@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -54,7 +55,6 @@ struct DWC_API FWetWrinklePatchPlacement
     // Canonical normal source for patch preview and bake.
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
     TObjectPtr<UTexture2D> WrinkleNormalTexture = nullptr;
-
 };
 
 USTRUCT()
@@ -290,10 +290,10 @@ struct DWC_API FWetWrinkleRuntimeNormalSource
 
 struct DWC_API FWetWrinkleResolvedNormalMap
 {
-    UTexture2D* Texture = nullptr;
-    EDWCWrinkleNormalSource Source = EDWCWrinkleNormalSource::Baked;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    bool bHasCoverageAlpha = false;
+    UTexture2D*              Texture = nullptr;
+    EDWCWrinkleNormalSource  Source = EDWCWrinkleNormalSource::Baked;
+    int32                    MaterialSlotIndex = INDEX_NONE;
+    bool                     bHasCoverageAlpha = false;
     EDWCWrinkleAlphaSemantic AlphaSemantic = EDWCWrinkleAlphaSemantic::None;
 
     bool IsValid() const

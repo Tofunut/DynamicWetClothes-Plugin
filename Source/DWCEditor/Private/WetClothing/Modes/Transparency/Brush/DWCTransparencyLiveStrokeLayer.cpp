@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyLiveStrokeLayer.h"
 
 namespace
@@ -13,7 +14,7 @@ namespace
     {
         return (Value % Divisor + Divisor) % Divisor;
     }
-}
+} // namespace
 
 void FDWCTransparencyLiveStrokeLayer::Begin(const FGuid& InStrokeGuid, const FIntPoint& InResolution)
 {
@@ -45,7 +46,7 @@ void FDWCTransparencyLiveStrokeLayer::Reset()
 }
 
 void FDWCTransparencyLiveStrokeLayer::RecordSample(
-    const FDWCTransparencyBrushSample& Sample,
+    const FDWCTransparencyBrushSample&  Sample,
     const EDWCTransparencyUVAddressMode AddressMode)
 {
     if (!IsActive() || Resolution.X <= 0 || Resolution.Y <= 0)
@@ -56,13 +57,13 @@ void FDWCTransparencyLiveStrokeLayer::RecordSample(
     const int32 SampleIndex = Samples.Add(Sample);
     const float RadiusPixelsX = FMath::Max(Sample.RadiusUV * Resolution.X, 1.0f);
     const float RadiusPixelsY = FMath::Max(Sample.RadiusUV * Resolution.Y, 1.0f);
-    const float CenterX = Sample.PositionUV.X * Resolution.X;
-    const float CenterY = Sample.PositionUV.Y * Resolution.Y;
+    const float CenterX = static_cast<float>(Sample.PositionUV.X * Resolution.X);
+    const float CenterY = static_cast<float>(Sample.PositionUV.Y * Resolution.Y);
     const int32 MinX = FMath::FloorToInt(CenterX - RadiusPixelsX - 1.0f);
     const int32 MaxX = FMath::CeilToInt(CenterX + RadiusPixelsX + 1.0f);
     const int32 MinY = FMath::FloorToInt(CenterY - RadiusPixelsY - 1.0f);
     const int32 MaxY = FMath::CeilToInt(CenterY + RadiusPixelsY + 1.0f);
-    const bool bWrap = AddressMode == EDWCTransparencyUVAddressMode::Wrap;
+    const bool  bWrap = AddressMode == EDWCTransparencyUVAddressMode::Wrap;
 
     const int32 TileCountX = FMath::DivideAndRoundUp(Resolution.X, TileSize);
     const int32 TileCountY = FMath::DivideAndRoundUp(Resolution.Y, TileSize);

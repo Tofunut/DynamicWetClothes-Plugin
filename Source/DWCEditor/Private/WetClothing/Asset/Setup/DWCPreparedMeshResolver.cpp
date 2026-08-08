@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCPreparedMeshResolver.h"
 #include "Core/DWCGeneratedAssetPaths.h"
 
@@ -35,7 +36,7 @@ namespace DWCPreparedMeshResolverPrivate
 
     FDWCPreparedMeshPreflightResult PreflightFailure(
         const EDWCPreparedMeshPreflightAction Action,
-        const FString& Message)
+        const FString&                        Message)
     {
         FDWCPreparedMeshPreflightResult Result;
         Result.Action = Action;
@@ -51,9 +52,9 @@ namespace DWCPreparedMeshResolverPrivate
             return false;
         }
 
-        UPackage* SourcePackage = SourceMesh->GetOutermost();
+        UPackage*  SourcePackage = SourceMesh->GetOutermost();
         const bool bIsPreviewOnlyMesh = SourceMesh->HasAnyFlags(RF_Transient) || SourcePackage == GetTransientPackage() ||
-            SourcePackage == nullptr || !FPackageName::IsValidLongPackageName(SourcePackage->GetName());
+                                        SourcePackage == nullptr || !FPackageName::IsValidLongPackageName(SourcePackage->GetName());
         if (bIsPreviewOnlyMesh)
         {
             OutErrorMessage = TEXT("The Source Skeletal Mesh is preview-only or unsaved. Assign a saved Skeletal Mesh asset before creating a WCA.");
@@ -71,14 +72,14 @@ namespace DWCPreparedMeshResolverPrivate
     }
 
     bool ResolveDeterministicMeshPath(
-        UWetClothingAsset& Asset,
-        const USkeletalMesh& SourceMesh,
+        UWetClothingAsset&      Asset,
+        const USkeletalMesh&    SourceMesh,
         FDeterministicMeshPath& OutPath,
-        FString& OutErrorMessage)
+        FString&                OutErrorMessage)
     {
         const FString AssetPackageName = Asset.GetOutermost() != nullptr
-            ? Asset.GetOutermost()->GetName()
-            : FString();
+                                             ? Asset.GetOutermost()->GetName()
+                                             : FString();
         if (!FPackageName::IsValidLongPackageName(AssetPackageName))
         {
             OutErrorMessage = TEXT("The Wet Clothing Asset must be saved before DWC can create a mesh copy.");
@@ -89,8 +90,8 @@ namespace DWCPreparedMeshResolverPrivate
         const FString GeneratedMeshFolder = DWCGeneratedAssetPaths::MakeAssetRoot(WCAFolder, Asset.GetName()) / TEXT("Mesh");
         const FString SourceAssetName = SourceMesh.GetName();
         OutPath.ObjectName = SourceAssetName.EndsWith(TEXT("_DWC"))
-            ? SourceAssetName
-            : SourceAssetName + TEXT("_DWC");
+                                 ? SourceAssetName
+                                 : SourceAssetName + TEXT("_DWC");
         OutPath.PackageName = GeneratedMeshFolder / OutPath.ObjectName;
         OutPath.ObjectPath = OutPath.PackageName + TEXT(".") + OutPath.ObjectName;
         return true;
@@ -155,11 +156,11 @@ namespace DWCPreparedMeshResolverPrivate
             UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
             UMaterialInterface* GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
             UMaterialInterface* GeneratedMaterialInstance = MaterialOverride.GeneratedMaterialInstance.Get();
-            const bool bIsExpectedSource = CurrentMaterial == nullptr ||
-                CurrentMaterial == SourceMaterial ||
-                CurrentMaterial == GeneratedMaterial ||
-                CurrentMaterial == GeneratedMaterialInstance ||
-                IsSameMaterialFamily(CurrentMaterial, SourceMaterial);
+            const bool          bIsExpectedSource = CurrentMaterial == nullptr ||
+                                           CurrentMaterial == SourceMaterial ||
+                                           CurrentMaterial == GeneratedMaterial ||
+                                           CurrentMaterial == GeneratedMaterialInstance ||
+                                           IsSameMaterialFamily(CurrentMaterial, SourceMaterial);
             if (!bIsExpectedSource)
             {
                 continue;
@@ -184,16 +185,16 @@ namespace DWCPreparedMeshResolverPrivate
             LODInfo->BuildSettings.bRecomputeTangents = false;
         }
     }
-}
+} // namespace DWCPreparedMeshResolverPrivate
 
 FDWCPreparedMeshPreflightResult FDWCPreparedMeshResolver::Preflight(
     UWetClothingAsset& Asset,
-    const bool bForceNewAsset)
+    const bool         bForceNewAsset)
 {
     using namespace DWCPreparedMeshResolverPrivate;
 
     USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
-    FString ErrorMessage;
+    FString        ErrorMessage;
     if (!IsSourceMeshUsable(SourceMesh, ErrorMessage))
     {
         return PreflightFailure(EDWCPreparedMeshPreflightAction::InvalidSourceMesh, ErrorMessage);
@@ -222,8 +223,8 @@ FDWCPreparedMeshPreflightResult FDWCPreparedMeshResolver::Preflight(
     if (USkeletalMesh* ExistingMesh = LoadObject<USkeletalMesh>(nullptr, *TargetPath.ObjectPath))
     {
         Result.Action = bForceNewAsset
-            ? EDWCPreparedMeshPreflightAction::ForceReplaceDeterministicMesh
-            : EDWCPreparedMeshPreflightAction::ReuseDeterministicMesh;
+                            ? EDWCPreparedMeshPreflightAction::ForceReplaceDeterministicMesh
+                            : EDWCPreparedMeshPreflightAction::ReuseDeterministicMesh;
         Result.ResolvedMesh = ExistingMesh;
         return Result;
     }
@@ -243,12 +244,12 @@ FDWCPreparedMeshPreflightResult FDWCPreparedMeshResolver::Preflight(
 
 FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
     UWetClothingAsset& Asset,
-    const bool bForceNewAsset)
+    const bool         bForceNewAsset)
 {
     using namespace DWCPreparedMeshResolverPrivate;
 
     USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
-    FString ErrorMessage;
+    FString        ErrorMessage;
     if (!IsSourceMeshUsable(SourceMesh, ErrorMessage))
     {
         return Failure(ErrorMessage);
@@ -291,7 +292,7 @@ FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
     }
 
     FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
-    UObject* DuplicatedObject = AssetToolsModule.Get().DuplicateAsset(
+    UObject*           DuplicatedObject = AssetToolsModule.Get().DuplicateAsset(
         TargetPath.ObjectName,
         FPackageName::GetLongPackagePath(TargetPath.PackageName),
         SourceMesh);

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleCustomNormalPanel.h"
 
 #include "AssetRegistry/AssetData.h"
@@ -23,7 +24,7 @@ namespace
 {
     FWetWrinkleRuntimeNormalSource* FindExactRuntimeSource(
         UWetClothingAsset* Asset,
-        const int32 MaterialSlotIndex)
+        const int32        MaterialSlotIndex)
     {
         if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE)
         {
@@ -35,7 +36,7 @@ namespace
 
     FWetWrinkleRuntimeNormalSource& FindOrAddExactRuntimeSource(
         UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex)
+        const int32        MaterialSlotIndex)
     {
         if (FWetWrinkleRuntimeNormalSource* Existing = FindExactRuntimeSource(&Asset, MaterialSlotIndex))
         {
@@ -56,7 +57,7 @@ namespace
                Texture->AddressX == TA_Clamp &&
                Texture->AddressY == TA_Clamp;
     }
-}
+} // namespace
 
 void SWetWrinkleCustomNormalPanel::Construct(const FArguments& InArgs)
 {
@@ -69,108 +70,82 @@ void SWetWrinkleCustomNormalPanel::Construct(const FArguments& InArgs)
     PreviewBrush.ImageSize = FVector2D(256.0f, 256.0f);
 
     ChildSlot
-    [
-        SNew(SBorder)
-        .Padding(10.0f)
-        .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-        [
-            SNew(SVerticalBox)
+        [SNew(SBorder)
+             .Padding(10.0f)
+             .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                 [SNew(SVerticalBox)
 
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("Heading", "Custom Wrinkle Normal Map"))
-                .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
-            ]
+                  + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                            [SNew(STextBlock)
+                                 .Text(LOCTEXT("Heading", "Custom Wrinkle Normal Map"))
+                                 .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
 
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-            [
-                SNew(SObjectPropertyEntryBox)
-                .AllowedClass(UTexture2D::StaticClass())
-                .ObjectPath(this, &SWetWrinkleCustomNormalPanel::GetTextureObjectPath)
-                .OnObjectChanged(this, &SWetWrinkleCustomNormalPanel::HandleTextureChanged)
-                .DisplayUseSelected(true)
-                .DisplayBrowse(true)
-            ]
+                  + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                            [SNew(SObjectPropertyEntryBox)
+                                 .AllowedClass(UTexture2D::StaticClass())
+                                 .ObjectPath(this, &SWetWrinkleCustomNormalPanel::GetTextureObjectPath)
+                                 .OnObjectChanged(this, &SWetWrinkleCustomNormalPanel::HandleTextureChanged)
+                                 .DisplayUseSelected(true)
+                                 .DisplayBrowse(true)]
 
-            + SVerticalBox::Slot()
-            .FillHeight(1.0f)
-            .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-            [
-                SNew(SBorder)
-                .Padding(1.0f)
-                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.DarkGroupBorder")))
-                [
-                    SNew(SScaleBox)
-                    .Stretch(EStretch::ScaleToFit)
-                    .StretchDirection(EStretchDirection::Both)
-                    [
-                        SNew(SImage)
-                        .Image(this, &SWetWrinkleCustomNormalPanel::GetPreviewBrush)
-                        .Visibility(this, &SWetWrinkleCustomNormalPanel::GetPreviewVisibility)
-                    ]
-                ]
-            ]
+                  + SVerticalBox::Slot()
+                        .FillHeight(1.0f)
+                        .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                            [SNew(SBorder)
+                                 .Padding(1.0f)
+                                 .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.DarkGroupBorder")))
+                                     [SNew(SScaleBox)
+                                          .Stretch(EStretch::ScaleToFit)
+                                          .StretchDirection(EStretchDirection::Both)
+                                              [SNew(SImage)
+                                                   .Image(this, &SWetWrinkleCustomNormalPanel::GetPreviewBrush)
+                                                   .Visibility(this, &SWetWrinkleCustomNormalPanel::GetPreviewVisibility)]]]
 
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-            [
-                SNew(STextBlock)
-                .Text(this, &SWetWrinkleCustomNormalPanel::GetTextureInfoText)
-                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-            ]
+                  + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                            [SNew(STextBlock)
+                                 .Text(this, &SWetWrinkleCustomNormalPanel::GetTextureInfoText)
+                                 .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
 
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-            [
-                SNew(STextBlock)
-                .Text(this, &SWetWrinkleCustomNormalPanel::GetStatusText)
-                .ColorAndOpacity(this, &SWetWrinkleCustomNormalPanel::GetStatusColor)
-                .AutoWrapText(true)
-            ]
+                  + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                            [SNew(STextBlock)
+                                 .Text(this, &SWetWrinkleCustomNormalPanel::GetStatusText)
+                                 .ColorAndOpacity(this, &SWetWrinkleCustomNormalPanel::GetStatusColor)
+                                 .AutoWrapText(true)]
 
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            [
-                SNew(SHorizontalBox)
+                  + SVerticalBox::Slot()
+                        .AutoHeight()
+                            [SNew(SHorizontalBox)
 
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .Padding(0.0f, 0.0f, 4.0f, 0.0f)
-                [
-                    SNew(SButton)
-                    .Text(LOCTEXT("Browse", "Browse"))
-                    .IsEnabled(this, &SWetWrinkleCustomNormalPanel::CanUseTextureCommands)
-                    .OnClicked(this, &SWetWrinkleCustomNormalPanel::HandleBrowseClicked)
-                ]
+                             + SHorizontalBox::Slot()
+                                   .AutoWidth()
+                                   .Padding(0.0f, 0.0f, 4.0f, 0.0f)
+                                       [SNew(SButton)
+                                            .Text(LOCTEXT("Browse", "Browse"))
+                                            .IsEnabled(this, &SWetWrinkleCustomNormalPanel::CanUseTextureCommands)
+                                            .OnClicked(this, &SWetWrinkleCustomNormalPanel::HandleBrowseClicked)]
 
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .Padding(0.0f, 0.0f, 4.0f, 0.0f)
-                [
-                    SNew(SButton)
-                    .Text(LOCTEXT("Open", "Open"))
-                    .IsEnabled(this, &SWetWrinkleCustomNormalPanel::CanUseTextureCommands)
-                    .OnClicked(this, &SWetWrinkleCustomNormalPanel::HandleOpenClicked)
-                ]
+                             + SHorizontalBox::Slot()
+                                   .AutoWidth()
+                                   .Padding(0.0f, 0.0f, 4.0f, 0.0f)
+                                       [SNew(SButton)
+                                            .Text(LOCTEXT("Open", "Open"))
+                                            .IsEnabled(this, &SWetWrinkleCustomNormalPanel::CanUseTextureCommands)
+                                            .OnClicked(this, &SWetWrinkleCustomNormalPanel::HandleOpenClicked)]
 
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                [
-                    SNew(SButton)
-                    .Text(LOCTEXT("FixSettings", "Fix Texture Settings"))
-                    .IsEnabled(this, &SWetWrinkleCustomNormalPanel::CanUseTextureCommands)
-                    .OnClicked(this, &SWetWrinkleCustomNormalPanel::HandleFixSettingsClicked)
-                ]
-            ]
-        ]
-    ];
+                             + SHorizontalBox::Slot()
+                                   .AutoWidth()
+                                       [SNew(SButton)
+                                            .Text(LOCTEXT("FixSettings", "Fix Texture Settings"))
+                                            .IsEnabled(this, &SWetWrinkleCustomNormalPanel::CanUseTextureCommands)
+                                            .OnClicked(this, &SWetWrinkleCustomNormalPanel::HandleFixSettingsClicked)]]]];
 
     Refresh();
 }
@@ -193,34 +168,36 @@ FString SWetWrinkleCustomNormalPanel::GetTextureObjectPath() const
 void SWetWrinkleCustomNormalPanel::HandleTextureChanged(const FAssetData& AssetData)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const int32 SlotIndex = MaterialSlotIndex.Get(INDEX_NONE);
+    const int32        SlotIndex = MaterialSlotIndex.Get(INDEX_NONE);
     if (Asset == nullptr || SlotIndex == INDEX_NONE)
     {
         return;
     }
 
-    UTexture2D* NewTexture = Cast<UTexture2D>(AssetData.GetAsset());
+    UTexture2D*               NewTexture = Cast<UTexture2D>(AssetData.GetAsset());
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Wrinkle;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-        EDWCEditorAuthoringImpact::Preview |
-        EDWCEditorAuthoringImpact::RuntimeBinding |
-        EDWCEditorAuthoringImpact::Details;
+                    EDWCEditorAuthoringImpact::Preview |
+                    EDWCEditorAuthoringImpact::RuntimeBinding |
+                    EDWCEditorAuthoringImpact::Details;
     Change.MaterialSlotIndex = SlotIndex;
     if (!AuthoringDocument.IsValid() ||
         !AuthoringDocument->Edit(
-            LOCTEXT("SetCustomNormalTransaction", "Set Custom Wrinkle Normal Map"),
-            Change,
-            [SlotIndex, NewTexture](UWetClothingAsset& MutableAsset)
-            {
-                FWetWrinkleRuntimeNormalSource& Source =
-                    FindOrAddExactRuntimeSource(MutableAsset, SlotIndex);
-                if (Source.Source == EDWCWrinkleNormalSource::CustomTexture &&
-                    Source.CustomWrinkleNormalMap == NewTexture) return false;
-                Source.Source = EDWCWrinkleNormalSource::CustomTexture;
-                Source.CustomWrinkleNormalMap = NewTexture;
-                return true;
-            }).bChanged)
+                              LOCTEXT("SetCustomNormalTransaction", "Set Custom Wrinkle Normal Map"),
+                              Change,
+                              [SlotIndex, NewTexture](UWetClothingAsset& MutableAsset)
+                              {
+                                  FWetWrinkleRuntimeNormalSource& Source =
+                                      FindOrAddExactRuntimeSource(MutableAsset, SlotIndex);
+                                  if (Source.Source == EDWCWrinkleNormalSource::CustomTexture &&
+                                      Source.CustomWrinkleNormalMap == NewTexture)
+                                      return false;
+                                  Source.Source = EDWCWrinkleNormalSource::CustomTexture;
+                                  Source.CustomWrinkleNormalMap = NewTexture;
+                                  return true;
+                              })
+             .bChanged)
     {
         return;
     }
@@ -271,9 +248,9 @@ FText SWetWrinkleCustomNormalPanel::GetTextureInfoText() const
     const UTexture2D* Texture = ResolveTexture();
     return Texture != nullptr
                ? FText::Format(LOCTEXT("TextureInfo", "{0} x {1} | UV {2}"),
-                     FText::AsNumber(Texture->GetSizeX()),
-                     FText::AsNumber(Texture->GetSizeY()),
-                     FText::AsNumber(WetClothingAsset.IsValid() ? WetClothingAsset->GetDWCDataUVChannelIndex() : 0))
+                               FText::AsNumber(Texture->GetSizeX()),
+                               FText::AsNumber(Texture->GetSizeY()),
+                               FText::AsNumber(WetClothingAsset.IsValid() ? WetClothingAsset->GetDWCDataUVChannelIndex() : 0))
                : FText::GetEmpty();
 }
 

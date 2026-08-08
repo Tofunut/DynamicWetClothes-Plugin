@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCEditorSurfaceAuthoringTool.h"
 
 #include "BaseBehaviors/ClickDragBehavior.h"
@@ -64,8 +65,8 @@ FInputRayHit UDWCEditorSurfaceAuthoringTool::CanBeginClickDragSequence(const FIn
 {
     double HitDepth = 0.0;
     return Target != nullptr && Target->CanBeginSurfaceInteraction(PressPos.WorldRay, HitDepth)
-        ? FInputRayHit(HitDepth)
-        : FInputRayHit();
+               ? FInputRayHit(HitDepth)
+               : FInputRayHit();
 }
 
 void UDWCEditorSurfaceAuthoringTool::OnClickPress(const FInputDeviceRay& PressPos)
@@ -107,8 +108,8 @@ FInputRayHit UDWCEditorSurfaceAuthoringTool::BeginHoverSequenceHitTest(const FIn
 {
     double HitDepth = 0.0;
     return Target != nullptr && Target->HitTestSurface(DevicePos.WorldRay, HitDepth)
-        ? FInputRayHit(HitDepth)
-        : FInputRayHit();
+               ? FInputRayHit(HitDepth)
+               : FInputRayHit();
 }
 
 void UDWCEditorSurfaceAuthoringTool::OnBeginHover(const FInputDeviceRay& DevicePos)

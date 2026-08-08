@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothingAssetMeshAnalyzer.h"
 
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVPreviewDataBuilder.h"
@@ -9,7 +10,7 @@
 #include "Utility/DWCError.h"
 
 void FWetClothingAssetMeshAnalyzer::SetError(
-    FString* OutErrorMessage,
+    FString*     OutErrorMessage,
     const TCHAR* InMessage)
 {
     DWC::Error::SetMessage(OutErrorMessage, InMessage);
@@ -17,7 +18,7 @@ void FWetClothingAssetMeshAnalyzer::SetError(
 
 int32 FWetClothingAssetMeshAnalyzer::GetNumUVChannels(
     const USkeletalMesh* SkeletalMesh,
-    const int32 LODIndex)
+    const int32          LODIndex)
 {
     if (SkeletalMesh == nullptr)
     {
@@ -34,12 +35,12 @@ int32 FWetClothingAssetMeshAnalyzer::GetNumUVChannels(
 }
 
 bool FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
-    const USkeletalMesh* SkeletalMesh,
-    const int32 LODIndex,
-    const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex,
+    const USkeletalMesh*               SkeletalMesh,
+    const int32                        LODIndex,
+    const int32                        UVChannelIndex,
+    const int32                        MaterialSlotIndex,
     TArray<FWetClothingAssetUVIsland>& OutIslands,
-    FString* OutErrorMessage)
+    FString*                           OutErrorMessage)
 {
     TArray<FWCAUVPreviewSourceTriangle> SourceTriangles;
     if (!FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
@@ -60,11 +61,11 @@ bool FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
 }
 
 bool FWetClothingAssetMeshAnalyzer::BuildMaterialSlotDataUVIslands(
-    const UWetClothingAsset& WetClothingAsset,
-    const int32 LODIndex,
-    const int32 MaterialSlotIndex,
+    const UWetClothingAsset&           WetClothingAsset,
+    const int32                        LODIndex,
+    const int32                        MaterialSlotIndex,
     TArray<FWetClothingAssetUVIsland>& OutIslands,
-    FString* OutErrorMessage)
+    FString*                           OutErrorMessage)
 {
     TArray<FWCAUVPreviewSourceTriangle> SourceTriangles;
     if (!FWCAUVPreviewTriangleReader::ReadFromDataUV(
@@ -84,13 +85,13 @@ bool FWetClothingAssetMeshAnalyzer::BuildMaterialSlotDataUVIslands(
 }
 
 bool FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslandsFromTopology(
-    const USkeletalMesh* SkeletalMesh,
-    const int32 LODIndex,
-    const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex,
+    const USkeletalMesh*                        SkeletalMesh,
+    const int32                                 LODIndex,
+    const int32                                 UVChannelIndex,
+    const int32                                 MaterialSlotIndex,
     const TArray<FDWCOriginalUVIslandTopology>& Topology,
-    TArray<FWetClothingAssetUVIsland>& OutIslands,
-    FString* OutErrorMessage)
+    TArray<FWetClothingAssetUVIsland>&          OutIslands,
+    FString*                                    OutErrorMessage)
 {
     TArray<FWCAUVPreviewSourceTriangle> SourceTriangles;
     if (!FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(

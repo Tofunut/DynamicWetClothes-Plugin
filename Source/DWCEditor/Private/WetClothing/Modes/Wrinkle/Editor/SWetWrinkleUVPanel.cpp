@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleUVPanel.h"
 
 #include "Styling/AppStyle.h"
@@ -42,17 +43,13 @@ void SWetWrinkleUVPanel::Construct(const FArguments& InArgs)
                                          TAttribute<float>(),
                                          TFunction<void(float)>(),
                                          TAttribute<float>::CreateLambda([this]()
-                                         {
-                                             return IslandLineOpacity;
-                                         }),
+                                                                         { return IslandLineOpacity; }),
                                          [this](const float NewValue)
                                          {
                                              HandleIslandLineOpacityChanged(NewValue);
                                          },
                                          TAttribute<float>::CreateLambda([this]()
-                                         {
-                                             return IslandLineThicknessScale;
-                                         }),
+                                                                         { return IslandLineThicknessScale; }),
                                          [this](const float NewValue)
                                          {
                                              HandleIslandLineThicknessScaleChanged(NewValue);

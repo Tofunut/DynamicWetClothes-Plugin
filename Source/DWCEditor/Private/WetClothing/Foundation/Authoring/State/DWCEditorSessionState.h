@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -60,11 +61,11 @@ enum class EDWCTransparencyPaintTarget : uint8
 
 struct FDWCTransparencyEditContext
 {
-    FGuid LayerGuid;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    int32 UVChannelIndex = INDEX_NONE;
+    FGuid                         LayerGuid;
+    int32                         MaterialSlotIndex = INDEX_NONE;
+    int32                         UVChannelIndex = INDEX_NONE;
     EDWCTransparencyUVAddressMode AddressMode = EDWCTransparencyUVAddressMode::Clamp;
-    EDWCTransparencyPaintTarget PaintTarget = EDWCTransparencyPaintTarget::None;
+    EDWCTransparencyPaintTarget   PaintTarget = EDWCTransparencyPaintTarget::None;
 };
 
 struct FWetWrinkleBrushSettings
@@ -74,39 +75,39 @@ struct FWetWrinkleBrushSettings
         RidgeNaturalVariation.bEnabled = true;
     }
 
-    EWetWrinkleToolMode ToolMode = EWetWrinkleToolMode::Patch;
-    int32 UVChannelIndex = INDEX_NONE;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    TObjectPtr<UTexture2D> WrinkleNormalTexture = nullptr;
-    float BrushRadiusUV = 0.025f;
-    float Strength = 1.0f;
-    float Falloff = 0.5f;
-    float RotationRadians = 0.0f;
-    float PreviewWetness = 1.0f;
-    EWetProceduralRidgeShape RidgeShape = EWetProceduralRidgeShape::Convex;
-    bool bFlipRidgeFoldSide = false;
-    float RidgeStartTaper = 0.15f;
-    float RidgeEndTaper = 0.15f;
-    float RidgePointSpacingScale = 0.25f;
-    FWetProceduralRidgeFlareSettings RidgeFlareSettings;
+    EWetWrinkleToolMode                  ToolMode = EWetWrinkleToolMode::Patch;
+    int32                                UVChannelIndex = INDEX_NONE;
+    int32                                MaterialSlotIndex = INDEX_NONE;
+    TObjectPtr<UTexture2D>               WrinkleNormalTexture = nullptr;
+    float                                BrushRadiusUV = 0.025f;
+    float                                Strength = 1.0f;
+    float                                Falloff = 0.5f;
+    float                                RotationRadians = 0.0f;
+    float                                PreviewWetness = 1.0f;
+    EWetProceduralRidgeShape             RidgeShape = EWetProceduralRidgeShape::Convex;
+    bool                                 bFlipRidgeFoldSide = false;
+    float                                RidgeStartTaper = 0.15f;
+    float                                RidgeEndTaper = 0.15f;
+    float                                RidgePointSpacingScale = 0.25f;
+    FWetProceduralRidgeFlareSettings     RidgeFlareSettings;
     FWetProceduralRidgeVariationSettings RidgeNaturalVariation;
-    EWetProceduralRidgeEditMode RidgeEditMode = EWetProceduralRidgeEditMode::Draw;
-    bool bRidgeJunctionModeEnabled = true;
-    bool bShowPreview = true;
+    EWetProceduralRidgeEditMode          RidgeEditMode = EWetProceduralRidgeEditMode::Draw;
+    bool                                 bRidgeJunctionModeEnabled = true;
+    bool                                 bShowPreview = true;
 };
 
 struct FDWCTransparencyPaintSettings
 {
-    EDWCTransparencyBrushMode Mode = EDWCTransparencyBrushMode::Apply;
+    EDWCTransparencyBrushMode            Mode = EDWCTransparencyBrushMode::Apply;
     EDWCTransparencyRevealColorBrushMode RevealColorMode = EDWCTransparencyRevealColorBrushMode::Paint;
-    float RadiusUV = 0.0677f;
-    float Strength = 0.5f;
-    float Falloff = 0.5f;
-    float Spacing = 0.25f;
-    float TargetAlpha = 1.0f;
-    bool bEnabled = true;
-    bool bRevealColorPaint = false;
-    FLinearColor RevealColor = FLinearColor::White;
+    float                                RadiusUV = 0.0677f;
+    float                                Strength = 0.5f;
+    float                                Falloff = 0.5f;
+    float                                Spacing = 0.25f;
+    float                                TargetAlpha = 1.0f;
+    bool                                 bEnabled = true;
+    bool                                 bRevealColorPaint = false;
+    FLinearColor                         RevealColor = FLinearColor::White;
 };
 
 enum class EDWCEditorSessionEffect : uint32
@@ -136,12 +137,12 @@ struct FDWCEditorAuthoringIndex
 struct FDWCEditorWrinkleSessionState
 {
     FWetWrinkleBrushSettings Brush;
-    float BrushSizeCm = 8.0f;
-    float BrushSizeUV = 0.0677f;
-    bool bShowBakedTransparency = true;
-    FGuid SelectedElementGuid;
-    EWetWrinkleElementType SelectedElementType = EWetWrinkleElementType::Patch;
-    int32 SelectedRidgePointIndex = INDEX_NONE;
+    float                    BrushSizeCm = 8.0f;
+    float                    BrushSizeUV = 0.0677f;
+    bool                     bShowBakedTransparency = true;
+    FGuid                    SelectedElementGuid;
+    EWetWrinkleElementType   SelectedElementType = EWetWrinkleElementType::Patch;
+    int32                    SelectedRidgePointIndex = INDEX_NONE;
 };
 
 /**
@@ -166,35 +167,35 @@ struct FDWCEditorTransparencySessionState
         RevealPaint.Strength = 1.0f;
     }
 
-    FGuid SelectedLayerGuid;
-    FDWCTransparencyEditContext EditContext;
+    FGuid                                    SelectedLayerGuid;
+    FDWCTransparencyEditContext              EditContext;
     TMap<FGuid, EDWCTransparencyEditorStage> StageByLayer;
-    EWetClothingTransparencyPreviewMode PreviewMode =
+    EWetClothingTransparencyPreviewMode      PreviewMode =
         EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     EDWCTransparencyVisualizationMode VisualizationMode =
         EDWCTransparencyVisualizationMode::Final;
-    float WetnessPreviewPercent = 100.0f;
+    float                           WetnessPreviewPercent = 100.0f;
     FDWCTransparencyPreviewSettings PreviewSettings;
-    bool bPreviewSettingsInitialized = false;
-    bool bShowSavedWrinkle = true;
-    FDWCTransparencyPaintSettings Paint;
-    FDWCTransparencyPaintSettings RevealPaint;
+    bool                            bPreviewSettingsInitialized = false;
+    bool                            bShowSavedWrinkle = true;
+    FDWCTransparencyPaintSettings   Paint;
+    FDWCTransparencyPaintSettings   RevealPaint;
 };
 
 struct FDWCEditorSessionState
 {
-    EWCAEditorMode ActiveMode = EWCAEditorMode::PartEdit;
-    uint64 SessionRevision = 0;
-    uint64 AuthoringRevision = 0;
-    uint64 WrinkleAuthoringRevision = 0;
-    uint64 TransparencyAuthoringRevision = 0;
-    FDWCEditorAuthoringIndex AuthoringIndex;
-    FDWCEditorWrinkleSessionState Wrinkle;
+    EWCAEditorMode                     ActiveMode = EWCAEditorMode::PartEdit;
+    uint64                             SessionRevision = 0;
+    uint64                             AuthoringRevision = 0;
+    uint64                             WrinkleAuthoringRevision = 0;
+    uint64                             TransparencyAuthoringRevision = 0;
+    FDWCEditorAuthoringIndex           AuthoringIndex;
+    FDWCEditorWrinkleSessionState      Wrinkle;
     FDWCEditorTransparencySessionState Transparency;
 };
 
 inline uint64 GetDWCEditorDomainRevision(
-    const FDWCEditorSessionState& State,
+    const FDWCEditorSessionState&   State,
     const EDWCEditorAuthoringDomain Domain)
 {
     switch (Domain)

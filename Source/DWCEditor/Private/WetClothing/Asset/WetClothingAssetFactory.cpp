@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothingAssetFactory.h"
 #include "Utility/DWCLog.h"
 
@@ -34,9 +35,9 @@
 
 namespace
 {
-    constexpr float CreateDialogWidth = 720.0f;
-    constexpr int32 RecommendedDWCDataUVSelection = INDEX_NONE;
-    constexpr int32 MaxDWCDataUVChannelIndex = 3;
+    constexpr float    CreateDialogWidth = 720.0f;
+    constexpr int32    RecommendedDWCDataUVSelection = INDEX_NONE;
+    constexpr int32    MaxDWCDataUVChannelIndex = 3;
     const FLinearColor InfoIconTint(0.32f, 0.65f, 1.0f, 1.0f);
     const FLinearColor WarningIconTint(1.0f, 0.78f, 0.18f, 1.0f);
 
@@ -91,8 +92,8 @@ namespace
     {
         const int32 UVChannelCount = GetSkeletalMeshUVChannelCount(Mesh, 0);
         const int32 PreferredChannel = UVChannelCount > 0
-            ? FMath::Clamp(UVChannelCount, 0, MaxDWCDataUVChannelIndex)
-            : FMath::Clamp(OriginalUVChannelIndex + 1, 0, MaxDWCDataUVChannelIndex);
+                                           ? FMath::Clamp(UVChannelCount, 0, MaxDWCDataUVChannelIndex)
+                                           : FMath::Clamp(OriginalUVChannelIndex + 1, 0, MaxDWCDataUVChannelIndex);
         if (PreferredChannel != OriginalUVChannelIndex)
         {
             return PreferredChannel;
@@ -162,9 +163,9 @@ namespace
 
     bool IsDWCDataUVSelectionValid(
         const USkeletalMesh* Mesh,
-        const int32 OriginalUVChannelIndex,
-        const bool bUseRecommendedDWCDataUVChannel,
-        const int32 SelectedUVChannelIndex)
+        const int32          OriginalUVChannelIndex,
+        const bool           bUseRecommendedDWCDataUVChannel,
+        const int32          SelectedUVChannelIndex)
     {
         if (Mesh == nullptr || !IsExistingSourceUVChannel(Mesh, OriginalUVChannelIndex))
         {
@@ -172,8 +173,8 @@ namespace
         }
 
         const int32 EffectiveUVChannelIndex = bUseRecommendedDWCDataUVChannel
-            ? GetDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex)
-            : SelectedUVChannelIndex;
+                                                  ? GetDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex)
+                                                  : SelectedUVChannelIndex;
         return EffectiveUVChannelIndex >= 0 &&
                EffectiveUVChannelIndex <= MaxDWCDataUVChannelIndex &&
                EffectiveUVChannelIndex != OriginalUVChannelIndex;
@@ -181,8 +182,8 @@ namespace
 
     bool ConfirmExistingDataUVOverwrite(
         const USkeletalMesh* Mesh,
-        const int32 OriginalUVChannelIndex,
-        const int32 DataUVChannelIndex)
+        const int32          OriginalUVChannelIndex,
+        const int32          DataUVChannelIndex)
     {
         if (DataUVChannelIndex == OriginalUVChannelIndex)
         {
@@ -244,8 +245,8 @@ namespace
 
     bool IsSurfaceNormalUVSelectionValid(
         const USkeletalMesh* Mesh,
-        const int32 OriginalUVChannelIndex,
-        const int32 Selection)
+        const int32          OriginalUVChannelIndex,
+        const int32          Selection)
     {
         return IsExistingSourceUVChannel(
             Mesh,
@@ -254,8 +255,8 @@ namespace
 
     FText BuildSurfaceNormalUVInfoText(
         const USkeletalMesh* Mesh,
-        const int32 OriginalUVChannelIndex,
-        const int32 Selection)
+        const int32          OriginalUVChannelIndex,
+        const int32          Selection)
     {
         if (Mesh == nullptr)
         {
@@ -281,9 +282,9 @@ namespace
 
     FText BuildPreferredDWCDataUVInfoText(
         const USkeletalMesh* Mesh,
-        const int32 OriginalUVChannelIndex,
-        const bool bUseRecommendedDWCDataUVChannel,
-        const int32 PreferredDWCDataUVChannelIndex)
+        const int32          OriginalUVChannelIndex,
+        const bool           bUseRecommendedDWCDataUVChannel,
+        const int32          PreferredDWCDataUVChannelIndex)
     {
         if (Mesh == nullptr)
         {
@@ -330,20 +331,20 @@ namespace
 
     int32 ResolvePreferredDWCDataUVChannelIndex(
         const USkeletalMesh* Mesh,
-        const int32 OriginalUVChannelIndex,
-        const bool bUseRecommendedDWCDataUVChannel,
-        const int32 PreferredDWCDataUVChannelIndex)
+        const int32          OriginalUVChannelIndex,
+        const bool           bUseRecommendedDWCDataUVChannel,
+        const int32          PreferredDWCDataUVChannelIndex)
     {
         return bUseRecommendedDWCDataUVChannel
-            ? GetDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex)
-            : PreferredDWCDataUVChannelIndex;
+                   ? GetDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex)
+                   : PreferredDWCDataUVChannelIndex;
     }
 
     bool IsPreferredDWCDataUVInfoWarning(
         const USkeletalMesh* Mesh,
-        const int32 OriginalUVChannelIndex,
-        const bool bUseRecommendedDWCDataUVChannel,
-        const int32 PreferredDWCDataUVChannelIndex)
+        const int32          OriginalUVChannelIndex,
+        const bool           bUseRecommendedDWCDataUVChannel,
+        const int32          PreferredDWCDataUVChannelIndex)
     {
         const int32 EffectiveUVChannelIndex = ResolvePreferredDWCDataUVChannelIndex(
             Mesh,
@@ -356,9 +357,9 @@ namespace
 
     FSlateColor GetPreferredDWCDataUVInfoColor(
         const USkeletalMesh* Mesh,
-        const int32 OriginalUVChannelIndex,
-        const bool bUseRecommendedDWCDataUVChannel,
-        const int32 PreferredDWCDataUVChannelIndex)
+        const int32          OriginalUVChannelIndex,
+        const bool           bUseRecommendedDWCDataUVChannel,
+        const int32          PreferredDWCDataUVChannelIndex)
     {
         if (Mesh == nullptr)
         {
@@ -366,28 +367,28 @@ namespace
         }
 
         if (!IsDWCDataUVSelectionValid(
-            Mesh,
-            OriginalUVChannelIndex,
-            bUseRecommendedDWCDataUVChannel,
-            PreferredDWCDataUVChannelIndex))
+                Mesh,
+                OriginalUVChannelIndex,
+                bUseRecommendedDWCDataUVChannel,
+                PreferredDWCDataUVChannelIndex))
         {
             return FStyleColors::Error;
         }
 
         return IsPreferredDWCDataUVInfoWarning(
-            Mesh,
-            OriginalUVChannelIndex,
-            bUseRecommendedDWCDataUVChannel,
-            PreferredDWCDataUVChannelIndex)
-            ? FSlateColor(WarningIconTint)
-            : FSlateColor(InfoIconTint);
+                   Mesh,
+                   OriginalUVChannelIndex,
+                   bUseRecommendedDWCDataUVChannel,
+                   PreferredDWCDataUVChannelIndex)
+                   ? FSlateColor(WarningIconTint)
+                   : FSlateColor(InfoIconTint);
     }
 
     const FSlateBrush* GetPreferredDWCDataUVInfoIconBrush(
         const USkeletalMesh* Mesh,
-        const int32 OriginalUVChannelIndex,
-        const bool bUseRecommendedDWCDataUVChannel,
-        const int32 PreferredDWCDataUVChannelIndex)
+        const int32          OriginalUVChannelIndex,
+        const bool           bUseRecommendedDWCDataUVChannel,
+        const int32          PreferredDWCDataUVChannelIndex)
     {
         if (Mesh == nullptr)
         {
@@ -395,70 +396,60 @@ namespace
         }
 
         if (!IsDWCDataUVSelectionValid(
-            Mesh,
-            OriginalUVChannelIndex,
-            bUseRecommendedDWCDataUVChannel,
-            PreferredDWCDataUVChannelIndex))
+                Mesh,
+                OriginalUVChannelIndex,
+                bUseRecommendedDWCDataUVChannel,
+                PreferredDWCDataUVChannelIndex))
         {
             return FDWCEditorStyle::GetBrush(TEXT("DWCEditor.Status.Error"));
         }
 
         return IsPreferredDWCDataUVInfoWarning(
-            Mesh,
-            OriginalUVChannelIndex,
-            bUseRecommendedDWCDataUVChannel,
-            PreferredDWCDataUVChannelIndex)
-            ? FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"))
-            : FAppStyle::GetBrush(TEXT("Icons.InfoWithColor"));
+                   Mesh,
+                   OriginalUVChannelIndex,
+                   bUseRecommendedDWCDataUVChannel,
+                   PreferredDWCDataUVChannelIndex)
+                   ? FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"))
+                   : FAppStyle::GetBrush(TEXT("Icons.InfoWithColor"));
     }
 
     TSharedRef<SWidget> BuildCreationInfoTextRow(const TAttribute<FText>& Text)
     {
         return SNew(SHorizontalBox)
-            .Visibility_Lambda([Text]()
-            {
-                return Text.Get().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
-            })
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Top)
-            .Padding(0.0f, 1.0f, 6.0f, 0.0f)
-            [
-                SNew(SBox)
-                .WidthOverride(16.0f)
-                .HeightOverride(16.0f)
-                [
-                    SNew(SImage)
-                    .Image(FAppStyle::GetBrush(TEXT("Icons.InfoWithColor")))
-                    .ColorAndOpacity(InfoIconTint)
-                ]
-            ]
-            + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
-            .VAlign(VAlign_Center)
-            [
-                SNew(STextBlock)
-                .AutoWrapText(true)
-                .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                .ColorAndOpacity(InfoIconTint)
-                .Text(Text)
-            ];
+                   .Visibility_Lambda([Text]()
+                                      { return Text.Get().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; }) +
+               SHorizontalBox::Slot()
+                   .AutoWidth()
+                   .VAlign(VAlign_Top)
+                   .Padding(0.0f, 1.0f, 6.0f, 0.0f)
+                       [SNew(SBox)
+                            .WidthOverride(16.0f)
+                            .HeightOverride(16.0f)
+                                [SNew(SImage)
+                                     .Image(FAppStyle::GetBrush(TEXT("Icons.InfoWithColor")))
+                                     .ColorAndOpacity(InfoIconTint)]] +
+               SHorizontalBox::Slot()
+                   .FillWidth(1.0f)
+                   .VAlign(VAlign_Center)
+                       [SNew(STextBlock)
+                            .AutoWrapText(true)
+                            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                            .ColorAndOpacity(InfoIconTint)
+                            .Text(Text)];
     }
 
     TSharedRef<SWidget> BuildCreationHelperTextRow(const TAttribute<FText>& Text)
     {
         return SNew(STextBlock)
             .Visibility_Lambda([Text]()
-            {
-                return Text.Get().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
-            })
+                               { return Text.Get().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
             .AutoWrapText(true)
             .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
             .ColorAndOpacity(FSlateColor::UseSubduedForeground())
             .Text(Text);
     }
 
-}
+} // namespace
 
 #if WITH_EDITOR
 void UWetClothingAssetCreationSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
@@ -466,8 +457,8 @@ void UWetClothingAssetCreationSettings::PostEditChangeProperty(FPropertyChangedE
     Super::PostEditChangeProperty(PropertyChangedEvent);
 
     const FName PropertyName = PropertyChangedEvent.Property != nullptr
-        ? PropertyChangedEvent.Property->GetFName()
-        : NAME_None;
+                                   ? PropertyChangedEvent.Property->GetFName()
+                                   : NAME_None;
     if (PropertyName == GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, SourceSkeletalMesh))
     {
         PreferredDWCDataUVChannelIndex = GetDefaultDWCDataUVChannelIndex(SourceSkeletalMesh, OriginalUVChannelIndex);
@@ -494,7 +485,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
     PendingCreationSettings = NewObject<UWetClothingAssetCreationSettings>(this, NAME_None, RF_Transient);
 
     FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
-    FDetailsViewArgs DetailsArgs;
+    FDetailsViewArgs       DetailsArgs;
     DetailsArgs.bAllowSearch = false;
     DetailsArgs.bHideSelectionTip = true;
     DetailsArgs.bLockable = false;
@@ -502,15 +493,14 @@ bool UWetClothingAssetFactory::ConfigureProperties()
     DetailsArgs.NameAreaSettings = FDetailsViewArgs::HideNameArea;
     TSharedRef<IDetailsView> DetailsView = PropertyEditor.CreateDetailView(DetailsArgs);
     DetailsView->SetIsPropertyVisibleDelegate(FIsPropertyVisible::CreateLambda([](const FPropertyAndParent& PropertyAndParent)
-    {
+                                                                               {
         const FName PropertyName = PropertyAndParent.Property.GetFName();
         return PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, SourceSkeletalMesh) &&
                PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, OriginalUVChannelIndex) &&
                PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, SurfaceWaterNormalUVChannelIndex) &&
                PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, PreferredDWCDataUVChannelIndex) &&
                PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, FirstGeneratedLODIndex) &&
-               PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, LastGeneratedLODIndex);
-    }));
+               PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, LastGeneratedLODIndex); }));
     DetailsView->SetObject(PendingCreationSettings);
 
     TArray<TSharedPtr<int32>> DWCDataUVChannelOptions;
@@ -528,336 +518,163 @@ bool UWetClothingAssetFactory::ConfigureProperties()
     bool bUseRecommendedDWCDataUVChannel = true;
     auto HandleSourceMeshPicked =
         [this, DetailsView, &bUseRecommendedDWCDataUVChannel](const FAssetData& AssetData)
+    {
+        if (PendingCreationSettings == nullptr)
         {
-            if (PendingCreationSettings == nullptr)
-            {
-                return;
-            }
+            return;
+        }
 
-            USkeletalMesh* NewSourceMesh = Cast<USkeletalMesh>(AssetData.GetAsset());
-            PendingCreationSettings->SourceSkeletalMesh = NewSourceMesh;
-            bUseRecommendedDWCDataUVChannel = true;
-            PendingCreationSettings->SurfaceWaterNormalUVChannelIndex = INDEX_NONE;
-            PendingCreationSettings->PreferredDWCDataUVChannelIndex = GetDefaultDWCDataUVChannelIndex(NewSourceMesh, PendingCreationSettings->OriginalUVChannelIndex);
-            PendingCreationSettings->FirstGeneratedLODIndex = 0;
-            PendingCreationSettings->LastGeneratedLODIndex = FMath::Max(0, GetSkeletalMeshLODCount(NewSourceMesh) - 1);
-            ClampLODRangeForMesh(NewSourceMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
-            DetailsView->ForceRefresh();
-        };
+        USkeletalMesh* NewSourceMesh = Cast<USkeletalMesh>(AssetData.GetAsset());
+        PendingCreationSettings->SourceSkeletalMesh = NewSourceMesh;
+        bUseRecommendedDWCDataUVChannel = true;
+        PendingCreationSettings->SurfaceWaterNormalUVChannelIndex = INDEX_NONE;
+        PendingCreationSettings->PreferredDWCDataUVChannelIndex = GetDefaultDWCDataUVChannelIndex(NewSourceMesh, PendingCreationSettings->OriginalUVChannelIndex);
+        PendingCreationSettings->FirstGeneratedLODIndex = 0;
+        PendingCreationSettings->LastGeneratedLODIndex = FMath::Max(0, GetSkeletalMeshLODCount(NewSourceMesh) - 1);
+        ClampLODRangeForMesh(NewSourceMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
+        DetailsView->ForceRefresh();
+    };
 
     auto IsCreateEnabled =
         [this, &bUseRecommendedDWCDataUVChannel]()
+    {
+        if (PendingCreationSettings == nullptr ||
+            PendingCreationSettings->SourceSkeletalMesh == nullptr)
         {
-            if (PendingCreationSettings == nullptr ||
-                PendingCreationSettings->SourceSkeletalMesh == nullptr)
-            {
-                return false;
-            }
+            return false;
+        }
 
-            const int32 EffectiveDataUVChannel = bUseRecommendedDWCDataUVChannel
-                ? GetDefaultDWCDataUVChannelIndex(
-                    PendingCreationSettings->SourceSkeletalMesh,
-                    PendingCreationSettings->OriginalUVChannelIndex)
-                : PendingCreationSettings->PreferredDWCDataUVChannelIndex;
-            const int32 EffectiveSurfaceNormalUVChannel = ResolveSurfaceNormalUVChannel(
-                PendingCreationSettings->SurfaceWaterNormalUVChannelIndex,
-                PendingCreationSettings->OriginalUVChannelIndex);
-            return IsDWCDataUVSelectionValid(
-                       PendingCreationSettings->SourceSkeletalMesh,
-                       PendingCreationSettings->OriginalUVChannelIndex,
-                       bUseRecommendedDWCDataUVChannel,
-                       PendingCreationSettings->PreferredDWCDataUVChannelIndex) &&
-                   IsSurfaceNormalUVSelectionValid(
-                       PendingCreationSettings->SourceSkeletalMesh,
-                       PendingCreationSettings->OriginalUVChannelIndex,
-                       PendingCreationSettings->SurfaceWaterNormalUVChannelIndex) &&
-                   EffectiveSurfaceNormalUVChannel != EffectiveDataUVChannel;
-        };
+        const int32 EffectiveDataUVChannel = bUseRecommendedDWCDataUVChannel
+                                                 ? GetDefaultDWCDataUVChannelIndex(
+                                                       PendingCreationSettings->SourceSkeletalMesh,
+                                                       PendingCreationSettings->OriginalUVChannelIndex)
+                                                 : PendingCreationSettings->PreferredDWCDataUVChannelIndex;
+        const int32 EffectiveSurfaceNormalUVChannel = ResolveSurfaceNormalUVChannel(
+            PendingCreationSettings->SurfaceWaterNormalUVChannelIndex,
+            PendingCreationSettings->OriginalUVChannelIndex);
+        return IsDWCDataUVSelectionValid(
+                   PendingCreationSettings->SourceSkeletalMesh,
+                   PendingCreationSettings->OriginalUVChannelIndex,
+                   bUseRecommendedDWCDataUVChannel,
+                   PendingCreationSettings->PreferredDWCDataUVChannelIndex) &&
+               IsSurfaceNormalUVSelectionValid(
+                   PendingCreationSettings->SourceSkeletalMesh,
+                   PendingCreationSettings->OriginalUVChannelIndex,
+                   PendingCreationSettings->SurfaceWaterNormalUVChannelIndex) &&
+               EffectiveSurfaceNormalUVChannel != EffectiveDataUVChannel;
+    };
 
     auto HasSourceMesh =
         [this]()
-        {
-            return PendingCreationSettings != nullptr &&
-                   PendingCreationSettings->SourceSkeletalMesh != nullptr;
-        };
+    {
+        return PendingCreationSettings != nullptr &&
+               PendingCreationSettings->SourceSkeletalMesh != nullptr;
+    };
 
     auto GetSourceMeshRequiredTooltip =
         [HasSourceMesh]()
-        {
-            return HasSourceMesh()
-                ? FText::GetEmpty()
-                : LOCTEXT("SelectSourceMeshFirstTooltip", "Select a source mesh first.");
-        };
+    {
+        return HasSourceMesh()
+                   ? FText::GetEmpty()
+                   : LOCTEXT("SelectSourceMeshFirstTooltip", "Select a source mesh first.");
+    };
 
     auto GetSourceMeshRequiredInfoText =
         [this]()
-        {
-            return PendingCreationSettings == nullptr || PendingCreationSettings->SourceSkeletalMesh == nullptr
-                ? LOCTEXT("CreateSelectSourceMeshStatus", "Select a source mesh to inspect UV channels and available LODs.")
-                : FText::GetEmpty();
-        };
+    {
+        return PendingCreationSettings == nullptr || PendingCreationSettings->SourceSkeletalMesh == nullptr
+                   ? LOCTEXT("CreateSelectSourceMeshStatus", "Select a source mesh to inspect UV channels and available LODs.")
+                   : FText::GetEmpty();
+    };
 
-    bool bAccepted = false;
+    bool                bAccepted = false;
     TSharedRef<SWindow> Dialog =
         SNew(SWindow)
-        .Title(LOCTEXT("CreateTitle", "Create Wet Clothing Asset"))
-        .SizingRule(ESizingRule::Autosized)
-        .SupportsMaximize(false)
-        .SupportsMinimize(false);
+            .Title(LOCTEXT("CreateTitle", "Create Wet Clothing Asset"))
+            .SizingRule(ESizingRule::Autosized)
+            .SupportsMaximize(false)
+            .SupportsMinimize(false);
 
     Dialog->SetContent(
         SNew(SBox)
-        .WidthOverride(CreateDialogWidth)
-        [
-            SNew(SBorder)
-            .Padding(12.0f)
-            [
-                SNew(SVerticalBox)
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0, 0, 0, 8)
-            [
-                SNew(STextBlock)
-                .AutoWrapText(true)
-                .Text(LOCTEXT(
-                    "CreateDescription",
-                    "Choose the Source Mesh and which derived data to prepare."))
-            ]
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0, 0, 0, 8)
-            [
-                SNew(SBorder)
-                .Padding(8.0f)
-                .BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    [
-                        SNew(STextBlock)
-                        .Text(LOCTEXT("SourceSkeletalMeshPickerLabel", "Source Skeletal Mesh"))
-                        .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
-                        BuildCreationInfoTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda(GetSourceMeshRequiredInfoText)))
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SVerticalBox)
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        [
-                            SNew(SBox)
-                            .HeightOverride(40.0f)
-                            [
-                                SNew(SObjectPropertyEntryBox)
-                                .AllowedClass(USkeletalMesh::StaticClass())
-                                .AllowClear(true)
-                                .AllowCreate(false)
-                                .DisplayThumbnail(false)
-                                .ObjectPath_Lambda([this]()
-                                {
-                                    return PendingCreationSettings != nullptr && PendingCreationSettings->SourceSkeletalMesh != nullptr
-                                        ? PendingCreationSettings->SourceSkeletalMesh->GetPathName()
-                                        : FString();
-                                })
-                                .OnObjectChanged_Lambda(HandleSourceMeshPicked)
-                            ]
-                        ]
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                        [
-                            BuildCreationHelperTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([this]()
-                            {
-                                return PendingCreationSettings != nullptr
-                                    ? BuildSourceMeshUVInfoText(PendingCreationSettings->SourceSkeletalMesh)
-                                    : BuildSourceMeshUVInfoText(nullptr);
-                            })))
-                        ]
-                    ]
-                    ]
-                ]
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0, 0, 0, 8)
-            [
-                SNew(SBorder)
-                .Padding(8.0f)
-                .BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    [
-                        SNew(STextBlock)
-                        .Text(LOCTEXT("DWCUVChannelSectionLabel", "DWC UV Channel"))
-                        .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 8.0f, 0.0f, 0.0f)
-                    [
-                        BuildCreationHelperTextRow(BuildCreateDWCDataUVTargetText())
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 10.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("OriginalUVChannelLabel", "Original UV Channel"))
-                        ]
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(SBox)
-                            .WidthOverride(180.0f)
-                            [
-                                SNew(SSpinBox<int32>)
-                                .IsEnabled_Lambda(HasSourceMesh)
-                                .MinValue(0)
-                                .MaxValue(7)
-                                .MinSliderValue(0)
-                                .MaxSliderValue(7)
-                                .Value_Lambda([this]()
-                                {
-                                    return PendingCreationSettings != nullptr
-                                        ? PendingCreationSettings->OriginalUVChannelIndex
-                                        : 0;
-                                })
-                                .OnValueChanged_Lambda([this](const int32 NewValue)
-                                {
+            .WidthOverride(CreateDialogWidth)
+                [SNew(SBorder)
+                     .Padding(12.0f)
+                         [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[SNew(STextBlock).AutoWrapText(true).Text(LOCTEXT("CreateDescription", "Choose the Source Mesh and which derived data to prepare."))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[SNew(SBorder).Padding(8.0f).BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("SourceSkeletalMeshPickerLabel", "Source Skeletal Mesh")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[BuildCreationInfoTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda(GetSourceMeshRequiredInfoText)))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride(40.0f)[SNew(SObjectPropertyEntryBox).AllowedClass(USkeletalMesh::StaticClass()).AllowClear(true).AllowCreate(false).DisplayThumbnail(false).ObjectPath_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   { return PendingCreationSettings != nullptr && PendingCreationSettings->SourceSkeletalMesh != nullptr
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                ? PendingCreationSettings->SourceSkeletalMesh->GetPathName()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                : FString(); })
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .OnObjectChanged_Lambda(HandleSourceMeshPicked)]] +
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[BuildCreationHelperTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    { return PendingCreationSettings != nullptr
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ? BuildSourceMeshUVInfoText(PendingCreationSettings->SourceSkeletalMesh)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 : BuildSourceMeshUVInfoText(nullptr); })))]]]] +
+                          SVerticalBox::Slot()
+                              .AutoHeight()
+                              .Padding(0, 0, 0, 8)
+                                  [SNew(SBorder)
+                                       .Padding(8.0f)
+                                       .BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+                                           [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("DWCUVChannelSectionLabel", "DWC UV Channel")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)[BuildCreationHelperTextRow(BuildCreateDWCDataUVTargetText())] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 0.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("OriginalUVChannelLabel", "Original UV Channel"))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(180.0f)[SNew(SSpinBox<int32>).IsEnabled_Lambda(HasSourceMesh).MinValue(0).MaxValue(7).MinSliderValue(0).MaxSliderValue(7).Value_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              { return PendingCreationSettings != nullptr
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           ? PendingCreationSettings->OriginalUVChannelIndex
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           : 0; })
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   .OnValueChanged_Lambda([this](const int32 NewValue)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          {
                                     if (PendingCreationSettings == nullptr)
                                     {
                                         return;
                                     }
-                                    PendingCreationSettings->OriginalUVChannelIndex = FMath::Clamp(NewValue, 0, 7);
-                                })
-                            ]
-                        ]
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 10.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("SurfaceNormalUVChannelLabel", "Surface Normal UV"))
-                            .ToolTipText(LOCTEXT(
-                                "SurfaceNormalUVChannelTooltip",
-                                "UV channel used to sample tangent-space Surface Water normals."))
-                        ]
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(SBox)
-                            .WidthOverride(180.0f)
-                            [
-                                SNew(SComboBox<TSharedPtr<int32>>)
-                                .IsEnabled_Lambda(HasSourceMesh)
-                                .ToolTipText_Lambda(GetSourceMeshRequiredTooltip)
-                                .OptionsSource(&SurfaceNormalUVChannelOptions)
-                                .InitiallySelectedItem(SurfaceNormalUVChannelOptions[0])
-                                .OnGenerateWidget_Lambda([this](TSharedPtr<int32> Item)
-                                {
+                                    PendingCreationSettings->OriginalUVChannelIndex = FMath::Clamp(NewValue, 0, 7); })]]] +
+                                            SVerticalBox::Slot()
+                                                .AutoHeight()
+                                                .Padding(0.0f, 10.0f, 0.0f, 0.0f)
+                                                    [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("SurfaceNormalUVChannelLabel", "Surface Normal UV")).ToolTipText(LOCTEXT("SurfaceNormalUVChannelTooltip", "UV channel used to sample tangent-space Surface Water normals."))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(180.0f)[SNew(SComboBox<TSharedPtr<int32>>).IsEnabled_Lambda(HasSourceMesh).ToolTipText_Lambda(GetSourceMeshRequiredTooltip).OptionsSource(&SurfaceNormalUVChannelOptions).InitiallySelectedItem(SurfaceNormalUVChannelOptions[0]).OnGenerateWidget_Lambda([this](TSharedPtr<int32> Item)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   {
                                     const int32 Selection = Item.IsValid() ? *Item : INDEX_NONE;
                                     return SNew(STextBlock)
                                         .Text(BuildSurfaceNormalUVChannelLabel(
                                             Selection,
                                             PendingCreationSettings != nullptr
                                                 ? PendingCreationSettings->OriginalUVChannelIndex
-                                                : 0));
-                                })
-                                .OnSelectionChanged_Lambda([this](TSharedPtr<int32> Item, ESelectInfo::Type)
-                                {
+                                                : 0)); })
+                                                                                                                                                                                                                                                                                                                                                                                                                                                     .OnSelectionChanged_Lambda([this](TSharedPtr<int32> Item, ESelectInfo::Type)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                {
                                     if (PendingCreationSettings != nullptr && Item.IsValid())
                                     {
                                         PendingCreationSettings->SurfaceWaterNormalUVChannelIndex = *Item;
-                                    }
-                                })
-                                [
-                                    SNew(STextBlock)
-                                    .Text_Lambda([this]()
-                                    {
-                                        return BuildSurfaceNormalUVChannelLabel(
-                                            PendingCreationSettings != nullptr
-                                                ? PendingCreationSettings->SurfaceWaterNormalUVChannelIndex
-                                                : INDEX_NONE,
-                                            PendingCreationSettings != nullptr
-                                                ? PendingCreationSettings->OriginalUVChannelIndex
-                                                : 0);
-                                    })
-                                ]
-                            ]
-                        ]
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 4.0f, 0.0f, 0.0f)
-                    [
-                        BuildCreationHelperTextRow(TAttribute<FText>::Create(
-                            TAttribute<FText>::FGetter::CreateLambda([this]()
-                            {
-                                return PendingCreationSettings != nullptr
-                                    ? BuildSurfaceNormalUVInfoText(
-                                        PendingCreationSettings->SourceSkeletalMesh,
-                                        PendingCreationSettings->OriginalUVChannelIndex,
-                                        PendingCreationSettings->SurfaceWaterNormalUVChannelIndex)
-                                    : FText::GetEmpty();
-                            })))
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 10.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("PreferredDWCDataUVChannelLabel", "Preferred DWC UV Channel"))
-                        ]
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(SBox)
-                            .WidthOverride(180.0f)
-                            [
-                                SNew(SComboBox<TSharedPtr<int32>>)
-                                .IsEnabled_Lambda(HasSourceMesh)
-                                .ToolTipText_Lambda(GetSourceMeshRequiredTooltip)
-                                .OptionsSource(&DWCDataUVChannelOptions)
-                                .InitiallySelectedItem(DWCDataUVChannelOptions[0])
-                                .OnGenerateWidget_Lambda([this](TSharedPtr<int32> Item)
-                                {
+                                    } })[SNew(STextBlock).Text_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  { return BuildSurfaceNormalUVChannelLabel(
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        PendingCreationSettings != nullptr
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            ? PendingCreationSettings->SurfaceWaterNormalUVChannelIndex
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            : INDEX_NONE,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        PendingCreationSettings != nullptr
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            ? PendingCreationSettings->OriginalUVChannelIndex
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            : 0); })]]]] +
+                                            SVerticalBox::Slot()
+                                                .AutoHeight()
+                                                .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                                                    [BuildCreationHelperTextRow(TAttribute<FText>::Create(
+                                                        TAttribute<FText>::FGetter::CreateLambda([this]()
+                                                                                                 { return PendingCreationSettings != nullptr
+                                                                                                              ? BuildSurfaceNormalUVInfoText(
+                                                                                                                    PendingCreationSettings->SourceSkeletalMesh,
+                                                                                                                    PendingCreationSettings->OriginalUVChannelIndex,
+                                                                                                                    PendingCreationSettings->SurfaceWaterNormalUVChannelIndex)
+                                                                                                              : FText::GetEmpty(); })))] +
+                                            SVerticalBox::Slot()
+                                                .AutoHeight()
+                                                .Padding(0.0f, 10.0f, 0.0f, 0.0f)
+                                                    [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("PreferredDWCDataUVChannelLabel", "Preferred DWC UV Channel"))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(180.0f)[SNew(SComboBox<TSharedPtr<int32>>).IsEnabled_Lambda(HasSourceMesh).ToolTipText_Lambda(GetSourceMeshRequiredTooltip).OptionsSource(&DWCDataUVChannelOptions).InitiallySelectedItem(DWCDataUVChannelOptions[0]).OnGenerateWidget_Lambda([this](TSharedPtr<int32> Item)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         {
                                     const int32 Selection = Item.IsValid() ? *Item : RecommendedDWCDataUVSelection;
                                     return SNew(STextBlock)
                                         .Text(BuildDWCDataUVChannelLabel(
                                             Selection,
                                             PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr,
-                                            PendingCreationSettings != nullptr ? PendingCreationSettings->OriginalUVChannelIndex : 0));
-                                })
-                                .OnSelectionChanged_Lambda([this, &bUseRecommendedDWCDataUVChannel](TSharedPtr<int32> Item, ESelectInfo::Type)
-                                {
+                                            PendingCreationSettings != nullptr ? PendingCreationSettings->OriginalUVChannelIndex : 0)); })
+                                                                                                                                                                                                                                                                                                                                       .OnSelectionChanged_Lambda([this, &bUseRecommendedDWCDataUVChannel](TSharedPtr<int32> Item, ESelectInfo::Type)
+                                                                                                                                                                                                                                                                                                                                                                  {
                                     if (PendingCreationSettings == nullptr || !Item.IsValid())
                                     {
                                         return;
@@ -874,12 +691,8 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                     {
                                         PendingCreationSettings->PreferredDWCDataUVChannelIndex =
                                             FMath::Clamp(Selection, 0, MaxDWCDataUVChannelIndex);
-                                    }
-                                })
-                                [
-                                    SNew(STextBlock)
-                                    .Text_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
-                                    {
+                                    } })[SNew(STextBlock).Text_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                                                                                                                                                                                                                                                                                                                                                                                                    {
                                         const int32 Selection = bUseRecommendedDWCDataUVChannel
                                             ? RecommendedDWCDataUVSelection
                                             : (PendingCreationSettings != nullptr
@@ -888,19 +701,13 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                         return BuildDWCDataUVChannelLabel(
                                             Selection,
                                             PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr,
-                                            PendingCreationSettings != nullptr ? PendingCreationSettings->OriginalUVChannelIndex : 0);
-                                    })
-                                ]
-                            ]
-                        ]
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 4.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SHorizontalBox)
-                        .Visibility_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
-                        {
+                                            PendingCreationSettings != nullptr ? PendingCreationSettings->OriginalUVChannelIndex : 0); })]]]] +
+                                            SVerticalBox::Slot()
+                                                .AutoHeight()
+                                                .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                                                    [SNew(SHorizontalBox)
+                                                         .Visibility_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                                                                            {
                             const FText InfoText = PendingCreationSettings != nullptr
                                 ? BuildPreferredDWCDataUVInfoText(
                                     PendingCreationSettings->SourceSkeletalMesh,
@@ -910,30 +717,25 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                 : BuildPreferredDWCDataUVInfoText(nullptr, 0, true, 1);
                             return InfoText.IsEmpty()
                                 ? EVisibility::Collapsed
-                                : EVisibility::Visible;
-                        })
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .VAlign(VAlign_Top)
-                        .Padding(0.0f, 1.0f, 6.0f, 0.0f)
-                        [
-                            SNew(SBox)
-                            .WidthOverride(16.0f)
-                            .HeightOverride(16.0f)
-                            [
-                                SNew(SImage)
-                                .Image_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
-                                {
-                                    return PendingCreationSettings != nullptr
-                                        ? GetPreferredDWCDataUVInfoIconBrush(
-                                            PendingCreationSettings->SourceSkeletalMesh,
-                                            PendingCreationSettings->OriginalUVChannelIndex,
-                                            bUseRecommendedDWCDataUVChannel,
-                                            PendingCreationSettings->PreferredDWCDataUVChannelIndex)
-                                        : GetPreferredDWCDataUVInfoIconBrush(nullptr, 0, true, 1);
-                                })
-                                .ColorAndOpacity_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
-                                {
+                                : EVisibility::Visible; }) +
+                                                     SHorizontalBox::Slot()
+                                                         .AutoWidth()
+                                                         .VAlign(VAlign_Top)
+                                                         .Padding(0.0f, 1.0f, 6.0f, 0.0f)
+                                                             [SNew(SBox)
+                                                                  .WidthOverride(16.0f)
+                                                                  .HeightOverride(16.0f)
+                                                                      [SNew(SImage)
+                                                                           .Image_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                                                                                         { return PendingCreationSettings != nullptr
+                                                                                                      ? GetPreferredDWCDataUVInfoIconBrush(
+                                                                                                            PendingCreationSettings->SourceSkeletalMesh,
+                                                                                                            PendingCreationSettings->OriginalUVChannelIndex,
+                                                                                                            bUseRecommendedDWCDataUVChannel,
+                                                                                                            PendingCreationSettings->PreferredDWCDataUVChannelIndex)
+                                                                                                      : GetPreferredDWCDataUVInfoIconBrush(nullptr, 0, true, 1); })
+                                                                           .ColorAndOpacity_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                                                                                                   {
                                     if (PendingCreationSettings == nullptr ||
                                         PendingCreationSettings->SourceSkeletalMesh == nullptr)
                                     {
@@ -952,189 +754,91 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                                PendingCreationSettings->PreferredDWCDataUVChannelIndex) &&
                                            !IsExistingSourceUVChannel(PendingCreationSettings->SourceSkeletalMesh, EffectiveUVChannelIndex)
                                                ? InfoIconTint
-                                               : FLinearColor::White;
-                                })
-                            ]
-                        ]
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                            .AutoWrapText(true)
-                            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                            .ColorAndOpacity_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
-                            {
-                                return PendingCreationSettings != nullptr
-                                    ? GetPreferredDWCDataUVInfoColor(
-                                        PendingCreationSettings->SourceSkeletalMesh,
-                                        PendingCreationSettings->OriginalUVChannelIndex,
-                                        bUseRecommendedDWCDataUVChannel,
-                                        PendingCreationSettings->PreferredDWCDataUVChannelIndex)
-                                    : GetPreferredDWCDataUVInfoColor(nullptr, 0, true, 1);
-                            })
-                            .Text_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
-                            {
-                                return PendingCreationSettings != nullptr
-                                    ? BuildPreferredDWCDataUVInfoText(
-                                        PendingCreationSettings->SourceSkeletalMesh,
-                                        PendingCreationSettings->OriginalUVChannelIndex,
-                                        bUseRecommendedDWCDataUVChannel,
-                                        PendingCreationSettings->PreferredDWCDataUVChannelIndex)
-                                    : BuildPreferredDWCDataUVInfoText(nullptr, 0, true, 1);
-                            })
-                        ]
-                    ]
-                ]
-            ]
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0, 0, 0, 8)
-            [
-                SNew(SBorder)
-                .Padding(8.0f)
-                .BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("LODRangeLabel", "Active LOD Mapping Range"))
-                            .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
-                        ]
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("FirstGeneratedLODLabel", "First Mapped LOD"))
-                        ]
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(SBox)
-                            .WidthOverride(120.0f)
-                            [
-                                SNew(SSpinBox<int32>)
-                                .IsEnabled_Lambda(HasSourceMesh)
-                                .ToolTipText_Lambda(GetSourceMeshRequiredTooltip)
-                                .MinValue(0)
-                                .MinSliderValue(0)
-                                .MaxValue_Lambda([this]()
-                                {
-                                    return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
-                                })
-                                .MaxSliderValue_Lambda([this]()
-                                {
-                                    return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
-                                })
-                                .Value_Lambda([this]()
-                                {
-                                    return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0;
-                                })
-                                .OnValueChanged_Lambda([this](int32 NewValue)
-                                {
+                                               : FLinearColor::White; })]] +
+                                                     SHorizontalBox::Slot()
+                                                         .FillWidth(1.0f)
+                                                         .VAlign(VAlign_Center)
+                                                             [SNew(STextBlock)
+                                                                  .AutoWrapText(true)
+                                                                  .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                                                                  .ColorAndOpacity_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                                                                                          { return PendingCreationSettings != nullptr
+                                                                                                       ? GetPreferredDWCDataUVInfoColor(
+                                                                                                             PendingCreationSettings->SourceSkeletalMesh,
+                                                                                                             PendingCreationSettings->OriginalUVChannelIndex,
+                                                                                                             bUseRecommendedDWCDataUVChannel,
+                                                                                                             PendingCreationSettings->PreferredDWCDataUVChannelIndex)
+                                                                                                       : GetPreferredDWCDataUVInfoColor(nullptr, 0, true, 1); })
+                                                                  .Text_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                                                                               { return PendingCreationSettings != nullptr
+                                                                                            ? BuildPreferredDWCDataUVInfoText(
+                                                                                                  PendingCreationSettings->SourceSkeletalMesh,
+                                                                                                  PendingCreationSettings->OriginalUVChannelIndex,
+                                                                                                  bUseRecommendedDWCDataUVChannel,
+                                                                                                  PendingCreationSettings->PreferredDWCDataUVChannelIndex)
+                                                                                            : BuildPreferredDWCDataUVInfoText(nullptr, 0, true, 1); })]]]] +
+                          SVerticalBox::Slot()
+                              .AutoHeight()
+                              .Padding(0, 0, 0, 8)
+                                  [SNew(SBorder)
+                                       .Padding(8.0f)
+                                       .BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+                                           [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("LODRangeLabel", "Active LOD Mapping Range")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("FirstGeneratedLODLabel", "First Mapped LOD"))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(120.0f)[SNew(SSpinBox<int32>).IsEnabled_Lambda(HasSourceMesh).ToolTipText_Lambda(GetSourceMeshRequiredTooltip).MinValue(0).MinSliderValue(0).MaxValue_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  { return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1); })
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 .MaxSliderValue_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        { return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1); })
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 .Value_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               { return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0; })
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 .OnValueChanged_Lambda([this](int32 NewValue)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        {
                                     if (PendingCreationSettings == nullptr)
                                     {
                                         return;
                                     }
                                     PendingCreationSettings->FirstGeneratedLODIndex = NewValue;
-                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
-                                })
-                                .OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type)
-                                {
+                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex); })
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 .OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          {
                                     if (PendingCreationSettings == nullptr)
                                     {
                                         return;
                                     }
                                     PendingCreationSettings->FirstGeneratedLODIndex = NewValue;
-                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
-                                })
-                            ]
-                        ]
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("LastGeneratedLODLabel", "Last Mapped LOD"))
-                        ]
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .VAlign(VAlign_Center)
-                        [
-                            SNew(SBox)
-                            .WidthOverride(120.0f)
-                            [
-                                SNew(SSpinBox<int32>)
-                                .IsEnabled_Lambda(HasSourceMesh)
-                                .ToolTipText_Lambda(GetSourceMeshRequiredTooltip)
-                                .MinValue_Lambda([this]()
-                                {
-                                    return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0;
-                                })
-                                .MinSliderValue_Lambda([this]()
-                                {
-                                    return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0;
-                                })
-                                .MaxValue_Lambda([this]()
-                                {
-                                    return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
-                                })
-                                .MaxSliderValue_Lambda([this]()
-                                {
-                                    return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
-                                })
-                                .Value_Lambda([this]()
-                                {
-                                    return PendingCreationSettings != nullptr ? PendingCreationSettings->LastGeneratedLODIndex : 0;
-                                })
-                                .OnValueChanged_Lambda([this](int32 NewValue)
-                                {
+                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex); })]]] +
+                                            SVerticalBox::Slot()
+                                                .AutoHeight()
+                                                .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                                                    [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("LastGeneratedLODLabel", "Last Mapped LOD"))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(120.0f)[SNew(SSpinBox<int32>).IsEnabled_Lambda(HasSourceMesh).ToolTipText_Lambda(GetSourceMeshRequiredTooltip).MinValue_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                        { return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0; })
+                                                                                                                                                                                                                                                                                                                     .MinSliderValue_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                            { return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0; })
+                                                                                                                                                                                                                                                                                                                     .MaxValue_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                      { return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1); })
+                                                                                                                                                                                                                                                                                                                     .MaxSliderValue_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                            { return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1); })
+                                                                                                                                                                                                                                                                                                                     .Value_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                   { return PendingCreationSettings != nullptr ? PendingCreationSettings->LastGeneratedLODIndex : 0; })
+                                                                                                                                                                                                                                                                                                                     .OnValueChanged_Lambda([this](int32 NewValue)
+                                                                                                                                                                                                                                                                                                                                            {
                                     if (PendingCreationSettings == nullptr)
                                     {
                                         return;
                                     }
                                     PendingCreationSettings->LastGeneratedLODIndex = NewValue;
-                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
-                                })
-                                .OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type)
-                                {
+                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex); })
+                                                                                                                                                                                                                                                                                                                     .OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type)
+                                                                                                                                                                                                                                                                                                                                              {
                                     if (PendingCreationSettings == nullptr)
                                     {
                                         return;
                                     }
                                     PendingCreationSettings->LastGeneratedLODIndex = NewValue;
-                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
-                                })
-                            ]
-                        ]
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
-                        BuildCreationHelperTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([this]()
-                        {
+                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex); })]]] +
+                                            SVerticalBox::Slot()
+                                                .AutoHeight()
+                                                .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                                                    [BuildCreationHelperTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([this]()
+                                                                                                                                                   {
                             if (PendingCreationSettings == nullptr)
                             {
                                 return BuildLODRangeInfoText(nullptr, 0, 0);
@@ -1143,45 +847,28 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                             return BuildLODRangeInfoText(
                                 PendingCreationSettings->SourceSkeletalMesh,
                                 PendingCreationSettings->FirstGeneratedLODIndex,
-                                PendingCreationSettings->LastGeneratedLODIndex);
-                        })))
-                    ]
-                ]
-            ]
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            [
-                SNew(SBox)
-                .WidthOverride(560.0f)
-                .HeightOverride(320.0f)
-                [DetailsView]
-            ]
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .HAlign(HAlign_Right)
-            .Padding(0, 10, 0, 0)
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .Padding(0, 0, 6, 0)
-                [
-                    SNew(SButton)
-                    .Text(LOCTEXT("Cancel", "Cancel"))
-                    .OnClicked_Lambda([Dialog]()
-                    {
+                                PendingCreationSettings->LastGeneratedLODIndex); })))]]] +
+                          SVerticalBox::Slot()
+                              .AutoHeight()
+                                  [SNew(SBox)
+                                       .WidthOverride(560.0f)
+                                       .HeightOverride(320.0f)
+                                           [DetailsView]] +
+                          SVerticalBox::Slot()
+                              .AutoHeight()
+                              .HAlign(HAlign_Right)
+                              .Padding(0, 10, 0, 0)
+                                  [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)[SNew(SButton).Text(LOCTEXT("Cancel", "Cancel")).OnClicked_Lambda([Dialog]()
+                                                                                                                                                                                  {
                         Dialog->RequestDestroyWindow();
-                        return FReply::Handled();
-                    })
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                [
-                    SNew(SButton)
-                    .Text(LOCTEXT("Create", "Create"))
-                    .IsEnabled_Lambda(IsCreateEnabled)
-                    .OnClicked_Lambda([this, &bAccepted, &bUseRecommendedDWCDataUVChannel, Dialog]()
-                    {
+                        return FReply::Handled(); })] +
+                                   SHorizontalBox::Slot()
+                                       .AutoWidth()
+                                           [SNew(SButton)
+                                                .Text(LOCTEXT("Create", "Create"))
+                                                .IsEnabled_Lambda(IsCreateEnabled)
+                                                .OnClicked_Lambda([this, &bAccepted, &bUseRecommendedDWCDataUVChannel, Dialog]()
+                                                                  {
                         if (PendingCreationSettings == nullptr)
                         {
                             return FReply::Handled();
@@ -1209,12 +896,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                             IsExistingSourceUVChannel(PendingCreationSettings->SourceSkeletalMesh, DataUVChannelIndex);
                         bAccepted = true;
                         Dialog->RequestDestroyWindow();
-                        return FReply::Handled();
-                    })
-                ]
-            ]
-            ]
-        ]);
+                        return FReply::Handled(); })]]]]);
 
     FSlateApplication::Get().AddModalWindow(Dialog, FSlateApplication::Get().GetActiveTopLevelWindow());
     if (!bAccepted)
@@ -1225,11 +907,11 @@ bool UWetClothingAssetFactory::ConfigureProperties()
 }
 
 UObject* UWetClothingAssetFactory::FactoryCreateNew(
-    UClass* Class,
-    UObject* InParent,
-    FName Name,
-    EObjectFlags Flags,
-    UObject* Context,
+    UClass*           Class,
+    UObject*          InParent,
+    FName             Name,
+    EObjectFlags      Flags,
+    UObject*          Context,
     FFeedbackContext* Warn)
 {
     if (PendingCreationSettings == nullptr || PendingCreationSettings->SourceSkeletalMesh == nullptr)
@@ -1238,7 +920,7 @@ UObject* UWetClothingAssetFactory::FactoryCreateNew(
     }
 
     UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(InParent, Class, Name, Flags | RF_Transactional);
-    FScopedSlowTask SlowTask(
+    FScopedSlowTask    SlowTask(
         2.0f,
         FText::FromString(FString::Printf(TEXT("Creating Wet Clothing Asset %s..."), *Name.ToString())));
     SlowTask.MakeDialog(false);

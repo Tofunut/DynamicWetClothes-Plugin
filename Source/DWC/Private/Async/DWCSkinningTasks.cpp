@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Async/DWCSkinningTasks.h"
 
 #include "Async/ParallelFor.h"
@@ -37,7 +38,7 @@ namespace
         OutLODData = &RenderData->LODRenderData[LODIndex];
         return true;
     }
-}
+} // namespace
 
 FDWCCpuSkinningTask::FDWCCpuSkinningTask(
     TWeakObjectPtr<UDynamicWetClothesComponent> InOwner,
@@ -77,7 +78,7 @@ void FDWCCpuSkinningTask::ExecuteWorker()
     }
 
     ParallelFor(VertexCount, [this](const int32 VertexIndex)
-    {
+                {
         const FDWCSkinningStaticData& StaticData = *Snapshot.StaticData;
         const FDWCSkinningVertexSnapshot& Vertex = StaticData.Vertices[VertexIndex];
         if (Vertex.InfluenceOffset < 0 || Vertex.InfluenceCount <= 0)
@@ -139,8 +140,7 @@ void FDWCCpuSkinningTask::ExecuteWorker()
         if (Snapshot.bComputeNormals)
         {
             Result.SkinnedNormals[VertexIndex] = SkinnedNormal.GetSafeNormal();
-        }
-    });
+        } });
 
     SetStatus(EDWCTaskStatus::Completed);
 }
@@ -158,12 +158,12 @@ void FDWCCpuSkinningTask::CommitGameThread()
 }
 
 bool BuildDWCSkinningTaskSnapshot(
-    USkeletalMeshComponent*       TargetSkeletalMesh,
-    const FName                   ReceiverId,
+    USkeletalMeshComponent*                                              TargetSkeletalMesh,
+    const FName                                                          ReceiverId,
     const TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>& StaticData,
-    const bool                    bComputePositions,
-    const bool                    bComputeNormals,
-    FDWCSkinningTaskSnapshot&     OutSnapshot)
+    const bool                                                           bComputePositions,
+    const bool                                                           bComputeNormals,
+    FDWCSkinningTaskSnapshot&                                            OutSnapshot)
 {
     DWC_PROFILE_SCOPE(DWC_BuildCpuSkinningTaskSnapshot);
 
@@ -174,8 +174,8 @@ bool BuildDWCSkinningTaskSnapshot(
         return false;
     }
 
-    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
-    const USkeletalMesh* CurrentMesh = TargetSkeletalMesh->GetSkeletalMeshAsset();
+    constexpr int32                RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    const USkeletalMesh*           CurrentMesh = TargetSkeletalMesh->GetSkeletalMeshAsset();
     const FSkinWeightVertexBuffer* CurrentSkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(RuntimeLODIndex);
     if (CurrentMesh == nullptr ||
         CurrentSkinWeightBuffer == nullptr ||
@@ -223,7 +223,7 @@ TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningSt
         return nullptr;
     }
 
-    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    constexpr int32             RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     FSkeletalMeshLODRenderData* LODData = nullptr;
     if (!GetLODRenderData(TargetSkeletalMesh, RuntimeLODIndex, LODData))
     {
@@ -253,7 +253,7 @@ TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningSt
     StaticData->Vertices.SetNumZeroed(VertexCount);
 
     const uint32 MaxInfluences = SkinWeightBuffer->GetMaxBoneInfluences();
-    const float BoneWeightScale = SkinWeightBuffer->GetBoneWeightByteSize() == 1 ? 255.0f : 65535.0f;
+    const float  BoneWeightScale = SkinWeightBuffer->GetBoneWeightByteSize() == 1 ? 255.0f : 65535.0f;
     StaticData->Influences.Reserve(VertexCount * static_cast<int32>(MaxInfluences));
 
     for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
@@ -267,7 +267,7 @@ TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningSt
         }
 
         const FSkelMeshRenderSection& Section = LODData->RenderSections[SectionIndex];
-        const int32 BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
+        const int32                   BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
         if (BufferVertexIndex < 0 || BufferVertexIndex >= VertexCount)
         {
             continue;
@@ -298,7 +298,7 @@ TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningSt
             }
 
             const int32 BoneIndex = Section.BoneMap[BoneMapIndex];
-            StaticData->Influences.Add({BoneIndex, static_cast<float>(BoneWeight) / BoneWeightScale});
+            StaticData->Influences.Add({ BoneIndex, static_cast<float>(BoneWeight) / BoneWeightScale });
             ++Vertex.InfluenceCount;
         }
 

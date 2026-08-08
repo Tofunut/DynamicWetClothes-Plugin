@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
 #include "Core/DWCGeneratedAssetPaths.h"
 
@@ -34,22 +35,21 @@ namespace
     struct FWetWrinkleBakeSourceCacheEntry
     {
         FWetWrinkleTexturePixelBuffer Pixels;
-        FWetClothingTextureReadback Readback;
-        FString Error;
-        FGuid SourceId;
-        bool bFlipGreenChannel = false;
-        bool bScalarSource = false;
-        bool bValid = false;
-
+        FWetClothingTextureReadback   Readback;
+        FString                       Error;
+        FGuid                         SourceId;
+        bool                          bFlipGreenChannel = false;
+        bool                          bScalarSource = false;
+        bool                          bValid = false;
     };
 
     struct FWetWrinkleBakeSeparationCacheKey
     {
         const UTexture2D* Texture = nullptr;
-        int32 BlurRadius = 0;
-        float ConvexityThreshold = 0.0f;
-        int32 MinimumComponentPixels = 0;
-        bool bInvertConvexity = false;
+        int32             BlurRadius = 0;
+        float             ConvexityThreshold = 0.0f;
+        int32             MinimumComponentPixels = 0;
+        bool              bInvertConvexity = false;
 
         bool operator==(const FWetWrinkleBakeSeparationCacheKey& Other) const
         {
@@ -72,23 +72,23 @@ namespace
 
     struct FWetWrinkleBakeSeparationCacheEntry
     {
-        FWetWrinkleTextureScalarBuffer Buffer;
+        FWetWrinkleTextureScalarBuffer                       Buffer;
         TSharedPtr<const TArray<float>, ESPMode::ThreadSafe> SharedValues;
-        FString Error;
-        FGuid SourceId;
-        bool bFlipGreenChannel = false;
-        bool bValid = false;
+        FString                                              Error;
+        FGuid                                                SourceId;
+        bool                                                 bFlipGreenChannel = false;
+        bool                                                 bValid = false;
     };
 
     struct FWetWrinkleBakeIslandCacheKey
     {
         const UWetClothingAsset* Asset = nullptr;
-        const UObject* Mesh = nullptr;
-        int32 LODIndex = 0;
-        int32 MaterialSlotIndex = INDEX_NONE;
-        int32 UVChannelIndex = 0;
-        int32 Width = 0;
-        int32 Height = 0;
+        const UObject*           Mesh = nullptr;
+        int32                    LODIndex = 0;
+        int32                    MaterialSlotIndex = INDEX_NONE;
+        int32                    UVChannelIndex = 0;
+        int32                    Width = 0;
+        int32                    Height = 0;
 
         bool operator==(const FWetWrinkleBakeIslandCacheKey& Other) const
         {
@@ -115,8 +115,8 @@ namespace
     struct FWetWrinkleBakeIslandCacheEntry
     {
         TArray<uint8> Mask;
-        FString TopologySignature;
-        bool bValid = false;
+        FString       TopologySignature;
+        bool          bValid = false;
     };
 
     float WrapUnit(float Value)
@@ -127,7 +127,7 @@ namespace
 
     FVector2D WrapUV(const FVector2D& UV)
     {
-        return FVector2D(WrapUnit(UV.X), WrapUnit(UV.Y));
+        return FVector2D(WrapUnit(static_cast<float>(UV.X)), WrapUnit(static_cast<float>(UV.Y)));
     }
 
     float WrappedDelta(float Delta)
@@ -137,17 +137,17 @@ namespace
 
     float SignedTriangleArea2D(const FVector2D& A, const FVector2D& B, const FVector2D& C)
     {
-        return (B.X - A.X) * (C.Y - A.Y) - (B.Y - A.Y) * (C.X - A.X);
+        return static_cast<float>((B.X - A.X) * (C.Y - A.Y) - (B.Y - A.Y) * (C.X - A.X));
     }
 
     bool BuildIslandMaskUncached(
         const UWetClothingAsset& WetClothingAsset,
-        const int32 LODIndex,
-        const int32 MaterialSlotIndex,
-        const int32 UVChannelIndex,
-        const int32 Width,
-        const int32 Height,
-        TArray<uint8>& OutIslandMask)
+        const int32              LODIndex,
+        const int32              MaterialSlotIndex,
+        const int32              UVChannelIndex,
+        const int32              Width,
+        const int32              Height,
+        TArray<uint8>&           OutIslandMask)
     {
         OutIslandMask.Init(0, Width * Height);
         if (WetClothingAsset.GetDWCSkeletalMesh() == nullptr || Width <= 0 || Height <= 0)
@@ -173,11 +173,11 @@ namespace
             {
                 const FVector2D WrappedUV0 = WrapUV(Triangle.UVs[0]);
                 const FVector2D WrappedUV1 = WrappedUV0 + FVector2D(
-                    WrappedDelta(Triangle.UVs[1].X - Triangle.UVs[0].X),
-                    WrappedDelta(Triangle.UVs[1].Y - Triangle.UVs[0].Y));
+                                                              WrappedDelta(static_cast<float>(Triangle.UVs[1].X - Triangle.UVs[0].X)),
+                                                              WrappedDelta(static_cast<float>(Triangle.UVs[1].Y - Triangle.UVs[0].Y)));
                 const FVector2D WrappedUV2 = WrappedUV0 + FVector2D(
-                    WrappedDelta(Triangle.UVs[2].X - Triangle.UVs[0].X),
-                    WrappedDelta(Triangle.UVs[2].Y - Triangle.UVs[0].Y));
+                                                              WrappedDelta(static_cast<float>(Triangle.UVs[2].X - Triangle.UVs[0].X)),
+                                                              WrappedDelta(static_cast<float>(Triangle.UVs[2].Y - Triangle.UVs[0].Y)));
 
                 for (int32 TileY = -1; TileY <= 1; ++TileY)
                 {
@@ -187,16 +187,16 @@ namespace
                         const FVector2D A = WrappedUV0 + TileOffset;
                         const FVector2D B = WrappedUV1 + TileOffset;
                         const FVector2D C = WrappedUV2 + TileOffset;
-                        const float TriangleArea = SignedTriangleArea2D(A, B, C);
+                        const float     TriangleArea = SignedTriangleArea2D(A, B, C);
                         if (FMath::Abs(TriangleArea) <= UE_SMALL_NUMBER)
                         {
                             continue;
                         }
 
-                        const int32 MinX = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X) * Width), 0, Width - 1);
-                        const int32 MaxX = FMath::Clamp(FMath::CeilToInt(FMath::Max3(A.X, B.X, C.X) * Width), 0, Width - 1);
-                        const int32 MinY = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y) * Height), 0, Height - 1);
-                        const int32 MaxY = FMath::Clamp(FMath::CeilToInt(FMath::Max3(A.Y, B.Y, C.Y) * Height), 0, Height - 1);
+                        const int32 MinX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X) * Width), 0, Width - 1));
+                        const int32 MaxX = IntCastChecked<int32>(FMath::Clamp(FMath::CeilToInt(FMath::Max3(A.X, B.X, C.X) * Width), 0, Width - 1));
+                        const int32 MinY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y) * Height), 0, Height - 1));
+                        const int32 MaxY = IntCastChecked<int32>(FMath::Clamp(FMath::CeilToInt(FMath::Max3(A.Y, B.Y, C.Y) * Height), 0, Height - 1));
                         for (int32 PixelY = MinY; PixelY <= MaxY; ++PixelY)
                         {
                             for (int32 PixelX = MinX; PixelX <= MaxX; ++PixelX)
@@ -207,9 +207,9 @@ namespace
                                 const float EdgeAB = SignedTriangleArea2D(A, B, PixelUV);
                                 const float EdgeBC = SignedTriangleArea2D(B, C, PixelUV);
                                 const float EdgeCA = SignedTriangleArea2D(C, A, PixelUV);
-                                const bool bInside = TriangleArea > 0.0f
-                                    ? EdgeAB >= -UE_SMALL_NUMBER && EdgeBC >= -UE_SMALL_NUMBER && EdgeCA >= -UE_SMALL_NUMBER
-                                    : EdgeAB <= UE_SMALL_NUMBER && EdgeBC <= UE_SMALL_NUMBER && EdgeCA <= UE_SMALL_NUMBER;
+                                const bool  bInside = TriangleArea > 0.0f
+                                                          ? EdgeAB >= -UE_SMALL_NUMBER && EdgeBC >= -UE_SMALL_NUMBER && EdgeCA >= -UE_SMALL_NUMBER
+                                                          : EdgeAB <= UE_SMALL_NUMBER && EdgeBC <= UE_SMALL_NUMBER && EdgeCA <= UE_SMALL_NUMBER;
                                 if (bInside)
                                 {
                                     OutIslandMask[PixelY * Width + PixelX] = 1;
@@ -224,30 +224,30 @@ namespace
         return OutIslandMask.Contains(1);
     }
 
-}
+} // namespace
 
 struct FWetWrinkleNormalMapBakeSession::FImpl
 {
-    TMap<const UTexture2D*, FWetWrinkleBakeSourceCacheEntry> SourceTextures;
+    TMap<const UTexture2D*, FWetWrinkleBakeSourceCacheEntry>                     SourceTextures;
     TMap<FWetWrinkleBakeSeparationCacheKey, FWetWrinkleBakeSeparationCacheEntry> SeparationBuffers;
-    TMap<FWetWrinkleBakeIslandCacheKey, FWetWrinkleBakeIslandCacheEntry> IslandMasks;
+    TMap<FWetWrinkleBakeIslandCacheKey, FWetWrinkleBakeIslandCacheEntry>         IslandMasks;
 };
 
 struct FWetWrinkleNormalMapBakeSnapshot::FImpl
 {
-    int32 LODIndex = 0;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    int32 UVChannelIndex = 0;
-    int32 PaddingPixels = 0;
-    FIntPoint FinalTextureSize = FIntPoint::ZeroValue;
-    FIntPoint WorkingTextureSize = FIntPoint::ZeroValue;
+    int32                                LODIndex = 0;
+    int32                                MaterialSlotIndex = INDEX_NONE;
+    int32                                UVChannelIndex = 0;
+    int32                                PaddingPixels = 0;
+    FIntPoint                            FinalTextureSize = FIntPoint::ZeroValue;
+    FIntPoint                            WorkingTextureSize = FIntPoint::ZeroValue;
     TArray<FDWCEditorNormalStampCommand> StampCommands;
-    TArray<FWetProceduralRidgeStroke> ProceduralRidgeStrokes;
-    TArray<uint8> IslandMask;
-    FString BaseSuffix;
-    FString BuildSignature;
-    uint64 EstimatedBytes = 0;
-    bool bValid = false;
+    TArray<FWetProceduralRidgeStroke>    ProceduralRidgeStrokes;
+    TArray<uint8>                        IslandMask;
+    FString                              BaseSuffix;
+    FString                              BuildSignature;
+    uint64                               EstimatedBytes = 0;
+    bool                                 bValid = false;
 };
 
 FWetWrinkleNormalMapBakeSession::FWetWrinkleNormalMapBakeSession()
@@ -285,19 +285,19 @@ uint64 FWetWrinkleNormalMapBakeSnapshot::GetEstimatedBytes() const
 
 struct FWetWrinkleNormalMapBaker::FBakeGroup
 {
-    int32 LODIndex = 0;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    int32 UVChannelIndex = 0;
+    int32                                    LODIndex = 0;
+    int32                                    MaterialSlotIndex = INDEX_NONE;
+    int32                                    UVChannelIndex = 0;
     TArray<const FWetWrinklePatchPlacement*> Stamps;
     TArray<const FWetProceduralRidgeStroke*> ProceduralRidgeStrokes;
 };
 
 bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
-    UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex,
+    UWetClothingAsset*                      WetClothingAsset,
+    const int32                             MaterialSlotIndex,
     const FWetWrinkleNormalMapBakeSettings& Settings,
-    FWetWrinkleNormalMapBakeResult& OutResult,
-    FString& OutErrorMessage)
+    FWetWrinkleNormalMapBakeResult&         OutResult,
+    FString&                                OutErrorMessage)
 {
     FWetWrinkleNormalMapBakeSession Session;
     return BakeMaterialSlot(
@@ -310,12 +310,12 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
 }
 
 bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
-    UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex,
+    UWetClothingAsset*                      WetClothingAsset,
+    const int32                             MaterialSlotIndex,
     const FWetWrinkleNormalMapBakeSettings& Settings,
-    FWetWrinkleNormalMapBakeSession& Session,
-    FWetWrinkleNormalMapBakeResult& OutResult,
-    FString& OutErrorMessage)
+    FWetWrinkleNormalMapBakeSession&        Session,
+    FWetWrinkleNormalMapBakeResult&         OutResult,
+    FString&                                OutErrorMessage)
 {
     FWetWrinkleNormalMapBakeSnapshot Snapshot;
     if (!BuildMaterialSlotSnapshot(
@@ -339,12 +339,12 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
 }
 
 bool FWetWrinkleNormalMapBaker::BuildMaterialSlotSnapshot(
-    UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex,
+    UWetClothingAsset*                      WetClothingAsset,
+    const int32                             MaterialSlotIndex,
     const FWetWrinkleNormalMapBakeSettings& Settings,
-    FWetWrinkleNormalMapBakeSession& Session,
-    FWetWrinkleNormalMapBakeSnapshot& OutSnapshot,
-    FString& OutErrorMessage)
+    FWetWrinkleNormalMapBakeSession&        Session,
+    FWetWrinkleNormalMapBakeSnapshot&       OutSnapshot,
+    FString&                                OutErrorMessage)
 {
     check(IsInGameThread());
     OutSnapshot = FWetWrinkleNormalMapBakeSnapshot();
@@ -360,11 +360,11 @@ bool FWetWrinkleNormalMapBaker::BuildMaterialSlotSnapshot(
     }
 
     const int32 DataUVChannelIndex = WetClothingAsset->GetDWCDataUVChannelIndex();
-    int32 MatchingStampCount = 0;
-    int32 MissingTextureCount = 0;
-    int32 MatchingStrokeCount = 0;
-    int32 InvalidStrokeCount = 0;
-    FBakeGroup Group;
+    int32       MatchingStampCount = 0;
+    int32       MissingTextureCount = 0;
+    int32       MatchingStrokeCount = 0;
+    int32       InvalidStrokeCount = 0;
+    FBakeGroup  Group;
     Group.LODIndex = 0;
     Group.MaterialSlotIndex = MaterialSlotIndex;
     Group.UVChannelIndex = DataUVChannelIndex;
@@ -436,7 +436,7 @@ bool FWetWrinkleNormalMapBaker::BuildMaterialSlotSnapshot(
 
 bool FWetWrinkleNormalMapBaker::IsMaterialSlotBakeCurrent(
     const UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex)
+    const int32              MaterialSlotIndex)
 {
     if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
     {
@@ -449,37 +449,37 @@ bool FWetWrinkleNormalMapBaker::IsMaterialSlotBakeCurrent(
     Settings.bIncludeDisabledPatches =
         WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches;
 
-    const int32 UVChannelIndex = WetClothingAsset->GetDWCDataUVChannelIndex();
+    const int32     UVChannelIndex = WetClothingAsset->GetDWCDataUVChannelIndex();
     const FIntPoint TextureSize = WetWrinkleTextureRaster::ResolveFinalTextureSize(Settings.Resolution);
-    FBakeGroup Group;
+    FBakeGroup      Group;
     Group.LODIndex = 0;
     Group.MaterialSlotIndex = MaterialSlotIndex;
     Group.UVChannelIndex = UVChannelIndex;
 
-        for (const FWetWrinklePatchPlacement& Stamp : WetClothingAsset->Authored.WrinkleData.EditablePatches)
+    for (const FWetWrinklePatchPlacement& Stamp : WetClothingAsset->Authored.WrinkleData.EditablePatches)
+    {
+        if ((!Stamp.bEnabled && !Settings.bIncludeDisabledPatches) ||
+            Stamp.MaterialSlotIndex != MaterialSlotIndex ||
+            Stamp.WrinkleNormalTexture == nullptr)
         {
-            if ((!Stamp.bEnabled && !Settings.bIncludeDisabledPatches) ||
-                Stamp.MaterialSlotIndex != MaterialSlotIndex ||
-                Stamp.WrinkleNormalTexture == nullptr)
-            {
-                continue;
-            }
-            Group.Stamps.Add(&Stamp);
+            continue;
         }
+        Group.Stamps.Add(&Stamp);
+    }
 
-        for (const FWetProceduralRidgeStroke& Stroke :
-             WetClothingAsset->Authored.WrinkleData.EditableProceduralRidgeStrokes)
+    for (const FWetProceduralRidgeStroke& Stroke :
+         WetClothingAsset->Authored.WrinkleData.EditableProceduralRidgeStrokes)
+    {
+        if ((!Stroke.bEnabled && !Settings.bIncludeDisabledPatches) ||
+            Stroke.MaterialSlotIndex != MaterialSlotIndex ||
+            Stroke.Points.Num() < 2 ||
+            Stroke.WidthUV <= 0.0f ||
+            Stroke.Strength <= 0.0f)
         {
-            if ((!Stroke.bEnabled && !Settings.bIncludeDisabledPatches) ||
-                Stroke.MaterialSlotIndex != MaterialSlotIndex ||
-                Stroke.Points.Num() < 2 ||
-                Stroke.WidthUV <= 0.0f ||
-                Stroke.Strength <= 0.0f)
-            {
-                continue;
-            }
-            Group.ProceduralRidgeStrokes.Add(&Stroke);
+            continue;
         }
+        Group.ProceduralRidgeStrokes.Add(&Stroke);
+    }
 
     if (Group.Stamps.IsEmpty() && Group.ProceduralRidgeStrokes.IsEmpty())
     {
@@ -494,11 +494,11 @@ bool FWetWrinkleNormalMapBaker::IsMaterialSlotBakeCurrent(
         BakedMap->Resolution != TextureSize.X ||
         BakedMap->PaddingPixels != FMath::Clamp(Settings.PaddingPixels, 0, 64) ||
         BakedMap->BuildSignature != MakeBuildSignature(
-            *WetClothingAsset,
-            Group,
-            TextureSize.X,
-            TextureSize.Y,
-            Settings))
+                                        *WetClothingAsset,
+                                        Group,
+                                        TextureSize.X,
+                                        TextureSize.Y,
+                                        Settings))
     {
         return false;
     }
@@ -506,12 +506,12 @@ bool FWetWrinkleNormalMapBaker::IsMaterialSlotBakeCurrent(
 }
 
 bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
-    UWetClothingAsset& WetClothingAsset,
-    const FBakeGroup& Group,
+    UWetClothingAsset&                      WetClothingAsset,
+    const FBakeGroup&                       Group,
     const FWetWrinkleNormalMapBakeSettings& Settings,
-    FWetWrinkleNormalMapBakeSession& Session,
-    FWetWrinkleNormalMapBakeSnapshot& OutSnapshot,
-    FString& OutErrorMessage)
+    FWetWrinkleNormalMapBakeSession&        Session,
+    FWetWrinkleNormalMapBakeSnapshot&       OutSnapshot,
+    FString&                                OutErrorMessage)
 {
     check(IsInGameThread());
     if (Group.Stamps.Num() == 0 && Group.ProceduralRidgeStrokes.Num() == 0)
@@ -544,11 +544,11 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
     for (const FWetWrinklePatchPlacement* StampPtr : Group.Stamps)
     {
         const FWetWrinklePatchPlacement& Stamp = *StampPtr;
-        UTexture2D* CorrectedNormalTexture = Stamp.WrinkleNormalTexture;
-        const FGuid SourceId = CorrectedNormalTexture != nullptr
-            ? CorrectedNormalTexture->Source.GetId()
-            : FGuid();
-        const bool bFlipGreenChannel =
+        UTexture2D*                      CorrectedNormalTexture = Stamp.WrinkleNormalTexture;
+        const FGuid                      SourceId = CorrectedNormalTexture != nullptr
+                                                        ? CorrectedNormalTexture->Source.GetId()
+                                                        : FGuid();
+        const bool                       bFlipGreenChannel =
             CorrectedNormalTexture != nullptr && CorrectedNormalTexture->bFlipGreenChannel;
         FWetWrinkleBakeSourceCacheEntry* NormalSource = Session.Impl->SourceTextures.Find(CorrectedNormalTexture);
         if (NormalSource == nullptr ||
@@ -567,10 +567,10 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
                 NewSource.Error);
             FString ReadbackError;
             NewSource.bValid = NewSource.bValid &&
-                FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
-                    CorrectedNormalTexture,
-                    NewSource.Readback,
-                    ReadbackError);
+                               FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
+                                   CorrectedNormalTexture,
+                                   NewSource.Readback,
+                                   ReadbackError);
             if (!NewSource.bValid && NewSource.Error.IsEmpty())
             {
                 NewSource.Error = MoveTemp(ReadbackError);
@@ -588,7 +588,8 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
             CoverageSettings.InputBlurRadiusPixels,
             CoverageSettings.ConvexityThreshold,
             CoverageSettings.MinimumComponentPixels,
-            CoverageSettings.bInvertConvexity};
+            CoverageSettings.bInvertConvexity
+        };
         FWetWrinkleBakeSeparationCacheEntry* SeparationEntry =
             Session.Impl->SeparationBuffers.Find(SeparationKey);
         if (SeparationEntry == nullptr ||
@@ -664,7 +665,8 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
         Group.MaterialSlotIndex,
         Group.UVChannelIndex,
         FinalTextureSize.X,
-        FinalTextureSize.Y};
+        FinalTextureSize.Y
+    };
     FString TopologySignature = WetClothingAsset.GetSourceMeshSignature();
     if (const FDWCDataUVLODMetadata* DataUVMetadata =
             WetClothingAsset.FindDataUVMetadataForLOD(Group.LODIndex))
@@ -714,18 +716,18 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
         static_cast<uint64>(WorkingTextureSize.X) * WorkingTextureSize.Y *
         (sizeof(uint32) + sizeof(float));
     const uint64 FinalSurfaceBytes = WorkingTextureSize == FinalTextureSize
-        ? 0
-        : static_cast<uint64>(FinalTextureSize.X) * FinalTextureSize.Y *
-            (sizeof(uint32) + sizeof(float));
+                                         ? 0
+                                         : static_cast<uint64>(FinalTextureSize.X) * FinalTextureSize.Y *
+                                               (sizeof(uint32) + sizeof(float));
     const uint64 ResultPixelsBytes =
         static_cast<uint64>(FinalTextureSize.X) * FinalTextureSize.Y * (sizeof(FColor) + sizeof(uint8));
     // Dilation retains an 8-bit distance field and can grow integer frontiers
     // over a substantial part of a 4K island. Budget those temporary arrays so
     // two large bakes cannot be admitted on an optimistic estimate.
     const uint64 DilationWorkingBytes = static_cast<uint64>(FinalTextureSize.X) * FinalTextureSize.Y *
-        (sizeof(uint8) + sizeof(int32) * 2);
+                                        (sizeof(uint8) + sizeof(int32) * 2);
     Snapshot.EstimatedBytes = WorkingSurfaceBytes + FinalSurfaceBytes + ResultPixelsBytes +
-        Snapshot.IslandMask.GetAllocatedSize() + DilationWorkingBytes;
+                              Snapshot.IslandMask.GetAllocatedSize() + DilationWorkingBytes;
     TSet<const void*> CountedSourceBuffers;
     for (const FDWCEditorNormalStampCommand& Command : Snapshot.StampCommands)
     {
@@ -753,7 +755,7 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
 
 FWetWrinkleNormalMapComputedResult FWetWrinkleNormalMapBaker::ComputeSnapshot(
     const FWetWrinkleNormalMapBakeSnapshot& SnapshotHandle,
-    const FDWCEditorCancellationToken* CancellationToken)
+    const FDWCEditorCancellationToken*      CancellationToken)
 {
     FWetWrinkleNormalMapComputedResult Result;
     if (!SnapshotHandle.IsValid())
@@ -763,7 +765,7 @@ FWetWrinkleNormalMapComputedResult FWetWrinkleNormalMapBaker::ComputeSnapshot(
     }
 
     const FWetWrinkleNormalMapBakeSnapshot::FImpl& Snapshot = *SnapshotHandle.Impl;
-    FDWCEditorNormalRasterSurface WorkingSurface;
+    FDWCEditorNormalRasterSurface                  WorkingSurface;
     if (!WorkingSurface.Initialize(Snapshot.WorkingTextureSize, true))
     {
         Result.Error = TEXT("Failed to allocate the wrinkle raster surface.");
@@ -808,7 +810,7 @@ FWetWrinkleNormalMapComputedResult FWetWrinkleNormalMapBaker::ComputeSnapshot(
         return Result;
     }
 
-    FDWCEditorNormalRasterSurface FinalSurface;
+    FDWCEditorNormalRasterSurface  FinalSurface;
     FDWCEditorNormalRasterSurface* FinalSurfaceToEncode = &WorkingSurface;
     if (Snapshot.WorkingTextureSize != Snapshot.FinalTextureSize)
     {
@@ -842,11 +844,11 @@ FWetWrinkleNormalMapComputedResult FWetWrinkleNormalMapBaker::ComputeSnapshot(
 }
 
 bool FWetWrinkleNormalMapBaker::CommitComputedResult(
-    UWetClothingAsset* WetClothingAsset,
+    UWetClothingAsset*                      WetClothingAsset,
     const FWetWrinkleNormalMapBakeSnapshot& SnapshotHandle,
-    FWetWrinkleNormalMapComputedResult&& ComputedResult,
-    FWetWrinkleNormalMapBakeResult& OutResult,
-    FString& OutErrorMessage)
+    FWetWrinkleNormalMapComputedResult&&    ComputedResult,
+    FWetWrinkleNormalMapBakeResult&         OutResult,
+    FString&                                OutErrorMessage)
 {
     check(IsInGameThread());
     OutResult = FWetWrinkleNormalMapBakeResult();
@@ -858,13 +860,13 @@ bool FWetWrinkleNormalMapBaker::CommitComputedResult(
     if (!ComputedResult.bSucceeded)
     {
         OutErrorMessage = ComputedResult.Error.IsEmpty()
-            ? TEXT("The wrinkle bake calculation failed.")
-            : MoveTemp(ComputedResult.Error);
+                              ? TEXT("The wrinkle bake calculation failed.")
+                              : MoveTemp(ComputedResult.Error);
         return false;
     }
 
     const FWetWrinkleNormalMapBakeSnapshot::FImpl& Snapshot = *SnapshotHandle.Impl;
-    const int32 ExpectedPixelCount = Snapshot.FinalTextureSize.X * Snapshot.FinalTextureSize.Y;
+    const int32                                    ExpectedPixelCount = Snapshot.FinalTextureSize.X * Snapshot.FinalTextureSize.Y;
     if (ComputedResult.NormalPixels.Num() != ExpectedPixelCount ||
         ComputedResult.MaskPixels.Num() != ExpectedPixelCount)
     {
@@ -940,10 +942,10 @@ bool FWetWrinkleNormalMapBaker::CommitComputedResult(
 }
 
 FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
-    const UWetClothingAsset& WetClothingAsset,
-    const FBakeGroup& Group,
-    const int32 Width,
-    const int32 Height,
+    const UWetClothingAsset&                WetClothingAsset,
+    const FBakeGroup&                       Group,
+    const int32                             Width,
+    const int32                             Height,
     const FWetWrinkleNormalMapBakeSettings& Settings)
 {
     FString Canonical;
@@ -1049,13 +1051,13 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
 }
 
 UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateNormalTextureAsset(
-    UWetClothingAsset& WetClothingAsset,
-    const FString& ObjectSuffix,
-    const int32 Width,
-    const int32 Height,
+    UWetClothingAsset&    WetClothingAsset,
+    const FString&        ObjectSuffix,
+    const int32           Width,
+    const int32           Height,
     const TArray<FColor>& Pixels,
-    UTexture2D* ExistingTexture,
-    FString& OutErrorMessage)
+    UTexture2D*           ExistingTexture,
+    FString&              OutErrorMessage)
 {
 #if WITH_EDITORONLY_DATA
     const FString AssetPackageName = WetClothingAsset.GetOutermost()->GetName();
@@ -1096,7 +1098,7 @@ UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateNormalTextureAsset(
 
     if (Texture != nullptr)
     {
-        FGuid ExistingOwnerGuid;
+        FGuid      ExistingOwnerGuid;
         const bool bHasOwner = WetClothingAsset.TryGetGeneratedAssetOwnerGuid(Texture, ExistingOwnerGuid);
         if (bHasOwner && ExistingOwnerGuid != WetClothingAsset.GetAssetGuid())
         {
@@ -1158,13 +1160,13 @@ UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateNormalTextureAsset(
 }
 
 UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateMaskTextureAsset(
-    UWetClothingAsset& WetClothingAsset,
-    const FString& ObjectSuffix,
-    const int32 Width,
-    const int32 Height,
+    UWetClothingAsset&   WetClothingAsset,
+    const FString&       ObjectSuffix,
+    const int32          Width,
+    const int32          Height,
     const TArray<uint8>& Pixels,
-    UTexture2D* ExistingTexture,
-    FString& OutErrorMessage)
+    UTexture2D*          ExistingTexture,
+    FString&             OutErrorMessage)
 {
 #if WITH_EDITORONLY_DATA
     const FString AssetPackageName = WetClothingAsset.GetOutermost()->GetName();
@@ -1205,7 +1207,7 @@ UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateMaskTextureAsset(
 
     if (Texture != nullptr)
     {
-        FGuid ExistingOwnerGuid;
+        FGuid      ExistingOwnerGuid;
         const bool bHasOwner = WetClothingAsset.TryGetGeneratedAssetOwnerGuid(Texture, ExistingOwnerGuid);
         if (bHasOwner && ExistingOwnerGuid != WetClothingAsset.GetAssetGuid())
         {

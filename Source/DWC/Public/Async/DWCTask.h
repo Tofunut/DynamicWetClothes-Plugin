@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -14,9 +15,9 @@ enum class EDWCTaskStatus : uint8
 
 struct DWC_API FDWCVertexGeometryStaticData
 {
-    UPTRINT SkeletalMeshIdentity = 0;
-    UPTRINT VertexDataIdentity = 0;
-    int32 VertexCount = 0;
+    UPTRINT           SkeletalMeshIdentity = 0;
+    UPTRINT           VertexDataIdentity = 0;
+    int32             VertexCount = 0;
     TArray<FVector3f> LocalPositions;
     TArray<FVector3f> LocalNormals;
 

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleElementListPanel.h"
 
 #include "Styling/CoreStyle.h"
@@ -53,12 +54,7 @@ void SWetWrinkleElementListPanel::Construct(const FArguments& InArgs)
                   + SVerticalBox::Slot()
                         .AutoHeight()
                         .Padding(2.0f, 0.0f, 2.0f, 4.0f)
-                            [SNew(SHorizontalBox)
-                             + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(28.0f)]
-                             + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(118.0f).Padding(FMargin(4.0f,0.0f))[SNew(STextBlock).Text(LOCTEXT("ElementColumn", "Element")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
-                             + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(62.0f).HAlign(HAlign_Center)[SNew(STextBlock).Text(LOCTEXT("ElementTypeColumn", "Type")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
-                             + SHorizontalBox::Slot().FillWidth(1.0f).Padding(4.0f,0.0f)[SNew(STextBlock).Text(LOCTEXT("ElementTextureColumn", "Texture")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]
-                             + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(28.0f)]]
+                            [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(28.0f)] + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(118.0f).Padding(FMargin(4.0f, 0.0f))[SNew(STextBlock).Text(LOCTEXT("ElementColumn", "Element")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]] + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(62.0f).HAlign(HAlign_Center)[SNew(STextBlock).Text(LOCTEXT("ElementTypeColumn", "Type")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]] + SHorizontalBox::Slot().FillWidth(1.0f).Padding(4.0f, 0.0f)[SNew(STextBlock).Text(LOCTEXT("ElementTextureColumn", "Texture")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))] + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(28.0f)]]
 
                   + SVerticalBox::Slot()
                         .AutoHeight()
@@ -75,8 +71,8 @@ void SWetWrinkleElementListPanel::Construct(const FArguments& InArgs)
 
 void SWetWrinkleElementListPanel::SetItems(
     TArray<FWetWrinkleElementListItemPtr>&& InItems,
-    const FGuid& SelectedGuid,
-    const EWetWrinkleElementType SelectedType)
+    const FGuid&                            SelectedGuid,
+    const EWetWrinkleElementType            SelectedType)
 {
     Items = MoveTemp(InItems);
     if (!ListView.IsValid())
@@ -106,7 +102,7 @@ void SWetWrinkleElementListPanel::RequestRefresh()
 }
 
 TSharedRef<ITableRow> SWetWrinkleElementListPanel::GenerateRow(
-    FWetWrinkleElementListItemPtr Item,
+    FWetWrinkleElementListItemPtr     Item,
     const TSharedRef<STableViewBase>& OwnerTable) const
 {
     check(OnGenerateRow.IsBound());
@@ -115,7 +111,7 @@ TSharedRef<ITableRow> SWetWrinkleElementListPanel::GenerateRow(
 
 void SWetWrinkleElementListPanel::HandleSelectionChanged(
     FWetWrinkleElementListItemPtr Item,
-    const ESelectInfo::Type SelectInfo) const
+    const ESelectInfo::Type       SelectInfo) const
 {
     if (!bSynchronizingSelection)
     {

@@ -1,4 +1,4 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
 
 #include "RuntimeState/Utils/WetSimulationStage.h"
 
@@ -55,7 +55,7 @@ namespace
 float FWetSimulationStageArgs::GetDryRatePerSecond() const
 {
     const FWetnessProfileParameters* Parameters = FindFirstVertexParameters(RuntimeData);
-    const float DryRateScale = WetnessSettings != nullptr ? FMath::Max(0.0f, WetnessSettings->DryRateScale) : 1.0f;
+    const float                      DryRateScale = WetnessSettings != nullptr ? FMath::Max(0.0f, WetnessSettings->DryRateScale) : 1.0f;
     return (Parameters ? Parameters->GetDryRatePerSecond() : 1.0f) * DryRateScale;
 }
 
@@ -74,8 +74,8 @@ float FWetSimulationStageArgs::GetGravityFlowStrength() const
 float FWetSimulationStageArgs::GetDryRatePerSecondForVertex(const int32 VertexIndex) const
 {
     const FWetnessProfileParameters* Parameters = RuntimeData != nullptr
-                                                     ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
-                                                     : nullptr;
+                                                      ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
+                                                      : nullptr;
     if (Parameters == nullptr)
     {
         return GetDryRatePerSecond();
@@ -88,8 +88,8 @@ float FWetSimulationStageArgs::GetDryRatePerSecondForVertex(const int32 VertexIn
 float FWetSimulationStageArgs::GetSpreadRatePerSecondForVertex(const int32 VertexIndex) const
 {
     const FWetnessProfileParameters* Parameters = RuntimeData != nullptr
-                                                     ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
-                                                     : nullptr;
+                                                      ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
+                                                      : nullptr;
     return Parameters != nullptr
                ? Parameters->GetSpreadRatePerSecond()
                : GetSpreadRatePerSecond();
@@ -98,8 +98,8 @@ float FWetSimulationStageArgs::GetSpreadRatePerSecondForVertex(const int32 Verte
 float FWetSimulationStageArgs::GetGravityFlowStrengthForVertex(const int32 VertexIndex) const
 {
     const FWetnessProfileParameters* Parameters = RuntimeData != nullptr
-                                                     ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
-                                                     : nullptr;
+                                                      ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
+                                                      : nullptr;
     return Parameters != nullptr
                ? Parameters->GetGravityFlowStrength()
                : GetGravityFlowStrength();
@@ -526,7 +526,7 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
     };
 
     TArray<FNeighborFlow, TInlineAllocator<16>> ValidNeighborFlows;
-    float TotalWeight = 0.0f;
+    float                                       TotalWeight = 0.0f;
 
     const int32 NeighborEndOffset = NeighborRange.StartOffset + NeighborRange.Count;
     for (int32 NeighborOffset = NeighborRange.StartOffset; NeighborOffset < NeighborEndOffset; ++NeighborOffset)
@@ -566,7 +566,7 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
             continue;
         }
 
-        ValidNeighborFlows.Add({NeighborIndex, Weight});
+        ValidNeighborFlows.Add({ NeighborIndex, Weight });
         TotalWeight += Weight;
     }
 
@@ -596,14 +596,14 @@ float FWetSimulationStage::CalculateNeighborGravityBias(const FWetSimulationStag
 
     const FVector TargetLocalPosition(Receiver.MeshSampler->CachedSkinnedPositions[NeighborIndex]);
     const FVector FlowDelta = TargetLocalPosition - SourceLocalPosition;
-    const float   FlowLengthSquared = FlowDelta.SizeSquared();
+    const float   FlowLengthSquared = static_cast<float>(FlowDelta.SizeSquared());
     if (FlowLengthSquared <= SMALL_NUMBER)
     {
         return 1.0f;
     }
 
-    const float GravityAlignment =
-        FVector::DotProduct(FlowDelta, LocalGravityDirection) * FMath::InvSqrt(FlowLengthSquared);
+    const float GravityAlignment = static_cast<float>(
+        FVector::DotProduct(FlowDelta, LocalGravityDirection) * FMath::InvSqrt(FlowLengthSquared));
 
     return FMath::Clamp(
         1.0f + GravityAlignment * GravityFlowStrength,
@@ -615,11 +615,11 @@ void FWetSimulationStage::ProcessPendingWetness(FWetSimulationStageArgs& Receive
 {
     DWC_PROFILE_SCOPE(DWC_Simulation_ProcessPendingWetness);
 
-    float SpreadAlpha = 0.0f;
-    float GravityFlowStrength = 0.0f;
+    float   SpreadAlpha = 0.0f;
+    float   GravityFlowStrength = 0.0f;
     FVector LocalGravityDirection = FVector::DownVector;
-    bool  bUseGravityBias = false;
-    bool  bCanSpread = false;
+    bool    bUseGravityBias = false;
+    bool    bCanSpread = false;
 
     if (!PreparePendingWetnessProcessing(Receiver,
                                          EffectiveSpreadRatePerSecond,

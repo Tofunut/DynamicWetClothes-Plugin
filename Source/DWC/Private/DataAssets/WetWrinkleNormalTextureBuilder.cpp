@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DataAssets/WetWrinkleNormalTextureBuilder.h"
 
 #include "Engine/Texture2D.h"
@@ -7,9 +8,9 @@ namespace
 {
     void ResizeNormalSourcePixels(
         const TArray<FColor>& SourcePixels,
-        const FIntPoint& SourceSize,
-        const FIntPoint& TargetSize,
-        TArray<FColor>& OutPixels)
+        const FIntPoint&      SourceSize,
+        const FIntPoint&      TargetSize,
+        TArray<FColor>&       OutPixels)
     {
         OutPixels.SetNumUninitialized(TargetSize.X * TargetSize.Y);
         for (int32 TargetY = 0; TargetY < TargetSize.Y; ++TargetY)
@@ -20,10 +21,10 @@ namespace
             const float FracY = FMath::Clamp(SourceY - FMath::Floor(SourceY), 0.0f, 1.0f);
             for (int32 TargetX = 0; TargetX < TargetSize.X; ++TargetX)
             {
-                const float SourceX = ((static_cast<float>(TargetX) + 0.5f) * SourceSize.X / TargetSize.X) - 0.5f;
-                const int32 X0 = FMath::Clamp(FMath::FloorToInt(SourceX), 0, SourceSize.X - 1);
-                const int32 X1 = FMath::Min(X0 + 1, SourceSize.X - 1);
-                const float FracX = FMath::Clamp(SourceX - FMath::Floor(SourceX), 0.0f, 1.0f);
+                const float        SourceX = ((static_cast<float>(TargetX) + 0.5f) * SourceSize.X / TargetSize.X) - 0.5f;
+                const int32        X0 = FMath::Clamp(FMath::FloorToInt(SourceX), 0, SourceSize.X - 1);
+                const int32        X1 = FMath::Min(X0 + 1, SourceSize.X - 1);
+                const float        FracX = FMath::Clamp(SourceX - FMath::Floor(SourceX), 0.0f, 1.0f);
                 const FLinearColor Top = FMath::Lerp(
                     SourcePixels[Y0 * SourceSize.X + X0].ReinterpretAsLinear(),
                     SourcePixels[Y0 * SourceSize.X + X1].ReinterpretAsLinear(),
@@ -73,9 +74,9 @@ namespace
     }
 
     FColor ReadSourceColor(
-        const TArray64<uint8>& MipData,
+        const TArray64<uint8>&     MipData,
         const ETextureSourceFormat Format,
-        const int64 PixelIndex)
+        const int64                PixelIndex)
     {
         switch (Format)
         {
@@ -97,7 +98,7 @@ namespace
 
         case TSF_RGBA16:
         {
-            const int64 ByteIndex = PixelIndex * 8;
+            const int64  ByteIndex = PixelIndex * 8;
             const uint16 R = static_cast<uint16>(MipData[ByteIndex + 0]) | (static_cast<uint16>(MipData[ByteIndex + 1]) << 8);
             const uint16 G = static_cast<uint16>(MipData[ByteIndex + 2]) | (static_cast<uint16>(MipData[ByteIndex + 3]) << 8);
             const uint16 B = static_cast<uint16>(MipData[ByteIndex + 4]) | (static_cast<uint16>(MipData[ByteIndex + 5]) << 8);
@@ -115,10 +116,10 @@ namespace
     }
 
     bool ReadTextureSourcePixelsInternal(
-        UTexture2D* Texture,
+        UTexture2D*     Texture,
         TArray<FColor>& OutPixels,
-        FIntPoint& OutSize,
-        FString& OutError)
+        FIntPoint&      OutSize,
+        FString&        OutError)
     {
         OutPixels.Reset();
         OutSize = FIntPoint::ZeroValue;
@@ -139,7 +140,7 @@ namespace
         const ETextureSourceFormat SourceFormat = Texture->Source.GetFormat();
         if (SourceFormat != TSF_BGRA8 && SourceFormat != TSF_G8 && SourceFormat != TSF_RGBA16)
         {
-            UEnum* SourceFormatEnum = StaticEnum<ETextureSourceFormat>();
+            UEnum*        SourceFormatEnum = StaticEnum<ETextureSourceFormat>();
             const FString FormatName = SourceFormatEnum != nullptr
                                            ? SourceFormatEnum->GetNameStringByValue(static_cast<int64>(SourceFormat))
                                            : FString::Printf(TEXT("%d"), static_cast<int32>(SourceFormat));
@@ -157,7 +158,7 @@ namespace
             return false;
         }
 
-        OutSize = FIntPoint(Texture->Source.GetSizeX(), Texture->Source.GetSizeY());
+        OutSize = FIntPoint(IntCastChecked<int32>(Texture->Source.GetSizeX()), IntCastChecked<int32>(Texture->Source.GetSizeY()));
         const int64 PixelCount = static_cast<int64>(OutSize.X) * static_cast<int64>(OutSize.Y);
         if (OutSize.X <= 0 || OutSize.Y <= 0 || PixelCount <= 0)
         {
@@ -187,9 +188,9 @@ namespace
 
     void BlurVectorField(
         const TArray<FVector2f>& Input,
-        const FIntPoint Size,
-        const int32 Radius,
-        TArray<FVector2f>& Output)
+        const FIntPoint          Size,
+        const int32              Radius,
+        TArray<FVector2f>&       Output)
     {
         if (Radius <= 0)
         {
@@ -197,8 +198,8 @@ namespace
             return;
         }
 
-        const int32 Width = Size.X;
-        const int32 Height = Size.Y;
+        const int32       Width = Size.X;
+        const int32       Height = Size.Y;
         TArray<FVector2f> Scratch;
         Scratch.SetNumUninitialized(Input.Num());
         Output.SetNumUninitialized(Input.Num());
@@ -208,7 +209,7 @@ namespace
             for (int32 X = 0; X < Width; ++X)
             {
                 FVector2f Sum = FVector2f::ZeroVector;
-                int32 Count = 0;
+                int32     Count = 0;
                 for (int32 Offset = -Radius; Offset <= Radius; ++Offset)
                 {
                     const int32 SampleX = FMath::Clamp(X + Offset, 0, Width - 1);
@@ -224,7 +225,7 @@ namespace
             for (int32 X = 0; X < Width; ++X)
             {
                 FVector2f Sum = FVector2f::ZeroVector;
-                int32 Count = 0;
+                int32     Count = 0;
                 for (int32 Offset = -Radius; Offset <= Radius; ++Offset)
                 {
                     const int32 SampleY = FMath::Clamp(Y + Offset, 0, Height - 1);
@@ -239,8 +240,8 @@ namespace
     float FindRobustPositiveScale(const TArray<float>& Values)
     {
         constexpr int32 BinCount = 1024;
-        float Maximum = 0.0f;
-        int32 PositiveCount = 0;
+        float           Maximum = 0.0f;
+        int32           PositiveCount = 0;
         for (const float Value : Values)
         {
             if (Value > UE_SMALL_NUMBER)
@@ -267,7 +268,7 @@ namespace
         }
 
         const int32 TargetCount = FMath::Max(1, FMath::CeilToInt(static_cast<float>(PositiveCount) * 0.98f));
-        int32 Accumulated = 0;
+        int32       Accumulated = 0;
         for (int32 Bin = 0; Bin < BinCount; ++Bin)
         {
             Accumulated += Histogram[Bin];
@@ -281,8 +282,8 @@ namespace
 
     void MorphologicalCloseBinary(TArray<uint8>& Mask, const FIntPoint Size)
     {
-        const int32 Width = Size.X;
-        const int32 Height = Size.Y;
+        const int32   Width = Size.X;
+        const int32   Height = Size.Y;
         TArray<uint8> Dilated;
         Dilated.Init(0, Mask.Num());
 
@@ -341,8 +342,8 @@ namespace
             return;
         }
 
-        const int32 Width = Size.X;
-        const int32 Height = Size.Y;
+        const int32   Width = Size.X;
+        const int32   Height = Size.Y;
         TArray<uint8> Visited;
         Visited.Init(0, Mask.Num());
         TArray<int32> Queue;
@@ -400,12 +401,12 @@ namespace
     }
 
     bool BuildConvexSeparationFromPixels(
-        const TArray<FColor>& CorrectedPixels,
-        const FIntPoint Size,
-        const bool bFlipGreenChannel,
+        const TArray<FColor>&                        CorrectedPixels,
+        const FIntPoint                              Size,
+        const bool                                   bFlipGreenChannel,
         const FWetWrinkleCoverageExtractionSettings& Settings,
-        FWetWrinkleTextureScalarBuffer& OutBuffer,
-        FString& OutError)
+        FWetWrinkleTextureScalarBuffer&              OutBuffer,
+        FString&                                     OutError)
     {
         OutBuffer = FWetWrinkleTextureScalarBuffer();
         const int32 PixelCount = Size.X * Size.Y;
@@ -420,8 +421,8 @@ namespace
         for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
         {
             const FColor& Color = CorrectedPixels[PixelIndex];
-            const float NormalX = static_cast<float>(Color.R) / 255.0f * 2.0f - 1.0f;
-            float NormalY = -(static_cast<float>(Color.G) / 255.0f * 2.0f - 1.0f);
+            const float   NormalX = static_cast<float>(Color.R) / 255.0f * 2.0f - 1.0f;
+            float         NormalY = -(static_cast<float>(Color.G) / 255.0f * 2.0f - 1.0f);
             if (bFlipGreenChannel)
             {
                 NormalY = -NormalY;
@@ -450,9 +451,9 @@ namespace
             }
         }
 
-        const float RobustScale = FindRobustPositiveScale(Convexity);
-        const float HighThreshold = FMath::Clamp(Settings.ConvexityThreshold, 0.0f, 1.0f);
-        const float LowThreshold = HighThreshold * 0.4f;
+        const float   RobustScale = FindRobustPositiveScale(Convexity);
+        const float   HighThreshold = FMath::Clamp(Settings.ConvexityThreshold, 0.0f, 1.0f);
+        const float   LowThreshold = HighThreshold * 0.4f;
         TArray<uint8> CandidateMask;
         TArray<uint8> ResultMask;
         CandidateMask.Init(0, PixelCount);
@@ -513,9 +514,9 @@ namespace
 
     FVector2f EstimateBorderAverageXY(
         const TArray<FColor>& SourcePixels,
-        const FIntPoint& Size,
-        const bool bFlipGreen,
-        const float BorderPercent)
+        const FIntPoint&      Size,
+        const bool            bFlipGreen,
+        const float           BorderPercent)
     {
         const int32 BorderPixels = FMath::Clamp(
             FMath::CeilToInt(static_cast<float>(FMath::Min(Size.X, Size.Y)) * FMath::Clamp(BorderPercent, 0.0f, 50.0f) * 0.01f),
@@ -523,7 +524,7 @@ namespace
             FMath::Max(1, FMath::Min(Size.X, Size.Y)));
 
         FVector2f Sum = FVector2f::ZeroVector;
-        int32 SampleCount = 0;
+        int32     SampleCount = 0;
         for (int32 Y = 0; Y < Size.Y; ++Y)
         {
             for (int32 X = 0; X < Size.X; ++X)
@@ -545,11 +546,11 @@ namespace
 
     float EstimateBorderNoiseThreshold(
         const TArray<FColor>& SourcePixels,
-        const FIntPoint& Size,
-        const bool bFlipGreen,
-        const float BorderPercent,
-        const FVector2f& BackgroundAverageXY,
-        const float UserFlatThreshold)
+        const FIntPoint&      Size,
+        const bool            bFlipGreen,
+        const float           BorderPercent,
+        const FVector2f&      BackgroundAverageXY,
+        const float           UserFlatThreshold)
     {
         const int32 BorderPixels = FMath::Clamp(
             FMath::CeilToInt(static_cast<float>(FMath::Min(Size.X, Size.Y)) * FMath::Clamp(BorderPercent, 0.0f, 50.0f) * 0.01f),
@@ -569,9 +570,9 @@ namespace
                     continue;
                 }
 
-                const int32 PixelIndex = Y * Size.X + X;
+                const int32     PixelIndex = Y * Size.X + X;
                 const FVector2f SourceXY = GetNormalXY(DecodeNormalFromColor(SourcePixels[PixelIndex], bFlipGreen));
-                const float Deviation = (SourceXY - BackgroundAverageXY).Length();
+                const float     Deviation = (SourceXY - BackgroundAverageXY).Length();
                 Sum += Deviation;
                 SumSquared += Deviation * Deviation;
                 ++SampleCount;
@@ -590,7 +591,7 @@ namespace
         return FMath::Clamp(FMath::Max(UserFlatThreshold, BorderNoiseThreshold), 0.0f, 1.0f);
     }
 
-}
+} // namespace
 
 float FWetWrinkleTextureScalarBuffer::SampleBilinear(const FVector2D& UV) const
 {
@@ -614,19 +615,19 @@ float FWetWrinkleTextureScalarBuffer::SampleBilinear(const FVector2D& UV) const
 }
 
 bool FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
-    UTexture2D* SourceNormalTexture,
-    const bool bUseCorrection,
-    const FWetWrinkleNormalCorrectionSettings& Settings,
+    UTexture2D*                                  SourceNormalTexture,
+    const bool                                   bUseCorrection,
+    const FWetWrinkleNormalCorrectionSettings&   Settings,
     const FWetWrinkleCoverageExtractionSettings& CoverageSettings,
-    FWetWrinkleNormalBuildOutput& OutOutput,
-    FString& OutError,
-    const int32 MaxOutputDimension)
+    FWetWrinkleNormalBuildOutput&                OutOutput,
+    FString&                                     OutError,
+    const int32                                  MaxOutputDimension)
 {
     OutOutput = FWetWrinkleNormalBuildOutput();
     OutError.Reset();
 
     TArray<FColor> SourcePixels;
-    FIntPoint SourceSize = FIntPoint::ZeroValue;
+    FIntPoint      SourceSize = FIntPoint::ZeroValue;
     if (!ReadTextureSourcePixelsInternal(SourceNormalTexture, SourcePixels, SourceSize, OutError))
     {
         return false;
@@ -634,7 +635,7 @@ bool FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
 
     if (MaxOutputDimension > 0 && FMath::Max(SourceSize.X, SourceSize.Y) > MaxOutputDimension)
     {
-        const float Scale = static_cast<float>(MaxOutputDimension) / static_cast<float>(FMath::Max(SourceSize.X, SourceSize.Y));
+        const float     Scale = static_cast<float>(MaxOutputDimension) / static_cast<float>(FMath::Max(SourceSize.X, SourceSize.Y));
         const FIntPoint PreviewSize(
             FMath::Max(1, FMath::RoundToInt(SourceSize.X * Scale)),
             FMath::Max(1, FMath::RoundToInt(SourceSize.Y * Scale)));
@@ -644,7 +645,7 @@ bool FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
         SourceSize = PreviewSize;
     }
 
-    const bool bApplyGreenFlip = bUseCorrection && Settings.bFlipGreen;
+    const bool      bApplyGreenFlip = bUseCorrection && Settings.bFlipGreen;
     const FVector2f BackgroundAverageXY = bUseCorrection
                                               ? EstimateBorderAverageXY(SourcePixels, SourceSize, bApplyGreenFlip, Settings.BorderPercent)
                                               : FVector2f::ZeroVector;
@@ -664,16 +665,16 @@ bool FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
                                              ? EstimateBorderNoiseThreshold(SourcePixels, SourceSize, bApplyGreenFlip, Settings.BorderPercent, BackgroundAverageXY, FlatThreshold)
                                              : FlatThreshold;
     const float DeviationAmplify = FMath::Max(Settings.DeviationPreviewAmplify, 0.0f);
-    int32 FlatPixelCount = 0;
-    float MaxXYDeviation = 0.0f;
+    int32       FlatPixelCount = 0;
+    float       MaxXYDeviation = 0.0f;
 
     for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
     {
-        const FColor SourceColor = SourcePixels[PixelIndex];
+        const FColor    SourceColor = SourcePixels[PixelIndex];
         const FVector3f SourceNormal = DecodeNormalFromColor(SourceColor, bApplyGreenFlip);
         const FVector2f SourceXY = GetNormalXY(SourceNormal);
         const FVector2f CorrectedXY = bUseCorrection ? SourceXY - BackgroundAverageXY : SourceXY;
-        const float XYDeviation = CorrectedXY.Length();
+        const float     XYDeviation = CorrectedXY.Length();
 
         FVector3f CorrectedNormal;
         if (bUseCorrection)
@@ -734,10 +735,10 @@ bool FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
 }
 
 bool FWetWrinkleNormalTextureBuilder::BuildConvexSeparationBuffer(
-    UTexture2D* CorrectedNormalTexture,
+    UTexture2D*                                  CorrectedNormalTexture,
     const FWetWrinkleCoverageExtractionSettings& Settings,
-    FWetWrinkleTextureScalarBuffer& OutBuffer,
-    FString& OutError)
+    FWetWrinkleTextureScalarBuffer&              OutBuffer,
+    FString&                                     OutError)
 {
     FWetWrinkleTexturePixelBuffer CorrectedNormal;
     if (!ReadTextureSourcePixels(CorrectedNormalTexture, CorrectedNormal, OutError))
@@ -760,20 +761,20 @@ bool FWetWrinkleNormalTextureBuilder::BuildConvexSeparationBuffer(
 }
 
 bool FWetWrinkleNormalTextureBuilder::ReadTextureSourcePixels(
-    UTexture2D* Texture,
+    UTexture2D*                    Texture,
     FWetWrinkleTexturePixelBuffer& OutBuffer,
-    FString& OutError)
+    FString&                       OutError)
 {
     OutBuffer = FWetWrinkleTexturePixelBuffer();
     return ReadTextureSourcePixelsInternal(Texture, OutBuffer.Pixels, OutBuffer.Size, OutError);
 }
 
 bool FWetWrinkleNormalTextureBuilder::BuildConvexSeparationBufferFromPixels(
-    const FWetWrinkleTexturePixelBuffer& CorrectedNormal,
-    const bool bFlipGreenChannel,
+    const FWetWrinkleTexturePixelBuffer&         CorrectedNormal,
+    const bool                                   bFlipGreenChannel,
     const FWetWrinkleCoverageExtractionSettings& Settings,
-    FWetWrinkleTextureScalarBuffer& OutBuffer,
-    FString& OutError)
+    FWetWrinkleTextureScalarBuffer&              OutBuffer,
+    FString&                                     OutError)
 {
     if (!CorrectedNormal.IsValid())
     {

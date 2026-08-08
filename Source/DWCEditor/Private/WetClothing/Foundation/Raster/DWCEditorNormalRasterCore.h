@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -9,20 +10,20 @@ class FDWCEditorNormalRasterCore final
   public:
     static FDWCEditorRasterResult RasterizeStamp(
         const FDWCEditorNormalStampCommand& Command,
-        FDWCEditorNormalRasterSurface& Surface,
-        const FDWCEditorCancellationToken* CancellationToken = nullptr,
-        const FIntRect* ClipRect = nullptr);
+        FDWCEditorNormalRasterSurface&      Surface,
+        const FDWCEditorCancellationToken*  CancellationToken = nullptr,
+        const FIntRect*                     ClipRect = nullptr);
 
     static FDWCEditorRasterResult RasterizeStampRegion(
         const FDWCEditorNormalStampCommand& Command,
-        FDWCEditorNormalRasterRegion& Region,
-        const FDWCEditorCancellationToken* CancellationToken = nullptr,
-        const FIntRect* ClipRect = nullptr);
+        FDWCEditorNormalRasterRegion&       Region,
+        const FDWCEditorCancellationToken*  CancellationToken = nullptr,
+        const FIntRect*                     ClipRect = nullptr);
 
     static void ComputeStampBounds(
         const FDWCEditorNormalStampCommand& Command,
-        FIntPoint CanvasSize,
-        TArray<FIntRect>& OutBounds);
+        FIntPoint                           CanvasSize,
+        TArray<FIntRect>&                   OutBounds);
 
     static FVector3f BlendAngleCorrected(const FVector3f& BaseNormal, const FVector3f& DetailNormal);
 };

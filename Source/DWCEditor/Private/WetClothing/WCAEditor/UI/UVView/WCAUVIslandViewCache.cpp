@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Caches UV-island analysis by mesh/asset topology revision.
  */
@@ -19,33 +20,26 @@ namespace WCAUVIslandViewCachePrivate
     {
         FObjectKey MeshKey;
         FObjectKey AssetKey;
-        int32 LODIndex = 0;
-        int32 UVChannelIndex = 0;
-        int32 MaterialSlotIndex = INDEX_NONE;
-        uint64 GlobalRevision = 0;
-        uint64 MeshRevision = 0;
-        uint64 AssetRevision = 0;
-        UPTRINT RenderDataIdentity = 0;
-        int32 RenderVertexCount = 0;
-        int32 RenderUVChannelCount = 0;
+        int32      LODIndex = 0;
+        int32      UVChannelIndex = 0;
+        int32      MaterialSlotIndex = INDEX_NONE;
+        uint64     GlobalRevision = 0;
+        uint64     MeshRevision = 0;
+        uint64     AssetRevision = 0;
+        UPTRINT    RenderDataIdentity = 0;
+        int32      RenderVertexCount = 0;
+        int32      RenderUVChannelCount = 0;
 
         FWCAUVIslandViewCacheKey(
-            const USkeletalMesh* Mesh,
+            const USkeletalMesh*     Mesh,
             const UWetClothingAsset* Asset,
-            const int32 InLODIndex,
-            const int32 InUVChannelIndex,
-            const int32 InMaterialSlotIndex,
-            const uint64 InGlobalRevision,
-            const uint64 InMeshRevision,
-            const uint64 InAssetRevision)
-            : MeshKey(Mesh)
-            , AssetKey(Asset != nullptr ? FObjectKey(Asset) : FObjectKey())
-            , LODIndex(InLODIndex)
-            , UVChannelIndex(InUVChannelIndex)
-            , MaterialSlotIndex(InMaterialSlotIndex)
-            , GlobalRevision(InGlobalRevision)
-            , MeshRevision(InMeshRevision)
-            , AssetRevision(InAssetRevision)
+            const int32              InLODIndex,
+            const int32              InUVChannelIndex,
+            const int32              InMaterialSlotIndex,
+            const uint64             InGlobalRevision,
+            const uint64             InMeshRevision,
+            const uint64             InAssetRevision)
+            : MeshKey(Mesh), AssetKey(Asset != nullptr ? FObjectKey(Asset) : FObjectKey()), LODIndex(InLODIndex), UVChannelIndex(InUVChannelIndex), MaterialSlotIndex(InMaterialSlotIndex), GlobalRevision(InGlobalRevision), MeshRevision(InMeshRevision), AssetRevision(InAssetRevision)
         {
             const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
             RenderDataIdentity = reinterpret_cast<UPTRINT>(RenderData);
@@ -93,9 +87,9 @@ namespace WCAUVIslandViewCachePrivate
     };
 
     TMap<FWCAUVIslandViewCacheKey, FWCAUVIslandViewCacheEntry> GUVIslandCache;
-    TMap<FObjectKey, uint64> GMeshRevisions;
-    TMap<FObjectKey, uint64> GAssetRevisions;
-    uint64 GGlobalRevision = 1;
+    TMap<FObjectKey, uint64>                                   GMeshRevisions;
+    TMap<FObjectKey, uint64>                                   GAssetRevisions;
+    uint64                                                     GGlobalRevision = 1;
 
     uint64 GetMeshRevision(const USkeletalMesh* Mesh)
     {
@@ -105,18 +99,18 @@ namespace WCAUVIslandViewCachePrivate
 
     uint64 GetAssetRevision(const UWetClothingAsset* Asset)
     {
-        const uint64 PersistentRevision = Asset != nullptr
-            ? Asset->GetPreviewTopologyRevision()
-            : 0;
+        const uint64  PersistentRevision = Asset != nullptr
+                                               ? Asset->GetPreviewTopologyRevision()
+                                               : 0;
         const uint64* TransientRevision = Asset != nullptr
-            ? GAssetRevisions.Find(FObjectKey(Asset))
-            : nullptr;
+                                              ? GAssetRevisions.Find(FObjectKey(Asset))
+                                              : nullptr;
         return PersistentRevision + (TransientRevision != nullptr ? *TransientRevision : 0);
     }
 
     void MoveBuiltIslandsToEntry(
         TArray<FWetClothingAssetUVIsland>&& BuiltIslands,
-        FWCAUVIslandViewCacheEntry& OutEntry)
+        FWCAUVIslandViewCacheEntry&         OutEntry)
     {
         OutEntry.Islands.Reserve(BuiltIslands.Num());
         for (FWetClothingAssetUVIsland& Island : BuiltIslands)
@@ -126,7 +120,7 @@ namespace WCAUVIslandViewCachePrivate
     }
 
     void CopyCachedIslands(
-        const FWCAUVIslandViewCacheEntry& Entry,
+        const FWCAUVIslandViewCacheEntry&              Entry,
         TArray<TSharedPtr<FWetClothingAssetUVIsland>>& OutIslands)
     {
         OutIslands.Append(Entry.Islands);
@@ -187,11 +181,11 @@ bool FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
 }
 
 bool FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
-    const UWetClothingAsset* WetClothingAsset,
-    const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex,
+    const UWetClothingAsset*                       WetClothingAsset,
+    const int32                                    UVChannelIndex,
+    const int32                                    MaterialSlotIndex,
     TArray<TSharedPtr<FWetClothingAssetUVIsland>>& OutIslands,
-    FString* OutErrorMessage)
+    FString*                                       OutErrorMessage)
 {
     OutIslands.Reset();
 
@@ -201,8 +195,8 @@ bool FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
         return false;
     }
 
-    const int32 LODIndex = WetClothingAsset->GetSimulationLODIndex();
-    const int32 OriginalUVChannelIndex = WetClothingAsset->GetOriginalUVChannelIndex();
+    const int32          LODIndex = WetClothingAsset->GetSimulationLODIndex();
+    const int32          OriginalUVChannelIndex = WetClothingAsset->GetOriginalUVChannelIndex();
     const USkeletalMesh* AnalysisMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
 
     if (AnalysisMesh == nullptr)
@@ -212,7 +206,7 @@ bool FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
     }
 
     const FDWCEditorUVTopologyData* Topology = WetClothingAsset->FindOriginalUVTopologyForLOD(LODIndex);
-    const bool bUseStoredTopology =
+    const bool                      bUseStoredTopology =
         Topology != nullptr &&
         Topology->bIsValid &&
         Topology->UVChannelIndex == OriginalUVChannelIndex &&
@@ -237,7 +231,7 @@ bool FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
     }
 
     TArray<FWetClothingAssetUVIsland> BuiltIslands;
-    bool bBuilt = false;
+    bool                              bBuilt = false;
     if (bUseStoredTopology)
     {
         bBuilt = FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslandsFromTopology(
@@ -345,7 +339,7 @@ bool FWCAUVIslandViewCache::BuildMaterialSlotGeometryPreviewTriangles(
     }
 
     const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
-    const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
+    const int32                       VertexCount = static_cast<int32>(LODData.GetNumVertices());
     if (VertexCount <= 0)
     {
         return false;
@@ -360,8 +354,8 @@ bool FWCAUVIslandViewCache::BuildMaterialSlotGeometryPreviewTriangles(
 
     const int32 NumUVChannels = static_cast<int32>(LODData.GetNumTexCoords());
     const int32 PreviewUVChannelIndex = NumUVChannels > 0
-        ? FMath::Clamp(PreferredUVChannelIndex, 0, NumUVChannels - 1)
-        : INDEX_NONE;
+                                            ? FMath::Clamp(PreferredUVChannelIndex, 0, NumUVChannels - 1)
+                                            : INDEX_NONE;
 
     for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
     {
@@ -377,8 +371,7 @@ bool FWCAUVIslandViewCache::BuildMaterialSlotGeometryPreviewTriangles(
 
         for (int32 TriangleIndex = FirstIndex; TriangleIndex + 2 < LastIndex; TriangleIndex += 3)
         {
-            const uint32 Indices[3] =
-            {
+            const uint32 Indices[3] = {
                 IndexBuffer[TriangleIndex],
                 IndexBuffer[TriangleIndex + 1],
                 IndexBuffer[TriangleIndex + 2]
@@ -402,7 +395,8 @@ bool FWCAUVIslandViewCache::BuildMaterialSlotGeometryPreviewTriangles(
                     LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex));
                 Triangle.RenderVertexIndices[CornerIndex] = static_cast<int32>(VertexIndex);
                 Triangle.LocalNormals[CornerIndex] = FVector(
-                    LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex)).GetSafeNormal();
+                                                         LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex))
+                                                         .GetSafeNormal();
 
                 FVector2D PreviewUV = FVector2D::ZeroVector;
                 if (PreviewUVChannelIndex != INDEX_NONE)
@@ -447,7 +441,7 @@ bool FWCAUVIslandViewCache::BuildMaterialSlotPreviewTriangles(
     }
 
     const USkeletalMesh* PreparedMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
-    const int32 OriginalUVChannelIndex = WetClothingAsset->GetOriginalUVChannelIndex();
+    const int32          OriginalUVChannelIndex = WetClothingAsset->GetOriginalUVChannelIndex();
     if (PreparedMesh == nullptr ||
         OriginalUVChannelIndex < 0 ||
         OriginalUVChannelIndex >= FWetClothingAssetMeshAnalyzer::GetNumUVChannels(PreparedMesh, WetClothingAsset->GetSimulationLODIndex()))

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyDirtyTileReplayWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -9,8 +10,8 @@ namespace
 {
     void ComposeAlphaRegions(
         const FDWCTransparencyDirtyTileReplayJobInput& Input,
-        const FDWCTransparencyAlphaTileStore& AlphaStore,
-        TArray<FDWCEditorBGRA8RegionPayload>& OutRegions)
+        const FDWCTransparencyAlphaTileStore&          AlphaStore,
+        TArray<FDWCEditorBGRA8RegionPayload>&          OutRegions)
     {
         FDWCTransparencyPixelComposeContext Context;
         Context.AutoResult = Input.AutoResult.Get();
@@ -18,8 +19,8 @@ namespace
         Context.VisualizationMode = Input.VisualizationMode;
         Context.bDeferPresentationToMaterial = true;
         Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
-            ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
-            : KINDA_SMALL_NUMBER;
+                                         ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
+                                         : KINDA_SMALL_NUMBER;
 
         for (const FDWCTransparencyAlphaComposeTileSnapshot& Tile : Input.AlphaComposeTiles)
         {
@@ -50,8 +51,8 @@ namespace
     }
 
     bool BuildAlphaReplay(
-        FDWCTransparencyDirtyTileReplayJobInput& Input,
-        FDWCTransparencyDirtyTileReplayJobResult& Output,
+        FDWCTransparencyDirtyTileReplayJobInput&                            Input,
+        FDWCTransparencyDirtyTileReplayJobResult&                           Output,
         const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
     {
         FDWCTransparencyAlphaTileStore WorkingStore;
@@ -91,8 +92,8 @@ namespace
 
     void ComposeRevealRegions(
         const FDWCTransparencyDirtyTileReplayJobInput& Input,
-        const FDWCTransparencyRevealColorTileStore& RevealStore,
-        TArray<FDWCEditorBGRA8RegionPayload>& OutRegions)
+        const FDWCTransparencyRevealColorTileStore&    RevealStore,
+        TArray<FDWCEditorBGRA8RegionPayload>&          OutRegions)
     {
         FDWCTransparencyAlphaTileStore AlphaStore;
         AlphaStore.Initialize(Input.AutoResult->Resolution);
@@ -117,8 +118,8 @@ namespace
         Context.VisualizationMode = Input.VisualizationMode;
         Context.bDeferPresentationToMaterial = true;
         Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
-            ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
-            : KINDA_SMALL_NUMBER;
+                                         ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
+                                         : KINDA_SMALL_NUMBER;
 
         for (const FDWCTransparencyRevealColorComposeTileSnapshot& Tile : Input.RevealComposeTiles)
         {
@@ -147,8 +148,8 @@ namespace
     }
 
     bool BuildRevealReplay(
-        FDWCTransparencyDirtyTileReplayJobInput& Input,
-        FDWCTransparencyDirtyTileReplayJobResult& Output,
+        FDWCTransparencyDirtyTileReplayJobInput&                            Input,
+        FDWCTransparencyDirtyTileReplayJobResult&                           Output,
         const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
     {
         FDWCTransparencyRevealColorTileStore WorkingStore;
@@ -190,19 +191,19 @@ namespace
         ComposeRevealRegions(Input, FinalStore, Output.PreviewRegions);
         return true;
     }
-}
+} // namespace
 
 FDWCEditorWorkerMemoryEstimate FDWCTransparencyDirtyTileReplayWorker::EstimateMemory(
     const FDWCTransparencyDirtyTileReplayJobInput& Input)
 {
     FDWCEditorWorkerMemoryEstimate Estimate;
-    const uint64 TilePixels = static_cast<uint64>(Input.DirtyTileCoordinates.Num()) *
-        FDWCTransparencyAlphaTileStore::TileSize * FDWCTransparencyAlphaTileStore::TileSize;
+    const uint64                   TilePixels = static_cast<uint64>(Input.DirtyTileCoordinates.Num()) *
+                              FDWCTransparencyAlphaTileStore::TileSize * FDWCTransparencyAlphaTileStore::TileSize;
     Estimate.WorkingBytes = Input.Target == EDWCTransparencyDirtyReplayTarget::Alpha
-        ? TilePixels * 2ull
-        : TilePixels * sizeof(FColor);
+                                ? TilePixels * 2ull
+                                : TilePixels * sizeof(FColor);
     Estimate.OutputBytes = TilePixels * (sizeof(FColor) +
-        (Input.Target == EDWCTransparencyDirtyReplayTarget::Alpha ? 2ull : sizeof(FColor)));
+                                         (Input.Target == EDWCTransparencyDirtyReplayTarget::Alpha ? 2ull : sizeof(FColor)));
     for (const FDWCTransparencyBrushStroke& Stroke : Input.AlphaStrokes)
     {
         Estimate.SnapshotBytes += Stroke.Samples.GetAllocatedSize();
@@ -216,7 +217,7 @@ FDWCEditorWorkerMemoryEstimate FDWCTransparencyDirtyTileReplayWorker::EstimateMe
 
 TSharedPtr<FDWCTransparencyDirtyTileReplayJobResult, ESPMode::ThreadSafe>
 FDWCTransparencyDirtyTileReplayWorker::Build(
-    FDWCTransparencyDirtyTileReplayJobInput&& Input,
+    FDWCTransparencyDirtyTileReplayJobInput&&                           Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FDWCTransparencyDirtyTileReplayJobResult, ESPMode::ThreadSafe> Output =
@@ -232,8 +233,8 @@ FDWCTransparencyDirtyTileReplayWorker::Build(
     }
 
     const bool bBuilt = Input.Target == EDWCTransparencyDirtyReplayTarget::Alpha
-        ? BuildAlphaReplay(Input, *Output, CancellationToken)
-        : BuildRevealReplay(Input, *Output, CancellationToken);
+                            ? BuildAlphaReplay(Input, *Output, CancellationToken)
+                            : BuildRevealReplay(Input, *Output, CancellationToken);
     Output->bSucceeded = bBuilt && !CancellationToken->IsCanceled();
     if (!Output->bSucceeded && Output->Error.IsEmpty())
     {

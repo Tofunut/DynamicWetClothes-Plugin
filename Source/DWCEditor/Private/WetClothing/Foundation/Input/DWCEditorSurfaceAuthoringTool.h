@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "BaseBehaviors/BehaviorTargetInterfaces.h"
@@ -30,8 +31,8 @@ class UDWCEditorSurfaceAuthoringToolBuilder final : public UInteractiveToolBuild
     GENERATED_BODY()
 
   public:
-    void SetTarget(IDWCEditorSurfaceToolTarget* InTarget) { Target = InTarget; }
-    virtual bool CanBuildTool(const FToolBuilderState& SceneState) const override;
+    void                      SetTarget(IDWCEditorSurfaceToolTarget* InTarget) { Target = InTarget; }
+    virtual bool              CanBuildTool(const FToolBuilderState& SceneState) const override;
     virtual UInteractiveTool* BuildTool(const FToolBuilderState& SceneState) const override;
 
   private:
@@ -40,9 +41,9 @@ class UDWCEditorSurfaceAuthoringToolBuilder final : public UInteractiveToolBuild
 
 UCLASS(Transient)
 class UDWCEditorSurfaceAuthoringTool final
-    : public UInteractiveTool
-    , public IClickDragBehaviorTarget
-    , public IHoverBehaviorTarget
+    : public UInteractiveTool,
+      public IClickDragBehaviorTarget,
+      public IHoverBehaviorTarget
 {
     GENERATED_BODY()
 
@@ -56,18 +57,18 @@ class UDWCEditorSurfaceAuthoringTool final
     virtual bool HasAccept() const override { return false; }
 
     virtual FInputRayHit CanBeginClickDragSequence(const FInputDeviceRay& PressPos) override;
-    virtual void OnClickPress(const FInputDeviceRay& PressPos) override;
-    virtual void OnClickDrag(const FInputDeviceRay& DragPos) override;
-    virtual void OnClickRelease(const FInputDeviceRay& ReleasePos) override;
-    virtual void OnTerminateDragSequence() override;
+    virtual void         OnClickPress(const FInputDeviceRay& PressPos) override;
+    virtual void         OnClickDrag(const FInputDeviceRay& DragPos) override;
+    virtual void         OnClickRelease(const FInputDeviceRay& ReleasePos) override;
+    virtual void         OnTerminateDragSequence() override;
 
     virtual FInputRayHit BeginHoverSequenceHitTest(const FInputDeviceRay& DevicePos) override;
-    virtual void OnBeginHover(const FInputDeviceRay& DevicePos) override;
-    virtual bool OnUpdateHover(const FInputDeviceRay& DevicePos) override;
-    virtual void OnEndHover() override;
+    virtual void         OnBeginHover(const FInputDeviceRay& DevicePos) override;
+    virtual bool         OnUpdateHover(const FInputDeviceRay& DevicePos) override;
+    virtual void         OnEndHover() override;
 
   private:
     IDWCEditorSurfaceToolTarget* Target = nullptr;
-    bool bInteracting = false;
-    bool bHovering = false;
+    bool                         bInteracting = false;
+    bool                         bHovering = false;
 };

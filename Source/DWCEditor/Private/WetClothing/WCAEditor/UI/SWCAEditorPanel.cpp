@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "SWCAEditorPanel.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -86,9 +87,12 @@ namespace
     {
         switch (Severity)
         {
-        case EWCAValidationSeverity::Error: return EWCAEditorStatusSeverity::Error;
-        case EWCAValidationSeverity::Warning: return EWCAEditorStatusSeverity::Warning;
-        default: return EWCAEditorStatusSeverity::Info;
+        case EWCAValidationSeverity::Error:
+            return EWCAEditorStatusSeverity::Error;
+        case EWCAValidationSeverity::Warning:
+            return EWCAEditorStatusSeverity::Warning;
+        default:
+            return EWCAEditorStatusSeverity::Info;
         }
     }
 
@@ -147,7 +151,7 @@ namespace
 
         TargetMessages->Add(BuildIssueStatusMessage(Issue));
     }
-}
+} // namespace
 
 FString FWCAEditorIssueStatus::BuildSummary() const
 {
@@ -251,9 +255,7 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
     OnStatusChanged = InArgs._OnStatusChanged;
 
     ChildSlot
-    [
-        SAssignNew(ModeContentBox, SBox)
-    ];
+        [SAssignNew(ModeContentBox, SBox)];
 
     {
         TGuardValue<bool> SuppressStatusChangedNotification(bSuppressStatusChangedNotification, true);
@@ -281,13 +283,13 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
 }
 
 int32 SWCAEditorPanel::OnPaint(
-    const FPaintArgs& Args,
-    const FGeometry& AllottedGeometry,
-    const FSlateRect& MyCullingRect,
+    const FPaintArgs&        Args,
+    const FGeometry&         AllottedGeometry,
+    const FSlateRect&        MyCullingRect,
     FSlateWindowElementList& OutDrawElements,
-    int32 LayerId,
-    const FWidgetStyle& InWidgetStyle,
-    bool bParentEnabled) const
+    int32                    LayerId,
+    const FWidgetStyle&      InWidgetStyle,
+    bool                     bParentEnabled) const
 {
     const int32 Result = SCompoundWidget::OnPaint(
         Args,
@@ -407,12 +409,13 @@ void SWCAEditorPanel::RefreshFromAsset(const bool bRebuildActiveModePreview)
     UpdateCachedStatus();
 
     const EWCAEditorMode ActiveMode = SessionStore.IsValid()
-        ? SessionStore->GetState().ActiveMode
-        : EWCAEditorMode::PartEdit;
+                                          ? SessionStore->GetState().ActiveMode
+                                          : EWCAEditorMode::PartEdit;
     switch (ActiveMode)
     {
     case EWCAEditorMode::PartEdit:
-        if (PartEditorPanel.IsValid()) PartEditorPanel->RefreshFromAsset();
+        if (PartEditorPanel.IsValid())
+            PartEditorPanel->RefreshFromAsset();
         break;
     case EWCAEditorMode::WrinkleEdit:
         if (WrinkleEditorPanel.IsValid())
@@ -428,7 +431,8 @@ void SWCAEditorPanel::RefreshFromAsset(const bool bRebuildActiveModePreview)
         }
         break;
     case EWCAEditorMode::TransparencyBake:
-        if (TransparencyBakePanel.IsValid()) TransparencyBakePanel->RefreshFromAsset();
+        if (TransparencyBakePanel.IsValid())
+            TransparencyBakePanel->RefreshFromAsset();
         break;
     default:
         break;
@@ -471,7 +475,7 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
     const bool bRunDeepValidation) const
 {
     FWCAEditorIssueStatus Result;
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    UWetClothingAsset*    Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
     {
         return Result;
@@ -490,7 +494,7 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
 
 void SWCAEditorPanel::UpdateCachedStatus(const bool bRefreshAssetState)
 {
-    const int32 PreviousIssueCount = CachedIssueCount;
+    const int32                    PreviousIssueCount = CachedIssueCount;
     const EWCAEditorStatusSeverity PreviousStatusSeverity = CachedStatusSeverity;
 
     const FWCAEditorIssueStatus Status = CollectIssueStatus(bRefreshAssetState, false);
@@ -508,7 +512,7 @@ void SWCAEditorPanel::UpdateCachedStatus(const bool bRefreshAssetState)
 bool SWCAEditorPanel::HasPendingVisualBakeTasks(FString* OutSummary) const
 {
     TArray<FString> PendingSections;
-    FString PartSummary;
+    FString         PartSummary;
     if (FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(WetClothingAsset.Get(), &PartSummary))
     {
         PendingSections.Add(PartSummary);
@@ -534,13 +538,13 @@ bool SWCAEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadW
 
     TArray<FString> Sections;
     TArray<FString> Failures;
-    bool bHadWarnings = false;
+    bool            bHadWarnings = false;
 
     FString PartPendingSummary;
     if (FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(WetClothingAsset.Get(), &PartPendingSummary))
     {
         FString PartBakeSummary;
-        bool bPartWarnings = false;
+        bool    bPartWarnings = false;
         if (FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMaterials(WetClothingAsset.Get(), PartBakeSummary, &bPartWarnings))
         {
             Sections.Add(PartBakeSummary);
@@ -577,12 +581,13 @@ bool SWCAEditorPanel::BakeAllWrinkleMaps(FString& OutSummary, bool* OutHadWarnin
 
 bool SWCAEditorPanel::RequestBakeAllWrinkleMaps(
     TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
-    FString* OutError)
+    FString*                                          OutError)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || !BakeCoordinator.IsValid())
     {
-        if (OutError != nullptr) *OutError = TEXT("The asynchronous bake service is unavailable.");
+        if (OutError != nullptr)
+            *OutError = TEXT("The asynchronous bake service is unavailable.");
         return false;
     }
     TArray<int32> MaterialSlots;
@@ -596,12 +601,13 @@ bool SWCAEditorPanel::RequestBakeAllWrinkleMaps(
 
 bool SWCAEditorPanel::RequestBakeAllTransparencyMaps(
     TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
-    FString* OutError)
+    FString*                                          OutError)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || !BakeCoordinator.IsValid())
     {
-        if (OutError != nullptr) *OutError = TEXT("The asynchronous bake service is unavailable.");
+        if (OutError != nullptr)
+            *OutError = TEXT("The asynchronous bake service is unavailable.");
         return false;
     }
 
@@ -653,7 +659,7 @@ void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)
     }
     if (SessionStore.IsValid())
     {
-        SessionStore->Dispatch(FDWCActivateEditorModeAction{NewMode});
+        SessionStore->Dispatch(FDWCActivateEditorModeAction{ NewMode });
     }
     const bool bHadModeWidget =
         (NewMode == EWCAEditorMode::PartEdit && PartEditorPanel.IsValid()) ||
@@ -696,7 +702,7 @@ void SWCAEditorPanel::HandleAuthoringDocumentChanged(const FDWCEditorAuthoringCh
 }
 
 void SWCAEditorPanel::SuspendPreviewMode(
-    const EWCAEditorMode Mode,
+    const EWCAEditorMode                 Mode,
     const EDWCEditorPreviewSuspendReason Reason)
 {
     switch (Mode)

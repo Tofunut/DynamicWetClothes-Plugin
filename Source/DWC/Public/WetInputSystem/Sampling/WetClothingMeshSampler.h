@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 
 class USkeletalMeshComponent;
@@ -11,19 +13,19 @@ class FWetClothingMeshSampler
 {
   public:
     uint64 GetAllocatedMemoryBytes() const;
-    void ResetPositions();
-    void ResetNormals();
+    void   ResetPositions();
+    void   ResetNormals();
 
     bool UpdateSkinningMatrices(USkeletalMeshComponent* TargetSkeletalMesh);
     bool UpdateSkinnedPositions(USkeletalMeshComponent* TargetSkeletalMesh, int32 LODIndex = 0);
     bool UpdateSkinnedPositionsDirect(USkeletalMeshComponent* TargetSkeletalMesh, int32 LODIndex = 0);
     bool UpdateSkinnedNormals(USkeletalMeshComponent* TargetSkeletalMesh, int32 LODIndex = 0);
     void CommitSkinnedCacheFromTask(
-        USkeletalMeshComponent*    TargetSkeletalMesh,
-        int32                      LODIndex,
-        uint64                     FrameNumber,
-        TArray<FVector3f>&&        SkinnedPositions,
-        TArray<FVector3f>&&        SkinnedNormals);
+        USkeletalMeshComponent* TargetSkeletalMesh,
+        int32                   LODIndex,
+        uint64                  FrameNumber,
+        TArray<FVector3f>&&     SkinnedPositions,
+        TArray<FVector3f>&&     SkinnedNormals);
     bool ComputeSkinnedPosition(
         const FSkeletalMeshLODRenderData& LODData,
         const FSkinWeightVertexBuffer&    SkinWeightBuffer,

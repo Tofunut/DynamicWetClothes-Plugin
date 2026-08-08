@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
 
 #include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
@@ -27,7 +28,7 @@ FDWCEditorCacheLease FDWCEditorCacheStore::AcquireLease(const FDWCEditorCacheKey
 }
 
 void FDWCEditorCacheStore::Put(
-    const FDWCEditorCacheKey& Key,
+    const FDWCEditorCacheKey&                                   Key,
     TSharedRef<const IDWCEditorCacheValue, ESPMode::ThreadSafe> Value)
 {
     check(IsInGameThread());
@@ -62,7 +63,7 @@ void FDWCEditorCacheStore::InvalidateOwner(const UObject* Owner)
         return;
     }
 
-    const FObjectKey OwnerKey(Owner);
+    const FObjectKey           OwnerKey(Owner);
     TArray<FDWCEditorCacheKey> KeysToRemove;
     for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
     {
@@ -117,7 +118,7 @@ void FDWCEditorCacheStore::TrimToBudget()
     while (GetTrackedBytes() > BudgetBytes && !Entries.IsEmpty())
     {
         const FDWCEditorCacheKey* OldestKey = nullptr;
-        uint64 OldestSerial = TNumericLimits<uint64>::Max();
+        uint64                    OldestSerial = TNumericLimits<uint64>::Max();
         for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
         {
             if (!Pair.Value.IsValid() || Pair.Value->ActiveLeaseCount.GetValue() > 0)
@@ -233,7 +234,7 @@ void FDWCEditorCacheStore::ResetDiagnosticCounters()
 
 void FDWCEditorCacheStore::RemoveEntry(
     const FDWCEditorCacheKey& Key,
-    const bool bCountEviction)
+    const bool                bCountEviction)
 {
     if (const TSharedPtr<FDWCEditorCacheEntry>* Entry = Entries.Find(Key))
     {
@@ -250,10 +251,9 @@ void FDWCEditorCacheStore::RemoveEntry(
 void FDWCEditorCacheStore::CleanupRetiredEntries()
 {
     RetiredEntries.RemoveAll([](const TWeakPtr<FDWCEditorCacheEntry>& RetiredEntry)
-    {
+                             {
         const TSharedPtr<FDWCEditorCacheEntry> Entry = RetiredEntry.Pin();
-        return !Entry.IsValid() || Entry->ActiveLeaseCount.GetValue() <= 0;
-    });
+        return !Entry.IsValid() || Entry->ActiveLeaseCount.GetValue() <= 0; });
 }
 
 void FDWCEditorCacheStore::TrackRetiredEntry(const TSharedPtr<FDWCEditorCacheEntry>& Entry)

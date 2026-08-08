@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -26,7 +27,7 @@ bool FDWCEditorPreviewRecoveryBoundedRetryTest::RunTest(const FString& Parameter
         if (Attempt < 2)
         {
             TestEqual(TEXT("Failure remains retryable within budget"),
-                Action, EDWCEditorPreviewRecoveryAction::RetryFullRebuild);
+                      Action, EDWCEditorPreviewRecoveryAction::RetryFullRebuild);
         }
     }
     TestTrue(TEXT("Repeated failure enters degraded state"), Recovery.IsDegraded());
@@ -47,8 +48,8 @@ bool FDWCEditorPreviewRecoveryStaleAndResumeTest::RunTest(const FString& Paramet
     Recovery.Invalidate(EDWCEditorPreviewInvalidationReason::ContextChanged);
     TestTrue(TEXT("Full rebuild starts"), Recovery.TryBeginFullRebuild());
     TestEqual(TEXT("Stale result is dropped"),
-        Recovery.HandleCommitResult(EDWCEditorPreviewCommitResult::StaleRequest, 0.0),
-        EDWCEditorPreviewRecoveryAction::DropStale);
+              Recovery.HandleCommitResult(EDWCEditorPreviewCommitResult::StaleRequest, 0.0),
+              EDWCEditorPreviewRecoveryAction::DropStale);
     TestFalse(TEXT("Stale result does not schedule a fallback"), Recovery.RequiresFullRebuild());
 
     Recovery.Invalidate(EDWCEditorPreviewInvalidationReason::ResolutionChanged);

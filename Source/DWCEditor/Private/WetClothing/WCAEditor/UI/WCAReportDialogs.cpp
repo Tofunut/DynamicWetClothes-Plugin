@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/WCAEditor/UI/WCAReportDialogs.h"
 
 #include "DataAssets/WetClothingAssetSetupData.h"
@@ -84,13 +85,13 @@ namespace
         }
 
         return SlotName.IsEmpty()
-            ? FText::FromString(FString::Printf(TEXT("Slot %d"), MaterialSlotIndex))
-            : FText::FromString(FString::Printf(TEXT("Slot %d \u2014 %s"), MaterialSlotIndex, *SlotName));
+                   ? FText::FromString(FString::Printf(TEXT("Slot %d"), MaterialSlotIndex))
+                   : FText::FromString(FString::Printf(TEXT("Slot %d \u2014 %s"), MaterialSlotIndex, *SlotName));
     }
 
     const USkeletalMesh* ResolveSlotIdentityMesh(
         const UWetClothingAsset* Asset,
-        const USkeletalMesh* FallbackMesh)
+        const USkeletalMesh*     FallbackMesh)
     {
         if (Asset != nullptr && Asset->GetSourceSkeletalMesh() != nullptr)
         {
@@ -101,8 +102,8 @@ namespace
 
     FText BuildAssetSlotLabel(
         const UWetClothingAsset* Asset,
-        const USkeletalMesh* FallbackMesh,
-        const int32 MaterialSlotIndex)
+        const USkeletalMesh*     FallbackMesh,
+        const int32              MaterialSlotIndex)
     {
         return BuildSlotLabel(ResolveSlotIdentityMesh(Asset, FallbackMesh), MaterialSlotIndex);
     }
@@ -118,8 +119,8 @@ namespace
         SortedLODIndices.Sort();
 
         TArray<FString> Ranges;
-        int32 RangeStart = SortedLODIndices[0];
-        int32 RangeEnd = RangeStart;
+        int32           RangeStart = SortedLODIndices[0];
+        int32           RangeEnd = RangeStart;
         for (int32 Index = 1; Index < SortedLODIndices.Num(); ++Index)
         {
             const int32 LODIndex = SortedLODIndices[Index];
@@ -130,15 +131,15 @@ namespace
             }
 
             Ranges.Add(RangeStart == RangeEnd
-                ? FString::Printf(TEXT("LOD%d"), RangeStart)
-                : FString::Printf(TEXT("LOD%d-LOD%d"), RangeStart, RangeEnd));
+                           ? FString::Printf(TEXT("LOD%d"), RangeStart)
+                           : FString::Printf(TEXT("LOD%d-LOD%d"), RangeStart, RangeEnd));
             RangeStart = LODIndex;
             RangeEnd = LODIndex;
         }
 
         Ranges.Add(RangeStart == RangeEnd
-            ? FString::Printf(TEXT("LOD%d"), RangeStart)
-            : FString::Printf(TEXT("LOD%d-LOD%d"), RangeStart, RangeEnd));
+                       ? FString::Printf(TEXT("LOD%d"), RangeStart)
+                       : FString::Printf(TEXT("LOD%d-LOD%d"), RangeStart, RangeEnd));
         return FText::FromString(FString::Join(Ranges, TEXT(", ")));
     }
 
@@ -156,7 +157,7 @@ namespace
 
     const FDWCDataUVLODWarning* FindLODWarning(
         const FDWCDataUVBuildResult& Result,
-        const int32 LODIndex)
+        const int32                  LODIndex)
     {
         return Result.LODWarnings.FindByPredicate(
             [LODIndex](const FDWCDataUVLODWarning& Warning)
@@ -210,89 +211,45 @@ namespace
             .Padding(FMargin(8.0f, 4.0f))
             .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
             .BorderBackgroundColor(FLinearColor(0.065f, 0.07f, 0.08f, 1.0f))
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(Label)
-                    .Font(MakeReportFont(10))
-                    .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(FText::AsNumber(Value))
-                    .Font(MakeReportFont(10, true))
-                    .ColorAndOpacity(WarningColor())
-                ]
-            ];
+                [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(Label).Font(MakeReportFont(10)).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(6.0f, 0.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::AsNumber(Value)).Font(MakeReportFont(10, true)).ColorAndOpacity(WarningColor())]];
     }
 
     TSharedRef<SWidget> BuildSummaryLine(const FText& Label, const FText& Value)
     {
-        return SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
-            .VAlign(VAlign_Center)
-            [
-                SNew(STextBlock)
-                .Text(Label)
-                .Font(MakeReportFont(10))
-                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            [
-                SNew(STextBlock)
-                .Text(Value)
-                .Font(MakeReportFont(10, true))
-            ];
+        return SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(Label).Font(MakeReportFont(10)).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(Value).Font(MakeReportFont(10, true))];
     }
 
     TSharedRef<SWidget> BuildCompactStatusCount(
-        const TCHAR* IconName,
+        const TCHAR*       IconName,
         const FSlateColor& IconColor,
-        const int32 Count,
-        const FText& Tooltip)
+        const int32        Count,
+        const FText&       Tooltip)
     {
         return SNew(SHorizontalBox)
-            .ToolTipText(Tooltip)
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            [
-                SNew(SBox)
-                .WidthOverride(14.0f)
-                .HeightOverride(14.0f)
-                [
-                    SNew(SImage)
-                    .Image(FAppStyle::GetBrush(IconName))
-                    .ColorAndOpacity(IconColor)
-                ]
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(3.0f, 0.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::AsNumber(Count))
-                .Font(MakeReportFont(10, true))
-                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-            ];
+                   .ToolTipText(Tooltip) +
+               SHorizontalBox::Slot()
+                   .AutoWidth()
+                   .VAlign(VAlign_Center)
+                       [SNew(SBox)
+                            .WidthOverride(14.0f)
+                            .HeightOverride(14.0f)
+                                [SNew(SImage)
+                                     .Image(FAppStyle::GetBrush(IconName))
+                                     .ColorAndOpacity(IconColor)]] +
+               SHorizontalBox::Slot()
+                   .AutoWidth()
+                   .VAlign(VAlign_Center)
+                   .Padding(3.0f, 0.0f, 0.0f, 0.0f)
+                       [SNew(STextBlock)
+                            .Text(FText::AsNumber(Count))
+                            .Font(MakeReportFont(10, true))
+                            .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))];
     }
 
     void AddMetricIfNonZero(
         const TSharedRef<SWrapBox>& Metrics,
-        const FText& Label,
-        const int32 Value)
+        const FText&                Label,
+        const int32                 Value)
     {
         if (Value <= 0)
         {
@@ -300,33 +257,29 @@ namespace
         }
 
         Metrics->AddSlot()
-        .Padding(0.0f, 0.0f, 6.0f, 6.0f)
-        [
-            BuildMetricPill(Label, Value)
-        ];
+            .Padding(0.0f, 0.0f, 6.0f, 6.0f)
+                [BuildMetricPill(Label, Value)];
     }
 
     void AddBulletLine(
         const TSharedRef<SVerticalBox>& Lines,
-        const FText& Text,
-        const FSlateColor& Color = FSlateColor(FStyleColors::ForegroundHover))
+        const FText&                    Text,
+        const FSlateColor&              Color = FSlateColor(FStyleColors::ForegroundHover))
     {
         Lines->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 3.0f, 0.0f, 0.0f)
-        [
-            SNew(STextBlock)
-            .Text(FText::Format(LOCTEXT("ReportBulletFormat", "- {0}"), Text))
-            .AutoWrapText(true)
-            .Font(MakeReportFont())
-            .ColorAndOpacity(Color)
-        ];
+            .AutoHeight()
+            .Padding(0.0f, 3.0f, 0.0f, 0.0f)
+                [SNew(STextBlock)
+                     .Text(FText::Format(LOCTEXT("ReportBulletFormat", "- {0}"), Text))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont())
+                     .ColorAndOpacity(Color)];
     }
 
     TSharedRef<SWidget> BuildIssueSummarySection(const FDWCDataUVBuildResult& Result)
     {
         const bool bWarning = DWCDataUVResultSeverity::Normalize(Result.ResultSeverity) ==
-            EDWCDataUVResultSeverity::ReadyWithWarnings;
+                              EDWCDataUVResultSeverity::ReadyWithWarnings;
         TSharedRef<SWrapBox> Metrics = SNew(SWrapBox).UseAllottedSize(true);
         AddMetricIfNonZero(Metrics, LOCTEXT("ExcludedTrianglesMetric", "Excluded triangles"), Result.ExcludedTriangleCount);
         AddMetricIfNonZero(Metrics, LOCTEXT("Degenerate3DMetric", "3D Degenerate"), Result.Degenerate3DTriangleCount);
@@ -341,91 +294,18 @@ namespace
             .Padding(FMargin(12.0f, 10.0f))
             .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
             .BorderBackgroundColor(NeutralBackground())
-            [
-                SNew(SVerticalBox)
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    .Padding(0.0f, 0.0f, 7.0f, 0.0f)
-                    [
-                        SNew(SBox)
-                        .WidthOverride(16.0f)
-                        .HeightOverride(16.0f)
-                        [
-                            SNew(SImage)
-                            .Image(FAppStyle::GetBrush(bWarning ? TEXT("Icons.WarningWithColor") : TEXT("Icons.SuccessWithColor")))
-                            .ColorAndOpacity(ColoredStatusIconTint())
-                        ]
-                    ]
-                    + SHorizontalBox::Slot()
-                    .FillWidth(1.0f)
-                    .VAlign(VAlign_Center)
-                    [
-                        SNew(STextBlock)
-                        .Text(bWarning
-                            ? LOCTEXT("DWCDataUVSourceUVWarningsHeading", "Warnings")
-                            : LOCTEXT("DWCDataUVSourceUVDiagnosticsHeading", "Diagnostics"))
-                        .Font(MakeReportFont(10, true))
-                        .ColorAndOpacity(bWarning ? WarningColor() : DataUVReadyColor())
-                    ]
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(0.0f, 8.0f, 0.0f, 0.0f)
-                [
-                    Metrics
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(0.0f, 4.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT(
-                        "DWCDataUVSourceIssuesCorrected",
-                        "DWC handled the reported UV issues during generation."))
-                    .AutoWrapText(true)
-                    .Font(MakeReportFont())
-                    .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(0.0f, 3.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(bWarning
-                        ? LOCTEXT("DWCDataUVSourceWarningsUsable", "The DWC UV was generated successfully, but some surface areas may not receive DWC data.")
-                        : LOCTEXT("DWCDataUVSourceNotesUsable", "The generated DWC UV remains usable without expected coverage loss."))
-                    .Font(MakeReportFont(10, true))
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(0.0f, 3.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(FText::FromString(FString::Printf(
-                        TEXT("Excluded surface: %.2f%%; largest excluded region: %.2f%%."),
-                        Result.ExcludedVisible3DSurfaceRatio * 100.0,
-                        Result.LargestConnectedExcluded3DSurfaceRatio * 100.0)))
-                    .Font(MakeReportFont())
-                    .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                    .Visibility(Result.ExcludedVisibleTriangleCount > 0 ? EVisibility::Visible : EVisibility::Collapsed)
-                ]
-            ];
+                [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 7.0f, 0.0f)[SNew(SBox).WidthOverride(16.0f).HeightOverride(16.0f)[SNew(SImage).Image(FAppStyle::GetBrush(bWarning ? TEXT("Icons.WarningWithColor") : TEXT("Icons.SuccessWithColor"))).ColorAndOpacity(ColoredStatusIconTint())]] + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(bWarning ? LOCTEXT("DWCDataUVSourceUVWarningsHeading", "Warnings") : LOCTEXT("DWCDataUVSourceUVDiagnosticsHeading", "Diagnostics")).Font(MakeReportFont(10, true)).ColorAndOpacity(bWarning ? WarningColor() : DataUVReadyColor())]] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)[Metrics] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(LOCTEXT("DWCDataUVSourceIssuesCorrected", "DWC handled the reported UV issues during generation.")).AutoWrapText(true).Font(MakeReportFont()).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(bWarning ? LOCTEXT("DWCDataUVSourceWarningsUsable", "The DWC UV was generated successfully, but some surface areas may not receive DWC data.") : LOCTEXT("DWCDataUVSourceNotesUsable", "The generated DWC UV remains usable without expected coverage loss.")).Font(MakeReportFont(10, true))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("Excluded surface: %.2f%%; largest excluded region: %.2f%%."), Result.ExcludedVisible3DSurfaceRatio * 100.0, Result.LargestConnectedExcluded3DSurfaceRatio * 100.0))).Font(MakeReportFont()).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover)).Visibility(Result.ExcludedVisibleTriangleCount > 0 ? EVisibility::Visible : EVisibility::Collapsed)]];
     }
 
     TSharedRef<SWidget> BuildSlotWarningCard(
         const FDWCDataUVSlotWarning& Diagnostic,
-        const USkeletalMesh* PreparedMesh,
-        const int32 LODIndex = INDEX_NONE,
-        const bool bShowSlotLabel = true,
-        const UWetClothingAsset* Asset = nullptr)
+        const USkeletalMesh*         PreparedMesh,
+        const int32                  LODIndex = INDEX_NONE,
+        const bool                   bShowSlotLabel = true,
+        const UWetClothingAsset*     Asset = nullptr)
     {
         const bool bWarning = DWCDataUVResultSeverity::Normalize(Diagnostic.ResultSeverity) ==
-            EDWCDataUVResultSeverity::ReadyWithWarnings;
+                              EDWCDataUVResultSeverity::ReadyWithWarnings;
         TSharedRef<SWrapBox> Metrics = SNew(SWrapBox).UseAllottedSize(true);
         AddMetricIfNonZero(Metrics, LOCTEXT("SlotDegenerate3DMetric", "3D Degenerate"), Diagnostic.Degenerate3DTriangleCount);
         AddMetricIfNonZero(Metrics, LOCTEXT("SlotDegenerateSourceUVMetric", "Degenerate Source UV"), Diagnostic.DegenerateSourceUVTriangleCount);
@@ -461,92 +341,39 @@ namespace
             AddBulletLine(
                 Lines,
                 FText::FromString(Diagnostic.bVisibleExclusionSafetyLimitExceeded
-                    ? FString::Printf(
-                        TEXT("DWC UV was generated without %.2f%% of this material's surface (automatic limit %.2f%%). Largest excluded region: %.2f%%."),
-                        Diagnostic.ExcludedVisible3DSurfaceRatio * 100.0,
-                        DWCDataUVSafetyLimits::VisibleExclusionRatio * 100.0,
-                        Diagnostic.LargestConnectedExcluded3DSurfaceRatio * 100.0)
-                    : FString::Printf(
-                        TEXT("Excluded surface: %.2f%%; largest excluded region: %.2f%%."),
-                        Diagnostic.ExcludedVisible3DSurfaceRatio * 100.0,
-                        Diagnostic.LargestConnectedExcluded3DSurfaceRatio * 100.0)));
+                                      ? FString::Printf(
+                                            TEXT("DWC UV was generated without %.2f%% of this material's surface (automatic limit %.2f%%). Largest excluded region: %.2f%%."),
+                                            Diagnostic.ExcludedVisible3DSurfaceRatio * 100.0,
+                                            DWCDataUVSafetyLimits::VisibleExclusionRatio * 100.0,
+                                            Diagnostic.LargestConnectedExcluded3DSurfaceRatio * 100.0)
+                                      : FString::Printf(
+                                            TEXT("Excluded surface: %.2f%%; largest excluded region: %.2f%%."),
+                                            Diagnostic.ExcludedVisible3DSurfaceRatio * 100.0,
+                                            Diagnostic.LargestConnectedExcluded3DSurfaceRatio * 100.0)));
         }
 
         FText HeadingText = bShowSlotLabel
-            ? BuildAssetSlotLabel(Asset, PreparedMesh, Diagnostic.MaterialSlotIndex)
-            : LODIndex != INDEX_NONE
-                ? FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex))
-                : FText::GetEmpty();
+                                ? BuildAssetSlotLabel(Asset, PreparedMesh, Diagnostic.MaterialSlotIndex)
+                            : LODIndex != INDEX_NONE
+                                ? FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex))
+                                : FText::GetEmpty();
 
         return SNew(SBorder)
             .Padding(FMargin(12.0f, 9.0f))
             .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
             .BorderBackgroundColor(bWarning ? FLinearColor(0.16f, 0.11f, 0.025f, 1.0f) : NeutralBackground())
-            [
-                SNew(SVerticalBox)
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .FillWidth(1.0f)
-                    .VAlign(VAlign_Center)
-                    [
-                        SNew(STextBlock)
-                        .Text(HeadingText)
-                        .Font(MakeReportFont(10, true))
-                    ]
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    .Padding(12.0f, 0.0f, 0.0f, 0.0f)
-                    [
-                        SNew(STextBlock)
-                        .Text(bWarning
-                            ? LOCTEXT("DWCDataUVReadyWithWarningsLabel", "Ready with warnings")
-                            : LOCTEXT("DWCDataUVReadyLabel", "Ready"))
-                        .Font(MakeReportFont(10, true))
-                        .ColorAndOpacity(bWarning ? WarningColor() : DataUVReadyColor())
-                    ]
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    .Padding(5.0f, 0.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SBox)
-                        .WidthOverride(14.0f)
-                        .HeightOverride(14.0f)
-                        [
-                            SNew(SImage)
-                            .Image(FAppStyle::GetBrush(bWarning ? TEXT("Icons.WarningWithColor") : TEXT("Icons.SuccessWithColor")))
-                            .ColorAndOpacity(ColoredStatusIconTint())
-                        ]
-                    ]
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(0.0f, 8.0f, 0.0f, 2.0f)
-                [
-                    Metrics
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                [
-                    Lines
-                ]
-            ];
+                [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(HeadingText).Font(MakeReportFont(10, true))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(12.0f, 0.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(bWarning ? LOCTEXT("DWCDataUVReadyWithWarningsLabel", "Ready with warnings") : LOCTEXT("DWCDataUVReadyLabel", "Ready")).Font(MakeReportFont(10, true)).ColorAndOpacity(bWarning ? WarningColor() : DataUVReadyColor())] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)[SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)[SNew(SImage).Image(FAppStyle::GetBrush(bWarning ? TEXT("Icons.WarningWithColor") : TEXT("Icons.SuccessWithColor"))).ColorAndOpacity(ColoredStatusIconTint())]]] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 2.0f)[Metrics] + SVerticalBox::Slot().AutoHeight()[Lines]];
     }
-
 
     bool IsSlotIncludedInMetadata(const FDWCDataUVLODMetadata& Metadata, const int32 MaterialSlotIndex)
     {
         return Metadata.GeneratedMaterialSlotIndices.IsEmpty() ||
-            Metadata.GeneratedMaterialSlotIndices.Contains(MaterialSlotIndex);
+               Metadata.GeneratedMaterialSlotIndices.Contains(MaterialSlotIndex);
     }
 
     const FDWCDataUVSlotWarning* FindSlotDiagnostic(
         const FDWCDataUVLODMetadata& Metadata,
-        const int32 MaterialSlotIndex)
+        const int32                  MaterialSlotIndex)
     {
         return Metadata.SlotWarnings.FindByPredicate(
             [MaterialSlotIndex](const FDWCDataUVSlotWarning& Diagnostic)
@@ -557,13 +384,13 @@ namespace
 
     TArray<int32> CollectMappedLODIndices(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* PreparedMesh)
+        const USkeletalMesh*     PreparedMesh)
     {
-        TArray<int32> LODIndices;
-        const FSkeletalMeshRenderData* RenderData = PreparedMesh != nullptr
-            ? PreparedMesh->GetResourceForRendering()
-            : nullptr;
-        const int32 LODCount = RenderData != nullptr ? RenderData->LODRenderData.Num() : 0;
+        TArray<int32>                            LODIndices;
+        const FSkeletalMeshRenderData*           RenderData = PreparedMesh != nullptr
+                                                                  ? PreparedMesh->GetResourceForRendering()
+                                                                  : nullptr;
+        const int32                              LODCount = RenderData != nullptr ? RenderData->LODRenderData.Num() : 0;
         const FDWCWetClothingAssetSetupSettings& Setup = Asset.GetSetupSettings();
         if (LODCount > 0 && Setup.bBuildGPUWetnessMapSimulationData)
         {
@@ -589,7 +416,7 @@ namespace
 
     TArray<int32> CollectRecordedSlotIndices(
         const UWetClothingAsset& Asset,
-        const TSet<int32>& FailedMaterialSlotIndices)
+        const TSet<int32>&       FailedMaterialSlotIndices)
     {
         TSet<int32> RecordedSlots = FailedMaterialSlotIndices;
 #if WITH_EDITORONLY_DATA
@@ -607,8 +434,8 @@ namespace
             if (Metadata.GeneratedMaterialSlotIndices.IsEmpty())
             {
                 const USkeletalMesh* Mesh = Asset.GetSourceSkeletalMesh() != nullptr
-                    ? Asset.GetSourceSkeletalMesh()
-                    : Asset.GetRuntimeSkeletalMesh();
+                                                ? Asset.GetSourceSkeletalMesh()
+                                                : Asset.GetRuntimeSkeletalMesh();
                 if (Mesh != nullptr)
                 {
                     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Mesh->GetMaterials().Num(); ++MaterialSlotIndex)
@@ -645,19 +472,19 @@ namespace
 
     struct FDataUVSlotLODDisplay
     {
-        EDataUVSlotLODStatus Status = EDataUVSlotLODStatus::NotGenerated;
-        FText StatusText;
-        const TCHAR* IconName = TEXT("Icons.Minus");
-        FSlateColor IconColor = FSlateColor(FStyleColors::ForegroundHover);
-        FSlateColor TextColor = FSlateColor(FStyleColors::ForegroundHover);
+        EDataUVSlotLODStatus         Status = EDataUVSlotLODStatus::NotGenerated;
+        FText                        StatusText;
+        const TCHAR*                 IconName = TEXT("Icons.Minus");
+        FSlateColor                  IconColor = FSlateColor(FStyleColors::ForegroundHover);
+        FSlateColor                  TextColor = FSlateColor(FStyleColors::ForegroundHover);
         const FDWCDataUVSlotWarning* Warning = nullptr;
-        bool bDiagnosticRecordAvailable = false;
+        bool                         bDiagnosticRecordAvailable = false;
     };
 
     const FDWCDataUVSlotLODResult* FindLastSlotLODResult(
         const UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex,
-        const int32 LODIndex)
+        const int32              MaterialSlotIndex,
+        const int32              LODIndex)
     {
 #if WITH_EDITORONLY_DATA
         return Asset.Derived.Inline.LastDataUVSlotLODResults.FindByPredicate(
@@ -672,10 +499,10 @@ namespace
 
     FDataUVSlotLODDisplay BuildSlotLODDisplay(
         const UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex,
-        const int32 LODIndex)
+        const int32              MaterialSlotIndex,
+        const int32              LODIndex)
     {
-        FDataUVSlotLODDisplay Display;
+        FDataUVSlotLODDisplay          Display;
         const FDWCDataUVSlotLODResult* LastResult = FindLastSlotLODResult(
             Asset,
             MaterialSlotIndex,
@@ -785,18 +612,18 @@ namespace
 
     FDataUVSlotLODDisplay BuildSlotOverallDisplay(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* PreparedMesh,
-        const int32 MaterialSlotIndex,
-        const TSet<int32>& FailedMaterialSlotIndices)
+        const USkeletalMesh*     PreparedMesh,
+        const int32              MaterialSlotIndex,
+        const TSet<int32>&       FailedMaterialSlotIndices)
     {
         const TArray<int32> LODIndices = CollectMappedLODIndices(Asset, PreparedMesh);
-        const bool bSlotFailed = FailedMaterialSlotIndices.Contains(MaterialSlotIndex);
-        bool bHasReady = false;
-        bool bHasWarnings = false;
-        bool bHasNotPresent = false;
-        bool bHasOutOfDate = false;
-        bool bHasMissing = false;
-        bool bHasDiagnosticsUnavailable = false;
+        const bool          bSlotFailed = FailedMaterialSlotIndices.Contains(MaterialSlotIndex);
+        bool                bHasReady = false;
+        bool                bHasWarnings = false;
+        bool                bHasNotPresent = false;
+        bool                bHasOutOfDate = false;
+        bool                bHasMissing = false;
+        bool                bHasDiagnosticsUnavailable = false;
 
         for (const int32 LODIndex : LODIndices)
         {
@@ -805,14 +632,14 @@ namespace
                 MaterialSlotIndex,
                 LODIndex);
             bHasReady |= Display.Status == EDataUVSlotLODStatus::Ready ||
-                Display.Status == EDataUVSlotLODStatus::ReadyWithWarnings;
+                         Display.Status == EDataUVSlotLODStatus::ReadyWithWarnings;
             bHasWarnings |= Display.Status == EDataUVSlotLODStatus::ReadyWithWarnings;
             bHasDiagnosticsUnavailable |=
                 Display.Status == EDataUVSlotLODStatus::Ready && !Display.bDiagnosticRecordAvailable;
             bHasNotPresent |= Display.Status == EDataUVSlotLODStatus::NotPresent;
             bHasOutOfDate |= Display.Status == EDataUVSlotLODStatus::OutOfDate;
             bHasMissing |= Display.Status == EDataUVSlotLODStatus::NotGenerated ||
-                Display.Status == EDataUVSlotLODStatus::NotCommitted;
+                           Display.Status == EDataUVSlotLODStatus::NotCommitted;
         }
 
         FDataUVSlotLODDisplay Overall;
@@ -879,24 +706,24 @@ namespace
 
     TSharedRef<SWidget> BuildSlotLODStatusCard(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* PreparedMesh,
-        const int32 MaterialSlotIndex,
-        const TSet<int32>& FailedMaterialSlotIndices,
-        const FString& LastFailureMessage,
-        const bool bShowSlotHeading = true)
+        const USkeletalMesh*     PreparedMesh,
+        const int32              MaterialSlotIndex,
+        const TSet<int32>&       FailedMaterialSlotIndices,
+        const FString&           LastFailureMessage,
+        const bool               bShowSlotHeading = true)
     {
         const TArray<int32> LODIndices = CollectMappedLODIndices(Asset, PreparedMesh);
-        const bool bSlotFailed = FailedMaterialSlotIndices.Contains(MaterialSlotIndex);
-        int32 RecordedLODCount = 0;
-        int32 DiagnosticExpectedLODCount = 0;
-        int32 DiagnosticRecordLODCount = 0;
-        int32 LatestRenderVertexCount = 0;
-        int32 ExcludedTriangleCount = 0;
-        int32 PackedDegenerateTriangleCount = 0;
-        int32 ResolvedOverlapPairCount = 0;
-        int32 SplitIslandCount = 0;
-        double MaxExcludedSurfaceRatio = 0.0;
-        double MaxConnectedExcludedSurfaceRatio = 0.0;
+        const bool          bSlotFailed = FailedMaterialSlotIndices.Contains(MaterialSlotIndex);
+        int32               RecordedLODCount = 0;
+        int32               DiagnosticExpectedLODCount = 0;
+        int32               DiagnosticRecordLODCount = 0;
+        int32               LatestRenderVertexCount = 0;
+        int32               ExcludedTriangleCount = 0;
+        int32               PackedDegenerateTriangleCount = 0;
+        int32               ResolvedOverlapPairCount = 0;
+        int32               SplitIslandCount = 0;
+        double              MaxExcludedSurfaceRatio = 0.0;
+        double              MaxConnectedExcludedSurfaceRatio = 0.0;
         for (const int32 LODIndex : LODIndices)
         {
             const FDWCDataUVLODMetadata* Metadata = Asset.FindDataUVMetadataForLOD(LODIndex);
@@ -923,9 +750,9 @@ namespace
             {
                 ++DiagnosticRecordLODCount;
                 ExcludedTriangleCount += Warning->Degenerate3DTriangleCount +
-                    Warning->DegenerateSourceUVTriangleCount +
-                    Warning->InvalidSourceUVTriangleCount +
-                    Warning->PackedDegenerateTriangleCount;
+                                         Warning->DegenerateSourceUVTriangleCount +
+                                         Warning->InvalidSourceUVTriangleCount +
+                                         Warning->PackedDegenerateTriangleCount;
                 PackedDegenerateTriangleCount += Warning->PackedDegenerateTriangleCount;
                 ResolvedOverlapPairCount += Warning->SelfOverlapPairCount;
                 SplitIslandCount += Warning->SplitOriginalUVIslandCount;
@@ -950,42 +777,9 @@ namespace
                 MaterialSlotIndex,
                 LODIndex);
             StatusRows->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 3.0f)
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex)))
-                    .Font(MakeReportFont(10, true))
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(Display.StatusText)
-                    .Font(MakeReportFont(10, Display.Status == EDataUVSlotLODStatus::Failed))
-                    .ColorAndOpacity(Display.TextColor)
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(5.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    SNew(SBox)
-                    .WidthOverride(14.0f)
-                    .HeightOverride(14.0f)
-                    [
-                        SNew(SImage)
-                        .Image(FAppStyle::GetBrush(Display.IconName))
-                        .ColorAndOpacity(Display.IconColor)
-                    ]
-                ]
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 3.0f)
+                    [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex))).Font(MakeReportFont(10, true))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(Display.StatusText).Font(MakeReportFont(10, Display.Status == EDataUVSlotLODStatus::Failed)).ColorAndOpacity(Display.TextColor)] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)[SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)[SNew(SImage).Image(FAppStyle::GetBrush(Display.IconName)).ColorAndOpacity(Display.IconColor)]]];
         }
 
         const FDataUVSlotLODDisplay OverallDisplay = BuildSlotOverallDisplay(
@@ -995,174 +789,55 @@ namespace
         if (bShowSlotHeading)
         {
             Card->AddSlot()
-            .AutoHeight()
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(BuildAssetSlotLabel(&Asset, PreparedMesh, MaterialSlotIndex))
-                    .Font(MakeReportFont(10, true))
-                    .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(10.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(OverallDisplay.StatusText)
-                    .Font(MakeReportFont(10, true))
-                    .ColorAndOpacity(OverallDisplay.TextColor)
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(5.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    SNew(SBox)
-                    .WidthOverride(14.0f)
-                    .HeightOverride(14.0f)
-                    [
-                        SNew(SImage)
-                        .Image(FAppStyle::GetBrush(OverallDisplay.IconName))
-                        .ColorAndOpacity(OverallDisplay.IconColor)
-                    ]
-                ]
-            ];
+                .AutoHeight()
+                    [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(BuildAssetSlotLabel(&Asset, PreparedMesh, MaterialSlotIndex)).Font(MakeReportFont(10, true)).OverflowPolicy(ETextOverflowPolicy::Ellipsis)] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10.0f, 0.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(OverallDisplay.StatusText).Font(MakeReportFont(10, true)).ColorAndOpacity(OverallDisplay.TextColor)] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)[SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)[SNew(SImage).Image(FAppStyle::GetBrush(OverallDisplay.IconName)).ColorAndOpacity(OverallDisplay.IconColor)]]];
         }
 
         Card->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, bShowSlotHeading ? 14.0f : 0.0f, 0.0f, 0.0f)
-        [
-            SNew(STextBlock)
-            .Text(LOCTEXT("DWCDataUVDetailsLODStatusHeading", "LOD Generation Status"))
-            .Font(MakeReportFont(10, true))
-        ];
+            .AutoHeight()
+            .Padding(0.0f, bShowSlotHeading ? 14.0f : 0.0f, 0.0f, 0.0f)
+                [SNew(STextBlock)
+                     .Text(LOCTEXT("DWCDataUVDetailsLODStatusHeading", "LOD Generation Status"))
+                     .Font(MakeReportFont(10, true))];
         Card->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-        [
-            SNew(SBorder)
-            .Padding(FMargin(12.0f, 8.0f))
-            .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-            .BorderBackgroundColor(NeutralBackground())
-            [
-                StatusRows
-            ]
-        ];
+            .AutoHeight()
+            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                [SNew(SBorder)
+                     .Padding(FMargin(12.0f, 8.0f))
+                     .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
+                     .BorderBackgroundColor(NeutralBackground())
+                         [StatusRows]];
 
         if (RecordedLODCount > 0)
         {
             Card->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 14.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVDetailsSummaryHeading", "Generation Summary"))
-                .Font(MakeReportFont(10, true))
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 14.0f, 0.0f, 0.0f)
+                    [SNew(STextBlock)
+                         .Text(LOCTEXT("DWCDataUVDetailsSummaryHeading", "Generation Summary"))
+                         .Font(MakeReportFont(10, true))];
             Card->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-            [
-                SNew(SBorder)
-                .Padding(FMargin(12.0f, 8.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-                .BorderBackgroundColor(NeutralBackground())
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("DWCDataUVDetailsRecordedLODs", "Recorded LODs"),
-                            FText::AsNumber(RecordedLODCount))
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("DWCDataUVDetailsDiagnosticRecords", "Diagnostic Records"),
-                            FText::FromString(FString::Printf(
-                                TEXT("%d / %d"),
-                                DiagnosticRecordLODCount,
-                                DiagnosticExpectedLODCount)))
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("DWCDataUVDetailsRenderVertices", "Render Vertices"),
-                            LatestRenderVertexCount > 0 ? FText::AsNumber(LatestRenderVertexCount) : FText::FromString(TEXT("-")))
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("DWCDataUVDetailsResolvedOverlaps", "Resolved Overlap Pairs"),
-                            bDiagnosticDataComplete
-                                ? FText::AsNumber(ResolvedOverlapPairCount)
-                                : UnknownDiagnosticValue)
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("DWCDataUVDetailsSplitIslands", "Split Source Islands"),
-                            bDiagnosticDataComplete
-                                ? FText::AsNumber(SplitIslandCount)
-                                : UnknownDiagnosticValue)
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("DWCDataUVDetailsExcludedTriangles", "Excluded Triangles"),
-                            bDiagnosticDataComplete
-                                ? FText::AsNumber(ExcludedTriangleCount)
-                                : UnknownDiagnosticValue)
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("DWCDataUVDetailsPackedDegenerate", "Packed Degenerate"),
-                            bDiagnosticDataComplete
-                                ? FText::AsNumber(PackedDegenerateTriangleCount)
-                                : UnknownDiagnosticValue)
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("DWCDataUVDetailsExcludedSurfaceRatio", "Excluded Surface Ratio"),
-                            bDiagnosticDataComplete
-                                ? FText::FromString(FString::Printf(TEXT("%.6f%%"), MaxExcludedSurfaceRatio * 100.0))
-                                : UnknownDiagnosticValue)
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("DWCDataUVDetailsLargestExcludedRegion", "Largest Excluded Region"),
-                            bDiagnosticDataComplete
-                                ? FText::FromString(FString::Printf(TEXT("%.6f%%"), MaxConnectedExcludedSurfaceRatio * 100.0))
-                                : UnknownDiagnosticValue)
-                    ]
-                ]
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                    [SNew(SBorder)
+                         .Padding(FMargin(12.0f, 8.0f))
+                         .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
+                         .BorderBackgroundColor(NeutralBackground())
+                             [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVDetailsRecordedLODs", "Recorded LODs"), FText::AsNumber(RecordedLODCount))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVDetailsDiagnosticRecords", "Diagnostic Records"), FText::FromString(FString::Printf(TEXT("%d / %d"), DiagnosticRecordLODCount, DiagnosticExpectedLODCount)))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVDetailsRenderVertices", "Render Vertices"), LatestRenderVertexCount > 0 ? FText::AsNumber(LatestRenderVertexCount) : FText::FromString(TEXT("-")))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVDetailsResolvedOverlaps", "Resolved Overlap Pairs"), bDiagnosticDataComplete ? FText::AsNumber(ResolvedOverlapPairCount) : UnknownDiagnosticValue)] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVDetailsSplitIslands", "Split Source Islands"), bDiagnosticDataComplete ? FText::AsNumber(SplitIslandCount) : UnknownDiagnosticValue)] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVDetailsExcludedTriangles", "Excluded Triangles"), bDiagnosticDataComplete ? FText::AsNumber(ExcludedTriangleCount) : UnknownDiagnosticValue)] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVDetailsPackedDegenerate", "Packed Degenerate"), bDiagnosticDataComplete ? FText::AsNumber(PackedDegenerateTriangleCount) : UnknownDiagnosticValue)] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVDetailsExcludedSurfaceRatio", "Excluded Surface Ratio"), bDiagnosticDataComplete ? FText::FromString(FString::Printf(TEXT("%.6f%%"), MaxExcludedSurfaceRatio * 100.0)) : UnknownDiagnosticValue)] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVDetailsLargestExcludedRegion", "Largest Excluded Region"), bDiagnosticDataComplete ? FText::FromString(FString::Printf(TEXT("%.6f%%"), MaxConnectedExcludedSurfaceRatio * 100.0)) : UnknownDiagnosticValue)]]];
 
             if (DiagnosticExpectedLODCount > 0 && !bDiagnosticDataComplete)
             {
                 Card->AddSlot()
-                .AutoHeight()
-                .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT(
-                        "DWCDataUVDiagnosticsNotRecordedNotice",
-                        "Diagnostic data was not recorded for one or more generated LODs. Values shown as '-' are unknown, not zero."))
-                    .AutoWrapText(true)
-                    .Font(MakeReportFont())
-                    .ColorAndOpacity(DataUVInfoColor())
-                ];
+                    .AutoHeight()
+                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                        [SNew(STextBlock)
+                             .Text(LOCTEXT(
+                                 "DWCDataUVDiagnosticsNotRecordedNotice",
+                                 "Diagnostic data was not recorded for one or more generated LODs. Values shown as '-' are unknown, not zero."))
+                             .AutoWrapText(true)
+                             .Font(MakeReportFont())
+                             .ColorAndOpacity(DataUVInfoColor())];
             }
-
         }
 
         bool bAddedDiagnostics = false;
@@ -1171,37 +846,33 @@ namespace
         {
             const FDWCDataUVLODMetadata* Metadata = Asset.FindDataUVMetadataForLOD(LODIndex);
             const FDWCDataUVSlotWarning* Diagnostic = Metadata != nullptr
-                ? FindSlotDiagnostic(*Metadata, MaterialSlotIndex)
-                : nullptr;
+                                                          ? FindSlotDiagnostic(*Metadata, MaterialSlotIndex)
+                                                          : nullptr;
             if (Diagnostic == nullptr || !Diagnostic->HasDiagnostics())
             {
                 continue;
             }
 
             const bool bWarning = DWCDataUVResultSeverity::Normalize(Diagnostic->ResultSeverity) ==
-                EDWCDataUVResultSeverity::ReadyWithWarnings;
+                                  EDWCDataUVResultSeverity::ReadyWithWarnings;
             bool& bHeadingAdded = bWarning ? bAddedWarnings : bAddedDiagnostics;
             if (!bHeadingAdded)
             {
                 Card->AddSlot()
-                .AutoHeight()
-                .Padding(0.0f, 14.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(bWarning
-                        ? LOCTEXT("DWCDataUVDetailsWarningsHeading", "Warnings")
-                        : LOCTEXT("DWCDataUVDetailsDiagnosticsHeading", "Diagnostics"))
-                    .Font(MakeReportFont(10, true))
-                ];
+                    .AutoHeight()
+                    .Padding(0.0f, 14.0f, 0.0f, 0.0f)
+                        [SNew(STextBlock)
+                             .Text(bWarning
+                                       ? LOCTEXT("DWCDataUVDetailsWarningsHeading", "Warnings")
+                                       : LOCTEXT("DWCDataUVDetailsDiagnosticsHeading", "Diagnostics"))
+                             .Font(MakeReportFont(10, true))];
                 bHeadingAdded = true;
             }
 
             Card->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-            [
-                BuildSlotWarningCard(*Diagnostic, PreparedMesh, LODIndex, false, &Asset)
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                    [BuildSlotWarningCard(*Diagnostic, PreparedMesh, LODIndex, false, &Asset)];
         }
 
         bool bAddedErrors = false;
@@ -1217,99 +888,51 @@ namespace
             if (!bAddedErrors)
             {
                 Card->AddSlot()
-                .AutoHeight()
-                .Padding(0.0f, 14.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT("DWCDataUVDetailsFailureHeading", "Errors"))
-                    .Font(MakeReportFont(10, true))
-                ];
+                    .AutoHeight()
+                    .Padding(0.0f, 14.0f, 0.0f, 0.0f)
+                        [SNew(STextBlock)
+                             .Text(LOCTEXT("DWCDataUVDetailsFailureHeading", "Errors"))
+                             .Font(MakeReportFont(10, true))];
                 bAddedErrors = true;
             }
 
             Card->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-            [
-                SNew(SBorder)
-                .Padding(FMargin(12.0f, 9.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-                .BorderBackgroundColor(ErrorBackground())
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot().AutoHeight()
-                    [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot().FillWidth(1.0f)
-                        [
-                            SNew(STextBlock)
-                            .Text(FText::FromString(FString::Printf(TEXT("LOD%d"), Record.LODIndex)))
-                            .Font(MakeReportFont(10, true))
-                        ]
-                        + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("DWCDataUVDetailsFailedDiagnostic", "Failed"))
-                            .Font(MakeReportFont(10, true))
-                            .ColorAndOpacity(ErrorColor())
-                        ]
-                        + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)
-                        [
-                            SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)
-                            [
-                                SNew(SImage)
-                                .Image(FAppStyle::GetBrush(TEXT("Icons.ErrorWithColor")))
-                                .ColorAndOpacity(ColoredStatusIconTint())
-                            ]
-                        ]
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
-                        SNew(STextBlock)
-                        .Text(FText::FromString(Record.Message.IsEmpty()
-                            ? TEXT("DWC UV generation failed for this LOD.")
-                            : Record.Message))
-                        .AutoWrapText(true)
-                        .Font(MakeReportFont())
-                        .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                    ]
-                ]
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                    [SNew(SBorder)
+                         .Padding(FMargin(12.0f, 9.0f))
+                         .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
+                         .BorderBackgroundColor(ErrorBackground())
+                             [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("LOD%d"), Record.LODIndex))).Font(MakeReportFont(10, true))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("DWCDataUVDetailsFailedDiagnostic", "Failed")).Font(MakeReportFont(10, true)).ColorAndOpacity(ErrorColor())] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)[SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.ErrorWithColor"))).ColorAndOpacity(ColoredStatusIconTint())]]] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::FromString(Record.Message.IsEmpty() ? TEXT("DWC UV generation failed for this LOD.") : Record.Message)).AutoWrapText(true).Font(MakeReportFont()).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]]];
         }
 #endif
 
         if (bSlotFailed && !bAddedErrors)
         {
             Card->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 14.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVDetailsLegacyFailureHeading", "Errors"))
-                .Font(MakeReportFont(10, true))
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 14.0f, 0.0f, 0.0f)
+                    [SNew(STextBlock)
+                         .Text(LOCTEXT("DWCDataUVDetailsLegacyFailureHeading", "Errors"))
+                         .Font(MakeReportFont(10, true))];
             Card->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-            [
-                SNew(SBorder)
-                .Padding(FMargin(12.0f, 9.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-                .BorderBackgroundColor(ErrorBackground())
-                [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT(
-                        "DWCDataUVDetailsLegacyFailureMessage",
-                        "DWC UV generation failed for this material slot. Check the error below and fix the reported source or validation issue before rebuilding."))
-                    .AutoWrapText(true)
-                    .Font(MakeReportFont())
-                    .ColorAndOpacity(ErrorColor())
-                ]
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                    [SNew(SBorder)
+                         .Padding(FMargin(12.0f, 9.0f))
+                         .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
+                         .BorderBackgroundColor(ErrorBackground())
+                             [SNew(STextBlock)
+                                  .Text(LOCTEXT(
+                                      "DWCDataUVDetailsLegacyFailureMessage",
+                                      "DWC UV generation failed for this material slot. Check the error below and fix the reported source or validation issue before rebuilding."))
+                                  .AutoWrapText(true)
+                                  .Font(MakeReportFont())
+                                  .ColorAndOpacity(ErrorColor())]];
         }
 
         TSharedRef<SVerticalBox> TechnicalDetails = SNew(SVerticalBox);
-        bool bHasTechnicalDetails = false;
+        bool                     bHasTechnicalDetails = false;
         for (const int32 LODIndex : LODIndices)
         {
             const FDWCDataUVLODMetadata* Metadata = Asset.FindDataUVMetadataForLOD(LODIndex);
@@ -1319,60 +942,50 @@ namespace
             }
             bHasTechnicalDetails = true;
             TechnicalDetails->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 2.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::FromString(FString::Printf(
-                    TEXT("LOD%d | Generator %d | Vertices %d | Channel UV%d\nInput Signature: %s\nOutput Signature: %s"),
-                    LODIndex,
-                    Metadata->GeneratorVersion,
-                    Metadata->RenderVertexCount,
-                    Metadata->UVChannelIndex,
-                    *Metadata->MeshInputSignature,
-                    *Metadata->DataUVOutputSignature)))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 2.0f)
+                    [SNew(STextBlock)
+                         .Text(FText::FromString(FString::Printf(
+                             TEXT("LOD%d | Generator %d | Vertices %d | Channel UV%d\nInput Signature: %s\nOutput Signature: %s"),
+                             LODIndex,
+                             Metadata->GeneratorVersion,
+                             Metadata->RenderVertexCount,
+                             Metadata->UVChannelIndex,
+                             *Metadata->MeshInputSignature,
+                             *Metadata->DataUVOutputSignature)))
+                         .AutoWrapText(true)
+                         .Font(MakeReportFont())
+                         .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))];
         }
         if (bHasTechnicalDetails)
         {
             Card->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 14.0f, 0.0f, 0.0f)
-            [
-                SNew(SExpandableArea)
-                .InitiallyCollapsed(true)
-                .HeaderContent()
-                [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT("DWCDataUVDetailsTechnicalHeading", "Technical Details"))
-                    .Font(MakeReportFont(10, true))
-                ]
-                .BodyContent()
-                [
-                    TechnicalDetails
-                ]
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 14.0f, 0.0f, 0.0f)
+                    [SNew(SExpandableArea)
+                         .InitiallyCollapsed(true)
+                         .HeaderContent()
+                             [SNew(STextBlock)
+                                  .Text(LOCTEXT("DWCDataUVDetailsTechnicalHeading", "Technical Details"))
+                                  .Font(MakeReportFont(10, true))]
+                         .BodyContent()
+                             [TechnicalDetails]];
         }
 
         return SNew(SBorder)
             .Padding(FMargin(12.0f, 10.0f))
             .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
             .BorderBackgroundColor(FLinearColor(0.035f, 0.038f, 0.043f, 1.0f))
-            [
-                Card
-            ];
+                [Card];
     }
 
     TSharedRef<SWidget> BuildSlotLODStatusExpandableArea(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* PreparedMesh,
-        const int32 MaterialSlotIndex,
-        const TSet<int32>& FailedMaterialSlotIndices,
-        const FString& LastFailureMessage,
-        const bool bInitiallyCollapsed)
+        const USkeletalMesh*     PreparedMesh,
+        const int32              MaterialSlotIndex,
+        const TSet<int32>&       FailedMaterialSlotIndices,
+        const FString&           LastFailureMessage,
+        const bool               bInitiallyCollapsed)
     {
         const FDataUVSlotLODDisplay OverallDisplay = BuildSlotOverallDisplay(
             Asset, PreparedMesh, MaterialSlotIndex, FailedMaterialSlotIndices);
@@ -1380,64 +993,25 @@ namespace
         return SNew(SExpandableArea)
             .InitiallyCollapsed(bInitiallyCollapsed)
             .HeaderContent()
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(BuildAssetSlotLabel(&Asset, PreparedMesh, MaterialSlotIndex))
-                    .Font(MakeReportFont(10, true))
-                    .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(10.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(OverallDisplay.StatusText)
-                    .Font(MakeReportFont(10, true))
-                    .ColorAndOpacity(OverallDisplay.TextColor)
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(5.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    SNew(SBox)
-                    .WidthOverride(14.0f)
-                    .HeightOverride(14.0f)
-                    [
-                        SNew(SImage)
-                        .Image(FAppStyle::GetBrush(OverallDisplay.IconName))
-                        .ColorAndOpacity(OverallDisplay.IconColor)
-                    ]
-                ]
-            ]
+                [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(BuildAssetSlotLabel(&Asset, PreparedMesh, MaterialSlotIndex)).Font(MakeReportFont(10, true)).OverflowPolicy(ETextOverflowPolicy::Ellipsis)] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10.0f, 0.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(OverallDisplay.StatusText).Font(MakeReportFont(10, true)).ColorAndOpacity(OverallDisplay.TextColor)] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)[SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)[SNew(SImage).Image(FAppStyle::GetBrush(OverallDisplay.IconName)).ColorAndOpacity(OverallDisplay.IconColor)]]]
             .BodyContent()
-            [
-                SNew(SBox)
-                .Padding(FMargin(0.0f, 8.0f, 0.0f, 0.0f))
-                [
-                    BuildSlotLODStatusCard(
-                        Asset,
-                        PreparedMesh,
-                        MaterialSlotIndex,
-                        FailedMaterialSlotIndices,
-                        LastFailureMessage,
-                        false)
-                ]
-            ];
+                [SNew(SBox)
+                     .Padding(FMargin(0.0f, 8.0f, 0.0f, 0.0f))
+                         [BuildSlotLODStatusCard(
+                             Asset,
+                             PreparedMesh,
+                             MaterialSlotIndex,
+                             FailedMaterialSlotIndices,
+                             LastFailureMessage,
+                             false)]];
     }
 
     TSharedRef<SWidget> BuildOperationSlotSection(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* PreparedMesh,
-        const TSet<int32>& IncludedMaterialSlotIndices,
-        const TSet<int32>& FailedMaterialSlotIndices,
-        const FString& LastFailureMessage)
+        const USkeletalMesh*     PreparedMesh,
+        const TSet<int32>&       IncludedMaterialSlotIndices,
+        const TSet<int32>&       FailedMaterialSlotIndices,
+        const FString&           LastFailureMessage)
     {
         TArray<int32> SortedSlots = IncludedMaterialSlotIndices.Array();
         SortedSlots.Remove(INDEX_NONE);
@@ -1445,40 +1019,36 @@ namespace
 
         TSharedRef<SVerticalBox> Content = SNew(SVerticalBox);
         Content->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-        [
-            SNew(STextBlock)
-            .Text(LOCTEXT("DWCDataUVOperationSlotsHeading", "Material Slot Results"))
-            .Font(MakeReportFont(10, true))
-        ];
+            .AutoHeight()
+            .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                [SNew(STextBlock)
+                     .Text(LOCTEXT("DWCDataUVOperationSlotsHeading", "Material Slot Results"))
+                     .Font(MakeReportFont(10, true))];
 
         for (int32 SlotListIndex = 0; SlotListIndex < SortedSlots.Num(); ++SlotListIndex)
         {
             const int32 MaterialSlotIndex = SortedSlots[SlotListIndex];
             Content->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 12.0f)
-            [
-                BuildSlotLODStatusExpandableArea(
-                    Asset,
-                    PreparedMesh,
-                    MaterialSlotIndex,
-                    FailedMaterialSlotIndices,
-                    FString(),
-                    SlotListIndex > 0)
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 12.0f)
+                    [BuildSlotLODStatusExpandableArea(
+                        Asset,
+                        PreparedMesh,
+                        MaterialSlotIndex,
+                        FailedMaterialSlotIndices,
+                        FString(),
+                        SlotListIndex > 0)];
         }
         return Content;
     }
 
     TSharedRef<SWidget> BuildAllSlotsOverview(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* PreparedMesh,
-        const TArray<int32>& MaterialSlotIndices,
-        const TSet<int32>& FailedMaterialSlotIndices)
+        const USkeletalMesh*     PreparedMesh,
+        const TArray<int32>&     MaterialSlotIndices,
+        const TSet<int32>&       FailedMaterialSlotIndices)
     {
-        const TArray<int32> LODIndices = CollectMappedLODIndices(Asset, PreparedMesh);
+        const TArray<int32>      LODIndices = CollectMappedLODIndices(Asset, PreparedMesh);
         TSharedRef<SVerticalBox> StatusRows = SNew(SVerticalBox);
         for (const int32 LODIndex : LODIndices)
         {
@@ -1506,18 +1076,28 @@ namespace
                         ++DiagnosticsUnavailableCount;
                     }
                     break;
-                case EDataUVSlotLODStatus::ReadyWithWarnings: ++WarningCount; break;
-                case EDataUVSlotLODStatus::NotPresent: ++ReadyCount; break;
-                case EDataUVSlotLODStatus::Failed: ++FailedCount; break;
-                case EDataUVSlotLODStatus::OutOfDate: ++OutOfDateCount; break;
+                case EDataUVSlotLODStatus::ReadyWithWarnings:
+                    ++WarningCount;
+                    break;
+                case EDataUVSlotLODStatus::NotPresent:
+                    ++ReadyCount;
+                    break;
+                case EDataUVSlotLODStatus::Failed:
+                    ++FailedCount;
+                    break;
+                case EDataUVSlotLODStatus::OutOfDate:
+                    ++OutOfDateCount;
+                    break;
                 case EDataUVSlotLODStatus::NotCommitted:
                 case EDataUVSlotLODStatus::NotGenerated:
-                default: ++MissingCount; break;
+                default:
+                    ++MissingCount;
+                    break;
                 }
             }
 
             FSlateColor TextColor = DataUVReadyColor();
-            FText StatusText = LOCTEXT("DWCDataUVAllSlotsReady", "Ready");
+            FText       StatusText = LOCTEXT("DWCDataUVAllSlotsReady", "Ready");
             if (FailedCount > 0)
             {
                 TextColor = ErrorColor();
@@ -1546,236 +1126,117 @@ namespace
             if (ReadyCount > 0)
             {
                 CompactCounts->AddSlot().AutoWidth().Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    BuildCompactStatusCount(TEXT("Icons.SuccessWithColor"), ColoredStatusIconTint(), ReadyCount,
-                        LOCTEXT("DWCDataUVOverallReadyCountTooltip", "Ready slots"))
-                ];
+                    [BuildCompactStatusCount(TEXT("Icons.SuccessWithColor"), ColoredStatusIconTint(), ReadyCount,
+                                             LOCTEXT("DWCDataUVOverallReadyCountTooltip", "Ready slots"))];
             }
             if (DiagnosticsUnavailableCount > 0)
             {
                 CompactCounts->AddSlot().AutoWidth().Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    BuildCompactStatusCount(TEXT("Icons.InfoWithColor"), ColoredStatusIconTint(), DiagnosticsUnavailableCount,
-                        LOCTEXT("DWCDataUVOverallDiagnosticsUnavailableCountTooltip", "Ready slots with unavailable diagnostics"))
-                ];
+                    [BuildCompactStatusCount(TEXT("Icons.InfoWithColor"), ColoredStatusIconTint(), DiagnosticsUnavailableCount,
+                                             LOCTEXT("DWCDataUVOverallDiagnosticsUnavailableCountTooltip", "Ready slots with unavailable diagnostics"))];
             }
             const int32 AttentionCount = WarningCount + OutOfDateCount + MissingCount;
             if (AttentionCount > 0)
             {
                 CompactCounts->AddSlot().AutoWidth().Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    BuildCompactStatusCount(TEXT("Icons.WarningWithColor"), ColoredStatusIconTint(), AttentionCount,
-                        LOCTEXT("DWCDataUVOverallWarningCountTooltip", "Slots with warnings, missing data, or out-of-date data"))
-                ];
+                    [BuildCompactStatusCount(TEXT("Icons.WarningWithColor"), ColoredStatusIconTint(), AttentionCount,
+                                             LOCTEXT("DWCDataUVOverallWarningCountTooltip", "Slots with warnings, missing data, or out-of-date data"))];
             }
             if (FailedCount > 0)
             {
                 CompactCounts->AddSlot().AutoWidth().Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    BuildCompactStatusCount(TEXT("Icons.ErrorWithColor"), ColoredStatusIconTint(), FailedCount,
-                        LOCTEXT("DWCDataUVOverallFailedCountTooltip", "Failed slots"))
-                ];
+                    [BuildCompactStatusCount(TEXT("Icons.ErrorWithColor"), ColoredStatusIconTint(), FailedCount,
+                                             LOCTEXT("DWCDataUVOverallFailedCountTooltip", "Failed slots"))];
             }
 
             StatusRows->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 4.0f)
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex)))
-                    .Font(MakeReportFont(10, true))
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(StatusText)
-                    .Font(MakeReportFont(10, FailedCount > 0))
-                    .ColorAndOpacity(TextColor)
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    CompactCounts
-                ]
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 4.0f)
+                    [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex))).Font(MakeReportFont(10, true))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(StatusText).Font(MakeReportFont(10, FailedCount > 0)).ColorAndOpacity(TextColor)] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[CompactCounts]];
         }
 
         const FDWCWetClothingAssetSetupSettings& Setup = Asset.GetSetupSettings();
-        return SNew(SVerticalBox)
-            + SVerticalBox::Slot().AutoHeight()
-            [
-                SNew(STextBlock).Text(LOCTEXT("DWCDataUVOverallLODStatusHeading", "Overall LOD Status")).Font(MakeReportFont(10, true))
-            ]
-            + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-            [
-                SNew(SBorder).Padding(FMargin(12.0f, 8.0f)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header"))).BorderBackgroundColor(NeutralBackground())
-                [
-                    StatusRows
-                ]
-            ]
-            + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 16.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock).Text(LOCTEXT("DWCDataUVCommonSettingsHeading", "Generation Configuration")).Font(MakeReportFont(10, true))
-            ]
-            + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-            [
-                SNew(SBorder).Padding(FMargin(12.0f, 8.0f)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header"))).BorderBackgroundColor(NeutralBackground())
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [ BuildSummaryLine(LOCTEXT("DWCDataUVCommonSourceUV", "Original UV Channel"), FText::FromString(FString::Printf(TEXT("UV%d"), Asset.GetOriginalUVChannelIndex()))) ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [ BuildSummaryLine(LOCTEXT("DWCDataUVCommonOutputUV", "DWC UV Channel"), Asset.GetDWCDataUVChannelIndex() != INDEX_NONE ? FText::FromString(FString::Printf(TEXT("UV%d"), Asset.GetDWCDataUVChannelIndex())) : FText::FromString(TEXT("-"))) ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [ BuildSummaryLine(LOCTEXT("DWCDataUVCommonRange", "Active LOD Range"), FText::FromString(FString::Printf(TEXT("LOD%d-LOD%d"), Setup.FirstGeneratedLODIndex, Setup.LastGeneratedLODIndex))) ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [ BuildSummaryLine(LOCTEXT("DWCDataUVCommonBackends", "Simulation Data"), FText::FromString(FString::Printf(TEXT("CPU %s · GPU %s"), Setup.bBuildCPUVertexSimulationData ? TEXT("ON") : TEXT("OFF"), Setup.bBuildGPUWetnessMapSimulationData ? TEXT("ON") : TEXT("OFF")))) ]
-                ]
-            ];
+        return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("DWCDataUVOverallLODStatusHeading", "Overall LOD Status")).Font(MakeReportFont(10, true))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(SBorder).Padding(FMargin(12.0f, 8.0f)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header"))).BorderBackgroundColor(NeutralBackground())[StatusRows]] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 16.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(LOCTEXT("DWCDataUVCommonSettingsHeading", "Generation Configuration")).Font(MakeReportFont(10, true))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(SBorder).Padding(FMargin(12.0f, 8.0f)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header"))).BorderBackgroundColor(NeutralBackground())[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVCommonSourceUV", "Original UV Channel"), FText::FromString(FString::Printf(TEXT("UV%d"), Asset.GetOriginalUVChannelIndex())))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVCommonOutputUV", "DWC UV Channel"), Asset.GetDWCDataUVChannelIndex() != INDEX_NONE ? FText::FromString(FString::Printf(TEXT("UV%d"), Asset.GetDWCDataUVChannelIndex())) : FText::FromString(TEXT("-")))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVCommonRange", "Active LOD Range"), FText::FromString(FString::Printf(TEXT("LOD%d-LOD%d"), Setup.FirstGeneratedLODIndex, Setup.LastGeneratedLODIndex)))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("DWCDataUVCommonBackends", "Simulation Data"), FText::FromString(FString::Printf(TEXT("CPU %s · GPU %s"), Setup.bBuildCPUVertexSimulationData ? TEXT("ON") : TEXT("OFF"), Setup.bBuildGPUWetnessMapSimulationData ? TEXT("ON") : TEXT("OFF"))))]]];
     }
 
     void OpenDetailsDialogInternal(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* PreparedMesh,
-        const TArray<int32>& MaterialSlotIndices,
-        const TSet<int32>& FailedMaterialSlotIndices,
-        const FString& LastFailureMessage,
-        const FText& WindowTitle,
-        const FText& HeaderText,
-        const bool bAllSlotsView)
+        const USkeletalMesh*     PreparedMesh,
+        const TArray<int32>&     MaterialSlotIndices,
+        const TSet<int32>&       FailedMaterialSlotIndices,
+        const FString&           LastFailureMessage,
+        const FText&             WindowTitle,
+        const FText&             HeaderText,
+        const bool               bAllSlotsView)
     {
         TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
         if (bAllSlotsView && !MaterialSlotIndices.IsEmpty())
         {
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 16.0f)
-            [
-                BuildAllSlotsOverview(Asset, PreparedMesh, MaterialSlotIndices, FailedMaterialSlotIndices)
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 16.0f)
+                    [BuildAllSlotsOverview(Asset, PreparedMesh, MaterialSlotIndices, FailedMaterialSlotIndices)];
         }
         if (bAllSlotsView && !MaterialSlotIndices.IsEmpty())
         {
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 8.0f, 0.0f, 8.0f)
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVMaterialSlotDetailsHeading", "Material Slot Details"))
-                .Font(MakeReportFont(10, true))
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 8.0f, 0.0f, 8.0f)
+                    [SNew(STextBlock)
+                         .Text(LOCTEXT("DWCDataUVMaterialSlotDetailsHeading", "Material Slot Details"))
+                         .Font(MakeReportFont(10, true))];
         }
 
         for (int32 SlotListIndex = 0; SlotListIndex < MaterialSlotIndices.Num(); ++SlotListIndex)
         {
             const int32 MaterialSlotIndex = MaterialSlotIndices[SlotListIndex];
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 14.0f)
-            [
-                bAllSlotsView
-                    ? BuildSlotLODStatusExpandableArea(
-                        Asset,
-                        PreparedMesh,
-                        MaterialSlotIndex,
-                        FailedMaterialSlotIndices,
-                        FString(),
-                        SlotListIndex > 0)
-                    : BuildSlotLODStatusCard(
-                        Asset,
-                        PreparedMesh,
-                        MaterialSlotIndex,
-                        FailedMaterialSlotIndices,
-                        FString())
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 14.0f)
+                    [bAllSlotsView
+                         ? BuildSlotLODStatusExpandableArea(
+                               Asset,
+                               PreparedMesh,
+                               MaterialSlotIndex,
+                               FailedMaterialSlotIndices,
+                               FString(),
+                               SlotListIndex > 0)
+                         : BuildSlotLODStatusCard(
+                               Asset,
+                               PreparedMesh,
+                               MaterialSlotIndex,
+                               FailedMaterialSlotIndices,
+                               FString())];
         }
 
         if (MaterialSlotIndices.IsEmpty())
         {
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(18.0f)
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVDetailsNoRecordedSlots", "No generated or failed material-slot records were found."))
-                .Justification(ETextJustify::Center)
-                .Font(MakeReportFont())
-                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-            ];
+                .AutoHeight()
+                .Padding(18.0f)
+                    [SNew(STextBlock)
+                         .Text(LOCTEXT("DWCDataUVDetailsNoRecordedSlots", "No generated or failed material-slot records were found."))
+                         .Justification(ETextJustify::Center)
+                         .Font(MakeReportFont())
+                         .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))];
         }
 
         TSharedRef<SWindow> DialogWindow =
             SNew(SWindow)
-            .Title(WindowTitle)
-            .ClientSize(FVector2D(650.0f, 620.0f))
-            .SizingRule(ESizingRule::UserSized)
-            .SupportsMaximize(true)
-            .SupportsMinimize(false);
+                .Title(WindowTitle)
+                .ClientSize(FVector2D(650.0f, 620.0f))
+                .SizingRule(ESizingRule::UserSized)
+                .SupportsMaximize(true)
+                .SupportsMinimize(false);
 
         DialogWindow->SetContent(
             SNew(SBorder)
-            .Padding(0.0f)
-            .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
-            [
-                SNew(SVerticalBox)
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(16.0f, 14.0f, 16.0f, 12.0f)
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    .Padding(0.0f, 0.0f, 10.0f, 0.0f)
-                    [
-                        SNew(SImage)
-                        .Image(FAppStyle::GetBrush(TEXT("Icons.InfoWithColor")))
-                        .ColorAndOpacity(DataUVInfoColor())
-                    ]
-                    + SHorizontalBox::Slot()
-                    .FillWidth(1.0f)
-                    .VAlign(VAlign_Center)
-                    [
-                        SNew(STextBlock)
-                        .Text(HeaderText)
-                        .Font(MakeReportFont(10, true))
-                        .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-                    ]
-                ]
-                + SVerticalBox::Slot()
-                .FillHeight(1.0f)
-                .Padding(16.0f, 0.0f, 16.0f, 0.0f)
-                [
-                    SNew(SScrollBox)
-                    + SScrollBox::Slot()
-                    .Padding(0.0f, 0.0f, 14.0f, 0.0f)
-                    [
-                        Body
-                    ]
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .HAlign(HAlign_Right)
-                .Padding(16.0f, 12.0f, 16.0f, 16.0f)
-                [
-                    SNew(SButton)
-                    .ContentPadding(FMargin(14.0f, 5.0f))
-                    .Text(LOCTEXT("DWCDataUVDetailsClose", "Close"))
-                    .OnClicked_Lambda([DialogWindow]()
-                    {
+                .Padding(0.0f)
+                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+                    [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(16.0f, 14.0f, 16.0f, 12.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 10.0f, 0.0f)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.InfoWithColor"))).ColorAndOpacity(DataUVInfoColor())] + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(HeaderText).Font(MakeReportFont(10, true)).OverflowPolicy(ETextOverflowPolicy::Ellipsis)]] + SVerticalBox::Slot().FillHeight(1.0f).Padding(16.0f, 0.0f, 16.0f, 0.0f)[SNew(SScrollBox) + SScrollBox::Slot().Padding(0.0f, 0.0f, 14.0f, 0.0f)[Body]] + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(16.0f, 12.0f, 16.0f, 16.0f)[SNew(SButton).ContentPadding(FMargin(14.0f, 5.0f)).Text(LOCTEXT("DWCDataUVDetailsClose", "Close")).OnClicked_Lambda([DialogWindow]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   {
                         DialogWindow->RequestDestroyWindow();
-                        return FReply::Handled();
-                    })
-                ]
-            ]);
+                        return FReply::Handled(); })]]);
 
         FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
     }
@@ -1786,72 +1247,20 @@ namespace
         for (const int32 LODIndex : Result.TargetLODIndices)
         {
             const FDWCDataUVLODWarning* Warning = FindLODWarning(Result, LODIndex);
-            const bool bSkipped = Warning != nullptr;
-            const FText StatusText = bSkipped
-                ? FText::Format(
-                    LOCTEXT("DWCDataUVSkippedLODStatus", "Skipped - {0}"),
-                    FText::FromString(Warning->Summary))
-                : LOCTEXT("DWCDataUVReadyLODStatus", "Ready");
+            const bool                  bSkipped = Warning != nullptr;
+            const FText                 StatusText = bSkipped
+                                                         ? FText::Format(
+                                               LOCTEXT("DWCDataUVSkippedLODStatus", "Skipped - {0}"),
+                                               FText::FromString(Warning->Summary))
+                                                         : LOCTEXT("DWCDataUVReadyLODStatus", "Ready");
 
             StatusRows->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 3.0f)
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex)))
-                    .Font(MakeReportFont(10, true))
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(StatusText)
-                    .Font(MakeReportFont(10, bSkipped))
-                    .ColorAndOpacity(bSkipped ? WarningColor() : DataUVReadyColor())
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(5.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    SNew(SBox)
-                    .WidthOverride(14.0f)
-                    .HeightOverride(14.0f)
-                    [
-                        SNew(SImage)
-                        .Image(FAppStyle::GetBrush(
-                            bSkipped ? TEXT("Icons.WarningWithColor") : TEXT("Icons.SuccessWithColor")))
-                    ]
-                ]
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 3.0f)
+                    [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex))).Font(MakeReportFont(10, true))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(StatusText).Font(MakeReportFont(10, bSkipped)).ColorAndOpacity(bSkipped ? WarningColor() : DataUVReadyColor())] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)[SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)[SNew(SImage).Image(FAppStyle::GetBrush(bSkipped ? TEXT("Icons.WarningWithColor") : TEXT("Icons.SuccessWithColor")))]]];
         }
 
-        return SNew(SVerticalBox)
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVLODGenerationStatusHeading", "LOD Generation Status"))
-                .Font(MakeReportFont(10, true))
-            ]
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-            [
-                SNew(SBorder)
-                .Padding(FMargin(12.0f, 8.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-                .BorderBackgroundColor(NeutralBackground())
-                [
-                    StatusRows
-                ]
-            ];
+        return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("DWCDataUVLODGenerationStatusHeading", "LOD Generation Status")).Font(MakeReportFont(10, true))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(SBorder).Padding(FMargin(12.0f, 8.0f)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header"))).BorderBackgroundColor(NeutralBackground())[StatusRows]];
     }
 
     TSharedRef<SWidget> BuildDiagnosticsSection(const FDWCDataUVBuildResult& Result)
@@ -1861,75 +1270,34 @@ namespace
         for (const FDWCDataUVLODWarning& Warning : Result.LODWarnings)
         {
             Details->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-            [
-                SNew(SBorder)
-                .Padding(FMargin(12.0f, 9.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-                .BorderBackgroundColor(WarningBackground())
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    [
-                        SNew(STextBlock)
-                        .Text(FText::Format(
-                            LOCTEXT("DWCDataUVLODTechnicalTitle", "LOD{0} - {1}"),
-                            FText::AsNumber(Warning.LODIndex),
-                            FText::FromString(Warning.Summary)))
-                        .Font(MakeReportFont(10, true))
-                        .ColorAndOpacity(WarningColor())
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
-                        SNew(STextBlock)
-                        .Text(FText::FromString(Warning.TechnicalDetails))
-                        .AutoWrapText(true)
-                        .Font(MakeReportFont())
-                        .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
-                        SNew(STextBlock)
-                        .Text(FText::Format(
-                            LOCTEXT("DWCDataUVLODNotGenerated", "Result: LOD{0} DWC UV data was not generated."),
-                            FText::AsNumber(Warning.LODIndex)))
-                        .Font(MakeReportFont(10, true))
-                    ]
-                ]
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                    [SNew(SBorder)
+                         .Padding(FMargin(12.0f, 9.0f))
+                         .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
+                         .BorderBackgroundColor(WarningBackground())
+                             [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(FText::Format(LOCTEXT("DWCDataUVLODTechnicalTitle", "LOD{0} - {1}"), FText::AsNumber(Warning.LODIndex), FText::FromString(Warning.Summary))).Font(MakeReportFont(10, true)).ColorAndOpacity(WarningColor())] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::FromString(Warning.TechnicalDetails)).AutoWrapText(true).Font(MakeReportFont()).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::Format(LOCTEXT("DWCDataUVLODNotGenerated", "Result: LOD{0} DWC UV data was not generated."), FText::AsNumber(Warning.LODIndex))).Font(MakeReportFont(10, true))]]];
         }
 
         if (!Result.TimingSummary.IsEmpty())
         {
             Details->AddSlot()
-            .AutoHeight()
-            [
-                SNew(STextBlock)
-                .Text(FText::FromString(Result.TimingSummary))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-            ];
+                .AutoHeight()
+                    [SNew(STextBlock)
+                         .Text(FText::FromString(Result.TimingSummary))
+                         .AutoWrapText(true)
+                         .Font(MakeReportFont())
+                         .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))];
         }
 
         return SNew(SExpandableArea)
             .InitiallyCollapsed(true)
             .HeaderContent()
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVDiagnosticsHeading", "Diagnostics"))
-                .Font(MakeReportFont(10, true))
-            ]
+                [SNew(STextBlock)
+                     .Text(LOCTEXT("DWCDataUVDiagnosticsHeading", "Diagnostics"))
+                     .Font(MakeReportFont(10, true))]
             .BodyContent()
-            [
-                Details
-            ];
+                [Details];
     }
 
     TSharedRef<SWidget> BuildFailureLODStatusSection(const FDWCDataUVBuildResult& Result)
@@ -1937,178 +1305,93 @@ namespace
         TSharedRef<SVerticalBox> StatusRows = SNew(SVerticalBox);
         for (const int32 LODIndex : Result.TargetLODIndices)
         {
-            const bool bReady = Result.GeneratedLODIndices.Contains(LODIndex);
-            const bool bFailed = LODIndex == Result.FailureLODIndex;
+            const bool   bReady = Result.GeneratedLODIndices.Contains(LODIndex);
+            const bool   bFailed = LODIndex == Result.FailureLODIndex;
             const TCHAR* IconName = bReady
-                ? TEXT("Icons.SuccessWithColor")
-                : bFailed
-                    ? TEXT("Icons.ErrorWithColor")
-                    : TEXT("Icons.Minus");
-            const FText StatusText = bReady
-                ? LOCTEXT("DWCDataUVFailureReadyStatus", "Ready")
-                : bFailed
-                    ? Result.ValidationFailure.bIsValid
-                        ? LOCTEXT("DWCDataUVFailureFailedStatus", "Failed - Degenerate packed triangle")
-                        : LOCTEXT("DWCDataUVFailureGenericFailedStatus", "Failed")
-                    : LOCTEXT("DWCDataUVFailureNotGeneratedStatus", "Not Generated");
+                                        ? TEXT("Icons.SuccessWithColor")
+                                    : bFailed
+                                        ? TEXT("Icons.ErrorWithColor")
+                                        : TEXT("Icons.Minus");
+            const FText  StatusText = bReady
+                                          ? LOCTEXT("DWCDataUVFailureReadyStatus", "Ready")
+                                      : bFailed
+                                          ? Result.ValidationFailure.bIsValid
+                                                ? LOCTEXT("DWCDataUVFailureFailedStatus", "Failed - Degenerate packed triangle")
+                                                : LOCTEXT("DWCDataUVFailureGenericFailedStatus", "Failed")
+                                          : LOCTEXT("DWCDataUVFailureNotGeneratedStatus", "Not Generated");
 
             StatusRows->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 3.0f)
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                [
-                    SNew(SBox)
-                    .WidthOverride(16.0f)
-                    .HeightOverride(16.0f)
-                    [
-                        SNew(SImage)
-                        .Image(FAppStyle::GetBrush(IconName))
-                    ]
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex)))
-                    .Font(MakeReportFont(10, true))
-                ]
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                .HAlign(HAlign_Right)
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .Text(StatusText)
-                    .Font(MakeReportFont(10, bFailed))
-                    .ColorAndOpacity(bFailed ? ErrorColor() : FSlateColor(FStyleColors::ForegroundHover))
-                ]
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 3.0f)
+                    [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)[SNew(SBox).WidthOverride(16.0f).HeightOverride(16.0f)[SNew(SImage).Image(FAppStyle::GetBrush(IconName))]] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("LOD%d"), LODIndex))).Font(MakeReportFont(10, true))] + SHorizontalBox::Slot().FillWidth(1.0f).HAlign(HAlign_Right).VAlign(VAlign_Center)[SNew(STextBlock).Text(StatusText).Font(MakeReportFont(10, bFailed)).ColorAndOpacity(bFailed ? ErrorColor() : FSlateColor(FStyleColors::ForegroundHover))]];
         }
 
-        return SNew(SVerticalBox)
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVFailureLODStatusHeading", "LOD Build Status"))
-                .Font(MakeReportFont(10, true))
-            ]
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-            [
-                SNew(SBorder)
-                .Padding(FMargin(12.0f, 8.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-                .BorderBackgroundColor(NeutralBackground())
-                [
-                    StatusRows
-                ]
-            ];
+        return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("DWCDataUVFailureLODStatusHeading", "LOD Build Status")).Font(MakeReportFont(10, true))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(SBorder).Padding(FMargin(12.0f, 8.0f)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header"))).BorderBackgroundColor(NeutralBackground())[StatusRows]];
     }
 
     TSharedRef<SWidget> BuildFailureDetailsSection(
         const FDWCDataUVBuildResult& Result,
-        const UWetClothingAsset* Asset,
-        const USkeletalMesh* PreparedMesh)
+        const UWetClothingAsset*     Asset,
+        const USkeletalMesh*         PreparedMesh)
     {
         const FDWCDataUVValidationFailure& Failure = Result.ValidationFailure;
-        TSharedRef<SVerticalBox> Lines = SNew(SVerticalBox);
+        TSharedRef<SVerticalBox>           Lines = SNew(SVerticalBox);
 
         if (Failure.bIsValid)
         {
             Lines->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                BuildSummaryLine(
+                [BuildSummaryLine(
                     LOCTEXT("DWCDataUVFailureMaterialSlot", "Material Slot"),
-                    BuildAssetSlotLabel(Asset, PreparedMesh, Failure.MaterialSlotIndex))
-            ];
+                    BuildAssetSlotLabel(Asset, PreparedMesh, Failure.MaterialSlotIndex))];
             Lines->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                BuildSummaryLine(
+                [BuildSummaryLine(
                     LOCTEXT("DWCDataUVFailureTriangle", "Triangle"),
-                    FText::AsNumber(Failure.MeshTriangleID))
-            ];
+                    FText::AsNumber(Failure.MeshTriangleID))];
             Lines->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                BuildSummaryLine(
+                [BuildSummaryLine(
                     LOCTEXT("DWCDataUVFailureChart", "Chart"),
-                    FText::AsNumber(Failure.ChartIndex))
-            ];
+                    FText::AsNumber(Failure.ChartIndex))];
             Lines->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                BuildSummaryLine(
+                [BuildSummaryLine(
                     LOCTEXT("DWCDataUVFailureReason", "Reason"),
                     Failure.Reason.Contains(TEXT("area is below tolerance"))
                         ? LOCTEXT("DWCDataUVFailureZeroAreaReason", "Packed triangle has zero area")
-                        : FText::FromString(Failure.Reason))
-            ];
+                        : FText::FromString(Failure.Reason))];
             Lines->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 8.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT(
-                    "DWCDataUVFailureCollapsedTriangleExplanation",
-                    "One triangle collapsed during UV packing, causing final validation to fail."))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 8.0f, 0.0f, 0.0f)
+                    [SNew(STextBlock)
+                         .Text(LOCTEXT(
+                             "DWCDataUVFailureCollapsedTriangleExplanation",
+                             "One triangle collapsed during UV packing, causing final validation to fail."))
+                         .AutoWrapText(true)
+                         .Font(MakeReportFont())
+                         .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))];
         }
         else
         {
             Lines->AddSlot().AutoHeight()
-            [
-                SNew(STextBlock)
-                .Text(FText::FromString(Result.Message))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-            ];
+                [SNew(STextBlock)
+                     .Text(FText::FromString(Result.Message))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont())
+                     .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))];
         }
 
         Lines->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 8.0f, 0.0f, 0.0f)
-        [
-            SNew(STextBlock)
-            .Text(LOCTEXT("DWCDataUVFailureNoResult", "No changes were made to the Prepared Mesh."))
-            .Font(MakeReportFont(10, true))
-            .ColorAndOpacity(ErrorColor())
-        ];
+            .AutoHeight()
+            .Padding(0.0f, 8.0f, 0.0f, 0.0f)
+                [SNew(STextBlock)
+                     .Text(LOCTEXT("DWCDataUVFailureNoResult", "No changes were made to the Prepared Mesh."))
+                     .Font(MakeReportFont(10, true))
+                     .ColorAndOpacity(ErrorColor())];
 
-        return SNew(SVerticalBox)
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVFailureDetailsHeading", "Failure Details"))
-                .Font(MakeReportFont(10, true))
-            ]
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-            [
-                SNew(SBorder)
-                .Padding(FMargin(12.0f, 9.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-                .BorderBackgroundColor(ErrorBackground())
-                [
-                    Lines
-                ]
-            ];
+        return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("DWCDataUVFailureDetailsHeading", "Failure Details")).Font(MakeReportFont(10, true))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(SBorder).Padding(FMargin(12.0f, 9.0f)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header"))).BorderBackgroundColor(ErrorBackground())[Lines]];
     }
 
     FString BuildFailureTechnicalText(const FDWCDataUVBuildResult& Result)
     {
-        FString Details = Result.Message;
+        FString                            Details = Result.Message;
         const FDWCDataUVValidationFailure& Failure = Result.ValidationFailure;
         if (Failure.bIsValid)
         {
@@ -2131,15 +1414,15 @@ namespace
         return Details;
     }
 
-}
+} // namespace
 
 namespace WCAReportDialogs
 {
     void OpenDWCDataUVBuildResultDialog(
         const FDWCDataUVBuildResult& Result,
-        const UWetClothingAsset* Asset,
-        const USkeletalMesh* PreparedMesh,
-        const TSet<int32>& IncludedMaterialSlotIndices)
+        const UWetClothingAsset*     Asset,
+        const USkeletalMesh*         PreparedMesh,
+        const TSet<int32>&           IncludedMaterialSlotIndices)
     {
         const bool bHasSkippedLODs = !Result.LODWarnings.IsEmpty();
         const bool bHasSourceIssues =
@@ -2153,40 +1436,34 @@ namespace WCAReportDialogs
             Result.BudgetFallbackIslandCount > 0;
 
         TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
-        const bool bUsesMaterialSlotCards = Asset != nullptr && !IncludedMaterialSlotIndices.IsEmpty();
+        const bool               bUsesMaterialSlotCards = Asset != nullptr && !IncludedMaterialSlotIndices.IsEmpty();
 
         if (bUsesMaterialSlotCards)
         {
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-            [
-                BuildOperationSlotSection(
-                    *Asset,
-                    PreparedMesh,
-                    IncludedMaterialSlotIndices,
-                    Result.FailedMaterialSlotIndices,
-                    Result.Message)
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                    [BuildOperationSlotSection(
+                        *Asset,
+                        PreparedMesh,
+                        IncludedMaterialSlotIndices,
+                        Result.FailedMaterialSlotIndices,
+                        Result.Message)];
         }
         else if (!Result.TargetLODIndices.IsEmpty())
         {
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-            [
-                BuildLODStatusSection(Result)
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                    [BuildLODStatusSection(Result)];
         }
 
         if (!bUsesMaterialSlotCards && bHasSourceIssues)
         {
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-            [
-                BuildIssueSummarySection(Result)
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                    [BuildIssueSummarySection(Result)];
         }
 
         TArray<FDWCDataUVSlotWarning> SlotWarnings = Result.SlotWarnings;
@@ -2207,13 +1484,13 @@ namespace WCAReportDialogs
         if (!bUsesMaterialSlotCards)
         {
             for (const EDWCDataUVResultSeverity SectionSeverity :
-                { EDWCDataUVResultSeverity::Ready, EDWCDataUVResultSeverity::ReadyWithWarnings })
+                 { EDWCDataUVResultSeverity::Ready, EDWCDataUVResultSeverity::ReadyWithWarnings })
             {
                 const bool bHasSection = SlotWarnings.ContainsByPredicate(
                     [SectionSeverity](const FDWCDataUVSlotWarning& Diagnostic)
                     {
                         return DWCDataUVResultSeverity::Normalize(Diagnostic.ResultSeverity) == SectionSeverity &&
-                            Diagnostic.HasDiagnostics();
+                               Diagnostic.HasDiagnostics();
                     });
                 if (!bHasSection)
                 {
@@ -2221,13 +1498,11 @@ namespace WCAReportDialogs
                 }
 
                 Body->AddSlot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 6.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(SectionSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings
-                        ? LOCTEXT("DWCDataUVSlotWarningsHeading", "Warnings")
-                        : LOCTEXT("DWCDataUVSlotDiagnosticsHeading", "Diagnostics"))
-                    .Font(MakeReportFont(10, true))
-                ];
+                    [SNew(STextBlock)
+                         .Text(SectionSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings
+                                   ? LOCTEXT("DWCDataUVSlotWarningsHeading", "Warnings")
+                                   : LOCTEXT("DWCDataUVSlotDiagnosticsHeading", "Diagnostics"))
+                         .Font(MakeReportFont(10, true))];
 
                 for (const FDWCDataUVSlotWarning& Diagnostic : SlotWarnings)
                 {
@@ -2237,7 +1512,7 @@ namespace WCAReportDialogs
                         continue;
                     }
                     Body->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                    [ BuildSlotWarningCard(Diagnostic, PreparedMesh, INDEX_NONE, true, Asset) ];
+                        [BuildSlotWarningCard(Diagnostic, PreparedMesh, INDEX_NONE, true, Asset)];
                 }
             }
         }
@@ -2245,106 +1520,34 @@ namespace WCAReportDialogs
         if (!Result.LODWarnings.IsEmpty() || !Result.TimingSummary.IsEmpty())
         {
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 2.0f, 0.0f, 0.0f)
-            [
-                BuildDiagnosticsSection(Result)
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 2.0f, 0.0f, 0.0f)
+                    [BuildDiagnosticsSection(Result)];
         }
 
         TSharedRef<SWindow> DialogWindow =
             SNew(SWindow)
-            .Title(LOCTEXT("DWCDataUVGeneratedTitle", "DWC UV Channel Generated"))
-            .ClientSize(FVector2D(760.0f, 620.0f))
-            .SizingRule(ESizingRule::UserSized)
-            .SupportsMaximize(true)
-            .SupportsMinimize(false);
+                .Title(LOCTEXT("DWCDataUVGeneratedTitle", "DWC UV Channel Generated"))
+                .ClientSize(FVector2D(760.0f, 620.0f))
+                .SizingRule(ESizingRule::UserSized)
+                .SupportsMaximize(true)
+                .SupportsMinimize(false);
 
         DialogWindow->SetContent(
             SNew(SBorder)
-            .Padding(0.0f)
-            .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
-            [
-                SNew(SVerticalBox)
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(16.0f, 14.0f, 16.0f, 12.0f)
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Top)
-                    .Padding(0.0f, 2.0f, 10.0f, 0.0f)
-                    [
-                        SNew(SImage)
-                        .Image(FAppStyle::GetBrush(
-                            DWCDataUVResultSeverity::Normalize(Result.ResultSeverity) ==
-                                    EDWCDataUVResultSeverity::ReadyWithWarnings ||
-                                bHasSkippedLODs
-                                ? TEXT("Icons.WarningWithColor")
-                                : TEXT("Icons.SuccessWithColor")))
-                        .ColorAndOpacity(ColoredStatusIconTint())
-                    ]
-                    + SHorizontalBox::Slot()
-                    .FillWidth(1.0f)
-                    [
-                        SNew(SVerticalBox)
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        [
-                            SNew(STextBlock)
-                            .Text(DWCDataUVResultSeverity::Normalize(Result.ResultSeverity) ==
-                                        EDWCDataUVResultSeverity::ReadyWithWarnings ||
-                                    bHasSkippedLODs
-                                ? LOCTEXT("DWCDataUVWarningsHeader", "DWC UV Channel Generated With Warnings")
-                                : LOCTEXT("DWCDataUVSuccessHeader", "DWC UV Channel Generated Successfully"))
-                            .Font(MakeReportFont(10, true))
-                        ]
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
-                        [
-                            SNew(STextBlock)
-                            .Text(BuildHeaderSummary(Result))
-                            .AutoWrapText(true)
-                            .Font(MakeReportFont())
-                            .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                        ]
-                    ]
-                ]
-                + SVerticalBox::Slot()
-                .FillHeight(1.0f)
-                .Padding(16.0f, 0.0f, 16.0f, 0.0f)
-                [
-                    SNew(SScrollBox)
-                    + SScrollBox::Slot()
-                    .Padding(0.0f, 0.0f, 14.0f, 0.0f)
-                    [
-                        Body
-                    ]
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .HAlign(HAlign_Right)
-                .Padding(16.0f, 12.0f, 16.0f, 16.0f)
-                [
-                    SNew(SButton)
-                    .ContentPadding(FMargin(14.0f, 5.0f))
-                    .Text(LOCTEXT("DWCDataUVResultOK", "OK"))
-                    .OnClicked_Lambda([DialogWindow]()
-                    {
+                .Padding(0.0f)
+                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+                    [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(16.0f, 14.0f, 16.0f, 12.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 2.0f, 10.0f, 0.0f)[SNew(SImage).Image(FAppStyle::GetBrush(DWCDataUVResultSeverity::Normalize(Result.ResultSeverity) == EDWCDataUVResultSeverity::ReadyWithWarnings || bHasSkippedLODs ? TEXT("Icons.WarningWithColor") : TEXT("Icons.SuccessWithColor"))).ColorAndOpacity(ColoredStatusIconTint())] + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(DWCDataUVResultSeverity::Normalize(Result.ResultSeverity) == EDWCDataUVResultSeverity::ReadyWithWarnings || bHasSkippedLODs ? LOCTEXT("DWCDataUVWarningsHeader", "DWC UV Channel Generated With Warnings") : LOCTEXT("DWCDataUVSuccessHeader", "DWC UV Channel Generated Successfully")).Font(MakeReportFont(10, true))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(BuildHeaderSummary(Result)).AutoWrapText(true).Font(MakeReportFont()).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]]] + SVerticalBox::Slot().FillHeight(1.0f).Padding(16.0f, 0.0f, 16.0f, 0.0f)[SNew(SScrollBox) + SScrollBox::Slot().Padding(0.0f, 0.0f, 14.0f, 0.0f)[Body]] + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(16.0f, 12.0f, 16.0f, 16.0f)[SNew(SButton).ContentPadding(FMargin(14.0f, 5.0f)).Text(LOCTEXT("DWCDataUVResultOK", "OK")).OnClicked_Lambda([DialogWindow]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               {
                         DialogWindow->RequestDestroyWindow();
-                        return FReply::Handled();
-                    })
-                ]
-            ]);
+                        return FReply::Handled(); })]]);
 
         FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
     }
 
     FDWCDataUVVisibleExclusionDecision ConfirmDWCDataUVVisibleExclusion(
         const FDWCDataUVBuildResult& Result,
-        const USkeletalMesh* SlotIdentityMesh)
+        const USkeletalMesh*         SlotIdentityMesh)
     {
         FDWCDataUVVisibleExclusionDecision Decision;
 
@@ -2361,9 +1564,7 @@ namespace WCAReportDialogs
             }
         }
         AffectedWarnings.Sort([](const FDWCDataUVSlotWarning& A, const FDWCDataUVSlotWarning& B)
-        {
-            return A.MaterialSlotIndex < B.MaterialSlotIndex;
-        });
+                              { return A.MaterialSlotIndex < B.MaterialSlotIndex; });
 
         // A pending-confirmation result without a matching diagnostic is an internal
         // state mismatch, not a user cancellation. Surface it explicitly so callers do
@@ -2400,189 +1601,36 @@ namespace WCAReportDialogs
                 continue;
             }
 
-            ESlotDecision SlotDecision = ESlotDecision::None;
+            ESlotDecision       SlotDecision = ESlotDecision::None;
             TSharedRef<SWindow> DialogWindow =
                 SNew(SWindow)
-                .Title(FText::Format(
-                    LOCTEXT("DWCDataUVSlotExclusionConfirmationTitle", "DWC UV Generation Warning - {0}"),
-                    BuildSlotLabel(SlotIdentityMesh, Warning->MaterialSlotIndex)))
-                .ClientSize(FVector2D(680.0f, 470.0f))
-                .SizingRule(ESizingRule::UserSized)
-                .SupportsMaximize(false)
-                .SupportsMinimize(false);
+                    .Title(FText::Format(
+                        LOCTEXT("DWCDataUVSlotExclusionConfirmationTitle", "DWC UV Generation Warning - {0}"),
+                        BuildSlotLabel(SlotIdentityMesh, Warning->MaterialSlotIndex)))
+                    .ClientSize(FVector2D(680.0f, 470.0f))
+                    .SizingRule(ESizingRule::UserSized)
+                    .SupportsMaximize(false)
+                    .SupportsMinimize(false);
 
             DialogWindow->SetContent(
                 SNew(SBorder)
-                .Padding(FMargin(16.0f, 14.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .VAlign(VAlign_Top)
-                        .Padding(0.0f, 2.0f, 10.0f, 0.0f)
-                        [
-                            SNew(SImage)
-                            .Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))
-                        ]
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        [
-                            SNew(SVerticalBox)
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            [
-                                SNew(STextBlock)
-                                .Text(BuildSlotLabel(SlotIdentityMesh, Warning->MaterialSlotIndex))
-                                .Font(MakeReportFont(10, true))
-                            ]
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            .Padding(0.0f, 4.0f, 0.0f, 0.0f)
-                            [
-                                SNew(STextBlock)
-                                .Text(LOCTEXT(
-                                    "DWCDataUVSlotExclusionConfirmationHeader",
-                                    "Some triangles cannot be included in the DWC UV."))
-                                .Font(MakeReportFont())
-                                .ColorAndOpacity(WarningColor())
-                                .AutoWrapText(true)
-                            ]
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                            [
-                                SNew(STextBlock)
-                                .Text(FText::FromString(FString::Printf(
-                                    TEXT("They cover %.2f%% of this material's surface, which exceeds the automatic limit of %.2f%%."),
-                                    Warning->ExcludedVisible3DSurfaceRatio * 100.0,
-                                    DWCDataUVSafetyLimits::VisibleExclusionRatio * 100.0)))
-                                .AutoWrapText(true)
-                                .Font(MakeReportFont())
-                                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                            ]
-                        ]
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 14.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SBorder)
-                        .Padding(FMargin(10.0f, 8.0f))
-                        .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
-                        .BorderBackgroundColor(WarningBackground())
-                        [
-                            SNew(SVerticalBox)
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            [
-                                SNew(STextBlock)
-                                .Text(FText::FromString(FString::Printf(
-                                    TEXT("Excluded surface: %.2f%%"),
-                                    Warning->ExcludedVisible3DSurfaceRatio * 100.0)))
-                                .Font(MakeReportFont())
-                            ]
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            .Padding(0.0f, 3.0f, 0.0f, 0.0f)
-                            [
-                                SNew(STextBlock)
-                                .Text(FText::FromString(FString::Printf(
-                                    TEXT("Automatic limit: %.2f%%"),
-                                    DWCDataUVSafetyLimits::VisibleExclusionRatio * 100.0)))
-                                .Font(MakeReportFont())
-                            ]
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            .Padding(0.0f, 3.0f, 0.0f, 0.0f)
-                            [
-                                SNew(STextBlock)
-                                .Text(FText::FromString(FString::Printf(
-                                    TEXT("Largest excluded region: %.2f%%"),
-                                    Warning->LargestConnectedExcluded3DSurfaceRatio * 100.0)))
-                                .Font(MakeReportFont())
-                            ]
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            .Padding(0.0f, 3.0f, 0.0f, 0.0f)
-                            [
-                                SNew(STextBlock)
-                                .Text(FText::FromString(FString::Printf(
-                                    TEXT("Excluded triangles: %d"),
-                                    Warning->ExcludedVisibleTriangleCount)))
-                                .Font(MakeReportFont())
-                            ]
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            .Padding(0.0f, 9.0f, 0.0f, 0.0f)
-                            [
-                                SNew(STextBlock)
-                                .Text(LOCTEXT(
-                                    "DWCDataUVSlotExclusionConfirmationResult",
-                                    "DWC can still generate the UV by excluding these triangles. The excluded areas will not participate in DWC simulation or texture-based data."))
-                                .AutoWrapText(true)
-                                .Font(MakeReportFont())
-                                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                            ]
-                        ]
-                    ]
-                    + SVerticalBox::Slot()
-                    .FillHeight(1.0f)
-                    [
-                        SNew(SSpacer)
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        [ SNew(SSpacer) ]
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                        [
-                            SNew(SButton)
-                            .Text(LOCTEXT("DWCDataUVExclusionCancelBuild", "Cancel Build"))
-                            .OnClicked_Lambda([DialogWindow, &SlotDecision]()
-                            {
+                    .Padding(FMargin(16.0f, 14.0f))
+                    .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+                        [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 2.0f, 10.0f, 0.0f)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))] + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(BuildSlotLabel(SlotIdentityMesh, Warning->MaterialSlotIndex)).Font(MakeReportFont(10, true))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(LOCTEXT("DWCDataUVSlotExclusionConfirmationHeader", "Some triangles cannot be included in the DWC UV.")).Font(MakeReportFont()).ColorAndOpacity(WarningColor()).AutoWrapText(true)] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("They cover %.2f%% of this material's surface, which exceeds the automatic limit of %.2f%%."), Warning->ExcludedVisible3DSurfaceRatio * 100.0, DWCDataUVSafetyLimits::VisibleExclusionRatio * 100.0))).AutoWrapText(true).Font(MakeReportFont()).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]]] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f)[SNew(SBorder).Padding(FMargin(10.0f, 8.0f)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel"))).BorderBackgroundColor(WarningBackground())[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("Excluded surface: %.2f%%"), Warning->ExcludedVisible3DSurfaceRatio * 100.0))).Font(MakeReportFont())] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("Automatic limit: %.2f%%"), DWCDataUVSafetyLimits::VisibleExclusionRatio * 100.0))).Font(MakeReportFont())] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("Largest excluded region: %.2f%%"), Warning->LargestConnectedExcluded3DSurfaceRatio * 100.0))).Font(MakeReportFont())] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("Excluded triangles: %d"), Warning->ExcludedVisibleTriangleCount))).Font(MakeReportFont())] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 9.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(LOCTEXT("DWCDataUVSlotExclusionConfirmationResult", "DWC can still generate the UV by excluding these triangles. The excluded areas will not participate in DWC simulation or texture-based data.")).AutoWrapText(true).Font(MakeReportFont()).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]]] + SVerticalBox::Slot().FillHeight(1.0f)[SNew(SSpacer)] + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SSpacer)] + SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)[SNew(SButton).Text(LOCTEXT("DWCDataUVExclusionCancelBuild", "Cancel Build")).OnClicked_Lambda([DialogWindow, &SlotDecision]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              {
                                 SlotDecision = ESlotDecision::Cancel;
                                 DialogWindow->RequestDestroyWindow();
-                                return FReply::Handled();
-                            })
-                        ]
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                        [
-                            SNew(SButton)
-                            .Text(LOCTEXT("DWCDataUVExclusionSkipThisSlot", "Skip This Slot"))
-                            .OnClicked_Lambda([DialogWindow, &SlotDecision]()
-                            {
+                                return FReply::Handled(); })] +
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)[SNew(SButton).Text(LOCTEXT("DWCDataUVExclusionSkipThisSlot", "Skip This Slot")).OnClicked_Lambda([DialogWindow, &SlotDecision]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  {
                                 SlotDecision = ESlotDecision::Skip;
                                 DialogWindow->RequestDestroyWindow();
-                                return FReply::Handled();
-                            })
-                        ]
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        [
-                            SNew(SButton)
-                            .ButtonStyle(FAppStyle::Get(), TEXT("PrimaryButton"))
-                            .Text(LOCTEXT("DWCDataUVExclusionGenerateWithoutAreas", "Generate Without These Areas"))
-                            .OnClicked_Lambda([DialogWindow, &SlotDecision]()
-                            {
+                                return FReply::Handled(); })] +
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              SHorizontalBox::Slot().AutoWidth()[SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("PrimaryButton")).Text(LOCTEXT("DWCDataUVExclusionGenerateWithoutAreas", "Generate Without These Areas")).OnClicked_Lambda([DialogWindow, &SlotDecision]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             {
                                 SlotDecision = ESlotDecision::GenerateWithoutAreas;
                                 DialogWindow->RequestDestroyWindow();
-                                return FReply::Handled();
-                            })
-                        ]
-                    ]
-                ]);
+                                return FReply::Handled(); })]]]);
 
             FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
 
@@ -2612,11 +1660,11 @@ namespace WCAReportDialogs
 
     void OpenDWCDataUVBuildFailureDialog(
         const FDWCDataUVBuildResult& Result,
-        const UWetClothingAsset* Asset,
-        const USkeletalMesh* PreparedMesh,
-        const TSet<int32>& IncludedMaterialSlotIndices)
+        const UWetClothingAsset*     Asset,
+        const USkeletalMesh*         PreparedMesh,
+        const TSet<int32>&           IncludedMaterialSlotIndices)
     {
-        const FString TechnicalDetails = BuildFailureTechnicalText(Result);
+        const FString            TechnicalDetails = BuildFailureTechnicalText(Result);
         TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
 
         if (Asset != nullptr && !IncludedMaterialSlotIndices.IsEmpty())
@@ -2634,170 +1682,93 @@ namespace WCAReportDialogs
                 FailedSlots = IncludedMaterialSlotIndices;
             }
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-            [
-                BuildOperationSlotSection(
-                    *Asset,
-                    PreparedMesh,
-                    IncludedMaterialSlotIndices,
-                    FailedSlots,
-                    Result.Message)
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                    [BuildOperationSlotSection(
+                        *Asset,
+                        PreparedMesh,
+                        IncludedMaterialSlotIndices,
+                        FailedSlots,
+                        Result.Message)];
         }
 
         if (!Result.TargetLODIndices.IsEmpty())
         {
             Body->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-            [
-                BuildFailureLODStatusSection(Result)
-            ];
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                    [BuildFailureLODStatusSection(Result)];
         }
 
         Body->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-        [
-            BuildFailureDetailsSection(Result, Asset, PreparedMesh)
-        ];
+            .AutoHeight()
+            .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                [BuildFailureDetailsSection(Result, Asset, PreparedMesh)];
 
         Body->AddSlot()
-        .AutoHeight()
-        [
-            SNew(SExpandableArea)
-            .InitiallyCollapsed(true)
-            .HeaderContent()
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVFailureDiagnosticsHeading", "Technical Details"))
-                .Font(MakeReportFont(10, true))
-            ]
-            .BodyContent()
-            [
-                SNew(STextBlock)
-                .Text(FText::FromString(TechnicalDetails))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-            ]
-        ];
+            .AutoHeight()
+                [SNew(SExpandableArea)
+                     .InitiallyCollapsed(true)
+                     .HeaderContent()
+                         [SNew(STextBlock)
+                              .Text(LOCTEXT("DWCDataUVFailureDiagnosticsHeading", "Technical Details"))
+                              .Font(MakeReportFont(10, true))]
+                     .BodyContent()
+                         [SNew(STextBlock)
+                              .Text(FText::FromString(TechnicalDetails))
+                              .AutoWrapText(true)
+                              .Font(MakeReportFont())
+                              .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]];
 
         TSharedRef<SWindow> DialogWindow =
             SNew(SWindow)
-            .Title(LOCTEXT("DWCDataUVFailureTitle", "DWC UV Generation Failed"))
-            .ClientSize(FVector2D(720.0f, 520.0f))
-            .SizingRule(ESizingRule::UserSized)
-            .SupportsMaximize(true)
-            .SupportsMinimize(false);
+                .Title(LOCTEXT("DWCDataUVFailureTitle", "DWC UV Generation Failed"))
+                .ClientSize(FVector2D(720.0f, 520.0f))
+                .SizingRule(ESizingRule::UserSized)
+                .SupportsMaximize(true)
+                .SupportsMinimize(false);
 
         DialogWindow->SetContent(
             SNew(SBorder)
-            .Padding(0.0f)
-            .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
-            [
-                SNew(SVerticalBox)
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(16.0f, 14.0f, 16.0f, 12.0f)
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Top)
-                    .Padding(0.0f, 2.0f, 10.0f, 0.0f)
-                    [
-                        SNew(SImage)
-                        .Image(FAppStyle::GetBrush(TEXT("Icons.ErrorWithColor")))
-                    ]
-                    + SHorizontalBox::Slot()
-                    .FillWidth(1.0f)
-                    [
-                        SNew(SVerticalBox)
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("DWCDataUVFailureHeader", "DWC UV Generation Failed"))
-                            .Font(MakeReportFont(10, true))
-                            .ColorAndOpacity(ErrorColor())
-                        ]
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
-                        [
-                            SNew(STextBlock)
-                            .Text(Result.FailureLODIndex == 0 && Result.ValidationFailure.bIsValid
-                                ? LOCTEXT(
-                                    "DWCDataUVFailureLOD0Summary",
-                                    "LOD0 failed final validation, so no usable DWC UV channel was generated.")
-                                : Result.FailureLODIndex == 0
-                                    ? LOCTEXT(
-                                        "DWCDataUVFailureLOD0GenericSummary",
-                                        "LOD0 generation failed, so no usable DWC UV channel was generated.")
-                                    : LOCTEXT(
-                                        "DWCDataUVFailureGenericSummary",
-                                        "DWC UV generation could not be completed. No changes were made to the Prepared Mesh. See Failure Details for the specific cause."))
-                            .AutoWrapText(true)
-                            .Font(MakeReportFont())
-                            .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                        ]
-                    ]
-                ]
-                + SVerticalBox::Slot()
-                .FillHeight(1.0f)
-                .Padding(16.0f, 0.0f, 16.0f, 0.0f)
-                [
-                    SNew(SScrollBox)
-                    + SScrollBox::Slot()
-                    .Padding(0.0f, 0.0f, 14.0f, 0.0f)
-                    [
-                        Body
-                    ]
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .HAlign(HAlign_Right)
-                .Padding(16.0f, 12.0f, 16.0f, 16.0f)
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                    [
-                        SNew(SButton)
-                        .ContentPadding(FMargin(12.0f, 5.0f))
-                        .Text(LOCTEXT("DWCDataUVFailureCopyDetails", "Copy Details"))
-                        .OnClicked_Lambda([TechnicalDetails]()
-                        {
+                .Padding(0.0f)
+                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+                    [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(16.0f, 14.0f, 16.0f, 12.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 2.0f, 10.0f, 0.0f)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.ErrorWithColor")))] + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("DWCDataUVFailureHeader", "DWC UV Generation Failed")).Font(MakeReportFont(10, true)).ColorAndOpacity(ErrorColor())] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(Result.FailureLODIndex == 0 && Result.ValidationFailure.bIsValid ? LOCTEXT("DWCDataUVFailureLOD0Summary", "LOD0 failed final validation, so no usable DWC UV channel was generated.") : Result.FailureLODIndex == 0 ? LOCTEXT("DWCDataUVFailureLOD0GenericSummary", "LOD0 generation failed, so no usable DWC UV channel was generated.")
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      : LOCTEXT("DWCDataUVFailureGenericSummary", "DWC UV generation could not be completed. No changes were made to the Prepared Mesh. See Failure Details for the specific cause."))
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .AutoWrapText(true)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .Font(MakeReportFont())
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]]] +
+                     SVerticalBox::Slot()
+                         .FillHeight(1.0f)
+                         .Padding(16.0f, 0.0f, 16.0f, 0.0f)
+                             [SNew(SScrollBox) + SScrollBox::Slot()
+                                                     .Padding(0.0f, 0.0f, 14.0f, 0.0f)
+                                                         [Body]] +
+                     SVerticalBox::Slot()
+                         .AutoHeight()
+                         .HAlign(HAlign_Right)
+                         .Padding(16.0f, 12.0f, 16.0f, 16.0f)
+                             [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)[SNew(SButton).ContentPadding(FMargin(12.0f, 5.0f)).Text(LOCTEXT("DWCDataUVFailureCopyDetails", "Copy Details")).OnClicked_Lambda([TechnicalDetails]()
+                                                                                                                                                                                                                                                         {
                             FPlatformApplicationMisc::ClipboardCopy(*TechnicalDetails);
-                            return FReply::Handled();
-                        })
-                    ]
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    [
-                        SNew(SButton)
-                        .ContentPadding(FMargin(14.0f, 5.0f))
-                        .Text(LOCTEXT("DWCDataUVFailureOK", "OK"))
-                        .OnClicked_Lambda([DialogWindow]()
-                        {
+                            return FReply::Handled(); })] +
+                              SHorizontalBox::Slot()
+                                  .AutoWidth()
+                                      [SNew(SButton)
+                                           .ContentPadding(FMargin(14.0f, 5.0f))
+                                           .Text(LOCTEXT("DWCDataUVFailureOK", "OK"))
+                                           .OnClicked_Lambda([DialogWindow]()
+                                                             {
                             DialogWindow->RequestDestroyWindow();
-                            return FReply::Handled();
-                        })
-                    ]
-                ]
-            ]);
+                            return FReply::Handled(); })]]]);
 
         FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
     }
     void OpenDWCDataUVSlotDetailsDialog(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* PreparedMesh,
-        const int32 MaterialSlotIndex,
-        const TSet<int32>& FailedMaterialSlotIndices,
-        const FString& LastFailureMessage)
+        const USkeletalMesh*     PreparedMesh,
+        const int32              MaterialSlotIndex,
+        const TSet<int32>&       FailedMaterialSlotIndices,
+        const FString&           LastFailureMessage)
     {
         TArray<int32> MaterialSlotIndices;
         if (MaterialSlotIndex != INDEX_NONE)
@@ -2818,9 +1789,9 @@ namespace WCAReportDialogs
 
     void OpenDWCDataUVAllSlotsDetailsDialog(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* PreparedMesh,
-        const TSet<int32>& FailedMaterialSlotIndices,
-        const FString& LastFailureMessage)
+        const USkeletalMesh*     PreparedMesh,
+        const TSet<int32>&       FailedMaterialSlotIndices,
+        const FString&           LastFailureMessage)
     {
         const TArray<int32> MaterialSlotIndices = CollectRecordedSlotIndices(Asset, FailedMaterialSlotIndices);
         OpenDetailsDialogInternal(
@@ -2847,32 +1818,28 @@ namespace WCAReportDialogs
         auto BuildLODRangeText = [](const int32 FirstLODIndex, const int32 LastLODIndex)
         {
             return FirstLODIndex == LastLODIndex
-                ? FString::Printf(TEXT("LOD%d"), FirstLODIndex)
-                : FString::Printf(TEXT("LOD%d-LOD%d"), FirstLODIndex, LastLODIndex);
+                       ? FString::Printf(TEXT("LOD%d"), FirstLODIndex)
+                       : FString::Printf(TEXT("LOD%d-LOD%d"), FirstLODIndex, LastLODIndex);
         };
 
         TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
         Body->AddSlot().AutoHeight()
-        [
-            SNew(STextBlock)
-            .Text(FText::FromString(FString::Printf(
-                TEXT("%s  \u2192  %s"),
-                *BuildLODRangeText(Report.PreviousFirstLODIndex, Report.PreviousLastLODIndex),
-                *BuildLODRangeText(Report.RequestedFirstLODIndex, Report.RequestedLastLODIndex))))
-            .Font(MakeReportFont(11, true))
-        ];
+            [SNew(STextBlock)
+                 .Text(FText::FromString(FString::Printf(
+                     TEXT("%s  \u2192  %s"),
+                     *BuildLODRangeText(Report.PreviousFirstLODIndex, Report.PreviousLastLODIndex),
+                     *BuildLODRangeText(Report.RequestedFirstLODIndex, Report.RequestedLastLODIndex))))
+                 .Font(MakeReportFont(11, true))];
 
         TSharedRef<SVerticalBox> ChangeRows = SNew(SVerticalBox);
-        auto AddLODChangeRow = [&ChangeRows](const FText& Label, const TArray<int32>& LODIndices)
+        auto                     AddLODChangeRow = [&ChangeRows](const FText& Label, const TArray<int32>& LODIndices)
         {
             if (LODIndices.IsEmpty())
             {
                 return;
             }
             ChangeRows->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                BuildSummaryLine(Label, BuildLODListText(LODIndices))
-            ];
+                [BuildSummaryLine(Label, BuildLODListText(LODIndices))];
         };
         AddLODChangeRow(LOCTEXT("LODRangeRetained", "Retained"), Report.RetainedLODIndices);
         AddLODChangeRow(LOCTEXT("LODRangeReused", "Reused"), Report.ReusedLODIndices);
@@ -2882,176 +1849,123 @@ namespace WCAReportDialogs
         AddLODChangeRow(LOCTEXT("LODRangeFailed", "Failed"), Report.FailedLODIndices);
 
         Body->AddSlot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
-        [
-            SNew(SBorder)
-            .Padding(FMargin(12.0f, 8.0f))
-            .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-            .BorderBackgroundColor(NeutralBackground())
-            [
-                ChangeRows
-            ]
-        ];
+            [SNew(SBorder)
+                 .Padding(FMargin(12.0f, 8.0f))
+                 .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
+                 .BorderBackgroundColor(NeutralBackground())
+                     [ChangeRows]];
 
         TSharedRef<SVerticalBox> Explanation = SNew(SVerticalBox);
         if (!Report.RetainedLODIndices.IsEmpty())
         {
             Explanation->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::Format(
-                    LOCTEXT("LODRangeRetainedExplanation", "Existing DWC UV data for {0} was retained."),
-                    BuildLODListText(Report.RetainedLODIndices)))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-            ];
+                [SNew(STextBlock)
+                     .Text(FText::Format(
+                         LOCTEXT("LODRangeRetainedExplanation", "Existing DWC UV data for {0} was retained."),
+                         BuildLODListText(Report.RetainedLODIndices)))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont())];
         }
         if (!Report.ReusedLODIndices.IsEmpty())
         {
             Explanation->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::Format(
-                    LOCTEXT("LODRangeReusedExplanation", "Existing valid DWC UV data was reused for {0}."),
-                    BuildLODListText(Report.ReusedLODIndices)))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-            ];
+                [SNew(STextBlock)
+                     .Text(FText::Format(
+                         LOCTEXT("LODRangeReusedExplanation", "Existing valid DWC UV data was reused for {0}."),
+                         BuildLODListText(Report.ReusedLODIndices)))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont())];
         }
         if (!Report.GeneratedLODIndices.IsEmpty())
         {
             Explanation->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::Format(
-                    LOCTEXT("LODRangeGeneratedExplanation", "DWC UV data was generated for {0}."),
-                    BuildLODListText(Report.GeneratedLODIndices)))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-            ];
+                [SNew(STextBlock)
+                     .Text(FText::Format(
+                         LOCTEXT("LODRangeGeneratedExplanation", "DWC UV data was generated for {0}."),
+                         BuildLODListText(Report.GeneratedLODIndices)))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont())];
         }
         if (!Report.RemovedLODIndices.IsEmpty())
         {
             Explanation->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::Format(
-                    LOCTEXT("LODRangeRemovedExplanation", "Data and runtime mappings for {0} were removed from the active range."),
-                    BuildLODListText(Report.RemovedLODIndices)))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-            ];
+                [SNew(STextBlock)
+                     .Text(FText::Format(
+                         LOCTEXT("LODRangeRemovedExplanation", "Data and runtime mappings for {0} were removed from the active range."),
+                         BuildLODListText(Report.RemovedLODIndices)))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont())];
         }
 
         if (!Report.PreparedLODIndices.IsEmpty())
         {
             Explanation->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::Format(
-                    LOCTEXT("LODRangePreparedExplanation", "Valid DWC UV data for {0} was retained and will be reused when the update is retried."),
-                    BuildLODListText(Report.PreparedLODIndices)))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-            ];
+                [SNew(STextBlock)
+                     .Text(FText::Format(
+                         LOCTEXT("LODRangePreparedExplanation", "Valid DWC UV data for {0} was retained and will be reused when the update is retried."),
+                         BuildLODListText(Report.PreparedLODIndices)))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont())];
         }
         if (!Report.FailedLODIndices.IsEmpty())
         {
             Explanation->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::Format(
-                    LOCTEXT("LODRangeFailedExplanation", "DWC UV generation failed for {0}."),
-                    BuildLODListText(Report.FailedLODIndices)))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-                .ColorAndOpacity(ErrorColor())
-            ];
+                [SNew(STextBlock)
+                     .Text(FText::Format(
+                         LOCTEXT("LODRangeFailedExplanation", "DWC UV generation failed for {0}."),
+                         BuildLODListText(Report.FailedLODIndices)))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont())
+                     .ColorAndOpacity(ErrorColor())];
         }
 
         if (Report.bApplied)
         {
             Explanation->AddSlot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(bHasGeneration
-                    ? LOCTEXT("LODRangeGenerationPerformed", "Only LODs without reusable DWC UV data were generated.")
-                    : LOCTEXT("LODRangeNoGenerationPerformed", "No DWC UV generation was performed."))
-                .Font(MakeReportFont(10, true))
-                .ColorAndOpacity(bHasGeneration ? FSlateColor(FStyleColors::ForegroundHover) : DataUVInfoColor())
-            ];
+                [SNew(STextBlock)
+                     .Text(bHasGeneration
+                               ? LOCTEXT("LODRangeGenerationPerformed", "Only LODs without reusable DWC UV data were generated.")
+                               : LOCTEXT("LODRangeNoGenerationPerformed", "No DWC UV generation was performed."))
+                     .Font(MakeReportFont(10, true))
+                     .ColorAndOpacity(bHasGeneration ? FSlateColor(FStyleColors::ForegroundHover) : DataUVInfoColor())];
         }
         else
         {
             Explanation->AddSlot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::Format(
-                    LOCTEXT("LODRangeNotAppliedExplanation", "The requested LOD range could not be activated. The active range remains {0}."),
-                    FText::FromString(BuildLODRangeText(
-                        Report.ActiveFirstLODIndex,
-                        Report.ActiveLastLODIndex))))
-                .AutoWrapText(true)
-                .Font(MakeReportFont(10, true))
-                .ColorAndOpacity(ErrorColor())
-            ];
+                [SNew(STextBlock)
+                     .Text(FText::Format(
+                         LOCTEXT("LODRangeNotAppliedExplanation", "The requested LOD range could not be activated. The active range remains {0}."),
+                         FText::FromString(BuildLODRangeText(
+                             Report.ActiveFirstLODIndex,
+                             Report.ActiveLastLODIndex))))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont(10, true))
+                     .ColorAndOpacity(ErrorColor())];
         }
 
         Body->AddSlot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f)
-        [
-            SNew(SSeparator)
-        ];
+            [SNew(SSeparator)];
         Body->AddSlot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
-        [
-            Explanation
-        ];
+            [Explanation];
 
         if (!Report.AdditionalSummary.IsEmpty())
         {
             Body->AddSlot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(FText::FromString(Report.AdditionalSummary))
-                .AutoWrapText(true)
-                .Font(MakeReportFont())
-                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-            ];
+                [SNew(STextBlock)
+                     .Text(FText::FromString(Report.AdditionalSummary))
+                     .AutoWrapText(true)
+                     .Font(MakeReportFont())
+                     .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))];
         }
 
         if (Report.bApplied && bHasGeneration)
         {
             Body->AddSlot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f)
-            [
-                SNew(SBorder)
-                .Padding(FMargin(12.0f, 8.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-                .BorderBackgroundColor(NeutralBackground())
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("LODRangeGeneratedCount", "Generated"),
-                            FText::Format(
-                                LOCTEXT("LODRangeGeneratedFraction", "{0} of {1} required LODs"),
-                                FText::AsNumber(Report.GeneratedLODIndices.Num()),
-                                FText::AsNumber(Report.GeneratedLODIndices.Num())))
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("LODRangeReusedCount", "Reused"),
-                            FText::AsNumber(Report.ReusedLODIndices.Num()))
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
-                    [
-                        BuildSummaryLine(
-                            LOCTEXT("LODRangeStatus", "Status"),
-                            bHasWarnings
-                                ? LOCTEXT("LODRangeStatusWarnings", "Ready with warnings")
-                                : LOCTEXT("LODRangeStatusReady", "Ready"))
-                    ]
-                ]
-            ];
+                [SNew(SBorder)
+                     .Padding(FMargin(12.0f, 8.0f))
+                     .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
+                     .BorderBackgroundColor(NeutralBackground())
+                         [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("LODRangeGeneratedCount", "Generated"), FText::Format(LOCTEXT("LODRangeGeneratedFraction", "{0} of {1} required LODs"), FText::AsNumber(Report.GeneratedLODIndices.Num()), FText::AsNumber(Report.GeneratedLODIndices.Num())))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("LODRangeReusedCount", "Reused"), FText::AsNumber(Report.ReusedLODIndices.Num()))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[BuildSummaryLine(LOCTEXT("LODRangeStatus", "Status"), bHasWarnings ? LOCTEXT("LODRangeStatusWarnings", "Ready with warnings") : LOCTEXT("LODRangeStatusReady", "Ready"))]]];
         }
 
         if (!Report.LODDetails.IsEmpty())
@@ -3059,144 +1973,63 @@ namespace WCAReportDialogs
             TSharedRef<SVerticalBox> DetailsBody = SNew(SVerticalBox);
             for (const FDWCLODRangeUpdateLODDetail& Detail : Report.LODDetails)
             {
-                const TCHAR* IconName = Detail.bSucceeded
-                    ? Detail.bHasWarnings
-                        ? TEXT("Icons.WarningWithColor")
-                        : TEXT("Icons.SuccessWithColor")
-                    : TEXT("Icons.ErrorWithColor");
+                const TCHAR*      IconName = Detail.bSucceeded
+                                                 ? Detail.bHasWarnings
+                                                       ? TEXT("Icons.WarningWithColor")
+                                                       : TEXT("Icons.SuccessWithColor")
+                                                 : TEXT("Icons.ErrorWithColor");
                 const FSlateColor IconColor = ColoredStatusIconTint();
                 const FSlateColor TextColor = Detail.bSucceeded
-                    ? DataUVReadyColor()
-                    : ErrorColor();
+                                                  ? DataUVReadyColor()
+                                                  : ErrorColor();
 
                 DetailsBody->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                [
-                    SNew(SBorder)
-                    .Padding(FMargin(12.0f, 9.0f))
-                    .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-                    .BorderBackgroundColor(Detail.bSucceeded ? NeutralBackground() : ErrorBackground())
-                    [
-                        SNew(SVerticalBox)
-                        + SVerticalBox::Slot().AutoHeight()
-                        [
-                            SNew(SHorizontalBox)
-                            + SHorizontalBox::Slot().FillWidth(1.0f)
-                            [
-                                SNew(STextBlock)
-                                .Text(FText::FromString(FString::Printf(TEXT("LOD%d"), Detail.LODIndex)))
-                                .Font(MakeReportFont(10, true))
-                            ]
-                            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                            [
-                                SNew(STextBlock)
-                                .Text(Detail.bSucceeded
-                                    ? LOCTEXT("LODRangeDetailReady", "Ready")
-                                    : LOCTEXT("LODRangeDetailFailed", "Failed"))
-                                .Font(MakeReportFont(10, true))
-                                .ColorAndOpacity(TextColor)
-                            ]
-                            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)
-                            [
-                                SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)
-                                [
-                                    SNew(SImage)
-                                    .Image(FAppStyle::GetBrush(IconName))
-                                    .ColorAndOpacity(IconColor)
-                                ]
-                            ]
-                        ]
-                        + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                        [
-                            SNew(STextBlock)
-                            .Text(FText::FromString(Detail.Message))
-                            .AutoWrapText(true)
-                            .Font(MakeReportFont())
-                            .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
-                        ]
-                    ]
-                ];
+                    [SNew(SBorder)
+                         .Padding(FMargin(12.0f, 9.0f))
+                         .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
+                         .BorderBackgroundColor(Detail.bSucceeded ? NeutralBackground() : ErrorBackground())
+                             [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("LOD%d"), Detail.LODIndex))).Font(MakeReportFont(10, true))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(Detail.bSucceeded ? LOCTEXT("LODRangeDetailReady", "Ready") : LOCTEXT("LODRangeDetailFailed", "Failed")).Font(MakeReportFont(10, true)).ColorAndOpacity(TextColor)] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f, 0.0f, 0.0f)[SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)[SNew(SImage).Image(FAppStyle::GetBrush(IconName)).ColorAndOpacity(IconColor)]]] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(FText::FromString(Detail.Message)).AutoWrapText(true).Font(MakeReportFont()).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]]];
             }
 
             Body->AddSlot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f)
-            [
-                SNew(SExpandableArea)
-                .InitiallyCollapsed(!bHasFailure)
-                .HeaderContent()
-                [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT("LODRangeDetailsHeading", "LOD Details"))
-                    .Font(MakeReportFont(10, true))
-                ]
-                .BodyContent()
-                [
-                    DetailsBody
-                ]
-            ];
+                [SNew(SExpandableArea)
+                     .InitiallyCollapsed(!bHasFailure)
+                     .HeaderContent()
+                         [SNew(STextBlock)
+                              .Text(LOCTEXT("LODRangeDetailsHeading", "LOD Details"))
+                              .Font(MakeReportFont(10, true))]
+                     .BodyContent()
+                         [DetailsBody]];
         }
 
         TSharedRef<SWindow> DialogWindow = SNew(SWindow)
-            .Title(Report.bApplied
-                ? LOCTEXT("LODRangeUpdatedTitle", "LOD Range Updated")
-                : LOCTEXT("LODRangeNotAppliedTitle", "LOD Range Update Not Applied"))
-            .ClientSize(FVector2D(570.0f, 520.0f))
-            .SizingRule(ESizingRule::UserSized)
-            .SupportsMaximize(false)
-            .SupportsMinimize(false);
+                                               .Title(Report.bApplied
+                                                          ? LOCTEXT("LODRangeUpdatedTitle", "LOD Range Updated")
+                                                          : LOCTEXT("LODRangeNotAppliedTitle", "LOD Range Update Not Applied"))
+                                               .ClientSize(FVector2D(570.0f, 520.0f))
+                                               .SizingRule(ESizingRule::UserSized)
+                                               .SupportsMaximize(false)
+                                               .SupportsMinimize(false);
 
         DialogWindow->SetContent(
             SNew(SBorder)
-            .Padding(0.0f)
-            .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
-            [
-                SNew(SVerticalBox)
-                + SVerticalBox::Slot().AutoHeight().Padding(16.0f, 14.0f, 16.0f, 12.0f)
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 2.0f, 10.0f, 0.0f)
-                    [
-                        SNew(SImage)
-                        .Image(FAppStyle::GetBrush(bHasFailure
-                            ? TEXT("Icons.ErrorWithColor")
-                            : bHasWarnings
-                                ? TEXT("Icons.WarningWithColor")
-                                : TEXT("Icons.InfoWithColor")))
-                        .ColorAndOpacity(!bHasFailure && !bHasWarnings
-                            ? DataUVInfoColor()
-                            : ColoredStatusIconTint())
-                    ]
-                    + SHorizontalBox::Slot().FillWidth(1.0f)
-                    [
-                        SNew(STextBlock)
-                        .Text(Report.bApplied
-                            ? LOCTEXT("LODRangeUpdatedHeader", "LOD Range Updated")
-                            : LOCTEXT("LODRangeNotAppliedHeader", "LOD Range Update Not Applied"))
-                        .Font(MakeReportFont(10, true))
-                    ]
-                ]
-                + SVerticalBox::Slot().FillHeight(1.0f).Padding(16.0f, 0.0f, 16.0f, 0.0f)
-                [
-                    SNew(SScrollBox)
-                    + SScrollBox::Slot().Padding(0.0f, 0.0f, 12.0f, 0.0f)
-                    [
-                        Body
-                    ]
-                ]
-                + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(16.0f, 12.0f, 16.0f, 16.0f)
-                [
-                    SNew(SButton)
-                    .ContentPadding(FMargin(14.0f, 5.0f))
-                    .Text(LOCTEXT("LODRangeClose", "Close"))
-                    .OnClicked_Lambda([DialogWindow]()
-                    {
+                .Padding(0.0f)
+                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+                    [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(16.0f, 14.0f, 16.0f, 12.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 2.0f, 10.0f, 0.0f)[SNew(SImage).Image(FAppStyle::GetBrush(bHasFailure ? TEXT("Icons.ErrorWithColor") : bHasWarnings ? TEXT("Icons.WarningWithColor")
+                                                                                                                                                                                                                                                                                                                               : TEXT("Icons.InfoWithColor")))
+                                                                                                                                                                                                                                  .ColorAndOpacity(!bHasFailure && !bHasWarnings ? DataUVInfoColor() : ColoredStatusIconTint())] +
+                                                                                                                SHorizontalBox::Slot().FillWidth(1.0f)[SNew(STextBlock).Text(Report.bApplied ? LOCTEXT("LODRangeUpdatedHeader", "LOD Range Updated") : LOCTEXT("LODRangeNotAppliedHeader", "LOD Range Update Not Applied")).Font(MakeReportFont(10, true))]] +
+                     SVerticalBox::Slot().FillHeight(1.0f).Padding(16.0f, 0.0f, 16.0f, 0.0f)
+                         [SNew(SScrollBox) + SScrollBox::Slot().Padding(0.0f, 0.0f, 12.0f, 0.0f)
+                                                 [Body]] +
+                     SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(16.0f, 12.0f, 16.0f, 16.0f)[SNew(SButton).ContentPadding(FMargin(14.0f, 5.0f)).Text(LOCTEXT("LODRangeClose", "Close")).OnClicked_Lambda([DialogWindow]()
+                                                                                                                                                                                                                            {
                         DialogWindow->RequestDestroyWindow();
-                        return FReply::Handled();
-                    })
-                ]
-            ]);
+                        return FReply::Handled(); })]]);
 
         FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
     }
 
-}
+} // namespace WCAReportDialogs
 
 #undef LOCTEXT_NAMESPACE

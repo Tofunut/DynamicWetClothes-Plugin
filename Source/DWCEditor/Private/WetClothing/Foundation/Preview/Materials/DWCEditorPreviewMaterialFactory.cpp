@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialFactory.h"
 
 #include "MaterialEditingLibrary.h"
@@ -15,7 +16,7 @@
 
 namespace
 {
-    constexpr int32 MaxGpuSkinUVChannelCount = 4;
+    constexpr int32        MaxGpuSkinUVChannelCount = 4;
     constexpr const TCHAR* PreviewEvaluateSurfaceAppearanceFunctionName = TEXT("MF_DWC_EvaluateSurfaceAppearance");
 
     bool ContainsGeneratedDwcSurfaceGraph(const UMaterial* Material)
@@ -42,9 +43,9 @@ namespace
 
     bool ConnectMaterialProperty(
         const FDWCMaterialGraphPin& Pin,
-        const EMaterialProperty Property,
-        const TCHAR* PropertyName,
-        FString& OutErrorMessage)
+        const EMaterialProperty     Property,
+        const TCHAR*                PropertyName,
+        FString&                    OutErrorMessage)
     {
         if (!Pin.IsValid() ||
             !UMaterialEditingLibrary::ConnectMaterialProperty(Pin.Expression, Pin.OutputName, Property))
@@ -56,11 +57,11 @@ namespace
         return true;
     }
 
-}
+} // namespace
 
 UMaterial* FDWCEditorPreviewMaterialFactory::BuildTransientBaseMaterialGraph(
     const FDWCEditorPreviewMaterialRequest& Request,
-    FString& OutErrorMessage)
+    FString&                                OutErrorMessage)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorPreviewMaterialFactory_BuildTransientBaseMaterial);
 
@@ -188,7 +189,7 @@ UMaterial* FDWCEditorPreviewMaterialFactory::BuildTransientBaseMaterialGraph(
 
 bool FDWCEditorPreviewMaterialFactory::BeginTransientBaseMaterialCompilation(
     UMaterial* TransientBaseMaterial,
-    FString& OutErrorMessage)
+    FString&   OutErrorMessage)
 {
     OutErrorMessage.Reset();
     if (TransientBaseMaterial == nullptr)
@@ -215,7 +216,7 @@ bool FDWCEditorPreviewMaterialFactory::BeginTransientBaseMaterialCompilation(
 
 EDWCEditorPreviewMaterialState FDWCEditorPreviewMaterialFactory::PollTransientBaseMaterialCompilation(
     UMaterial* TransientBaseMaterial,
-    FString& OutErrorMessage)
+    FString&   OutErrorMessage)
 {
     OutErrorMessage.Reset();
     if (TransientBaseMaterial == nullptr)
@@ -298,8 +299,8 @@ void FDWCEditorPreviewMaterialFactory::CancelTransientBaseMaterialCompilation(
 
 UMaterialInstanceConstant* FDWCEditorPreviewMaterialFactory::BuildTransientParent(
     UMaterialInterface* SourceMaterial,
-    UMaterial* TransientBaseMaterial,
-    FString& OutErrorMessage)
+    UMaterial*          TransientBaseMaterial,
+    FString&            OutErrorMessage)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorPreviewMaterialFactory_BuildTransientParent);
 
@@ -333,8 +334,8 @@ UMaterialInstanceConstant* FDWCEditorPreviewMaterialFactory::BuildTransientParen
 
 UMaterialInstanceDynamic* FDWCEditorPreviewMaterialFactory::BuildSlotMID(
     UMaterialInterface* TransientParent,
-    UObject* Outer,
-    FString& OutErrorMessage)
+    UObject*            Outer,
+    FString&            OutErrorMessage)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorPreviewMaterialFactory_BuildSlotMID);
 
@@ -345,7 +346,7 @@ UMaterialInstanceDynamic* FDWCEditorPreviewMaterialFactory::BuildSlotMID(
         return nullptr;
     }
 
-    UObject* EffectiveOuter = Outer != nullptr ? Outer : GetTransientPackage();
+    UObject*                  EffectiveOuter = Outer != nullptr ? Outer : GetTransientPackage();
     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(TransientParent, EffectiveOuter);
     if (MID == nullptr)
     {

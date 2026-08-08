@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WCAUVPreviewDataBuilder.h"
 
 #include "DataAssets/WetClothingAssetSetupData.h"
@@ -8,7 +9,7 @@
 
 void FWCAUVPreviewDataBuilder::BuildFromConnectivity(
     const TArray<FWCAUVPreviewSourceTriangle>& SourceTriangles,
-    TArray<FWetClothingAssetUVIsland>& OutIslands)
+    TArray<FWetClothingAssetUVIsland>&         OutIslands)
 {
     OutIslands.Reset();
 
@@ -47,7 +48,7 @@ void FWCAUVPreviewDataBuilder::BuildFromConnectivity(
             }
 
             const FWCAUVPreviewSourceTriangle& SourceTriangle = SourceTriangles[TriangleInputIndex];
-            FWetClothingAssetUVTriangle& Triangle = Island.UVTriangles.AddDefaulted_GetRef();
+            FWetClothingAssetUVTriangle&       Triangle = Island.UVTriangles.AddDefaulted_GetRef();
             Triangle.TriangleID = SourceTriangle.TriangleID;
             Triangle.MaterialSlotIndex = SourceTriangle.MaterialSlotIndex;
             Triangle.UVIslandID = Island.UVIslandID;
@@ -64,11 +65,11 @@ void FWCAUVPreviewDataBuilder::BuildFromConnectivity(
 }
 
 bool FWCAUVPreviewDataBuilder::BuildFromStoredTopology(
-    const TArray<FWCAUVPreviewSourceTriangle>& SourceTriangles,
-    const int32 MaterialSlotIndex,
+    const TArray<FWCAUVPreviewSourceTriangle>&  SourceTriangles,
+    const int32                                 MaterialSlotIndex,
     const TArray<FDWCOriginalUVIslandTopology>& Topology,
-    TArray<FWetClothingAssetUVIsland>& OutIslands,
-    FString* OutErrorMessage)
+    TArray<FWetClothingAssetUVIsland>&          OutIslands,
+    FString*                                    OutErrorMessage)
 {
     OutIslands.Reset();
 
@@ -101,7 +102,7 @@ bool FWCAUVPreviewDataBuilder::BuildFromStoredTopology(
             }
 
             const FWCAUVPreviewSourceTriangle& SourceTriangle = SourceTriangles[*SourceIndex];
-            FWetClothingAssetUVTriangle& Triangle = Island.UVTriangles.AddDefaulted_GetRef();
+            FWetClothingAssetUVTriangle&       Triangle = Island.UVTriangles.AddDefaulted_GetRef();
             Triangle.TriangleID = SourceTriangle.TriangleID;
             Triangle.MaterialSlotIndex = SourceTriangle.MaterialSlotIndex;
             Triangle.UVIslandID = Island.UVIslandID;
@@ -124,9 +125,7 @@ bool FWCAUVPreviewDataBuilder::BuildFromStoredTopology(
     }
 
     OutIslands.Sort([](const FWetClothingAssetUVIsland& A, const FWetClothingAssetUVIsland& B)
-    {
-        return A.UVIslandID < B.UVIslandID;
-    });
+                    { return A.UVIslandID < B.UVIslandID; });
 
     if (OutIslands.IsEmpty() && !SourceTriangles.IsEmpty())
     {

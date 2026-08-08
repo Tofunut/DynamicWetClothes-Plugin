@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -13,8 +14,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCTransparencyLiveStrokeLayerTest::RunTest(const FString& Parameters)
 {
     FDWCTransparencyLiveStrokeLayer Layer;
-    const FGuid StrokeGuid = FGuid::NewGuid();
-    const FIntPoint Resolution(4096, 4096);
+    const FGuid                     StrokeGuid = FGuid::NewGuid();
+    const FIntPoint                 Resolution(4096, 4096);
     Layer.Begin(StrokeGuid, Resolution);
 
     FDWCTransparencyBrushSample Sample;

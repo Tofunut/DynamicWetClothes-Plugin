@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Implements the Slate thumbnail widget that draws a material slot's UV triangles and representative texture.
  */
@@ -21,8 +22,8 @@ namespace SWCAMaterialSlotPreviewPrivate
         auto MakePointKey = [](const FVector2D& Point) -> uint32
         {
             constexpr float QuantizeScale = 4096.0f;
-            const uint32 X = static_cast<uint32>(FMath::Clamp(FMath::RoundToInt(Point.X * QuantizeScale), 0, 65535));
-            const uint32 Y = static_cast<uint32>(FMath::Clamp(FMath::RoundToInt(Point.Y * QuantizeScale), 0, 65535));
+            const uint32    X = static_cast<uint32>(FMath::Clamp(FMath::RoundToInt(Point.X * QuantizeScale), 0, 65535));
+            const uint32    Y = static_cast<uint32>(FMath::Clamp(FMath::RoundToInt(Point.Y * QuantizeScale), 0, 65535));
             return (X << 16) | Y;
         };
 
@@ -70,9 +71,9 @@ void SWCAMaterialSlotPreview::BuildPaintCache(
         return;
     }
 
-    const int32 SampleCount = FMath::Min(InTriangles.Num(), MaxMaterialSlotPreviewTriangles);
+    const int32  SampleCount = FMath::Min(InTriangles.Num(), MaxMaterialSlotPreviewTriangles);
     const double SampleStride = static_cast<double>(InTriangles.Num()) / static_cast<double>(SampleCount);
-    const FQuat ViewRotation = FRotator(-18.0f, -32.0f, 0.0f).Quaternion();
+    const FQuat  ViewRotation = FRotator(-18.0f, -32.0f, 0.0f).Quaternion();
 
     struct FProjectedTriangle
     {
@@ -82,20 +83,20 @@ void SWCAMaterialSlotPreview::BuildPaintCache(
 
     TArray<FProjectedTriangle> ProjectedTriangles;
     ProjectedTriangles.Reserve(SampleCount);
-    bool bHasBounds = false;
+    bool      bHasBounds = false;
     FVector2D MinPoint = FVector2D::ZeroVector;
     FVector2D MaxPoint = FVector2D::ZeroVector;
 
     for (int32 SampleIndex = 0; SampleIndex < SampleCount; ++SampleIndex)
     {
         const int32 TriangleIndex = FMath::Min(
-            FMath::FloorToInt(static_cast<double>(SampleIndex) * SampleStride),
+            IntCastChecked<int32>(FMath::FloorToInt(static_cast<double>(SampleIndex) * SampleStride)),
             InTriangles.Num() - 1);
         const FWetClothingAssetUVTriangle& Triangle = InTriangles[TriangleIndex];
-        FProjectedTriangle& Projected = ProjectedTriangles.AddDefaulted_GetRef();
+        FProjectedTriangle&                Projected = ProjectedTriangles.AddDefaulted_GetRef();
         for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
         {
-            const FVector RotatedPosition = ViewRotation.RotateVector(Triangle.LocalPositions[CornerIndex]);
+            const FVector   RotatedPosition = ViewRotation.RotateVector(Triangle.LocalPositions[CornerIndex]);
             const FVector2D Point(RotatedPosition.Y, -RotatedPosition.Z);
             Projected.Positions[CornerIndex] = Point;
             Projected.UVs[CornerIndex] = Triangle.UVs[CornerIndex];
@@ -126,8 +127,8 @@ void SWCAMaterialSlotPreview::BuildPaintCache(
 
     FLinearColor MinSampleColor(FLT_MAX, FLT_MAX, FLT_MAX, 1.0f);
     FLinearColor MaxSampleColor(-FLT_MAX, -FLT_MAX, -FLT_MAX, 1.0f);
-    double SampleSaturationSum = 0.0;
-    int32 TextureSampleCount = 0;
+    double       SampleSaturationSum = 0.0;
+    int32        TextureSampleCount = 0;
     TSet<uint64> EdgeKeys;
 
     CachedTriangles.Reserve(ProjectedTriangles.Num());
@@ -146,8 +147,8 @@ void SWCAMaterialSlotPreview::BuildPaintCache(
             FLinearColor SampleColor(0.28f, 0.28f, 0.28f, 1.0f);
             if (PreviewTextureData.IsValid())
             {
-                const int32 SampleX = FMath::RoundToInt(Cached.UVs[CornerIndex].X * (PreviewTextureData.Width - 1));
-                const int32 SampleY = FMath::RoundToInt((1.0f - Cached.UVs[CornerIndex].Y) * (PreviewTextureData.Height - 1));
+                const int32 SampleX = IntCastChecked<int32>(FMath::RoundToInt(Cached.UVs[CornerIndex].X * (PreviewTextureData.Width - 1)));
+                const int32 SampleY = IntCastChecked<int32>(FMath::RoundToInt((1.0f - Cached.UVs[CornerIndex].Y) * (PreviewTextureData.Height - 1)));
                 SampleColor = PreviewTextureData.GetLinearColor(SampleX, SampleY);
                 MinSampleColor.R = FMath::Min(MinSampleColor.R, SampleColor.R);
                 MinSampleColor.G = FMath::Min(MinSampleColor.G, SampleColor.G);
@@ -161,12 +162,12 @@ void SWCAMaterialSlotPreview::BuildPaintCache(
             Cached.Colors[CornerIndex] = SampleColor.ToFColor(true);
         }
 
-        const int32 EdgeCorners[3][2] = { {0, 1}, {1, 2}, {2, 0} };
+        const int32 EdgeCorners[3][2] = { { 0, 1 }, { 1, 2 }, { 2, 0 } };
         for (const auto& EdgeCorner : EdgeCorners)
         {
             const FVector2D& A = Cached.NormalizedPositions[EdgeCorner[0]];
             const FVector2D& B = Cached.NormalizedPositions[EdgeCorner[1]];
-            const uint64 EdgeKey = MakeEdgeKey(A, B);
+            const uint64     EdgeKey = MakeEdgeKey(A, B);
             if (!EdgeKeys.Contains(EdgeKey))
             {
                 EdgeKeys.Add(EdgeKey);
@@ -188,14 +189,13 @@ void SWCAMaterialSlotPreview::BuildPaintCache(
     }
 }
 
-
 void SWCAMaterialSlotPreview::UpdateSlateGeometryCache(const FGeometry& AllottedGeometry) const
 {
-    const FVector2D LocalSize = AllottedGeometry.GetLocalSize();
+    const FVector2D             LocalSize = AllottedGeometry.GetLocalSize();
     const FSlateRenderTransform RenderTransform = AllottedGeometry.GetAccumulatedRenderTransform();
-    const FVector2f TransformOrigin = TransformPoint(RenderTransform, FVector2f(0.0f, 0.0f));
-    const FVector2f TransformUnitX = TransformPoint(RenderTransform, FVector2f(1.0f, 0.0f));
-    const FVector2f TransformUnitY = TransformPoint(RenderTransform, FVector2f(0.0f, 1.0f));
+    const FVector2f             TransformOrigin = TransformPoint(RenderTransform, FVector2f(0.0f, 0.0f));
+    const FVector2f             TransformUnitX = TransformPoint(RenderTransform, FVector2f(1.0f, 0.0f));
+    const FVector2f             TransformUnitY = TransformPoint(RenderTransform, FVector2f(0.0f, 1.0f));
 
     const bool bSameGeometry =
         bSlateGeometryCacheValid &&
@@ -222,15 +222,15 @@ void SWCAMaterialSlotPreview::UpdateSlateGeometryCache(const FGeometry& Allotted
         return;
     }
 
-    const float Padding = 5.0f;
+    const float     Padding = 5.0f;
     const FVector2D Available(
         FMath::Max(1.0f, LocalSize.X - Padding * 2.0f),
         FMath::Max(1.0f, LocalSize.Y - Padding * 2.0f));
     const float UniformScale = FMath::Max(
         0.01f,
-        FMath::Min(
+        static_cast<float>(FMath::Min(
             Available.X / CachedProjectedBoundsSize.X,
-            Available.Y / CachedProjectedBoundsSize.Y));
+            Available.Y / CachedProjectedBoundsSize.Y)));
     const FVector2D ScaledSize = CachedProjectedBoundsSize * UniformScale;
     const FVector2D Offset(
         (LocalSize.X - ScaledSize.X) * 0.5f,
@@ -277,13 +277,13 @@ FVector2D SWCAMaterialSlotPreview::ComputeDesiredSize(float LayoutScaleMultiplie
 }
 
 int32 SWCAMaterialSlotPreview::OnPaint(
-    const FPaintArgs& Args,
-    const FGeometry& AllottedGeometry,
-    const FSlateRect& MyCullingRect,
+    const FPaintArgs&        Args,
+    const FGeometry&         AllottedGeometry,
+    const FSlateRect&        MyCullingRect,
     FSlateWindowElementList& OutDrawElements,
-    int32 LayerId,
-    const FWidgetStyle& InWidgetStyle,
-    bool bParentEnabled) const
+    int32                    LayerId,
+    const FWidgetStyle&      InWidgetStyle,
+    bool                     bParentEnabled) const
 {
     const FSlateBrush* WhiteBrush = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
 

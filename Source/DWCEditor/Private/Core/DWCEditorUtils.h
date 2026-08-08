@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,7 +11,7 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnDWCEditorAssetSaveAttemptFinished, UObje
 
 namespace DWCEditorUtils
 {
-    bool SaveAsset(UObject* Asset, bool bPrepareRuntimeData = true);
-    FOnDWCEditorAssetSaved& OnAssetSaved();
+    bool                                  SaveAsset(UObject* Asset, bool bPrepareRuntimeData = true);
+    FOnDWCEditorAssetSaved&               OnAssetSaved();
     FOnDWCEditorAssetSaveAttemptFinished& OnAssetSaveAttemptFinished();
 } // namespace DWCEditorUtils

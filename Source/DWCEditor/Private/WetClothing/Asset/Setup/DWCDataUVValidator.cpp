@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCDataUVValidator.h"
 
 #include "WetClothing/Foundation/UV/DWCUVGeometry.h"
@@ -7,25 +8,25 @@ namespace DWCDataUVValidatorPrivate
 {
     struct FPackedTriangleRecord
     {
-        int32 SourceTriangleIndex = INDEX_NONE;
-        int32 MeshTriangleID = INDEX_NONE;
-        int32 MaterialSlotIndex = INDEX_NONE;
-        int32 ChartIndex = INDEX_NONE;
+        int32     SourceTriangleIndex = INDEX_NONE;
+        int32     MeshTriangleID = INDEX_NONE;
+        int32     MaterialSlotIndex = INDEX_NONE;
+        int32     ChartIndex = INDEX_NONE;
         FVector2D UVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
-        FBox2D Bounds = FBox2D(ForceInit);
+        FBox2D    Bounds = FBox2D(ForceInit);
     };
-}
+} // namespace DWCDataUVValidatorPrivate
 
 using DWCDataUVValidatorPrivate::FPackedTriangleRecord;
 
 bool FDWCDataUVValidator::Validate(
     const TArray<FDWCDataUVTriangle>& Triangles,
-    const TArray<FDWCDataUVChart>& Charts,
-    const TMap<int32, FVector2f>& PackedUVByVertexInstance,
+    const TArray<FDWCDataUVChart>&    Charts,
+    const TMap<int32, FVector2f>&     PackedUVByVertexInstance,
     const int32 /*OutputResolution*/,
-    TSet<int32>& OutProblemMaterialSlots,
-    FString& OutError,
-    FDWCDataUVValidationFailure* OutFailure,
+    TSet<int32>&                           OutProblemMaterialSlots,
+    FString&                               OutError,
+    FDWCDataUVValidationFailure*           OutFailure,
     TArray<FDWCDataUVValidationExclusion>* OutDegenerateExclusions)
 {
     OutProblemMaterialSlots.Reset();
@@ -40,11 +41,11 @@ bool FDWCDataUVValidator::Validate(
     }
 
     TMap<int32, TSet<int32>> TriangleIndicesByMaterial;
-    TMap<int32, int32> ChartIndexByTriangle;
+    TMap<int32, int32>       ChartIndexByTriangle;
     for (int32 ChartIndex = 0; ChartIndex < Charts.Num(); ++ChartIndex)
     {
         const FDWCDataUVChart& Chart = Charts[ChartIndex];
-        TSet<int32>& TriangleSet = TriangleIndicesByMaterial.FindOrAdd(Chart.MaterialSlotIndex);
+        TSet<int32>&           TriangleSet = TriangleIndicesByMaterial.FindOrAdd(Chart.MaterialSlotIndex);
         for (const int32 TriangleIndex : Chart.TriangleIndices)
         {
             if (const int32* ExistingChartIndex = ChartIndexByTriangle.Find(TriangleIndex))
@@ -76,7 +77,7 @@ bool FDWCDataUVValidator::Validate(
             }
 
             const FDWCDataUVTriangle& Triangle = Triangles[TriangleIndex];
-            FPackedTriangleRecord PackedTriangle;
+            FPackedTriangleRecord     PackedTriangle;
             PackedTriangle.SourceTriangleIndex = TriangleIndex;
             PackedTriangle.MeshTriangleID = Triangle.TriangleID.GetValue();
             PackedTriangle.MaterialSlotIndex = MaterialPair.Key;
@@ -107,7 +108,7 @@ bool FDWCDataUVValidator::Validate(
             }
 
             constexpr double RangeTolerance = 1.0e-6;
-            bool bValidCoordinates = true;
+            bool             bValidCoordinates = true;
             for (const FVector2D& UV : PackedTriangle.UVs)
             {
                 bValidCoordinates &= FDWCUVGeometry::IsFiniteReasonableUV(UV) &&
@@ -176,22 +177,22 @@ bool FDWCDataUVValidator::Validate(
 
     for (const TPair<int32, TArray<FPackedTriangleRecord>>& MaterialPair : PackedTrianglesByMaterial)
     {
-        const int32 MaterialSlotIndex = MaterialPair.Key;
+        const int32                          MaterialSlotIndex = MaterialPair.Key;
         const TArray<FPackedTriangleRecord>& PackedTriangles = MaterialPair.Value;
         if (PackedTriangles.Num() < 2)
         {
             continue;
         }
 
-        const int32 GridDimension = FMath::Clamp(FMath::CeilToInt(FMath::Sqrt(static_cast<double>(PackedTriangles.Num()))), 1, 64);
+        const int32                GridDimension = IntCastChecked<int32>(FMath::Clamp(FMath::CeilToInt(FMath::Sqrt(static_cast<double>(PackedTriangles.Num()))), 1, 64));
         TMap<int32, TArray<int32>> CellToTriangleIndices;
         for (int32 LocalIndex = 0; LocalIndex < PackedTriangles.Num(); ++LocalIndex)
         {
             const FBox2D& Bounds = PackedTriangles[LocalIndex].Bounds;
-            const int32 MinCellX = FMath::Clamp(FMath::FloorToInt(Bounds.Min.X * GridDimension), 0, GridDimension - 1);
-            const int32 MaxCellX = FMath::Clamp(FMath::FloorToInt(Bounds.Max.X * GridDimension), 0, GridDimension - 1);
-            const int32 MinCellY = FMath::Clamp(FMath::FloorToInt(Bounds.Min.Y * GridDimension), 0, GridDimension - 1);
-            const int32 MaxCellY = FMath::Clamp(FMath::FloorToInt(Bounds.Max.Y * GridDimension), 0, GridDimension - 1);
+            const int32   MinCellX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Bounds.Min.X * GridDimension), 0, GridDimension - 1));
+            const int32   MaxCellX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Bounds.Max.X * GridDimension), 0, GridDimension - 1));
+            const int32   MinCellY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Bounds.Min.Y * GridDimension), 0, GridDimension - 1));
+            const int32   MaxCellY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Bounds.Max.Y * GridDimension), 0, GridDimension - 1));
 
             for (int32 CellY = MinCellY; CellY <= MaxCellY; ++CellY)
             {
@@ -205,7 +206,7 @@ bool FDWCDataUVValidator::Validate(
         TSet<uint64> CandidatePairs;
         for (const TPair<int32, TArray<int32>>& CellPair : CellToTriangleIndices)
         {
-            const TArray<int32>& LocalTriangles = CellPair.Value;
+            const TArray<int32>&       LocalTriangles = CellPair.Value;
             TMap<int32, TArray<int32>> TriangleIndicesByChart;
             for (const int32 LocalTriangleIndex : LocalTriangles)
             {
@@ -238,8 +239,8 @@ bool FDWCDataUVValidator::Validate(
 
         for (const uint64 PairKey : CandidatePairs)
         {
-            const int32 LocalA = static_cast<int32>(PairKey >> 32);
-            const int32 LocalB = static_cast<int32>(PairKey & 0xffffffffu);
+            const int32                  LocalA = static_cast<int32>(PairKey >> 32);
+            const int32                  LocalB = static_cast<int32>(PairKey & 0xffffffffu);
             const FPackedTriangleRecord& A = PackedTriangles[LocalA];
             const FPackedTriangleRecord& B = PackedTriangles[LocalB];
             if (!A.Bounds.Intersect(B.Bounds))

@@ -1,3 +1,5 @@
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 using UnrealBuildTool;
 
 public class DWCDemo : ModuleRules

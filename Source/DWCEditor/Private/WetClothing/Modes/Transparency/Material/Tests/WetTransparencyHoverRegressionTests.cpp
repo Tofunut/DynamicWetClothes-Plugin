@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -56,18 +57,18 @@ namespace
     bool IsTestIslandPixel(const FDWCTransparencyAutoBakeResult& Result, const int32 PixelIndex)
     {
         return Result.OuterIslandIDBuffer.IsValidIndex(PixelIndex) &&
-            FDWCTransparencyAutoBakeResult::MatchesOuterIslandID(
-                Result.OuterIslandIDBuffer[PixelIndex],
-                HoverTestIsland);
+               FDWCTransparencyAutoBakeResult::MatchesOuterIslandID(
+                   Result.OuterIslandIDBuffer[PixelIndex],
+                   HoverTestIsland);
     }
 
     float ComputeHoverWeight(
         const FDWCTransparencyBrushSample& Sample,
-        const float Falloff,
-        const FIntPoint Resolution,
-        const int32 X,
-        const int32 Y,
-        const bool bWrap)
+        const float                        Falloff,
+        const FIntPoint                    Resolution,
+        const int32                        X,
+        const int32                        Y,
+        const bool                         bWrap)
     {
         FVector2D Delta(
             (X + 0.5) / static_cast<double>(Resolution.X) - Sample.PositionUV.X,
@@ -85,16 +86,16 @@ namespace
         const float ClampedFalloff = FMath::Clamp(Falloff, 0.0f, 1.0f);
         const float InnerRadius = 1.0f - ClampedFalloff;
         const float RadialWeight = ClampedFalloff <= 0.00001f || Distance <= InnerRadius
-            ? 1.0f
-            : 1.0f - FMath::SmoothStep(InnerRadius, 1.0f, Distance);
+                                       ? 1.0f
+                                       : 1.0f - FMath::SmoothStep(InnerRadius, 1.0f, Distance);
         return FMath::Clamp(RadialWeight * FMath::Max(Sample.Strength, 0.0f), 0.0f, 1.0f);
     }
 
     void GatherStrokeTiles(
-        const FDWCTransparencyBrushSample& Sample,
-        const FIntPoint Resolution,
+        const FDWCTransparencyBrushSample&  Sample,
+        const FIntPoint                     Resolution,
         const EDWCTransparencyUVAddressMode AddressMode,
-        TArray<FIntPoint>& OutTiles)
+        TArray<FIntPoint>&                  OutTiles)
     {
         TArray<FIntRect> Regions;
         FDWCTransparencyBrushRasterizer::BuildSampleRegions(Sample, Resolution, AddressMode, Regions);
@@ -110,8 +111,8 @@ namespace
 
     bool RasterizeAlpha(
         const FDWCTransparencyAutoBakeResult& Result,
-        const FDWCTransparencyBrushStroke& Stroke,
-        FDWCTransparencyAlphaTileStore& Store)
+        const FDWCTransparencyBrushStroke&    Stroke,
+        FDWCTransparencyAlphaTileStore&       Store)
     {
         TArray<FIntPoint> OutputTiles;
         GatherStrokeTiles(Stroke.Samples[0], Result.Resolution, Stroke.UVAddressMode, OutputTiles);
@@ -126,10 +127,10 @@ namespace
     }
 
     bool RasterizeRevealColor(
-        const FDWCTransparencyAutoBakeResult& Result,
+        const FDWCTransparencyAutoBakeResult&    Result,
         const FDWCTransparencyRevealColorStroke& Stroke,
-        const FLinearColor& BaseColor,
-        FDWCTransparencyRevealColorTileStore& Store)
+        const FLinearColor&                      BaseColor,
+        FDWCTransparencyRevealColorTileStore&    Store)
     {
         TArray<FIntPoint> OutputTiles;
         GatherStrokeTiles(Stroke.Samples[0], Result.Resolution, Stroke.UVAddressMode, OutputTiles);
@@ -144,7 +145,7 @@ namespace
     }
 
     float ResolveAlpha(const FDWCTransparencyAutoBakeResult& Result,
-        const FDWCTransparencyAlphaTileStore& Store, const int32 PixelIndex)
+                       const FDWCTransparencyAlphaTileStore& Store, const int32 PixelIndex)
     {
         return FDWCTransparencyBrushRasterizer::ResolveEditedAlpha(Result, Store, PixelIndex);
     }
@@ -152,9 +153,9 @@ namespace
     float ComputeSmoothAlpha(
         const FDWCTransparencyAutoBakeResult& Result,
         const FDWCTransparencyAlphaTileStore& Store,
-        const int32 X,
-        const int32 Y,
-        const bool bWrap)
+        const int32                           X,
+        const int32                           Y,
+        const bool                            bWrap)
     {
         float Sum = 0.0f;
         int32 Count = 0;
@@ -188,8 +189,8 @@ namespace
 
     uint64 FindCounter(
         const TArray<FDWCEditorPreviewOperationCounter>& Counters,
-        const TCHAR* Name,
-        const bool bBytes)
+        const TCHAR*                                     Name,
+        const bool                                       bBytes)
     {
         const FDWCEditorPreviewOperationCounter* Counter = Counters.FindByPredicate(
             [Name](const FDWCEditorPreviewOperationCounter& Candidate)
@@ -198,7 +199,7 @@ namespace
             });
         return Counter != nullptr ? (bBytes ? Counter->Bytes : Counter->Count) : MAX_uint64;
     }
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyMaterialHoverAlphaParityTest,
@@ -207,14 +208,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCTransparencyMaterialHoverAlphaParityTest::RunTest(const FString&)
 {
-    const FIntPoint Resolution(16, 16);
-    const FDWCTransparencyAutoBakeResult Result = BuildHoverTestResult(Resolution);
+    const FIntPoint                         Resolution(16, 16);
+    const FDWCTransparencyAutoBakeResult    Result = BuildHoverTestResult(Resolution);
     const TArray<EDWCTransparencyBrushMode> Modes = {
         EDWCTransparencyBrushMode::Apply,
         EDWCTransparencyBrushMode::SetValue,
         EDWCTransparencyBrushMode::Erase,
         EDWCTransparencyBrushMode::ResetToAuto,
-        EDWCTransparencyBrushMode::Smooth};
+        EDWCTransparencyBrushMode::Smooth
+    };
 
     for (const EDWCTransparencyBrushMode Mode : Modes)
     {
@@ -235,18 +237,18 @@ bool FDWCTransparencyMaterialHoverAlphaParityTest::RunTest(const FString&)
         TestTrue(TEXT("The parity fixture seed stroke rasterizes"), RasterizeAlpha(Result, Seed, Store));
 
         FDWCTransparencyAlphaTileStore Before = Store;
-        FDWCTransparencyBrushStroke Stroke;
+        FDWCTransparencyBrushStroke    Stroke;
         Stroke.MaterialSlotIndex = 0;
         Stroke.UVAddressMode = Mode == EDWCTransparencyBrushMode::Apply
-            ? EDWCTransparencyUVAddressMode::Wrap
-            : EDWCTransparencyUVAddressMode::Clamp;
+                                   ? EDWCTransparencyUVAddressMode::Wrap
+                                   : EDWCTransparencyUVAddressMode::Clamp;
         Stroke.BrushMode = Mode;
         Stroke.Falloff = 0.6f;
         Stroke.TargetAlpha = 0.27f;
         FDWCTransparencyBrushSample& Sample = Stroke.Samples.AddDefaulted_GetRef();
         Sample.PositionUV = Mode == EDWCTransparencyBrushMode::Apply
-            ? FVector2D(0.98, 0.08)
-            : FVector2D(0.5, 0.5);
+                                ? FVector2D(0.98, 0.08)
+                                : FVector2D(0.5, 0.5);
         Sample.UVIslandID = HoverTestIsland;
         Sample.RadiusUV = Mode == EDWCTransparencyBrushMode::Apply ? 0.16f : 0.24f;
         Sample.Strength = 0.72f;
@@ -259,10 +261,10 @@ bool FDWCTransparencyMaterialHoverAlphaParityTest::RunTest(const FString&)
             {
                 const int32 PixelIndex = Y * Resolution.X + X;
                 const float Current = ResolveAlpha(Result, Before, PixelIndex);
-                float Weight = IsTestIslandPixel(Result, PixelIndex)
-                    ? ComputeHoverWeight(Sample, Stroke.Falloff, Resolution, X, Y, bWrap)
-                    : 0.0f;
-                float Target = Stroke.TargetAlpha;
+                float       Weight = IsTestIslandPixel(Result, PixelIndex)
+                                         ? ComputeHoverWeight(Sample, Stroke.Falloff, Resolution, X, Y, bWrap)
+                                         : 0.0f;
+                float       Target = Stroke.TargetAlpha;
                 if (Mode == EDWCTransparencyBrushMode::Apply)
                 {
                     Target = 1.0f;
@@ -301,13 +303,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCTransparencyMaterialHoverRevealColorParityTest::RunTest(const FString&)
 {
-    const FIntPoint Resolution(16, 16);
-    const FDWCTransparencyAutoBakeResult Result = BuildHoverTestResult(Resolution);
-    const FLinearColor BaseColor(0.08f, 0.16f, 0.24f, 1.0f);
+    const FIntPoint                                    Resolution(16, 16);
+    const FDWCTransparencyAutoBakeResult               Result = BuildHoverTestResult(Resolution);
+    const FLinearColor                                 BaseColor(0.08f, 0.16f, 0.24f, 1.0f);
     const TArray<EDWCTransparencyRevealColorBrushMode> Modes = {
         EDWCTransparencyRevealColorBrushMode::Paint,
         EDWCTransparencyRevealColorBrushMode::EraseToBase,
-        EDWCTransparencyRevealColorBrushMode::Smooth};
+        EDWCTransparencyRevealColorBrushMode::Smooth
+    };
 
     for (const EDWCTransparencyRevealColorBrushMode Mode : Modes)
     {
@@ -325,10 +328,10 @@ bool FDWCTransparencyMaterialHoverRevealColorParityTest::RunTest(const FString&)
         SeedSample.RadiusUV = 0.3f;
         SeedSample.Strength = 0.7f;
         TestTrue(TEXT("The reveal parity seed stroke rasterizes"),
-            RasterizeRevealColor(Result, Seed, BaseColor, Store));
+                 RasterizeRevealColor(Result, Seed, BaseColor, Store));
 
         FDWCTransparencyRevealColorTileStore Before = Store;
-        FDWCTransparencyRevealColorStroke Stroke;
+        FDWCTransparencyRevealColorStroke    Stroke;
         Stroke.MaterialSlotIndex = 0;
         Stroke.UVAddressMode = EDWCTransparencyUVAddressMode::Clamp;
         Stroke.BrushMode = Mode;
@@ -340,18 +343,18 @@ bool FDWCTransparencyMaterialHoverRevealColorParityTest::RunTest(const FString&)
         Sample.RadiusUV = 0.22f;
         Sample.Strength = 0.68f;
         TestTrue(TEXT("The reveal-color parity stroke rasterizes"),
-            RasterizeRevealColor(Result, Stroke, BaseColor, Store));
+                 RasterizeRevealColor(Result, Stroke, BaseColor, Store));
 
         for (int32 Y = 0; Y < Resolution.Y; ++Y)
         {
             for (int32 X = 0; X < Resolution.X; ++X)
             {
-                const int32 PixelIndex = Y * Resolution.X + X;
+                const int32        PixelIndex = Y * Resolution.X + X;
                 const FLinearColor Current(Before.GetColor(PixelIndex, MakeArrayView(Result.InnerColorBuffer)));
-                const float Weight = IsTestIslandPixel(Result, PixelIndex)
-                    ? ComputeHoverWeight(Sample, Stroke.Falloff, Resolution, X, Y, false)
-                    : 0.0f;
-                FLinearColor Target = Stroke.PaintColor.CopyWithNewOpacity(1.0f);
+                const float        Weight = IsTestIslandPixel(Result, PixelIndex)
+                                                ? ComputeHoverWeight(Sample, Stroke.Falloff, Resolution, X, Y, false)
+                                                : 0.0f;
+                FLinearColor       Target = Stroke.PaintColor.CopyWithNewOpacity(1.0f);
                 if (Mode == EDWCTransparencyRevealColorBrushMode::EraseToBase)
                 {
                     Target = BaseColor.CopyWithNewOpacity(1.0f);
@@ -376,7 +379,7 @@ bool FDWCTransparencyMaterialHoverRevealColorParityTest::RunTest(const FString&)
                 }
                 const FColor Expected = FMath::Lerp(Current, Target, Weight).ToFColor(true);
                 const FColor Actual = Store.GetColor(PixelIndex, MakeArrayView(Result.InnerColorBuffer));
-                const int32 MaxChannelError = FMath::Max3(
+                const int32  MaxChannelError = FMath::Max3(
                     FMath::Abs(static_cast<int32>(Expected.R) - Actual.R),
                     FMath::Abs(static_cast<int32>(Expected.G) - Actual.G),
                     FMath::Abs(static_cast<int32>(Expected.B) - Actual.B));
@@ -431,11 +434,11 @@ bool FDWCTransparencyMaterialHoverZeroUploadTest::RunTest(const FString&)
     TArray<FDWCEditorPreviewOperationCounter> UploadCounters;
     UploadQueue->AppendDiagnosticOperationCounters(UploadCounters);
     TestEqual(TEXT("Hover parameter replacement performs no preview region commits"),
-        FindCounter(WorkspaceCounters, TEXT("Preview region commit requests"), false), 0ull);
+              FindCounter(WorkspaceCounters, TEXT("Preview region commit requests"), false), 0ull);
     TestEqual(TEXT("Hover parameter replacement submits no render uploads"),
-        FindCounter(UploadCounters, TEXT("Render texture region uploads"), false), 0ull);
+              FindCounter(UploadCounters, TEXT("Render texture region uploads"), false), 0ull);
     TestEqual(TEXT("Hover parameter replacement uploads zero bytes"),
-        FindCounter(UploadCounters, TEXT("Render texture region uploads"), true), 0ull);
+              FindCounter(UploadCounters, TEXT("Render texture region uploads"), true), 0ull);
 
     Workspace.Reset();
     UploadQueue->Shutdown();
@@ -452,7 +455,7 @@ bool FDWCTransparencyMaterialHoverAuxiliaryResourceReuseTest::RunTest(const FStr
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
     FDWCEditorTextureWorkspace Workspace(UploadQueue);
-    UTexture2D* Owner = NewObject<UTexture2D>(GetTransientPackage());
+    UTexture2D*                Owner = NewObject<UTexture2D>(GetTransientPackage());
 
     FDWCEditorTextureDescriptor Descriptor;
     Descriptor.Size = FIntPoint(16, 16);
@@ -496,13 +499,13 @@ bool FDWCTransparencyMaterialHoverAuxiliaryResourceReuseTest::RunTest(const FStr
     TArray<FDWCEditorPreviewOperationCounter> UploadCounters;
     UploadQueue->AppendDiagnosticOperationCounters(UploadCounters);
     TestEqual(TEXT("Auxiliary reuse creates no additional texture"),
-        FindCounter(WorkspaceCounters, TEXT("Transient preview texture creates"), false), 0ull);
+              FindCounter(WorkspaceCounters, TEXT("Transient preview texture creates"), false), 0ull);
     TestEqual(TEXT("Auxiliary reuse recreates no texture"),
-        FindCounter(WorkspaceCounters, TEXT("Transient preview texture recreates"), false), 0ull);
+              FindCounter(WorkspaceCounters, TEXT("Transient preview texture recreates"), false), 0ull);
     TestEqual(TEXT("Auxiliary reuse submits no upload"),
-        FindCounter(UploadCounters, TEXT("Render texture region uploads"), false), 0ull);
+              FindCounter(UploadCounters, TEXT("Render texture region uploads"), false), 0ull);
     TestEqual(TEXT("Auxiliary reuse uploads zero bytes"),
-        FindCounter(UploadCounters, TEXT("Render texture region uploads"), true), 0ull);
+              FindCounter(UploadCounters, TEXT("Render texture region uploads"), true), 0ull);
 
     WarmLease.Reset();
     Workspace.Reset();

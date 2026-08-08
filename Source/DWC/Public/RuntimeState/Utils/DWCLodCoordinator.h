@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -29,11 +30,11 @@ class FDWCLodCoordinator
 
     bool HasAnyRenderLODSettings(const TArray<FDWCQualityLODScreenSizeThreshold>& Thresholds) const;
     bool UpdateRenderLOD(
-        UWorld* World,
-        const UObject* OwnerForLogs,
+        UWorld*                                               World,
+        const UObject*                                        OwnerForLogs,
         const TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>& Receivers,
-        const TArray<FDWCQualityLODScreenSizeThreshold>& Thresholds,
-        int32& OutLODLevel);
+        const TArray<FDWCQualityLODScreenSizeThreshold>&      Thresholds,
+        int32&                                                OutLODLevel);
     void ResetRenderLODState();
 
     int32 GetCurrentRenderLODLevel() const;
@@ -41,17 +42,17 @@ class FDWCLodCoordinator
 
   private:
     bool CalculateRenderLODScreenSize(
-        UWorld* World,
+        UWorld*                                               World,
         const TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>& Receivers,
-        float& OutScreenSize,
-        FBoxSphereBounds& OutBounds,
-        bool& bOutInViewFrustum) const;
+        float&                                                OutScreenSize,
+        FBoxSphereBounds&                                     OutBounds,
+        bool&                                                 bOutInViewFrustum) const;
     bool FindRenderLODLevel(
         const TArray<FDWCQualityLODScreenSizeThreshold>& Thresholds,
-        float ScreenSize,
-        int32& OutLODLevel) const;
+        float                                            ScreenSize,
+        int32&                                           OutLODLevel) const;
 
     TUniquePtr<FDWCQualityLODController> QualityLODController;
-    TUniquePtr<FDWCQualityLODEvaluator> QualityLODEvaluator;
+    TUniquePtr<FDWCQualityLODEvaluator>  QualityLODEvaluator;
     FDWCQualityLODScreenSizeRuntimeState RenderLODState;
 };

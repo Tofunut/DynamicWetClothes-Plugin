@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -19,38 +20,38 @@ enum class EDWCTransparencyDirtyReplayTarget : uint8
 
 struct FDWCTransparencyDirtyTileReplayJobInput
 {
-    EDWCTransparencyDirtyReplayTarget Target = EDWCTransparencyDirtyReplayTarget::Alpha;
-    TSharedPtr<const FDWCTransparencyAutoBakeResult> AutoResult;
-    TArray<FDWCTransparencyBrushStroke> AlphaStrokes;
-    TArray<FDWCTransparencyRevealColorStroke> RevealColorStrokes;
-    int32 BaselineStrokeCount = 0;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    FLinearColor BaseRevealColor = FLinearColor::White;
-    TArray<FIntPoint> DirtyTileCoordinates;
-    TArray<FDWCTransparencyAlphaComposeTileSnapshot> AlphaComposeTiles;
+    EDWCTransparencyDirtyReplayTarget                      Target = EDWCTransparencyDirtyReplayTarget::Alpha;
+    TSharedPtr<const FDWCTransparencyAutoBakeResult>       AutoResult;
+    TArray<FDWCTransparencyBrushStroke>                    AlphaStrokes;
+    TArray<FDWCTransparencyRevealColorStroke>              RevealColorStrokes;
+    int32                                                  BaselineStrokeCount = 0;
+    int32                                                  MaterialSlotIndex = INDEX_NONE;
+    FLinearColor                                           BaseRevealColor = FLinearColor::White;
+    TArray<FIntPoint>                                      DirtyTileCoordinates;
+    TArray<FDWCTransparencyAlphaComposeTileSnapshot>       AlphaComposeTiles;
     TArray<FDWCTransparencyRevealColorComposeTileSnapshot> RevealComposeTiles;
-    EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
-    uint64 ExpectedStoreRevision = 0;
-    FDWCEditorPreviewRegionTarget PreviewTarget;
+    EDWCTransparencyVisualizationMode                      VisualizationMode = EDWCTransparencyVisualizationMode::Final;
+    uint64                                                 ExpectedStoreRevision = 0;
+    FDWCEditorPreviewRegionTarget                          PreviewTarget;
 };
 
 struct FDWCTransparencyDirtyTileReplayJobResult final : FDWCEditorWorkerJobResult
 {
-    EDWCTransparencyDirtyReplayTarget Target = EDWCTransparencyDirtyReplayTarget::Alpha;
-    TArray<FDWCTransparencyAlphaTilePayload> AlphaTiles;
+    EDWCTransparencyDirtyReplayTarget              Target = EDWCTransparencyDirtyReplayTarget::Alpha;
+    TArray<FDWCTransparencyAlphaTilePayload>       AlphaTiles;
     TArray<FDWCTransparencyRevealColorTilePayload> RevealColorTiles;
-    TArray<FDWCEditorBGRA8RegionPayload> PreviewRegions;
-    uint64 ExpectedStoreRevision = 0;
-    FDWCEditorPreviewRegionTarget PreviewTarget;
+    TArray<FDWCEditorBGRA8RegionPayload>           PreviewRegions;
+    uint64                                         ExpectedStoreRevision = 0;
+    FDWCEditorPreviewRegionTarget                  PreviewTarget;
 };
 
 class FDWCTransparencyDirtyTileReplayWorker final
 {
-public:
+  public:
     static FDWCEditorWorkerMemoryEstimate EstimateMemory(
         const FDWCTransparencyDirtyTileReplayJobInput& Input);
 
     static TSharedPtr<FDWCTransparencyDirtyTileReplayJobResult, ESPMode::ThreadSafe> Build(
-        FDWCTransparencyDirtyTileReplayJobInput&& Input,
+        FDWCTransparencyDirtyTileReplayJobInput&&                           Input,
         const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken);
 };

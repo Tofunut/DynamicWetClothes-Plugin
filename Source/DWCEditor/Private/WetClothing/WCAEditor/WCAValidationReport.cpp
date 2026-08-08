@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -17,18 +18,25 @@ namespace
     {
         switch (Status)
         {
-        case EDWCBakeStatus::Disabled: return TEXT("Disabled");
-        case EDWCBakeStatus::Required: return TEXT("Required");
-        case EDWCBakeStatus::Valid: return TEXT("Valid");
-        case EDWCBakeStatus::ValidWithDiagnostics: return TEXT("Valid");
-        case EDWCBakeStatus::OutOfDate: return TEXT("Out of Date");
-        case EDWCBakeStatus::Failed: return TEXT("Failed");
-        default: return TEXT("Unknown");
+        case EDWCBakeStatus::Disabled:
+            return TEXT("Disabled");
+        case EDWCBakeStatus::Required:
+            return TEXT("Required");
+        case EDWCBakeStatus::Valid:
+            return TEXT("Valid");
+        case EDWCBakeStatus::ValidWithDiagnostics:
+            return TEXT("Valid");
+        case EDWCBakeStatus::OutOfDate:
+            return TEXT("Out of Date");
+        case EDWCBakeStatus::Failed:
+            return TEXT("Failed");
+        default:
+            return TEXT("Unknown");
         }
     }
 
     EWCAValidationSeverity SeverityForStatus(
-        const EDWCBakeStatus Status,
+        const EDWCBakeStatus         Status,
         const EWCAValidationSeverity NonFailedSeverity = EWCAValidationSeverity::Warning)
     {
         return Status == EDWCBakeStatus::Failed ? EWCAValidationSeverity::Error : NonFailedSeverity;
@@ -38,22 +46,22 @@ namespace
     {
         (void)bHasPayload;
         return Status == EDWCBakeStatus::Failed
-            ? EWCAValidationSeverity::Error
-            : EWCAValidationSeverity::Warning;
+                   ? EWCAValidationSeverity::Error
+                   : EWCAValidationSeverity::Warning;
     }
 
     void AddIssue(
-        FWCAValidationReport& Report,
-        const FName IssueId,
+        FWCAValidationReport&        Report,
+        const FName                  IssueId,
         const EWCAValidationSeverity Severity,
-        const EWCAValidationSection Section,
-        const EWCAValidationFixKind FixKind,
-        const FText& Title,
-        const FText& Status,
-        const FText& Detail,
-        const FText& RequiredAction,
-        const bool bFailed = false,
-        const FText& ContextLabel = FText::GetEmpty())
+        const EWCAValidationSection  Section,
+        const EWCAValidationFixKind  FixKind,
+        const FText&                 Title,
+        const FText&                 Status,
+        const FText&                 Detail,
+        const FText&                 RequiredAction,
+        const bool                   bFailed = false,
+        const FText&                 ContextLabel = FText::GetEmpty())
     {
         FWCAValidationIssue& Issue = Report.Issues.AddDefaulted_GetRef();
         Issue.IssueId = IssueId;
@@ -76,15 +84,15 @@ namespace
     }
 
     void AddBakeStatusIssueIfRequired(
-        FWCAValidationReport& Report,
-        const FName IssueId,
-        const FText& Title,
-        const EDWCBakeStatus Status,
+        FWCAValidationReport&       Report,
+        const FName                 IssueId,
+        const FText&                Title,
+        const EDWCBakeStatus        Status,
         const EWCAValidationSection Section,
         const EWCAValidationFixKind FixKind,
-        const FText& RequiredAction,
-        const FString& Detail,
-        const bool bSavePending = false)
+        const FText&                RequiredAction,
+        const FString&              Detail,
+        const bool                  bSavePending = false)
     {
         if (!IsActionRequiredStatus(Status) && !bSavePending)
         {
@@ -108,17 +116,16 @@ namespace
             Status == EDWCBakeStatus::Failed);
     }
 
-
     struct FDataUVLayoutDiagnosis
     {
         FString Detail;
-        FText RequiredAction;
+        FText   RequiredAction;
     };
 
     FDataUVLayoutDiagnosis DiagnoseDataUVLayout(
         const UWetClothingAsset& Asset,
-        const EDWCBakeStatus Status,
-        const bool bRunDeepValidation)
+        const EDWCBakeStatus     Status,
+        const bool               bRunDeepValidation)
     {
         FDataUVLayoutDiagnosis Result;
         Result.Detail = FString::Printf(TEXT("Prepared Mesh UV Layout: %s."), *BakeStatusToString(Status));
@@ -149,15 +156,15 @@ namespace
             return Result;
         }
 
-        const FSkeletalMeshRenderData* RenderData = RuntimeMesh->GetResourceForRendering();
-        const int32 LODCount = RenderData != nullptr ? RenderData->LODRenderData.Num() : 0;
+        const FSkeletalMeshRenderData*           RenderData = RuntimeMesh->GetResourceForRendering();
+        const int32                              LODCount = RenderData != nullptr ? RenderData->LODRenderData.Num() : 0;
         const FDWCWetClothingAssetSetupSettings& Setup = Asset.GetSetupSettings();
-        const int32 FirstLODIndex = LODCount > 0
-            ? FMath::Clamp(Setup.FirstGeneratedLODIndex, 0, LODCount - 1)
-            : FMath::Max(0, Setup.FirstGeneratedLODIndex);
-        const int32 LastLODIndex = LODCount > 0
-            ? FMath::Clamp(Setup.LastGeneratedLODIndex, FirstLODIndex, LODCount - 1)
-            : FMath::Max(FirstLODIndex, Setup.LastGeneratedLODIndex);
+        const int32                              FirstLODIndex = LODCount > 0
+                                                                     ? FMath::Clamp(Setup.FirstGeneratedLODIndex, 0, LODCount - 1)
+                                                                     : FMath::Max(0, Setup.FirstGeneratedLODIndex);
+        const int32                              LastLODIndex = LODCount > 0
+                                                                    ? FMath::Clamp(Setup.LastGeneratedLODIndex, FirstLODIndex, LODCount - 1)
+                                                                    : FMath::Max(FirstLODIndex, Setup.LastGeneratedLODIndex);
 
         for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
         {
@@ -287,20 +294,20 @@ namespace
         }
 
         Result.Detail += bRunDeepValidation
-            ? TEXT("\nReason: The stored layout does not match the current mapped LOD range or sealed metadata.")
-            : TEXT("\nReason: Fast validation found a stored-layout mismatch. Use Refresh in Validation Results for signature-level details.");
+                             ? TEXT("\nReason: The stored layout does not match the current mapped LOD range or sealed metadata.")
+                             : TEXT("\nReason: Fast validation found a stored-layout mismatch. Use Refresh in Validation Results for signature-level details.");
         return Result;
     }
 
     FString BuildRuntimeDetail(
-        const TCHAR* Label,
+        const TCHAR*         Label,
         const EDWCBakeStatus Status,
-        const bool bHasPayload,
-        const bool bWasEverGenerated,
-        const bool bWasEverSaved,
-        const bool bAssetHasUnsavedChanges,
-        const bool bSavePending,
-        const FString& FailureDetails)
+        const bool           bHasPayload,
+        const bool           bWasEverGenerated,
+        const bool           bWasEverSaved,
+        const bool           bAssetHasUnsavedChanges,
+        const bool           bSavePending,
+        const FString&       FailureDetails)
     {
         (void)bAssetHasUnsavedChanges;
         const bool bHasPriorOutput = bHasPayload || bWasEverGenerated || bWasEverSaved;
@@ -324,9 +331,9 @@ namespace
     }
 
     FString BuildMapDetail(
-        const TCHAR* Label,
+        const TCHAR*         Label,
         const EDWCBakeStatus Status,
-        const bool bSavePending)
+        const bool           bSavePending)
     {
         if (DWCBuildStatus::IsUsable(Status) && bSavePending)
         {
@@ -375,7 +382,7 @@ namespace
 
     FString DescribeWetPartProfile(
         const FWetPartProfileAssignment* Profile,
-        const int32 ProfileIndex)
+        const int32                      ProfileIndex)
     {
         if (Profile != nullptr && Profile->HasSourceProfile())
         {
@@ -388,12 +395,11 @@ namespace
         return FString::Printf(TEXT("profile %d"), ProfileIndex);
     }
 
-
     FText BuildSlotContextLabel(const int32 MaterialSlotIndex)
     {
         return MaterialSlotIndex == INDEX_NONE
-            ? FText::GetEmpty()
-            : FText::FromString(FString::Printf(TEXT("Slot %d"), MaterialSlotIndex));
+                   ? FText::GetEmpty()
+                   : FText::FromString(FString::Printf(TEXT("Slot %d"), MaterialSlotIndex));
     }
 
     FText StatusForValidationDetail(const FString& Detail)
@@ -462,7 +468,7 @@ namespace
             }
 
             FString Candidate = Segment.Mid(SlashIndex + 1);
-            int32 DotIndex = INDEX_NONE;
+            int32   DotIndex = INDEX_NONE;
             if (Candidate.FindChar(TEXT('.'), DotIndex))
             {
                 Candidate.LeftInline(DotIndex);
@@ -480,7 +486,7 @@ namespace
     {
         OutStableKey.Reset();
         const FString Prefix(TEXT("Profile '"));
-        const int32 StartIndex = Detail.Find(Prefix, ESearchCase::CaseSensitive);
+        const int32   StartIndex = Detail.Find(Prefix, ESearchCase::CaseSensitive);
         if (StartIndex == INDEX_NONE)
         {
             return false;
@@ -498,16 +504,16 @@ namespace
     }
 
     void AddGeneratedMaterialIssues(
-        FWCAValidationReport& Report,
+        FWCAValidationReport&  Report,
         const TArray<FString>& Messages)
     {
         for (int32 MessageIndex = 0; MessageIndex < Messages.Num(); ++MessageIndex)
         {
             const FString& Message = Messages[MessageIndex];
-            int32 MaterialSlotIndex = INDEX_NONE;
-            const bool bHasSlot = TryExtractSlotIndex(Message, MaterialSlotIndex);
-            const bool bFailed = Message.Contains(TEXT("failed"), ESearchCase::IgnoreCase);
-            const bool bFunctionMessage =
+            int32          MaterialSlotIndex = INDEX_NONE;
+            const bool     bHasSlot = TryExtractSlotIndex(Message, MaterialSlotIndex);
+            const bool     bFailed = Message.Contains(TEXT("failed"), ESearchCase::IgnoreCase);
+            const bool     bFunctionMessage =
                 Message.Contains(TEXT("MF_"), ESearchCase::CaseSensitive) ||
                 Message.Contains(TEXT("function"), ESearchCase::IgnoreCase);
             AddIssue(
@@ -519,8 +525,8 @@ namespace
                 bHasSlot
                     ? NSLOCTEXT("WCAValidationReport", "GeneratedMaterialSlotTitle", "Generated Material Setup")
                     : (bFunctionMessage
-                        ? NSLOCTEXT("WCAValidationReport", "GeneratedMaterialFunctionsTitle", "Generated Material Functions")
-                        : NSLOCTEXT("WCAValidationReport", "GeneratedMaterialSetupTitle", "Generated Material Setup")),
+                           ? NSLOCTEXT("WCAValidationReport", "GeneratedMaterialFunctionsTitle", "Generated Material Functions")
+                           : NSLOCTEXT("WCAValidationReport", "GeneratedMaterialSetupTitle", "Generated Material Setup")),
                 StatusForValidationDetail(Message),
                 FText::FromString(Message),
                 NSLOCTEXT("WCAValidationReport", "GeneratedMaterialsAction", "Use Build for Runtime > Generate Materials."),
@@ -533,14 +539,14 @@ namespace
     {
         OutMaterialSlotIndex = INDEX_NONE;
         const FString LowerDetail = Detail.ToLower();
-        const int32 SlotTokenIndex = LowerDetail.Find(TEXT("slot "));
+        const int32   SlotTokenIndex = LowerDetail.Find(TEXT("slot "));
         if (SlotTokenIndex == INDEX_NONE)
         {
             return false;
         }
 
         const int32 NumberStart = SlotTokenIndex + 5;
-        int32 NumberEnd = NumberStart;
+        int32       NumberEnd = NumberStart;
         while (NumberEnd < Detail.Len() && FChar::IsDigit(Detail[NumberEnd]))
         {
             ++NumberEnd;
@@ -557,7 +563,7 @@ namespace
     bool HasIssueForSectionAndContext(
         const FWCAValidationReport& Report,
         const EWCAValidationSection Section,
-        const FText& ContextLabel)
+        const FText&                ContextLabel)
     {
         return Report.Issues.ContainsByPredicate(
             [Section, &ContextLabel](const FWCAValidationIssue& Issue)
@@ -569,8 +575,8 @@ namespace
 
     void AddRenderProfileDataIssues(
         FWCAValidationReport& Report,
-        const bool bDataUVLayoutLocked,
-        const FString& VisualSummary)
+        const bool            bDataUVLayoutLocked,
+        const FString&        VisualSummary)
     {
         TArray<FString> Lines;
         VisualSummary.ParseIntoArrayLines(Lines, true);
@@ -590,8 +596,8 @@ namespace
 
             EWCAValidationSection Section = EWCAValidationSection::RenderProfileData;
             EWCAValidationFixKind FixKind = EWCAValidationFixKind::BakeRenderProfileData;
-            FText Title = NSLOCTEXT("WCAValidationReport", "WetPartDataTextureTitle", "Wet Part Data Texture");
-            FText RequiredAction = NSLOCTEXT(
+            FText                 Title = NSLOCTEXT("WCAValidationReport", "WetPartDataTextureTitle", "Wet Part Data Texture");
+            FText                 RequiredAction = NSLOCTEXT(
                 "WCAValidationReport",
                 "WetPartDataTextureAction",
                 "Use Build for Runtime > Bake Render Profile Lookup Texture.");
@@ -607,8 +613,8 @@ namespace
                     *FString::Printf(TEXT("Profile '%s'"), *ProfileDisplayName),
                     ESearchCase::CaseSensitive);
                 Title = Line.Contains(TEXT("texture settings"), ESearchCase::IgnoreCase)
-                    ? NSLOCTEXT("WCAValidationReport", "SurfaceWaterTextureSettingsTitle", "Surface Water Texture Settings")
-                    : NSLOCTEXT("WCAValidationReport", "PreparedSurfaceTexturesTitle", "Prepared Surface Textures");
+                            ? NSLOCTEXT("WCAValidationReport", "SurfaceWaterTextureSettingsTitle", "Surface Water Texture Settings")
+                            : NSLOCTEXT("WCAValidationReport", "PreparedSurfaceTexturesTitle", "Prepared Surface Textures");
 
                 if (Line.Contains(TEXT("invalid authored"), ESearchCase::IgnoreCase))
                 {
@@ -653,14 +659,14 @@ namespace
                 FixKind = bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV;
                 Title = NSLOCTEXT("WCAValidationReport", "PreparedMeshUVLayoutTitle", "Prepared Mesh UV Layout");
                 RequiredAction = bDataUVLayoutLocked
-                    ? NSLOCTEXT(
-                        "WCAValidationReport",
-                        "DWCDataUVLockedAction",
-                        "The prepared mesh UV layout is sealed and cannot be rebuilt. Create a new WCA if the mesh topology changed.")
-                    : NSLOCTEXT(
-                        "WCAValidationReport",
-                        "DWCDataUVInitializeAction",
-                        "Initialize the prepared mesh UV layout for this asset.");
+                                     ? NSLOCTEXT(
+                                           "WCAValidationReport",
+                                           "DWCDataUVLockedAction",
+                                           "The prepared mesh UV layout is sealed and cannot be rebuilt. Create a new WCA if the mesh topology changed.")
+                                     : NSLOCTEXT(
+                                           "WCAValidationReport",
+                                           "DWCDataUVInitializeAction",
+                                           "Initialize the prepared mesh UV layout for this asset.");
                 if (HasIssueForSectionAndContext(Report, Section, FText::GetEmpty()))
                 {
                     continue;
@@ -712,11 +718,11 @@ namespace
     }
 
     void AddSurfaceWaterInputIssues(
-        FWCAValidationReport& Report,
+        FWCAValidationReport&    Report,
         const UWetClothingAsset& Asset)
     {
         const FWetClothingEditableWetPartData& EditableData = Asset.Authored.PartData.EditableWetPartData;
-        TSet<int32> ReportedProfileIndices;
+        TSet<int32>                            ReportedProfileIndices;
 
         for (const FWetClothingAuthoredMaterialSlot& Slot : EditableData.MaterialSlots)
         {
@@ -735,7 +741,7 @@ namespace
                 }
 
                 const FWetPartProfileAssignment* Profile = EditableData.FindProfile(Entry);
-                FWetnessProfileParameters Parameters;
+                FWetnessProfileParameters        Parameters;
                 FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(Profile, Parameters);
                 if (!RequiresSurfaceWaterDropletMask(Parameters) ||
                     Parameters.SurfaceWater.DropletMaskTexture != nullptr)
@@ -767,11 +773,11 @@ namespace
     }
 
     void AppendIssueSection(
-        TArray<FString>& Sections,
-        const TCHAR* Heading,
+        TArray<FString>&            Sections,
+        const TCHAR*                Heading,
         const FWCAValidationReport& Report,
         const EWCAValidationSection Section,
-        const bool bManualOnly)
+        const bool                  bManualOnly)
     {
         TArray<FString> Lines;
         for (const FWCAValidationIssue& Issue : Report.Issues)
@@ -783,8 +789,8 @@ namespace
             }
 
             FString Line = Issue.Detail.IsEmpty()
-                ? Issue.Title.ToString()
-                : Issue.Detail.ToString();
+                               ? Issue.Title.ToString()
+                               : Issue.Detail.ToString();
             if (!Issue.RequiredAction.IsEmpty())
             {
                 Line += FString::Printf(TEXT(" %s"), *Issue.RequiredAction.ToString());
@@ -796,7 +802,7 @@ namespace
             Sections.Add(FString::Printf(TEXT("%s\n%s"), Heading, *FString::Join(Lines, TEXT("\n"))));
         }
     }
-}
+} // namespace
 
 bool FWCAValidationReport::HasManualIssues() const
 {
@@ -846,9 +852,9 @@ FString FWCAValidationReport::BuildManualIssueSummary() const
 }
 
 FWCAValidationReport BuildWCAValidationReport(
-    UWetClothingAsset& Asset,
+    UWetClothingAsset&       Asset,
     const EWCAValidationMode Mode,
-    const bool bRefreshAssetState)
+    const bool               bRefreshAssetState)
 {
     FWCAValidationReport Report;
 #if WITH_EDITORONLY_DATA
@@ -860,26 +866,26 @@ FWCAValidationReport BuildWCAValidationReport(
     }
 
     Report.Diagnostics = Asset.GetValidationSummary();
-    const FDWCAssetBakeState& State = Asset.GetBakeState();
+    const FDWCAssetBakeState&                State = Asset.GetBakeState();
     const FDWCWetClothingAssetSetupSettings& Setup = Asset.GetSetupSettings();
-    const bool bAssetHasUnsavedChanges = Asset.GetOutermost() != nullptr && Asset.GetOutermost()->IsDirty();
-    FString GPURuntimePreparationReason;
-    const bool bCanBuildGPURuntimeData =
+    const bool                               bAssetHasUnsavedChanges = Asset.GetOutermost() != nullptr && Asset.GetOutermost()->IsDirty();
+    FString                                  GPURuntimePreparationReason;
+    const bool                               bCanBuildGPURuntimeData =
         Asset.CanPrepareRuntimeDataForEditorSave(&GPURuntimePreparationReason);
-    const bool bHasRuntimeMesh = Asset.GetRuntimeSkeletalMesh() != nullptr;
-    const bool bHasCurrentOriginalUVTopology = DWCBuildStatus::IsUsable(State.OriginalUVTopology);
-    const bool bCanBuildCPURuntimeData = bHasRuntimeMesh && bHasCurrentOriginalUVTopology;
+    const bool    bHasRuntimeMesh = Asset.GetRuntimeSkeletalMesh() != nullptr;
+    const bool    bHasCurrentOriginalUVTopology = DWCBuildStatus::IsUsable(State.OriginalUVTopology);
+    const bool    bCanBuildCPURuntimeData = bHasRuntimeMesh && bHasCurrentOriginalUVTopology;
     const FString CPURuntimePreparationReason = !bHasRuntimeMesh
-        ? FString(TEXT("No runtime skeletal mesh is assigned."))
-        : (!bHasCurrentOriginalUVTopology
-            ? FString(TEXT("Original UV topology is missing or out of date."))
-            : FString());
+                                                    ? FString(TEXT("No runtime skeletal mesh is assigned."))
+                                                    : (!bHasCurrentOriginalUVTopology
+                                                           ? FString(TEXT("Original UV topology is missing or out of date."))
+                                                           : FString());
 
     auto BuildRuntimeValidationDetail = [](
-        const FString& BaseDetail,
-        const EDWCBakeStatus Status,
-        const bool bCanBuild,
-        const FString& PreparationReason)
+                                            const FString&       BaseDetail,
+                                            const EDWCBakeStatus Status,
+                                            const bool           bCanBuild,
+                                            const FString&       PreparationReason)
     {
         if (bCanBuild || DWCBuildStatus::IsUsable(Status) || PreparationReason.IsEmpty())
         {
@@ -892,10 +898,10 @@ FWCAValidationReport BuildWCAValidationReport(
     };
 
     auto GetRuntimeFixKind = [](
-        const EDWCBakeStatus Status,
-        const bool bSavePending,
-        const bool bCanBuild,
-        const EWCAValidationFixKind BuildFixKind)
+                                 const EDWCBakeStatus        Status,
+                                 const bool                  bSavePending,
+                                 const bool                  bCanBuild,
+                                 const EWCAValidationFixKind BuildFixKind)
     {
         if (bSavePending && DWCBuildStatus::IsUsable(Status))
         {
@@ -905,11 +911,11 @@ FWCAValidationReport BuildWCAValidationReport(
     };
 
     auto GetRuntimeRequiredAction = [](
-        const EDWCBakeStatus Status,
-        const bool bSavePending,
-        const bool bCanBuild,
-        const FText& BuildAction,
-        const FText& PrerequisiteAction)
+                                        const EDWCBakeStatus Status,
+                                        const bool           bSavePending,
+                                        const bool           bCanBuild,
+                                        const FText&         BuildAction,
+                                        const FText&         PrerequisiteAction)
     {
         if (bSavePending && DWCBuildStatus::IsUsable(Status))
         {
@@ -962,11 +968,11 @@ FWCAValidationReport BuildWCAValidationReport(
         bSourceMeshContentChanged
             ? NSLOCTEXT("WCAValidationReport", "OriginalUVTopologySourceChangedAction", "Rebuild the Failed DWC UV slots to regenerate Original UV topology from the current Original Mesh.")
             : (bDataUVLayoutLocked
-                ? NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyLockedAction", "Original UV island topology is locked unless the Original Mesh content changed and requires an explicit DWC UV rebuild.")
-                : NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyInitializeAction", "Initialize the prepared mesh UV layout and Original UV topology.")),
+                   ? NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyLockedAction", "Original UV island topology is locked unless the Original Mesh content changed and requires an explicit DWC UV rebuild.")
+                   : NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyInitializeAction", "Initialize the prepared mesh UV layout and Original UV topology.")),
         FString::Printf(TEXT("Original UV Topology: %s.%s"),
-            *BakeStatusToString(State.OriginalUVTopology),
-            bDataUVLayoutLocked ? TEXT(" The stored island identities are immutable") : TEXT("")));
+                        *BakeStatusToString(State.OriginalUVTopology),
+                        bDataUVLayoutLocked ? TEXT(" The stored island identities are immutable") : TEXT("")));
 
     if ((Setup.bBuildCPUVertexSimulationData || Asset.HasCPURuntimeDataPayload()) &&
         State.CPURuntimeData != EDWCBakeStatus::Disabled)
@@ -1164,8 +1170,8 @@ FWCAValidationReport BuildWCAValidationReport(
                         NSLOCTEXT("WCAValidationReport", "TransparencyMapsTitle", "Transparency Textures"),
                         NSLOCTEXT("WCAValidationReport", "OutOfDateStatus", "Out of Date"),
                         FText::FromString(CurrentnessReason.IsEmpty()
-                            ? TEXT("Transparency Textures: stored outputs are missing or out of date.")
-                            : FString::Printf(TEXT("Transparency Textures: %s"), *CurrentnessReason)),
+                                              ? TEXT("Transparency Textures: stored outputs are missing or out of date.")
+                                              : FString::Printf(TEXT("Transparency Textures: %s"), *CurrentnessReason)),
                         NSLOCTEXT("WCAValidationReport", "BakeTransparencyTexturesAction", "Use Build for Runtime > Bake Transparency Textures."),
                         false,
                         BuildSlotContextLabel(Layer.TargetSurface.OuterMaterialSlotIndex));

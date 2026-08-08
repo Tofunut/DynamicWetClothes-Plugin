@@ -1,5 +1,7 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
+#include "Engine/SkeletalMesh.h"
 #include "Utility/DWCLog.h"
 
 uint64 FWetClothingMeshSampler::GetAllocatedMemoryBytes() const
@@ -249,7 +251,7 @@ bool FWetClothingMeshSampler::UpdateSkinnedPositionsDirect(USkeletalMeshComponen
 
         FThreadSafeBool bFailed = false;
         ParallelFor(VertexCount, [this, LODData, SkinWeightBuffer, &bFailed](const int32 VertexIndex)
-        {
+                    {
             if (bFailed)
             {
                 return;
@@ -262,8 +264,7 @@ bool FWetClothingMeshSampler::UpdateSkinnedPositionsDirect(USkeletalMeshComponen
                 return;
             }
 
-            CachedSkinnedPositions[VertexIndex] = SkinnedPosition;
-        });
+            CachedSkinnedPositions[VertexIndex] = SkinnedPosition; });
 
         if (bFailed)
         {
@@ -334,7 +335,7 @@ bool FWetClothingMeshSampler::UpdateSkinnedNormals(USkeletalMeshComponent* Targe
         DWC_PROFILE_SCOPE(DWC_MeshSampler_UpdateSkinnedNormals_VertexLoop);
 
         ParallelFor(VertexCount, [this, LODData, SkinWeightBuffer, VertexCount, MaxInfluences, BoneWeightScale](const int32 VertexIndex)
-        {
+                    {
             int32 SectionIndex = INDEX_NONE;
             int32 SectionVertexIndex = INDEX_NONE;
             LODData->GetSectionFromVertexIndex(VertexIndex, SectionIndex, SectionVertexIndex);
@@ -387,8 +388,7 @@ bool FWetClothingMeshSampler::UpdateSkinnedNormals(USkeletalMeshComponent* Targe
                 SkinnedNormal += FVector3f(SkinnedNormal4f.X, SkinnedNormal4f.Y, SkinnedNormal4f.Z) * Weight;
             }
 
-            CachedSkinnedNormals[VertexIndex] = SkinnedNormal.GetSafeNormal();
-        });
+            CachedSkinnedNormals[VertexIndex] = SkinnedNormal.GetSafeNormal(); });
     }
 
     bCachedSkinnedNormalsValid = CachedSkinnedNormals.Num() == VertexCount;
@@ -453,7 +453,7 @@ bool FWetClothingMeshSampler::ComputeSkinnedPosition(
     }
 
     const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
-    const uint32 BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
+    const uint32                  BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
     if (BufferVertexIndex < 0 || BufferVertexIndex >= LODData.GetNumVertices())
     {
         return false;
@@ -537,7 +537,7 @@ bool FWetClothingMeshSampler::ComputeSkinnedNormal(
     }
 
     const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
-    const uint32 BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
+    const uint32                  BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
     if (BufferVertexIndex < 0 || BufferVertexIndex >= LODData.GetNumVertices())
     {
         return false;

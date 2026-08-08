@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionReducer.h"
 
 namespace
@@ -6,32 +7,32 @@ namespace
     bool AreBrushesEquivalent(const FWetWrinkleBrushSettings& A, const FWetWrinkleBrushSettings& B)
     {
         return A.ToolMode == B.ToolMode &&
-            A.UVChannelIndex == B.UVChannelIndex &&
-            A.MaterialSlotIndex == B.MaterialSlotIndex &&
-            A.WrinkleNormalTexture == B.WrinkleNormalTexture &&
-            FMath::IsNearlyEqual(A.BrushRadiusUV, B.BrushRadiusUV) &&
-            FMath::IsNearlyEqual(A.Strength, B.Strength) &&
-            FMath::IsNearlyEqual(A.Falloff, B.Falloff) &&
-            FMath::IsNearlyEqual(A.RotationRadians, B.RotationRadians) &&
-            FMath::IsNearlyEqual(A.PreviewWetness, B.PreviewWetness) &&
-            A.RidgeShape == B.RidgeShape &&
-            A.bFlipRidgeFoldSide == B.bFlipRidgeFoldSide &&
-            FMath::IsNearlyEqual(A.RidgeStartTaper, B.RidgeStartTaper) &&
-            FMath::IsNearlyEqual(A.RidgeEndTaper, B.RidgeEndTaper) &&
-            FMath::IsNearlyEqual(A.RidgePointSpacingScale, B.RidgePointSpacingScale) &&
-            FMath::IsNearlyEqual(A.RidgeFlareSettings.Length, B.RidgeFlareSettings.Length) &&
-            FMath::IsNearlyEqual(A.RidgeFlareSettings.WidthScale, B.RidgeFlareSettings.WidthScale) &&
-            FMath::IsNearlyEqual(A.RidgeFlareSettings.EndStrength, B.RidgeFlareSettings.EndStrength) &&
-            FMath::IsNearlyEqual(A.RidgeFlareSettings.Softness, B.RidgeFlareSettings.Softness) &&
-            A.RidgeNaturalVariation.bEnabled == B.RidgeNaturalVariation.bEnabled &&
-            FMath::IsNearlyEqual(A.RidgeNaturalVariation.CenterlineAmount, B.RidgeNaturalVariation.CenterlineAmount) &&
-            FMath::IsNearlyEqual(A.RidgeNaturalVariation.CenterlineFrequency, B.RidgeNaturalVariation.CenterlineFrequency) &&
-            FMath::IsNearlyEqual(A.RidgeNaturalVariation.WidthVariation, B.RidgeNaturalVariation.WidthVariation) &&
-            FMath::IsNearlyEqual(A.RidgeNaturalVariation.WidthFrequency, B.RidgeNaturalVariation.WidthFrequency) &&
-            A.RidgeNaturalVariation.NoiseSeed == B.RidgeNaturalVariation.NoiseSeed &&
-            A.RidgeEditMode == B.RidgeEditMode &&
-            A.bRidgeJunctionModeEnabled == B.bRidgeJunctionModeEnabled &&
-            A.bShowPreview == B.bShowPreview;
+               A.UVChannelIndex == B.UVChannelIndex &&
+               A.MaterialSlotIndex == B.MaterialSlotIndex &&
+               A.WrinkleNormalTexture == B.WrinkleNormalTexture &&
+               FMath::IsNearlyEqual(A.BrushRadiusUV, B.BrushRadiusUV) &&
+               FMath::IsNearlyEqual(A.Strength, B.Strength) &&
+               FMath::IsNearlyEqual(A.Falloff, B.Falloff) &&
+               FMath::IsNearlyEqual(A.RotationRadians, B.RotationRadians) &&
+               FMath::IsNearlyEqual(A.PreviewWetness, B.PreviewWetness) &&
+               A.RidgeShape == B.RidgeShape &&
+               A.bFlipRidgeFoldSide == B.bFlipRidgeFoldSide &&
+               FMath::IsNearlyEqual(A.RidgeStartTaper, B.RidgeStartTaper) &&
+               FMath::IsNearlyEqual(A.RidgeEndTaper, B.RidgeEndTaper) &&
+               FMath::IsNearlyEqual(A.RidgePointSpacingScale, B.RidgePointSpacingScale) &&
+               FMath::IsNearlyEqual(A.RidgeFlareSettings.Length, B.RidgeFlareSettings.Length) &&
+               FMath::IsNearlyEqual(A.RidgeFlareSettings.WidthScale, B.RidgeFlareSettings.WidthScale) &&
+               FMath::IsNearlyEqual(A.RidgeFlareSettings.EndStrength, B.RidgeFlareSettings.EndStrength) &&
+               FMath::IsNearlyEqual(A.RidgeFlareSettings.Softness, B.RidgeFlareSettings.Softness) &&
+               A.RidgeNaturalVariation.bEnabled == B.RidgeNaturalVariation.bEnabled &&
+               FMath::IsNearlyEqual(A.RidgeNaturalVariation.CenterlineAmount, B.RidgeNaturalVariation.CenterlineAmount) &&
+               FMath::IsNearlyEqual(A.RidgeNaturalVariation.CenterlineFrequency, B.RidgeNaturalVariation.CenterlineFrequency) &&
+               FMath::IsNearlyEqual(A.RidgeNaturalVariation.WidthVariation, B.RidgeNaturalVariation.WidthVariation) &&
+               FMath::IsNearlyEqual(A.RidgeNaturalVariation.WidthFrequency, B.RidgeNaturalVariation.WidthFrequency) &&
+               A.RidgeNaturalVariation.NoiseSeed == B.RidgeNaturalVariation.NoiseSeed &&
+               A.RidgeEditMode == B.RidgeEditMode &&
+               A.bRidgeJunctionModeEnabled == B.bRidgeJunctionModeEnabled &&
+               A.bShowPreview == B.bShowPreview;
     }
 
     bool ArePaintSettingsEquivalent(
@@ -39,15 +40,15 @@ namespace
         const FDWCTransparencyPaintSettings& B)
     {
         return A.Mode == B.Mode &&
-            A.RevealColorMode == B.RevealColorMode &&
-            FMath::IsNearlyEqual(A.RadiusUV, B.RadiusUV) &&
-            FMath::IsNearlyEqual(A.Strength, B.Strength) &&
-            FMath::IsNearlyEqual(A.Falloff, B.Falloff) &&
-            FMath::IsNearlyEqual(A.Spacing, B.Spacing) &&
-            FMath::IsNearlyEqual(A.TargetAlpha, B.TargetAlpha) &&
-            A.bEnabled == B.bEnabled &&
-            A.bRevealColorPaint == B.bRevealColorPaint &&
-            A.RevealColor.Equals(B.RevealColor);
+               A.RevealColorMode == B.RevealColorMode &&
+               FMath::IsNearlyEqual(A.RadiusUV, B.RadiusUV) &&
+               FMath::IsNearlyEqual(A.Strength, B.Strength) &&
+               FMath::IsNearlyEqual(A.Falloff, B.Falloff) &&
+               FMath::IsNearlyEqual(A.Spacing, B.Spacing) &&
+               FMath::IsNearlyEqual(A.TargetAlpha, B.TargetAlpha) &&
+               A.bEnabled == B.bEnabled &&
+               A.bRevealColorPaint == B.bRevealColorPaint &&
+               A.RevealColor.Equals(B.RevealColor);
     }
 
     void NormalizeWrinkleBrush(FWetWrinkleBrushSettings& Brush)
@@ -84,9 +85,9 @@ namespace
         const FDWCTransparencyPreviewSettings& B)
     {
         return FMath::IsNearlyEqual(A.TransparencyStrength, B.TransparencyStrength) &&
-            FMath::IsNearlyEqual(A.WrinkleSuppressionStrength, B.WrinkleSuppressionStrength) &&
-            FMath::IsNearlyEqual(A.WrinkleMaskThreshold, B.WrinkleMaskThreshold) &&
-            FMath::IsNearlyEqual(A.WrinkleMaskSoftness, B.WrinkleMaskSoftness);
+               FMath::IsNearlyEqual(A.WrinkleSuppressionStrength, B.WrinkleSuppressionStrength) &&
+               FMath::IsNearlyEqual(A.WrinkleMaskThreshold, B.WrinkleMaskThreshold) &&
+               FMath::IsNearlyEqual(A.WrinkleMaskSoftness, B.WrinkleMaskSoftness);
     }
 
     EDWCEditorSessionEffect EffectsForAuthoringImpact(const EDWCEditorAuthoringImpact Impact)
@@ -95,7 +96,7 @@ namespace
         if (EnumHasAnyFlags(Impact, EDWCEditorAuthoringImpact::ElementList))
         {
             Effects |= EDWCEditorSessionEffect::RefreshElementList |
-                EDWCEditorSessionEffect::RefreshUVView;
+                       EDWCEditorSessionEffect::RefreshUVView;
         }
         if (EnumHasAnyFlags(Impact, EDWCEditorAuthoringImpact::Preview))
         {
@@ -111,10 +112,10 @@ namespace
         }
         return Effects;
     }
-}
+} // namespace
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&             State,
     const FDWCActivateEditorModeAction& Action)
 {
     if (State.ActiveMode == Action.Mode)
@@ -123,12 +124,12 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     }
     State.ActiveMode = Action.Mode;
     return EDWCEditorSessionEffect::SyncControls |
-        EDWCEditorSessionEffect::SyncSelection |
-        EDWCEditorSessionEffect::UpdatePreviewParameters;
+           EDWCEditorSessionEffect::SyncSelection |
+           EDWCEditorSessionEffect::UpdatePreviewParameters;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&             State,
     const FDWCReconcileAuthoringAction& Action)
 {
     State.AuthoringRevision = Action.AuthoringRevision;
@@ -174,13 +175,13 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     {
         State.Transparency.SelectedLayerGuid.Invalidate();
         Effects |= EDWCEditorSessionEffect::SyncSelection |
-            EDWCEditorSessionEffect::RefreshStageContent;
+                   EDWCEditorSessionEffect::RefreshStageContent;
     }
     return Effects;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&          State,
     const FDWCSetWrinkleBrushAction& Action)
 {
     FWetWrinkleBrushSettings Brush = Action.Brush;
@@ -200,7 +201,7 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&               State,
     const FDWCSelectWrinkleElementAction& Action)
 {
     if (State.Wrinkle.SelectedElementGuid == Action.ElementGuid &&
@@ -213,12 +214,12 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     State.Wrinkle.SelectedElementType = Action.ElementType;
     State.Wrinkle.SelectedRidgePointIndex = Action.RidgePointIndex;
     return EDWCEditorSessionEffect::SyncSelection |
-        EDWCEditorSessionEffect::UpdatePreviewParameters |
-        EDWCEditorSessionEffect::RefreshDetails;
+           EDWCEditorSessionEffect::UpdatePreviewParameters |
+           EDWCEditorSessionEffect::RefreshDetails;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&                 State,
     const FDWCSetWrinkleCrossPreviewAction& Action)
 {
     if (State.Wrinkle.bShowBakedTransparency == Action.bShowBakedTransparency)
@@ -227,11 +228,11 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     }
     State.Wrinkle.bShowBakedTransparency = Action.bShowBakedTransparency;
     return EDWCEditorSessionEffect::SyncControls |
-        EDWCEditorSessionEffect::UpdatePreviewParameters;
+           EDWCEditorSessionEffect::UpdatePreviewParameters;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&                  State,
     const FDWCSelectTransparencyLayerAction& Action)
 {
     if (State.Transparency.SelectedLayerGuid == Action.LayerGuid)
@@ -240,11 +241,11 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     }
     State.Transparency.SelectedLayerGuid = Action.LayerGuid;
     return EDWCEditorSessionEffect::SyncSelection |
-        EDWCEditorSessionEffect::RebuildPreviewContent;
+           EDWCEditorSessionEffect::RebuildPreviewContent;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&               State,
     const FDWCSetTransparencyStageAction& Action)
 {
     EDWCTransparencyEditorStage& Stage = State.Transparency.StageByLayer.FindOrAdd(Action.LayerGuid);
@@ -254,12 +255,12 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     }
     Stage = Action.Stage;
     return EDWCEditorSessionEffect::SyncControls |
-        EDWCEditorSessionEffect::RefreshStageContent |
-        EDWCEditorSessionEffect::RebuildPreviewContent;
+           EDWCEditorSessionEffect::RefreshStageContent |
+           EDWCEditorSessionEffect::RebuildPreviewContent;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&                                State,
     const FDWCInitializeTransparencyPreviewSettingsAction& Action)
 {
     FDWCEditorTransparencySessionState& Transparency = State.Transparency;
@@ -271,28 +272,28 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     FDWCTransparencyPreviewSettings Settings = Action.Settings;
     NormalizeTransparencyPreviewSettings(Settings);
     const bool bChanged = !Transparency.bPreviewSettingsInitialized ||
-        !AreTransparencyPreviewSettingsEquivalent(Transparency.PreviewSettings, Settings);
+                          !AreTransparencyPreviewSettingsEquivalent(Transparency.PreviewSettings, Settings);
     Transparency.PreviewSettings = Settings;
     Transparency.bPreviewSettingsInitialized = true;
     return bChanged
-        ? EDWCEditorSessionEffect::SyncControls |
-            EDWCEditorSessionEffect::UpdatePreviewParameters
-        : EDWCEditorSessionEffect::None;
+               ? EDWCEditorSessionEffect::SyncControls |
+                     EDWCEditorSessionEffect::UpdatePreviewParameters
+               : EDWCEditorSessionEffect::None;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&                 State,
     const FDWCSetTransparencyPreviewAction& Action)
 {
     FDWCEditorTransparencySessionState& Preview = State.Transparency;
-    const float Wetness = FMath::Clamp(Action.WetnessPreviewPercent, 0.0f, 100.0f);
-    FDWCTransparencyPreviewSettings Settings = Action.Settings;
+    const float                         Wetness = FMath::Clamp(Action.WetnessPreviewPercent, 0.0f, 100.0f);
+    FDWCTransparencyPreviewSettings     Settings = Action.Settings;
     NormalizeTransparencyPreviewSettings(Settings);
     const bool bChanged = Preview.PreviewMode != Action.PreviewMode ||
-        Preview.VisualizationMode != Action.VisualizationMode ||
-        !FMath::IsNearlyEqual(Preview.WetnessPreviewPercent, Wetness) ||
-        !AreTransparencyPreviewSettingsEquivalent(Preview.PreviewSettings, Settings) ||
-        Preview.bShowSavedWrinkle != Action.bShowSavedWrinkle;
+                          Preview.VisualizationMode != Action.VisualizationMode ||
+                          !FMath::IsNearlyEqual(Preview.WetnessPreviewPercent, Wetness) ||
+                          !AreTransparencyPreviewSettingsEquivalent(Preview.PreviewSettings, Settings) ||
+                          Preview.bShowSavedWrinkle != Action.bShowSavedWrinkle;
     if (!bChanged)
     {
         return EDWCEditorSessionEffect::None;
@@ -304,11 +305,11 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     Preview.bPreviewSettingsInitialized = true;
     Preview.bShowSavedWrinkle = Action.bShowSavedWrinkle;
     return EDWCEditorSessionEffect::SyncControls |
-        EDWCEditorSessionEffect::UpdatePreviewParameters;
+           EDWCEditorSessionEffect::UpdatePreviewParameters;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&               State,
     const FDWCSetTransparencyPaintAction& Action)
 {
     FDWCTransparencyPaintSettings Paint = Action.Paint;
@@ -327,8 +328,8 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
         Paint.bRevealColorPaint = false;
     }
     FDWCTransparencyPaintSettings& Target = Action.bRevealPaint
-        ? State.Transparency.RevealPaint
-        : State.Transparency.Paint;
+                                                ? State.Transparency.RevealPaint
+                                                : State.Transparency.Paint;
     if (ArePaintSettingsEquivalent(Target, Paint))
     {
         return EDWCEditorSessionEffect::None;
@@ -337,12 +338,12 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     // Paint settings are consumed by the viewport.  Returning the preview
     // effect here keeps UI -> session -> viewport as the only update path.
     return Action.Effects |
-        EDWCEditorSessionEffect::SyncControls |
-        EDWCEditorSessionEffect::UpdatePreviewParameters;
+           EDWCEditorSessionEffect::SyncControls |
+           EDWCEditorSessionEffect::UpdatePreviewParameters;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
-    FDWCEditorSessionState& State,
+    FDWCEditorSessionState&                     State,
     const FDWCSetTransparencyEditContextAction& Action)
 {
     const FDWCTransparencyEditContext& Current = State.Transparency.EditContext;

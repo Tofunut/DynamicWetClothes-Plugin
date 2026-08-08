@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Converts Texture2D source data into a pixel buffer used for UV-based color sampling.
  */
@@ -12,20 +13,20 @@ namespace
 {
     struct FReadbackCacheEntry
     {
-        int32 Width = 0;
-        int32 Height = 0;
-        ETextureSourceFormat Format = TSF_Invalid;
-        FGuid SourceId;
-        bool bSRGB = false;
-        TextureAddress AddressX = TA_Clamp;
-        TextureAddress AddressY = TA_Clamp;
+        int32                       Width = 0;
+        int32                       Height = 0;
+        ETextureSourceFormat        Format = TSF_Invalid;
+        FGuid                       SourceId;
+        bool                        bSRGB = false;
+        TextureAddress              AddressX = TA_Clamp;
+        TextureAddress              AddressY = TA_Clamp;
         FWetClothingTextureReadback Data;
-        uint64 LastUsedSerial = 0;
+        uint64                      LastUsedSerial = 0;
     };
 
     TMap<FObjectKey, FReadbackCacheEntry> GTextureReadbackCache;
-    uint64 GTextureReadbackUseSerial = 0;
-    constexpr uint64 TextureReadbackCacheBudgetBytes = 256ull * 1024ull * 1024ull;
+    uint64                                GTextureReadbackUseSerial = 0;
+    constexpr uint64                      TextureReadbackCacheBudgetBytes = 256ull * 1024ull * 1024ull;
 
     uint64 GetReadbackCacheBytes()
     {
@@ -46,7 +47,7 @@ namespace
         while (UsedBytes > TextureReadbackCacheBudgetBytes)
         {
             const FObjectKey* OldestKey = nullptr;
-            uint64 OldestSerial = MAX_uint64;
+            uint64            OldestSerial = MAX_uint64;
             for (const TPair<FObjectKey, FReadbackCacheEntry>& Pair : GTextureReadbackCache)
             {
                 if (Pair.Key != ProtectedKey && Pair.Value.LastUsedSerial < OldestSerial)
@@ -63,7 +64,7 @@ namespace
             UsedBytes = GetReadbackCacheBytes();
         }
     }
-}
+} // namespace
 
 bool FWetClothingTextureReadback::IsValid() const
 {
@@ -163,9 +164,9 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
     }
 
     OutTextureData.RawData = MoveTemp(SharedRawData);
-    OutTextureData.Width = Texture->Source.GetSizeX();
-    OutTextureData.Height = Texture->Source.GetSizeY();
-    OutTextureData.BytesPerPixel = Texture->Source.GetBytesPerPixel();
+    OutTextureData.Width = IntCastChecked<int32>(Texture->Source.GetSizeX());
+    OutTextureData.Height = IntCastChecked<int32>(Texture->Source.GetSizeY());
+    OutTextureData.BytesPerPixel = IntCastChecked<int32>(Texture->Source.GetBytesPerPixel());
     OutTextureData.bSRGB = Texture->SRGB;
     OutTextureData.Format = SourceFormat;
     OutTextureData.AddressX = Texture->AddressX;

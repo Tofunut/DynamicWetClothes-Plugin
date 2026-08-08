@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
@@ -27,17 +28,17 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     virtual void OnConstruction(const FTransform& Transform) override;
 
   private:
-    void RefreshExistingOverlaps();
-    void RefreshReceiversInsideBounds();
-    void ApplyWetnessTick();
-    void AddReceiverFromActor(AActor* OtherActor);
-    void RemoveReceiverFromActor(AActor* OtherActor);
-    bool IsReceiverInsideRainBounds(const UDynamicWetClothesComponent& Receiver) const;
+    void    RefreshExistingOverlaps();
+    void    RefreshReceiversInsideBounds();
+    void    ApplyWetnessTick();
+    void    AddReceiverFromActor(AActor* OtherActor);
+    void    RemoveReceiverFromActor(AActor* OtherActor);
+    bool    IsReceiverInsideRainBounds(const UDynamicWetClothesComponent& Receiver) const;
     FVector GetRainDirectionWorld() const;
-    void BuildRainWetAreaData(FDWCWetAreaData& OutAreaData) const;
-    void ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const;
-    void ApplyRainNiagaraParameters() const;
-    bool ShouldLogDebug() const;
+    void    BuildRainWetAreaData(FDWCWetAreaData& OutAreaData) const;
+    void    ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const;
+    void    ApplyRainNiagaraParameters() const;
+    bool    ShouldLogDebug() const;
 
     UFUNCTION()
     void OnRainBeginOverlap(
@@ -101,6 +102,5 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     FTimerHandle                                             WetnessTimer;
     mutable double                                           LastDebugLogTime = -1000000.0;
 
-    public:
-
+  public:
 };

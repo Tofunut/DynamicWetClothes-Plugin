@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -14,8 +15,8 @@ class FDWCEditorCancellationToken;
 
 struct FDWCTransparencyRevealColorComposeTileSnapshot
 {
-    FIntPoint TileCoordinate = FIntPoint::ZeroValue;
-    FIntRect Rect;
+    FIntPoint     TileCoordinate = FIntPoint::ZeroValue;
+    FIntRect      Rect;
     TArray<uint8> ManualPremultiplied;
     TArray<uint8> ManualWeight;
     TArray<uint8> OuterEdgeFeather;
@@ -23,36 +24,36 @@ struct FDWCTransparencyRevealColorComposeTileSnapshot
 
 struct FDWCTransparencyRevealColorIncrementalJobInput
 {
-    TSharedPtr<const FDWCTransparencyAutoBakeResult> AutoResult;
-    FDWCTransparencyRevealColorStroke Stroke;
-    TArray<FDWCTransparencyBrushSample> Samples;
-    FLinearColor BaseRevealColor = FLinearColor::White;
-    TArray<FIntPoint> OutputTileCoordinates;
-    TArray<FDWCTransparencyRevealColorTilePayload> SnapshotTiles;
+    TSharedPtr<const FDWCTransparencyAutoBakeResult>       AutoResult;
+    FDWCTransparencyRevealColorStroke                      Stroke;
+    TArray<FDWCTransparencyBrushSample>                    Samples;
+    FLinearColor                                           BaseRevealColor = FLinearColor::White;
+    TArray<FIntPoint>                                      OutputTileCoordinates;
+    TArray<FDWCTransparencyRevealColorTilePayload>         SnapshotTiles;
     TArray<FDWCTransparencyRevealColorComposeTileSnapshot> ComposeTiles;
-    EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
-    uint64 ExpectedRevealRevision = 0;
-    FDWCEditorPreviewRegionTarget PreviewTarget;
+    EDWCTransparencyVisualizationMode                      VisualizationMode = EDWCTransparencyVisualizationMode::Final;
+    uint64                                                 ExpectedRevealRevision = 0;
+    FDWCEditorPreviewRegionTarget                          PreviewTarget;
 };
 
 struct FDWCTransparencyRevealColorIncrementalJobResult final : FDWCEditorWorkerJobResult
 {
     TArray<FDWCTransparencyRevealColorTilePayload> RevealTiles;
-    TArray<FDWCEditorBGRA8RegionPayload> PreviewRegions;
-    uint64 ExpectedRevealRevision = 0;
-    FDWCEditorPreviewRegionTarget PreviewTarget;
-    bool bHasChanges = false;
+    TArray<FDWCEditorBGRA8RegionPayload>           PreviewRegions;
+    uint64                                         ExpectedRevealRevision = 0;
+    FDWCEditorPreviewRegionTarget                  PreviewTarget;
+    bool                                           bHasChanges = false;
 };
 
 class FDWCTransparencyRevealColorIncrementalWorker final
 {
   public:
     static FDWCEditorWorkerMemoryEstimate EstimateMemory(
-        const TArray<FDWCTransparencyRevealColorTilePayload>& SnapshotTiles,
+        const TArray<FDWCTransparencyRevealColorTilePayload>&         SnapshotTiles,
         const TArray<FDWCTransparencyRevealColorComposeTileSnapshot>& ComposeTiles,
-        int32 OutputTileCount);
+        int32                                                         OutputTileCount);
 
     static TSharedPtr<FDWCTransparencyRevealColorIncrementalJobResult, ESPMode::ThreadSafe> Build(
-        FDWCTransparencyRevealColorIncrementalJobInput&& Input,
+        FDWCTransparencyRevealColorIncrementalJobInput&&                    Input,
         const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken);
 };

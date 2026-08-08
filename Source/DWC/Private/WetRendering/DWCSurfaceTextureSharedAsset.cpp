@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetRendering/DWCSurfaceTextureSharedAsset.h"
 #include "Core/DWCGeneratedAssetPaths.h"
 
@@ -13,8 +14,8 @@ namespace DWCSurfaceTextureSharedAsset
 
         FString MakeStableSourceKey(
             const FString& SourceTexturePath,
-            const TCHAR* TextureRole,
-            const bool bNormalMap)
+            const TCHAR*   TextureRole,
+            const bool     bNormalMap)
         {
             return FString::Printf(
                 TEXT("DWC.SurfaceTexture.v%d|Role=%s|Normal=%d|Texture=%s"),
@@ -23,7 +24,7 @@ namespace DWCSurfaceTextureSharedAsset
                 bNormalMap ? 1 : 0,
                 *SourceTexturePath);
         }
-    }
+    } // namespace
 
     const TCHAR* GetSharedFolder()
     {
@@ -32,8 +33,8 @@ namespace DWCSurfaceTextureSharedAsset
 
     FString MakeNormalizedTextureObjectName(
         const FString& SourceTexturePath,
-        const TCHAR* TextureRole,
-        const bool bNormalMap)
+        const TCHAR*   TextureRole,
+        const bool     bNormalMap)
     {
         if (SourceTexturePath.IsEmpty() || TextureRole == nullptr || TextureRole[0] == 0)
         {
@@ -47,42 +48,42 @@ namespace DWCSurfaceTextureSharedAsset
 
     FString MakeNormalizedTextureObjectName(
         const UTexture2D* SourceTexture,
-        const TCHAR* TextureRole,
-        const bool bNormalMap)
+        const TCHAR*      TextureRole,
+        const bool        bNormalMap)
     {
         return SourceTexture != nullptr
-            ? MakeNormalizedTextureObjectName(SourceTexture->GetPathName(), TextureRole, bNormalMap)
-            : FString();
+                   ? MakeNormalizedTextureObjectName(SourceTexture->GetPathName(), TextureRole, bNormalMap)
+                   : FString();
     }
 
     FString MakeNormalizedTexturePackageName(
         const FString& SourceTexturePath,
-        const TCHAR* TextureRole,
-        const bool bNormalMap)
+        const TCHAR*   TextureRole,
+        const bool     bNormalMap)
     {
         const FString ObjectName = MakeNormalizedTextureObjectName(
             SourceTexturePath,
             TextureRole,
             bNormalMap);
         return ObjectName.IsEmpty()
-            ? FString()
-            : FString(SharedFolder) / ObjectName;
+                   ? FString()
+                   : FString(SharedFolder) / ObjectName;
     }
 
     FString MakeNormalizedTexturePackageName(
         const UTexture2D* SourceTexture,
-        const TCHAR* TextureRole,
-        const bool bNormalMap)
+        const TCHAR*      TextureRole,
+        const bool        bNormalMap)
     {
         return SourceTexture != nullptr
-            ? MakeNormalizedTexturePackageName(SourceTexture->GetPathName(), TextureRole, bNormalMap)
-            : FString();
+                   ? MakeNormalizedTexturePackageName(SourceTexture->GetPathName(), TextureRole, bNormalMap)
+                   : FString();
     }
 
     FString MakeNormalizedTextureObjectPath(
         const FString& SourceTexturePath,
-        const TCHAR* TextureRole,
-        const bool bNormalMap)
+        const TCHAR*   TextureRole,
+        const bool     bNormalMap)
     {
         const FString PackageName = MakeNormalizedTexturePackageName(
             SourceTexturePath,
@@ -102,11 +103,11 @@ namespace DWCSurfaceTextureSharedAsset
 
     FString MakeNormalizedTextureObjectPath(
         const UTexture2D* SourceTexture,
-        const TCHAR* TextureRole,
-        const bool bNormalMap)
+        const TCHAR*      TextureRole,
+        const bool        bNormalMap)
     {
         return SourceTexture != nullptr
-            ? MakeNormalizedTextureObjectPath(SourceTexture->GetPathName(), TextureRole, bNormalMap)
-            : FString();
+                   ? MakeNormalizedTextureObjectPath(SourceTexture->GetPathName(), TextureRole, bNormalMap)
+                   : FString();
     }
-}
+} // namespace DWCSurfaceTextureSharedAsset

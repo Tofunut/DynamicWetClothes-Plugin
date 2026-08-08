@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -137,7 +138,7 @@ struct DWC_API FDWCWorkloadStatsSnapshot
 
 class DWC_API FDWCWorkloadStats
 {
-public:
+  public:
 #if STATS
     static void RecordSurfaceWaterStampQueued(uint32 PendingStampCount);
     static void RecordSurfaceWaterStampsSubmitted(uint32 StampCount);
@@ -153,22 +154,22 @@ public:
     static void RecordGPUBackendDispatch();
 
     static FDWCWorkloadEventTotals ReadEventTotals();
-    static uint32 ConsumeSurfaceWaterMaxPendingStamps();
+    static uint32                  ConsumeSurfaceWaterMaxPendingStamps();
 #else
-    static void RecordSurfaceWaterStampQueued(uint32) {}
-    static void RecordSurfaceWaterStampsSubmitted(uint32) {}
-    static void RecordSurfaceWaterGPUDispatch() {}
-    static void RecordCPUSkinningCompleted(uint32) {}
-    static void RecordLODTransferCompleted(uint32) {}
-    static void RecordWetContactsReceived(uint32) {}
-    static void RecordWetContactsOutcome(uint32, bool) {}
-    static void RecordWetnessSimulationUpdate(bool) {}
-    static void RecordDirtyVerticesGenerated(uint32) {}
-    static void RecordRenderUpdate(uint32) {}
-    static void RecordGPUBackendUpdateSubmitted() {}
-    static void RecordGPUBackendDispatch() {}
+    static void                    RecordSurfaceWaterStampQueued(uint32) {}
+    static void                    RecordSurfaceWaterStampsSubmitted(uint32) {}
+    static void                    RecordSurfaceWaterGPUDispatch() {}
+    static void                    RecordCPUSkinningCompleted(uint32) {}
+    static void                    RecordLODTransferCompleted(uint32) {}
+    static void                    RecordWetContactsReceived(uint32) {}
+    static void                    RecordWetContactsOutcome(uint32, bool) {}
+    static void                    RecordWetnessSimulationUpdate(bool) {}
+    static void                    RecordDirtyVerticesGenerated(uint32) {}
+    static void                    RecordRenderUpdate(uint32) {}
+    static void                    RecordGPUBackendUpdateSubmitted() {}
+    static void                    RecordGPUBackendDispatch() {}
     static FDWCWorkloadEventTotals ReadEventTotals() { return {}; }
-    static uint32 ConsumeSurfaceWaterMaxPendingStamps() { return 0; }
+    static uint32                  ConsumeSurfaceWaterMaxPendingStamps() { return 0; }
 #endif
 };
 
@@ -176,7 +177,7 @@ namespace DWCStats
 {
     DWC_API void RegisterStatCommands();
     DWC_API void UnregisterStatCommands();
-}
+} // namespace DWCStats
 
 // `stat dwc mem` toggles all three memory sections together.
 DECLARE_STATS_GROUP(TEXT("DWC Memory"), STATGROUP_DWC, STATCAT_Advanced);
@@ -282,8 +283,6 @@ DECLARE_MEMORY_STAT_POOL_EXTERN(
     STATGROUP_DWCGPUMemory,
     FPlatformMemory::MCR_GPU,
     DWC_API);
-
-
 
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Total Tracked"), STAT_DWC_TotalTrackedGPU, STATGROUP_DWCGPUMemory, FPlatformMemory::MCR_GPU, DWC_API);
 

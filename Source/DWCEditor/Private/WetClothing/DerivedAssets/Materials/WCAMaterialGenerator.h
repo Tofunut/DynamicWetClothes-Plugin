@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,12 +13,12 @@ class UWetClothingAsset;
 
 struct FWetClothingUnifiedMaterialSetupResult
 {
-    bool bSucceeded = false;
-    bool bAlreadyConfigured = false;
-    UMaterial* GeneratedMaterial = nullptr;
-    UMaterialInstanceConstant* GeneratedMaterialInstance = nullptr;
+    bool                        bSucceeded = false;
+    bool                        bAlreadyConfigured = false;
+    UMaterial*                  GeneratedMaterial = nullptr;
+    UMaterialInstanceConstant*  GeneratedMaterialInstance = nullptr;
     UMaterialFunctionInterface* EvaluateSurfaceAppearanceFunction = nullptr;
-    FString Message;
+    FString                     Message;
 };
 
 class FWCAMaterialGenerator
@@ -28,14 +29,14 @@ class FWCAMaterialGenerator
     struct FOptions
     {
         EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
-        int32 DWCDataUVChannelIndex = INDEX_NONE;
-        int32 OriginalUVChannelIndex = 0;
-        int32 MaterialSlotIndex = INDEX_NONE;
-        int32 SurfaceWaterNormalUVChannelIndex = 0;
-        float SurfaceWaterTargetRoughness = 0.02f;
-        bool bUseSurfaceWater = false;
-        bool bEnableDWCDataUVSampling = false;
-        bool bConnectWetnessMapPath = false;
+        int32              DWCDataUVChannelIndex = INDEX_NONE;
+        int32              OriginalUVChannelIndex = 0;
+        int32              MaterialSlotIndex = INDEX_NONE;
+        int32              SurfaceWaterNormalUVChannelIndex = 0;
+        float              SurfaceWaterTargetRoughness = 0.02f;
+        bool               bUseSurfaceWater = false;
+        bool               bEnableDWCDataUVSampling = false;
+        bool               bConnectWetnessMapPath = false;
 
         /** Optional owner used to place generated assets in a WCA-specific deterministic folder. */
         const UWetClothingAsset* OwningWetClothingAsset = nullptr;
@@ -43,24 +44,24 @@ class FWCAMaterialGenerator
 
     static FOptions MakeOptionsForAsset(
         const UWetClothingAsset* WetClothingAsset,
-        EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU,
-        int32 MaterialSlotIndex = INDEX_NONE);
+        EDWCSimulationMode       SimulationMode = EDWCSimulationMode::VertexCPU,
+        int32                    MaterialSlotIndex = INDEX_NONE);
 
     /** Resolves the original source material consistently for generation, validation, and visual bakes. */
     static UMaterialInterface* ResolveGeneratedMaterialSource(
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
-        UMaterialInterface* CandidateMaterial);
+        int32                    MaterialSlotIndex,
+        UMaterialInterface*      CandidateMaterial);
 
     /** Creates one shared DWC material graph and one runtime-selectable MIC. */
     static FWetClothingUnifiedMaterialSetupResult CreateOrUpdateUnifiedMaterialSet(
         UMaterialInterface* SourceMaterial,
-        const FOptions& Options = FOptions());
+        const FOptions&     Options = FOptions());
 
     /** Creates a transient GPU preview permutation from the source material without writing generated assets. */
     static FWetClothingUnifiedMaterialSetupResult CreateTransientUnifiedPreviewMaterial(
         UMaterialInterface* SourceMaterial,
-        const FOptions& Options = FOptions());
+        const FOptions&     Options = FOptions());
 
     static bool IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface);
     static bool IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface, const FOptions& Options);
@@ -68,14 +69,14 @@ class FWCAMaterialGenerator
     /** Stable hash used by the editor to decide whether a generated set is current. */
     static FString BuildGeneratedMaterialSignature(
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
-        UMaterialInterface* SourceMaterial);
+        int32                    MaterialSlotIndex,
+        UMaterialInterface*      SourceMaterial);
 
     /** Fast source/reference/signature check. Does not inspect the full generated graph. */
     static bool IsGeneratedMaterialOverrideCurrent(
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
-        FString* OutReason = nullptr);
+        int32                    MaterialSlotIndex,
+        FString*                 OutReason = nullptr);
 
     /** Fast reference-only validation used by routine editor status refreshes. */
     static void ValidateGeneratedMaterialOverrideReferences(const UWetClothingAsset* WetClothingAsset, TArray<FString>& OutMessages);
@@ -84,5 +85,4 @@ class FWCAMaterialGenerator
     static void ValidateGeneratedMaterialOverrides(const UWetClothingAsset* WetClothingAsset, TArray<FString>& OutMessages);
 
     static bool ValidateSurfaceAppearanceFunctions(FString& OutErrorMessage);
-
 };

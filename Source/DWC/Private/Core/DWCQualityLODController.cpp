@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Core/DWCQualityLODController.h"
 
 void FDWCQualityLODController::SetEnabled(const bool bInEnabled)
@@ -30,7 +31,7 @@ FDWCQualityLODPolicy FDWCQualityLODController::ResolvePolicy(const int32 InQuali
 void FDWCQualityLODController::SetLOD(FDWCQualityLODRuntimeState& State, const int32 InQualityLOD) const
 {
     const int32 SafeLOD = FMath::Max(0, InQualityLOD);
-    const bool bLODChanged = State.CurrentQualityLOD != SafeLOD;
+    const bool  bLODChanged = State.CurrentQualityLOD != SafeLOD;
     State.CurrentQualityLOD = SafeLOD;
     State.ResolvedPolicy = ResolvePolicy(SafeLOD);
     if (bLODChanged)
@@ -70,7 +71,7 @@ bool FDWCQualityLODController::ShouldUpdateTransparency(const FDWCQualityLODRunt
 }
 
 bool FDWCQualityLODController::ShouldRunInterval(
-    float& Accumulator,
+    float&      Accumulator,
     const float BaseInterval,
     const float TargetInterval) const
 {

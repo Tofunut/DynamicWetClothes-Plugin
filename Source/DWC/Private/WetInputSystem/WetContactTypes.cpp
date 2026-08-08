@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetInputSystem/WetContactTypes.h"
 
 FDWCWaterSurfaceData::FDWCWaterSurfaceData() = default;

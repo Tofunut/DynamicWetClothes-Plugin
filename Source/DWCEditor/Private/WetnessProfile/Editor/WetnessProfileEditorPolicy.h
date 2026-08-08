@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -15,9 +16,8 @@ struct FWetnessProfileParameters;
  */
 class FWetnessProfileEditorPolicy
 {
-public:
+  public:
     static bool SanitizeProfile(UWetnessProfile* Profile, TArray<FString>* OutChanges = nullptr);
     static bool SanitizeParameters(FWetnessProfileParameters& Parameters, TArray<FString>* OutChanges = nullptr);
     static void FindProfileIssues(const UWetnessProfile* Profile, TArray<FString>& OutIssues);
-
 };

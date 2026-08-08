@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCOriginalUVTopologyBuilder.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -6,17 +7,18 @@
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 
 bool FDWCOriginalUVTopologyBuilder::BuildLOD(
-    const UWetClothingAsset& Asset,
-    USkeletalMesh* PreparedMesh,
-    const int32 LODIndex,
+    const UWetClothingAsset&  Asset,
+    USkeletalMesh*            PreparedMesh,
+    const int32               LODIndex,
     FDWCEditorUVTopologyData& OutTopology,
-    FString* OutErrorMessage,
-    const TSet<int32>* TargetMaterialSlotIndices)
+    FString*                  OutErrorMessage,
+    const TSet<int32>*        TargetMaterialSlotIndices)
 {
     OutTopology = FDWCEditorUVTopologyData();
     if (PreparedMesh == nullptr)
     {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("No DWC Prepared Skeletal Mesh is available.");
+        if (OutErrorMessage)
+            *OutErrorMessage = TEXT("No DWC Prepared Skeletal Mesh is available.");
         return false;
     }
 
@@ -29,7 +31,8 @@ bool FDWCOriginalUVTopologyBuilder::BuildLOD(
     OutTopology.GeneratorVersion = DWCGeneratedDataVersion::OriginalUVTopology;
     if (OutTopology.BuildSignature.IsEmpty())
     {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("Failed to build the DWC Prepared Mesh Original-UV signature.");
+        if (OutErrorMessage)
+            *OutErrorMessage = TEXT("Failed to build the DWC Prepared Mesh Original-UV signature.");
         return false;
     }
 
@@ -41,7 +44,7 @@ bool FDWCOriginalUVTopologyBuilder::BuildLOD(
         }
 
         TArray<FWetClothingAssetUVIsland> Islands;
-        FString Error;
+        FString                           Error;
         if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
                 PreparedMesh,
                 OutTopology.LODIndex,
@@ -74,10 +77,12 @@ bool FDWCOriginalUVTopologyBuilder::BuildLOD(
     OutTopology.bIsValid = !OutTopology.Islands.IsEmpty();
     if (!OutTopology.bIsValid)
     {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("The DWC Prepared Mesh contains no Original-UV island records.");
+        if (OutErrorMessage)
+            *OutErrorMessage = TEXT("The DWC Prepared Mesh contains no Original-UV island records.");
         return false;
     }
 
-    if (OutErrorMessage) OutErrorMessage->Reset();
+    if (OutErrorMessage)
+        OutErrorMessage->Reset();
     return true;
 }

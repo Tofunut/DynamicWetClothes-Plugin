@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Preview/Orchestration/DWCEditorPreviewLayerStack.h"
 
 #include "Engine/Texture.h"
@@ -24,27 +25,27 @@ namespace
         }
         Bindings.Add(Binding);
     }
-}
+} // namespace
 
 void FDWCEditorPreviewLayer::AddScalar(
     const FName ParameterName,
     const float Value,
     const float ResetValue)
 {
-    Scalars.Add({ParameterName, Value, ResetValue});
+    Scalars.Add({ ParameterName, Value, ResetValue });
 }
 
 void FDWCEditorPreviewLayer::AddVector(
-    const FName ParameterName,
+    const FName         ParameterName,
     const FLinearColor& Value,
     const FLinearColor& ResetValue)
 {
-    Vectors.Add({ParameterName, Value, ResetValue});
+    Vectors.Add({ ParameterName, Value, ResetValue });
 }
 
 void FDWCEditorPreviewLayer::AddTexture(const FName ParameterName, UTexture* Value)
 {
-    Textures.Add({ParameterName, Value});
+    Textures.Add({ ParameterName, Value });
 }
 
 bool FDWCEditorPreviewParameterSet::IsEmpty() const
@@ -55,8 +56,8 @@ bool FDWCEditorPreviewParameterSet::IsEmpty() const
 uint64 FDWCEditorPreviewParameterSet::GetAllocatedSize() const
 {
     return static_cast<uint64>(Scalars.GetAllocatedSize()) +
-        static_cast<uint64>(Vectors.GetAllocatedSize()) +
-        static_cast<uint64>(Textures.GetAllocatedSize());
+           static_cast<uint64>(Vectors.GetAllocatedSize()) +
+           static_cast<uint64>(Textures.GetAllocatedSize());
 }
 
 void FDWCEditorPreviewLayerStack::AddOrReplace(FDWCEditorPreviewLayer Layer)

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -39,42 +40,42 @@ struct FDWCEditorPreviewMaterialRequest
     /** Stable owner for a slot MID, normally the active WCA or preview session. */
     UObject* SlotOwner = nullptr;
     UObject* MIDOuter = nullptr;
-    int32 MaterialSlotIndex = INDEX_NONE;
+    int32    MaterialSlotIndex = INDEX_NONE;
 
     int32 DWCDataUVChannelIndex = INDEX_NONE;
     int32 SurfaceWaterNormalUVChannelIndex = 0;
 
     EDWCEditorPreviewMaterialFeature FeatureMask = EDWCEditorPreviewMaterialFeature::None;
-    uint32 FeatureSchemaVersion = 1;
+    uint32                           FeatureSchemaVersion = 1;
 
     /** Increment when the source interface's uniform/static overrides change in place. */
-    uint32 SourceParameterRevision = 0;
+    uint32                          SourceParameterRevision = 0;
     FDWCEditorPreviewGraphExtension ExtendGraph;
 };
 
 struct FDWCEditorPreviewMaterialResult
 {
     EDWCEditorPreviewMaterialState State = EDWCEditorPreviewMaterialState::Failed;
-    bool bSucceeded = false;
-    bool bPending = false;
-    bool bGraphCacheHit = false;
-    bool bParentCacheHit = false;
-    bool bMIDCacheHit = false;
+    bool                           bSucceeded = false;
+    bool                           bPending = false;
+    bool                           bGraphCacheHit = false;
+    bool                           bParentCacheHit = false;
+    bool                           bMIDCacheHit = false;
 
-    UMaterial* TransientBaseMaterial = nullptr;
+    UMaterial*                 TransientBaseMaterial = nullptr;
     UMaterialInstanceConstant* TransientParent = nullptr;
-    UMaterialInstanceDynamic* PreviewMID = nullptr;
-    FString Message;
+    UMaterialInstanceDynamic*  PreviewMID = nullptr;
+    FString                    Message;
 };
 
 struct FDWCEditorPreviewMaterialCacheStats
 {
-    int32 GraphEntryCount = 0;
-    int32 ParentEntryCount = 0;
-    int32 SlotMIDEntryCount = 0;
-    int32 FailedGraphEntryCount = 0;
-    int32 PendingGraphEntryCount = 0;
-    int32 FailedParentEntryCount = 0;
+    int32  GraphEntryCount = 0;
+    int32  ParentEntryCount = 0;
+    int32  SlotMIDEntryCount = 0;
+    int32  FailedGraphEntryCount = 0;
+    int32  PendingGraphEntryCount = 0;
+    int32  FailedParentEntryCount = 0;
     uint64 EstimatedContainerBytes = 0;
 
     uint64 GraphHitCount = 0;

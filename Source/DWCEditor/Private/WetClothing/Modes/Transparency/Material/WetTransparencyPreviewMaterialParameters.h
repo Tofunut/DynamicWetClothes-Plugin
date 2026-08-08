@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -130,7 +131,7 @@ namespace DWCTransparencyPreviewMaterialParameters
         static const FName Name(TEXT("DWC_UseTransparencyHoverEdgeFeatherMap"));
         return Name;
     }
-}
+} // namespace DWCTransparencyPreviewMaterialParameters
 
 /** Stable values consumed by the editor-only Transparency hover shader. */
 enum class EDWCTransparencyMaterialHoverTarget : uint8

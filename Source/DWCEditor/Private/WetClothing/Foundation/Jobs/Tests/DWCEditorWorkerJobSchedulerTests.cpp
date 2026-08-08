@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -13,7 +14,7 @@ namespace
 {
     bool PumpWorkerCompletionsUntil(
         TFunctionRef<bool()> Predicate,
-        const double TimeoutSeconds = 5.0)
+        const double         TimeoutSeconds = 5.0)
     {
         const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
         while (!Predicate() && FPlatformTime::Seconds() < Deadline)
@@ -24,7 +25,7 @@ namespace
         FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
         return Predicate();
     }
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorWorkerCancellationTokenTest,
@@ -52,7 +53,7 @@ bool FDWCEditorWorkerBudgetContractTest::RunTest(const FString& Parameters)
         MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(1, 1024, 512);
     FDWCEditorWorkerJobDescriptor Descriptor;
     Descriptor.EstimatedBytes = 513;
-    FString Error;
+    FString                         Error;
     const FDWCEditorWorkerJobTicket Ticket = Scheduler->Submit(
         Descriptor,
         [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
@@ -126,7 +127,7 @@ bool FDWCEditorWorkerQueuedMemoryReservationTest::RunTest(const FString& Paramet
     QueuedDescriptor.Key.MaterialSlotIndex = 2;
     QueuedDescriptor.EstimatedBytes = 512;
     QueuedDescriptor.DebugName = TEXT("Queued reservation owner");
-    FString Error;
+    FString                         Error;
     const FDWCEditorWorkerJobTicket QueuedTicket = Scheduler->Submit(
         QueuedDescriptor,
         [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
@@ -143,7 +144,7 @@ bool FDWCEditorWorkerQueuedMemoryReservationTest::RunTest(const FString& Paramet
     FDWCEditorWorkerJobDescriptor RejectedDescriptor;
     RejectedDescriptor.Key.MaterialSlotIndex = 3;
     RejectedDescriptor.EstimatedBytes = 1;
-    FString RejectedError;
+    FString                         RejectedError;
     const FDWCEditorWorkerJobTicket DeferredTicket = Scheduler->Submit(
         RejectedDescriptor,
         [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
@@ -191,8 +192,8 @@ bool FDWCEditorWorkerQueuedCancellationCompletionTest::RunTest(const FString& Pa
     FDWCEditorWorkerJobDescriptor QueuedDescriptor;
     QueuedDescriptor.Key.MaterialSlotIndex = 2;
     QueuedDescriptor.EstimatedBytes = 1;
-    bool bFinishedCalled = false;
-    EDWCEditorWorkerJobCompletion Completion = EDWCEditorWorkerJobCompletion::Applied;
+    bool                            bFinishedCalled = false;
+    EDWCEditorWorkerJobCompletion   Completion = EDWCEditorWorkerJobCompletion::Applied;
     const FDWCEditorWorkerJobTicket QueuedTicket = Scheduler->Submit(
         QueuedDescriptor,
         [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
@@ -230,9 +231,9 @@ bool FDWCEditorWorkerRejectedReplacementKeepsActiveJobTest::RunTest(const FStrin
 {
     TSharedRef<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler =
         MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(1, 1024, 1024);
-    FEvent* WorkStarted = FPlatformProcess::GetSynchEventFromPool(true);
-    FEvent* ReleaseWork = FPlatformProcess::GetSynchEventFromPool(true);
-    FEvent* WorkFinished = FPlatformProcess::GetSynchEventFromPool(true);
+    FEvent*                                                      WorkStarted = FPlatformProcess::GetSynchEventFromPool(true);
+    FEvent*                                                      ReleaseWork = FPlatformProcess::GetSynchEventFromPool(true);
+    FEvent*                                                      WorkFinished = FPlatformProcess::GetSynchEventFromPool(true);
     TSharedPtr<FDWCEditorCancellationToken, ESPMode::ThreadSafe> ActiveToken;
 
     FDWCEditorWorkerJobDescriptor Descriptor;
@@ -259,9 +260,9 @@ bool FDWCEditorWorkerRejectedReplacementKeepsActiveJobTest::RunTest(const FStrin
     const bool bStarted = WorkStarted->Wait(5000);
     TestTrue(TEXT("The original job starts"), bStarted);
 
-    bool bReplacedPendingFinished = false;
-    EDWCEditorWorkerJobCompletion ReplacedPendingCompletion = EDWCEditorWorkerJobCompletion::Applied;
-    FString Error;
+    bool                            bReplacedPendingFinished = false;
+    EDWCEditorWorkerJobCompletion   ReplacedPendingCompletion = EDWCEditorWorkerJobCompletion::Applied;
+    FString                         Error;
     const FDWCEditorWorkerJobTicket ReplacementTicket = Scheduler->Submit(
         Descriptor,
         [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
@@ -287,7 +288,7 @@ bool FDWCEditorWorkerRejectedReplacementKeepsActiveJobTest::RunTest(const FStrin
         TestTrue(TEXT("A newer latest request cancels obsolete active work"), ActiveToken->IsCanceled());
     }
 
-    bool bLatestApplied = false;
+    bool                            bLatestApplied = false;
     const FDWCEditorWorkerJobTicket LatestTicket = Scheduler->Submit(
         Descriptor,
         [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
@@ -314,7 +315,8 @@ bool FDWCEditorWorkerRejectedReplacementKeepsActiveJobTest::RunTest(const FStrin
     TestTrue(TEXT("The worker exits before test cleanup"), WorkFinished->Wait(5000));
     TestTrue(
         TEXT("The latest mailbox request runs after the obsolete active job retires"),
-        PumpWorkerCompletionsUntil([&bLatestApplied]() { return bLatestApplied; }));
+        PumpWorkerCompletionsUntil([&bLatestApplied]()
+                                   { return bLatestApplied; }));
     Scheduler->Shutdown();
     FPlatformProcess::ReturnSynchEventToPool(WorkFinished);
     FPlatformProcess::ReturnSynchEventToPool(ReleaseWork);
@@ -348,8 +350,8 @@ bool FDWCEditorWorkerDomainCancellationCompletionTest::RunTest(const FString& Pa
     QueuedDescriptor.Key.MaterialSlotIndex = 2;
     QueuedDescriptor.Domain = EDWCEditorAuthoringDomain::Wrinkle;
     QueuedDescriptor.EstimatedBytes = 1;
-    bool bFinishedCalled = false;
-    EDWCEditorWorkerJobCompletion Completion = EDWCEditorWorkerJobCompletion::Applied;
+    bool                            bFinishedCalled = false;
+    EDWCEditorWorkerJobCompletion   Completion = EDWCEditorWorkerJobCompletion::Applied;
     const FDWCEditorWorkerJobTicket QueuedTicket = Scheduler->Submit(
         QueuedDescriptor,
         [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
@@ -393,10 +395,10 @@ bool FDWCEditorWorkerTwoPhaseAdmissionLifetimeTest::RunTest(const FString& Param
     Descriptor.EstimatedBytes = 128;
     Descriptor.DebugName = TEXT("Two-phase lifetime");
 
-    bool bPrepareSawAdmission = false;
-    bool bApplySawLease = false;
-    bool bFinishedSawLease = false;
-    bool bFinished = false;
+    bool                            bPrepareSawAdmission = false;
+    bool                            bApplySawLease = false;
+    bool                            bFinishedSawLease = false;
+    bool                            bFinished = false;
     const FDWCEditorWorkerJobTicket Ticket = Scheduler->SubmitTwoPhase(
         Descriptor,
         [&Scheduler, &bPrepareSawAdmission](
@@ -407,7 +409,7 @@ bool FDWCEditorWorkerTwoPhaseAdmissionLifetimeTest::RunTest(const FString& Param
             bPrepareSawAdmission = Scheduler->GetReservedBytes() == 128;
             OutPrepared.ActualEstimatedBytes = 256;
             OutPrepared.Work = [](
-                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+                                   const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
             {
                 return MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
             };
@@ -432,7 +434,8 @@ bool FDWCEditorWorkerTwoPhaseAdmissionLifetimeTest::RunTest(const FString& Param
     TestTrue(TEXT("The two-phase job is admitted"), Ticket.IsValid());
     TestTrue(TEXT("Prepare runs only after the initial reservation exists"), bPrepareSawAdmission);
     TestEqual(TEXT("The reservation grows to the prepared estimate"), Scheduler->GetReservedBytes(), 256ull);
-    TestTrue(TEXT("The two-phase job reaches completion"), PumpWorkerCompletionsUntil([&bFinished]() { return bFinished; }));
+    TestTrue(TEXT("The two-phase job reaches completion"), PumpWorkerCompletionsUntil([&bFinished]()
+                                                                                      { return bFinished; }));
     TestTrue(TEXT("Apply executes while the lease is still held"), bApplySawLease);
     TestTrue(TEXT("Finished executes while the lease is still held"), bFinishedSawLease);
     TestEqual(TEXT("The lease is released after completion callbacks retire"), Scheduler->GetReservedBytes(), 0ull);
@@ -467,8 +470,8 @@ bool FDWCEditorWorkerDeferredPrepareTest::RunTest(const FString& Parameters)
         [](const FDWCEditorWorkerJobTicket&, TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>) {});
     TestTrue(TEXT("The memory owner starts"), OwnerStarted->Wait(5000));
 
-    int32 PrepareCount = 0;
-    bool bDeferredApplied = false;
+    int32                         PrepareCount = 0;
+    bool                          bDeferredApplied = false;
     FDWCEditorWorkerJobDescriptor DeferredDescriptor;
     DeferredDescriptor.Key.MaterialSlotIndex = 2;
     DeferredDescriptor.EstimatedBytes = 128;
@@ -483,7 +486,7 @@ bool FDWCEditorWorkerDeferredPrepareTest::RunTest(const FString& Parameters)
             ++PrepareCount;
             OutPrepared.ActualEstimatedBytes = 128;
             OutPrepared.Work = [](
-                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+                                   const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
             {
                 return MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
             };
@@ -504,7 +507,8 @@ bool FDWCEditorWorkerDeferredPrepareTest::RunTest(const FString& Parameters)
     ReleaseOwner->Trigger();
     TestTrue(
         TEXT("The deferred request prepares and applies after memory is released"),
-        PumpWorkerCompletionsUntil([&bDeferredApplied]() { return bDeferredApplied; }));
+        PumpWorkerCompletionsUntil([&bDeferredApplied]()
+                                   { return bDeferredApplied; }));
     TestEqual(TEXT("Deferred prepare executes exactly once"), PrepareCount, 1);
     Scheduler->Shutdown();
     FPlatformProcess::ReturnSynchEventToPool(ReleaseOwner);
@@ -525,10 +529,10 @@ bool FDWCEditorWorkerPrepareFailureReleasesLeaseTest::RunTest(const FString& Par
     Descriptor.EstimatedBytes = 128;
     Descriptor.DebugName = TEXT("Prepare failure");
 
-    int32 FinishedCount = 0;
-    EDWCEditorWorkerJobCompletion Completion = EDWCEditorWorkerJobCompletion::Applied;
-    FString FinishedError;
-    FString Error;
+    int32                           FinishedCount = 0;
+    EDWCEditorWorkerJobCompletion   Completion = EDWCEditorWorkerJobCompletion::Applied;
+    FString                         FinishedError;
+    FString                         Error;
     const FDWCEditorWorkerJobTicket Ticket = Scheduler->SubmitTwoPhase(
         Descriptor,
         [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&,
@@ -543,7 +547,7 @@ bool FDWCEditorWorkerPrepareFailureReleasesLeaseTest::RunTest(const FString& Par
         [&FinishedCount, &Completion, &FinishedError](
             const FDWCEditorWorkerJobTicket&,
             const EDWCEditorWorkerJobCompletion InCompletion,
-            const FString& InError)
+            const FString&                      InError)
         {
             ++FinishedCount;
             Completion = InCompletion;
@@ -569,11 +573,11 @@ bool FDWCEditorWorkerFIFORequestPolicyTest::RunTest(const FString& Parameters)
 {
     TSharedRef<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler =
         MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(1, 512, 256);
-    FEvent* FirstStarted = FPlatformProcess::GetSynchEventFromPool(true);
-    FEvent* ReleaseFirst = FPlatformProcess::GetSynchEventFromPool(true);
+    FEvent*                                                      FirstStarted = FPlatformProcess::GetSynchEventFromPool(true);
+    FEvent*                                                      ReleaseFirst = FPlatformProcess::GetSynchEventFromPool(true);
     TSharedPtr<FDWCEditorCancellationToken, ESPMode::ThreadSafe> FirstToken;
-    int32 AppliedCount = 0;
-    int32 FinishedCount = 0;
+    int32                                                        AppliedCount = 0;
+    int32                                                        FinishedCount = 0;
 
     FDWCEditorWorkerJobDescriptor Descriptor;
     Descriptor.Key.Kind = EDWCEditorWorkerJobKind::WrinkleBake;
@@ -627,7 +631,8 @@ bool FDWCEditorWorkerFIFORequestPolicyTest::RunTest(const FString& Parameters)
     ReleaseFirst->Trigger();
     TestTrue(
         TEXT("Both FIFO requests complete"),
-        PumpWorkerCompletionsUntil([&FinishedCount]() { return FinishedCount == 2; }));
+        PumpWorkerCompletionsUntil([&FinishedCount]()
+                                   { return FinishedCount == 2; }));
     TestEqual(TEXT("Both FIFO results are applied"), AppliedCount, 2);
     Scheduler->Shutdown();
     FPlatformProcess::ReturnSynchEventToPool(ReleaseFirst);
@@ -664,7 +669,7 @@ bool FDWCEditorWorkerSingletonRequestPolicyTest::RunTest(const FString& Paramete
         [](const FDWCEditorWorkerJobTicket&, TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>) {});
     TestTrue(TEXT("The first singleton request starts"), WorkStarted->Wait(5000));
 
-    FString DuplicateError;
+    FString                         DuplicateError;
     const FDWCEditorWorkerJobTicket DuplicateTicket = Scheduler->Submit(
         Descriptor,
         [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
@@ -684,7 +689,8 @@ bool FDWCEditorWorkerSingletonRequestPolicyTest::RunTest(const FString& Paramete
     ReleaseWork->Trigger();
     TestTrue(
         TEXT("The singleton owner retires"),
-        PumpWorkerCompletionsUntil([&Scheduler]() { return Scheduler->GetActiveJobCount() == 0; }));
+        PumpWorkerCompletionsUntil([&Scheduler]()
+                                   { return Scheduler->GetActiveJobCount() == 0; }));
     Scheduler->Shutdown();
     FPlatformProcess::ReturnSynchEventToPool(ReleaseWork);
     FPlatformProcess::ReturnSynchEventToPool(WorkStarted);
@@ -701,12 +707,12 @@ bool FDWCEditorWorkerDetachedLeaseRetirementTest::RunTest(const FString& Paramet
     FDWCEditorResourceBudgetConfig Budget;
     Budget.GlobalEditorCPUBytes = 1024;
     Budget.WorkerPrivateCPUBytes = 1024;
-    TSharedRef<FDWCEditorResourceGovernor> Governor = MakeShared<FDWCEditorResourceGovernor>(Budget);
+    TSharedRef<FDWCEditorResourceGovernor>                        Governor = MakeShared<FDWCEditorResourceGovernor>(Budget);
     TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler =
         MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(Governor, 1, 1024, 1024);
     FEvent* WorkStarted = FPlatformProcess::GetSynchEventFromPool(true);
     FEvent* ReleaseWork = FPlatformProcess::GetSynchEventFromPool(true);
-    int32 FinishedCount = 0;
+    int32   FinishedCount = 0;
 
     FDWCEditorWorkerJobDescriptor Descriptor;
     Descriptor.Key.MaterialSlotIndex = 11;
@@ -735,7 +741,8 @@ bool FDWCEditorWorkerDetachedLeaseRetirementTest::RunTest(const FString& Paramet
     TestTrue(
         TEXT("Destroying the scheduler does not strand the worker lease"),
         PumpWorkerCompletionsUntil(
-            [&Governor]() { return Governor->GetDiagnostics().GlobalCPUUsedBytes == 0; }));
+            [&Governor]()
+            { return Governor->GetDiagnostics().GlobalCPUUsedBytes == 0; }));
     TestEqual(TEXT("Detached completion is reported exactly once"), FinishedCount, 1);
     FPlatformProcess::ReturnSynchEventToPool(ReleaseWork);
     FPlatformProcess::ReturnSynchEventToPool(WorkStarted);

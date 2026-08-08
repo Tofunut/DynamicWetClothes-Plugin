@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -22,20 +23,20 @@ namespace DWCWetPartDataTextureBake
         const float Normalized = FMath::GetRangePct(MinDetailSize, MaxDetailSize, FMath::Clamp(Value, MinDetailSize, MaxDetailSize));
         return static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(Normalized, 0.0f, 1.0f) * 255.0f));
     }
-}
+} // namespace DWCWetPartDataTextureBake
 
 struct FWetClothingWetPartDataSlotBakeResult
 {
-    int32 MaterialSlotIndex = INDEX_NONE;
+    int32                  MaterialSlotIndex = INDEX_NONE;
     TObjectPtr<UTexture2D> WetPartDataTexture = nullptr;
-    int32 PaintedPixelCount = 0;
+    int32                  PaintedPixelCount = 0;
 };
 
 struct FWetClothingWetPartDataTextureBakeResult
 {
     TArray<FWetClothingWetPartDataSlotBakeResult> SlotResults;
-    int32 LocalProfileCount = 0;
-    int32 PaintedPixelCount = 0;
+    int32                                         LocalProfileCount = 0;
+    int32                                         PaintedPixelCount = 0;
 };
 
 /**
@@ -47,24 +48,24 @@ struct FWetClothingWetPartDataTextureBakeResult
  */
 class FWetClothingWetPartDataTextureBaker
 {
-public:
+  public:
     static FString MakeBuildSignature(const UWetClothingAsset* WetClothingAsset);
     static FString MakeSlotBuildSignature(const FString& GlobalSignature, int32 MaterialSlotIndex);
 
     static bool Bake(
-        UWetClothingAsset* WetClothingAsset,
+        UWetClothingAsset*                        WetClothingAsset,
         FWetClothingWetPartDataTextureBakeResult& OutResult,
-        FString& OutErrorMessage);
+        FString&                                  OutErrorMessage);
 
     static bool ResolveProfileParameters(
         const FWetPartProfileAssignment* ProfileAssignment,
-        FWetnessProfileParameters& OutParameters);
+        FWetnessProfileParameters&       OutParameters);
 
     static FString MakeProfileStableKey(
         const FWetPartProfileAssignment* ProfileAssignment,
         const FWetnessProfileParameters& Parameters);
 
-private:
+  private:
     static bool IsUVPointInsideTriangle(
         const FVector2D& Point,
         const FVector2D& A,
@@ -72,25 +73,25 @@ private:
         const FVector2D& C);
 
     static int32 PaintTriangle(
-        TArray<FColor>& Pixels,
-        TArray<bool>& PaintedMask,
-        int32 Width,
-        int32 Height,
+        TArray<FColor>&                    Pixels,
+        TArray<bool>&                      PaintedMask,
+        int32                              Width,
+        int32                              Height,
         const FWetClothingAssetUVTriangle& Triangle,
-        const FColor& PackedPartData);
+        const FColor&                      PackedPartData);
 
     static void DilatePaintedPixels(
         TArray<FColor>& Pixels,
-        TArray<bool>& PaintedMask,
-        int32 Width,
-        int32 Height,
-        int32 PaddingPixels);
+        TArray<bool>&   PaintedMask,
+        int32           Width,
+        int32           Height,
+        int32           PaddingPixels);
 
     static UTexture2D* CreateOrUpdateTextureAsset(
-        UWetClothingAsset& WetClothingAsset,
-        int32 MaterialSlotIndex,
+        UWetClothingAsset&    WetClothingAsset,
+        int32                 MaterialSlotIndex,
         const TArray<FColor>& Pixels,
-        int32 Width,
-        int32 Height,
-        FString& OutErrorMessage);
+        int32                 Width,
+        int32                 Height,
+        FString&              OutErrorMessage);
 };

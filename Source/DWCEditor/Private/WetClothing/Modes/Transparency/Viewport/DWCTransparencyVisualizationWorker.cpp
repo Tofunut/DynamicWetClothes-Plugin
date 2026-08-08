@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyVisualizationWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -7,7 +8,7 @@
 
 TSharedPtr<FDWCTransparencyVisualizationJobResult, ESPMode::ThreadSafe>
 FDWCTransparencyVisualizationWorker::Build(
-    FDWCTransparencyVisualizationJobInput&& Input,
+    FDWCTransparencyVisualizationJobInput&&                             Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FDWCTransparencyVisualizationJobResult, ESPMode::ThreadSafe> Output =
@@ -94,8 +95,8 @@ FDWCTransparencyVisualizationWorker::Build(
     Context.VisualizationMode = Input.VisualizationMode;
     Context.bDeferPresentationToMaterial = true;
     Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
-        ? FDWCTransparencyComposite::ComputeMaximumHitDistance(Result)
-        : KINDA_SMALL_NUMBER;
+                                     ? FDWCTransparencyComposite::ComputeMaximumHitDistance(Result)
+                                     : KINDA_SMALL_NUMBER;
     if (!FDWCTransparencyComposite::ComposeVisualizationPixels(
             Context,
             Output->Pixels,
@@ -103,8 +104,8 @@ FDWCTransparencyVisualizationWorker::Build(
     {
         Output->bSucceeded = false;
         Output->Error = CancellationToken->IsCanceled()
-            ? TEXT("The transparency visualization job was canceled.")
-            : TEXT("The transparency visualization snapshot is invalid.");
+                            ? TEXT("The transparency visualization job was canceled.")
+                            : TEXT("The transparency visualization snapshot is invalid.");
         return Output;
     }
     // Compose must read the rebuilt working buffers first. Transfer ownership

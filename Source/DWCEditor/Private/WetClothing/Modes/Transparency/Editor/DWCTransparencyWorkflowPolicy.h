@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionState.h"
@@ -18,8 +19,8 @@ namespace DWCTransparencyWorkflow
     }
 
     inline bool CanContinueToGeneration(
-        const bool bHasAsset,
-        const bool bStructureTypeConfigured,
+        const bool                       bHasAsset,
+        const bool                       bStructureTypeConfigured,
         const EDWCTransparencySourceType SourceType)
     {
         return bHasAsset && bStructureTypeConfigured && IsSourceTypeAvailable(SourceType);
@@ -27,19 +28,19 @@ namespace DWCTransparencyWorkflow
 
     struct FDWCTransparencyPreviewContext
     {
-        EDWCTransparencyEditorStage Stage = EDWCTransparencyEditorStage::StructureSetup;
-        EDWCTransparencyPaintTarget PaintTarget = EDWCTransparencyPaintTarget::None;
-        EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
+        EDWCTransparencyEditorStage         Stage = EDWCTransparencyEditorStage::StructureSetup;
+        EDWCTransparencyPaintTarget         PaintTarget = EDWCTransparencyPaintTarget::None;
+        EDWCTransparencyVisualizationMode   VisualizationMode = EDWCTransparencyVisualizationMode::Final;
         EWetClothingTransparencyPreviewMode PreviewMode = EWetClothingTransparencyPreviewMode::TargetMeshOnly;
-        bool bUseManualRevealWorkingMap = false;
-        bool bUseFinalWorkingMap = false;
-        bool bEnableRevealColorPainting = false;
-        bool bEnableFinalAlphaPainting = false;
+        bool                                bUseManualRevealWorkingMap = false;
+        bool                                bUseFinalWorkingMap = false;
+        bool                                bEnableRevealColorPainting = false;
+        bool                                bEnableFinalAlphaPainting = false;
     };
 
     inline EDWCTransparencyPaintTarget ResolvePaintTarget(
         const EDWCTransparencyEditorStage Stage,
-        const EDWCTransparencySourceType SourceType)
+        const EDWCTransparencySourceType  SourceType)
     {
         // Stage 2 manual-color authoring always owns a reveal-color target so
         // its surface hit/cursor context is available immediately. The
@@ -52,19 +53,19 @@ namespace DWCTransparencyWorkflow
         }
 
         return Stage == EDWCTransparencyEditorStage::FinalEditing
-            ? EDWCTransparencyPaintTarget::FinalAlpha
-            : EDWCTransparencyPaintTarget::None;
+                   ? EDWCTransparencyPaintTarget::FinalAlpha
+                   : EDWCTransparencyPaintTarget::None;
     }
 
     inline FDWCTransparencyPreviewContext ResolvePreviewContext(
-        const EDWCTransparencyEditorStage Stage,
-        const EDWCTransparencySourceType SourceType,
-        const EDWCTransparencyVisualizationMode RequestedVisualizationMode,
+        const EDWCTransparencyEditorStage         Stage,
+        const EDWCTransparencySourceType          SourceType,
+        const EDWCTransparencyVisualizationMode   RequestedVisualizationMode,
         const EWetClothingTransparencyPreviewMode RequestedPreviewMode,
-        const bool bRevealPaintEnabled,
-        const bool bCanUseFullBlueprintPreview,
-        const bool bHasManualRevealWorkingMap,
-        const bool bHasFinalWorkingMap)
+        const bool                                bRevealPaintEnabled,
+        const bool                                bCanUseFullBlueprintPreview,
+        const bool                                bHasManualRevealWorkingMap,
+        const bool                                bHasFinalWorkingMap)
     {
         FDWCTransparencyPreviewContext Context;
         Context.Stage = Stage;
@@ -104,4 +105,4 @@ namespace DWCTransparencyWorkflow
 
         return Context;
     }
-}
+} // namespace DWCTransparencyWorkflow

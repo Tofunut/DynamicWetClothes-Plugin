@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -54,13 +55,13 @@ class FWetClothingAssetMeshAnalyzer
 
     /** Rebuilds draw/hit-test triangles from persistent WCA island membership without rerunning island connectivity. */
     static bool BuildMaterialSlotUVIslandsFromTopology(
-        const USkeletalMesh*                          SkeletalMesh,
-        int32                                         LODIndex,
-        int32                                         UVChannelIndex,
-        int32                                         MaterialSlotIndex,
-        const TArray<FDWCOriginalUVIslandTopology>&   Topology,
-        TArray<FWetClothingAssetUVIsland>&            OutIslands,
-        FString*                                      OutErrorMessage = nullptr);
+        const USkeletalMesh*                        SkeletalMesh,
+        int32                                       LODIndex,
+        int32                                       UVChannelIndex,
+        int32                                       MaterialSlotIndex,
+        const TArray<FDWCOriginalUVIslandTopology>& Topology,
+        TArray<FWetClothingAssetUVIsland>&          OutIslands,
+        FString*                                    OutErrorMessage = nullptr);
 
     static void SetError(FString* OutErrorMessage, const TCHAR* InMessage);
 };

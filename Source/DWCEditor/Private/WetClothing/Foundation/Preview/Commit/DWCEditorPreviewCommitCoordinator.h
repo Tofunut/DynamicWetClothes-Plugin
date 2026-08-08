@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -18,60 +19,60 @@ class FDWCEditorPreviewCommitCoordinator final
   public:
     explicit FDWCEditorPreviewCommitCoordinator(
         TSharedRef<FDWCEditorTextureWorkspace> InTextureWorkspace,
-        FGuid InProducerSessionEpoch = FGuid());
+        FGuid                                  InProducerSessionEpoch = FGuid());
 
     EDWCEditorPreviewCommitResult CommitBGRA8(
         const FDWCEditorPreviewCommitContext& Context,
-        const FDWCEditorTextureKey& Key,
-        const FDWCEditorTextureDescriptor& Descriptor,
-        TArray<FColor>&& Pixels,
-        FDWCEditorTextureLease& OutLease,
-        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+        const FDWCEditorTextureKey&           Key,
+        const FDWCEditorTextureDescriptor&    Descriptor,
+        TArray<FColor>&&                      Pixels,
+        FDWCEditorTextureLease&               OutLease,
+        EDWCEditorTextureUploadPriority       Priority = EDWCEditorTextureUploadPriority::Normal);
 
     EDWCEditorPreviewCommitResult CommitNormalBGRA8(
         const FDWCEditorPreviewCommitContext& Context,
-        const FDWCEditorTextureKey& Key,
-        const FDWCEditorTextureDescriptor& Descriptor,
-        TArray<FColor>&& Pixels,
-        FDWCEditorNormalRasterSurface&& WorkingSurface,
-        FDWCEditorTextureLease& OutLease,
-        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+        const FDWCEditorTextureKey&           Key,
+        const FDWCEditorTextureDescriptor&    Descriptor,
+        TArray<FColor>&&                      Pixels,
+        FDWCEditorNormalRasterSurface&&       WorkingSurface,
+        FDWCEditorTextureLease&               OutLease,
+        EDWCEditorTextureUploadPriority       Priority = EDWCEditorTextureUploadPriority::Normal);
 
     EDWCEditorPreviewCommitResult CommitBGRA8Regions(
-        const FDWCEditorPreviewCommitContext& Context,
-        const FDWCEditorTextureLease& Lease,
-        const FDWCEditorPreviewRegionTarget& Target,
+        const FDWCEditorPreviewCommitContext&       Context,
+        const FDWCEditorTextureLease&               Lease,
+        const FDWCEditorPreviewRegionTarget&        Target,
         const TArray<FDWCEditorBGRA8RegionPayload>& Regions,
-        FDWCEditorPreviewRegionCommitOutcome& OutOutcome,
-        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Interactive);
+        FDWCEditorPreviewRegionCommitOutcome&       OutOutcome,
+        EDWCEditorTextureUploadPriority             Priority = EDWCEditorTextureUploadPriority::Interactive);
 
     EDWCEditorPreviewCommitResult CommitG8Regions(
-        const FDWCEditorPreviewCommitContext& Context,
-        const FDWCEditorTextureLease& Lease,
-        const FDWCEditorPreviewRegionTarget& Target,
+        const FDWCEditorPreviewCommitContext&    Context,
+        const FDWCEditorTextureLease&            Lease,
+        const FDWCEditorPreviewRegionTarget&     Target,
         const TArray<FDWCEditorG8RegionPayload>& Regions,
-        FDWCEditorPreviewRegionCommitOutcome& OutOutcome,
-        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Interactive);
+        FDWCEditorPreviewRegionCommitOutcome&    OutOutcome,
+        EDWCEditorTextureUploadPriority          Priority = EDWCEditorTextureUploadPriority::Interactive);
 
     EDWCEditorPreviewCommitResult CommitNormalRegions(
-        const FDWCEditorPreviewCommitContext& Context,
-        const FDWCEditorTextureLease& Lease,
-        const FDWCEditorPreviewRegionTarget& Target,
+        const FDWCEditorPreviewCommitContext&        Context,
+        const FDWCEditorTextureLease&                Lease,
+        const FDWCEditorPreviewRegionTarget&         Target,
         const TArray<FDWCEditorNormalRegionPayload>& Regions,
-        FDWCEditorPreviewRegionCommitOutcome& OutOutcome,
-        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Interactive);
+        FDWCEditorPreviewRegionCommitOutcome&        OutOutcome,
+        EDWCEditorTextureUploadPriority              Priority = EDWCEditorTextureUploadPriority::Interactive);
 
-    void Shutdown();
-    bool IsShuttingDown() const { return bShuttingDown; }
+    void                               Shutdown();
+    bool                               IsShuttingDown() const { return bShuttingDown; }
     FDWCEditorPreviewCommitDiagnostics GetDiagnostics() const { return Diagnostics; }
-    void ResetDiagnosticCounters() { Diagnostics = {}; }
+    void                               ResetDiagnosticCounters() { Diagnostics = {}; }
 
   private:
     EDWCEditorPreviewCommitResult Validate(const FDWCEditorPreviewCommitContext& Context) const;
     EDWCEditorPreviewCommitResult RecordResult(EDWCEditorPreviewCommitResult Result);
 
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
-    FGuid ProducerSessionEpoch;
-    bool bShuttingDown = false;
-    FDWCEditorPreviewCommitDiagnostics Diagnostics;
+    FGuid                                  ProducerSessionEpoch;
+    bool                                   bShuttingDown = false;
+    FDWCEditorPreviewCommitDiagnostics     Diagnostics;
 };

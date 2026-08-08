@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Wet Part colors are emitted on the original reference-pose surface.
  * Camera-facing depth bias is applied by the dedicated overlay material.
@@ -11,10 +12,10 @@
 
 void FWetClothingWetPartOverlayMeshBuilder::BuildMeshData(
     const TArray<FWetClothingAssetUVIsland>& Islands,
-    const TMap<int32, int32>& UVIslandToWetPartID,
-    const TMap<int32, FLinearColor>& IslandColors,
+    const TMap<int32, int32>&                UVIslandToWetPartID,
+    const TMap<int32, FLinearColor>&         IslandColors,
     const float /*NormalOffset*/,
-    const float ColorIntensity,
+    const float          ColorIntensity,
     FDWCOverlayMeshData& OutMeshData)
 {
     OutMeshData.Reset();
@@ -22,7 +23,7 @@ void FWetClothingWetPartOverlayMeshBuilder::BuildMeshData(
 
     for (const FWetClothingAssetUVIsland& Island : Islands)
     {
-        const int32* WetPartID = UVIslandToWetPartID.Find(Island.UVIslandID);
+        const int32*        WetPartID = UVIslandToWetPartID.Find(Island.UVIslandID);
         const FLinearColor* IslandColor = IslandColors.Find(Island.UVIslandID);
         if (WetPartID == nullptr || *WetPartID <= 0 || IslandColor == nullptr)
         {

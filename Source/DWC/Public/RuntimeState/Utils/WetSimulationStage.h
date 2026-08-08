@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -28,7 +29,7 @@ struct DWC_API FWetSimulationStageArgs
 
     FWetClothingMeshSampler* MeshSampler = nullptr;
 
-    bool  bAsyncSkinningRequested = false;
+    bool bAsyncSkinningRequested = false;
 
     TFunction<bool(bool bComputePositions, bool bComputeNormals)> RequestAsyncSkinning;
 

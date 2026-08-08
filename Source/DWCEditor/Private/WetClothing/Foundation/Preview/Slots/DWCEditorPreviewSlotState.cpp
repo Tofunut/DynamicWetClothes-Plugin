@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Preview/Slots/DWCEditorPreviewSlotState.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -26,7 +27,7 @@ namespace
         Hash = HashCombine(Hash, State.bPreviewReady ? 1u : 0u);
         return HashCombine(Hash, static_cast<uint32>(State.Issue));
     }
-}
+} // namespace
 
 const FDWCEditorPreviewSlotState* FDWCEditorPreviewSlotCollection::Find(const int32 MaterialSlotIndex) const
 {
@@ -61,29 +62,29 @@ FDWCEditorPreviewSlotCollection FDWCEditorPreviewSlotResolver::Resolve(
         return Result;
     }
 
-    const bool bHasValidDataUV = WetClothingAsset->HasValidDataUVForLOD(0);
+    const bool                          bHasValidDataUV = WetClothingAsset->HasValidDataUVForLOD(0);
     const FWetClothingBakedWetPartData& Baked = WetClothingAsset->Derived.Inline.BakedWetPartData;
-    const bool bHasBakedHeader = Baked.DataUVChannelIndex != INDEX_NONE &&
-        !Baked.BuildSignature.IsEmpty() &&
-        Baked.NormalizedNeutralSurfaceNormal != nullptr &&
-        Baked.LocalProfiles.Num() <= DWCWetPartDataTextureBake::MaxLocalProfileCount;
+    const bool                          bHasBakedHeader = Baked.DataUVChannelIndex != INDEX_NONE &&
+                                 !Baked.BuildSignature.IsEmpty() &&
+                                 Baked.NormalizedNeutralSurfaceNormal != nullptr &&
+                                 Baked.LocalProfiles.Num() <= DWCWetPartDataTextureBake::MaxLocalProfileCount;
     const bool bBakedSettingsCurrent =
         Baked.Resolution == DWCWetPartDataTextureBake::Resolution &&
         Baked.PaddingPixels == DWCWetPartDataTextureBake::PaddingPixels &&
         Baked.SurfaceTextureResolution == DWCSurfaceTextureNormalization::Resolution;
     const FString ExpectedGlobalSignature = bHasValidDataUV
-        ? FWetClothingWetPartDataTextureBaker::MakeBuildSignature(WetClothingAsset)
-        : FString();
-    const bool bBakedDataCurrent = bHasBakedHeader && bBakedSettingsCurrent &&
-        Baked.DataUVChannelIndex == WetClothingAsset->GetDWCDataUVChannelIndex() &&
-        !ExpectedGlobalSignature.IsEmpty() &&
-        Baked.BuildSignature == ExpectedGlobalSignature;
+                                                ? FWetClothingWetPartDataTextureBaker::MakeBuildSignature(WetClothingAsset)
+                                                : FString();
+    const bool    bBakedDataCurrent = bHasBakedHeader && bBakedSettingsCurrent &&
+                                   Baked.DataUVChannelIndex == WetClothingAsset->GetDWCDataUVChannelIndex() &&
+                                   !ExpectedGlobalSignature.IsEmpty() &&
+                                   Baked.BuildSignature == ExpectedGlobalSignature;
 
     const TArray<FSkeletalMaterial>& Materials = Mesh->GetMaterials();
     Result.Slots.Reserve(Materials.Num());
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Materials.Num(); ++MaterialSlotIndex)
     {
-        const FSkeletalMaterial& SkeletalMaterial = Materials[MaterialSlotIndex];
+        const FSkeletalMaterial&    SkeletalMaterial = Materials[MaterialSlotIndex];
         FDWCEditorPreviewSlotState& State = Result.Slots.AddDefaulted_GetRef();
         State.MaterialSlotIndex = MaterialSlotIndex;
         State.MaterialSlotName = SkeletalMaterial.MaterialSlotName;
@@ -101,8 +102,8 @@ FDWCEditorPreviewSlotCollection FDWCEditorPreviewSlotResolver::Resolve(
         {
             ++Result.WettableSlotCount;
             UMaterial* SourceBaseMaterial = State.SourceMaterial.IsValid()
-                ? State.SourceMaterial->GetMaterial()
-                : nullptr;
+                                                ? State.SourceMaterial->GetMaterial()
+                                                : nullptr;
             if (SourceBaseMaterial == nullptr)
             {
                 State.Issue = EDWCEditorPreviewSlotIssue::MissingSourceMaterial;

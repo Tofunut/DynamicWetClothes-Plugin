@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -53,11 +54,11 @@ namespace
             &Asset,
             MaterialSlotIndex);
     }
-}
+} // namespace
 
 void FWetWrinkleBakeService::CollectBakeMaterialSlots(
     const UWetClothingAsset& WetClothingAsset,
-    TArray<int32>& OutMaterialSlots)
+    TArray<int32>&           OutMaterialSlots)
 {
     TSet<int32> MaterialSlots;
     CollectAuthoredWrinkleMaterialSlots(WetClothingAsset, MaterialSlots);
@@ -67,7 +68,7 @@ void FWetWrinkleBakeService::CollectBakeMaterialSlots(
 
 void FWetWrinkleBakeService::RefreshBakeStatusFromCurrentOutputs(
     UWetClothingAsset* WetClothingAsset,
-    const FString& Failure)
+    const FString&     Failure)
 {
     if (WetClothingAsset == nullptr)
     {
@@ -138,18 +139,18 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
     Settings.PaddingPixels = WetClothingAsset->Authored.WrinkleData.BakeSettings.PaddingPixels;
     Settings.bIncludeDisabledPatches = WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches;
 
-    int32 TotalMapCount = 0;
-    int32 TotalStampCount = 0;
-    int32 TotalProceduralStrokeCount = 0;
+    int32           TotalMapCount = 0;
+    int32           TotalStampCount = 0;
+    int32           TotalProceduralStrokeCount = 0;
     TArray<FString> Failures;
-    TArray<int32> SortedSlots = AuthoredMaterialSlots.Array();
+    TArray<int32>   SortedSlots = AuthoredMaterialSlots.Array();
     SortedSlots.Sort();
     FWetWrinkleNormalMapBakeSession BakeSession;
 
     for (const int32 MaterialSlotIndex : SortedSlots)
     {
         FWetWrinkleNormalMapBakeResult Result;
-        FString ErrorMessage;
+        FString                        ErrorMessage;
         if (!FWetWrinkleNormalMapBaker::BakeMaterialSlot(
                 WetClothingAsset,
                 MaterialSlotIndex,

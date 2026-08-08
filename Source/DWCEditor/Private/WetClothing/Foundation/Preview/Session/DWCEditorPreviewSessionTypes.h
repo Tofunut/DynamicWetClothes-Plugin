@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialTypes.h"
@@ -21,42 +23,42 @@ using FDWCEditorPreviewMIDInitializer =
 
 struct FDWCEditorPreviewSessionConfig
 {
-    FString DiagnosticLabel;
+    FString                          DiagnosticLabel;
     EDWCEditorPreviewMaterialFeature FeatureMask = EDWCEditorPreviewMaterialFeature::None;
-    uint32 FeatureSchemaVersion = 1;
-    int32 SurfaceWaterNormalUVChannelIndex = 0;
-    float InitialPreviewWetness = 1.0f;
-    bool bObserveRelevantObjectChanges = true;
+    uint32                           FeatureSchemaVersion = 1;
+    int32                            SurfaceWaterNormalUVChannelIndex = 0;
+    float                            InitialPreviewWetness = 1.0f;
+    bool                             bObserveRelevantObjectChanges = true;
 
-    FDWCEditorPreviewGraphExtension ExtendGraph;
-    FDWCEditorPreviewMIDInitializer InitializeMID;
-    FDWCEditorPreviewMemoryCollector CollectMemoryStats;
+    FDWCEditorPreviewGraphExtension     ExtendGraph;
+    FDWCEditorPreviewMIDInitializer     InitializeMID;
+    FDWCEditorPreviewMemoryCollector    CollectMemoryStats;
     FDWCEditorPreviewOperationCollector CollectOperationStats;
     FDWCEditorPreviewDiagnosticResetter ResetDiagnosticCounters;
 };
 
 struct FDWCEditorPreviewSessionSlot
 {
-    FDWCEditorPreviewSlotState Eligibility;
+    FDWCEditorPreviewSlotState               Eligibility;
     TWeakObjectPtr<UMaterialInstanceDynamic> PreviewMID;
-    uint64 LastMaterialUseSerial = 0;
-    bool bActiveInPreviewScope = false;
-    bool bMaterialBuildPending = false;
-    bool bMaterialBuildFailed = false;
-    FString MaterialBuildError;
-    FDWCEditorPreviewParameterSet DesiredLayerParameters;
-    FDWCEditorPreviewParameterSet AppliedLayerParameters;
+    uint64                                   LastMaterialUseSerial = 0;
+    bool                                     bActiveInPreviewScope = false;
+    bool                                     bMaterialBuildPending = false;
+    bool                                     bMaterialBuildFailed = false;
+    FString                                  MaterialBuildError;
+    FDWCEditorPreviewParameterSet            DesiredLayerParameters;
+    FDWCEditorPreviewParameterSet            AppliedLayerParameters;
 };
 
 struct FDWCEditorPreviewSessionMaterialResult
 {
     EDWCEditorPreviewMaterialState State = EDWCEditorPreviewMaterialState::Failed;
-    bool bSucceeded = false;
-    bool bPending = false;
-    bool bCreated = false;
-    UMaterialInstanceDynamic* PreviewMID = nullptr;
-    UMaterialInterface* FallbackMaterial = nullptr;
-    FString Message;
+    bool                           bSucceeded = false;
+    bool                           bPending = false;
+    bool                           bCreated = false;
+    UMaterialInstanceDynamic*      PreviewMID = nullptr;
+    UMaterialInterface*            FallbackMaterial = nullptr;
+    FString                        Message;
 };
 
 DECLARE_MULTICAST_DELEGATE(FDWCEditorPreviewSessionSlotsChanged);

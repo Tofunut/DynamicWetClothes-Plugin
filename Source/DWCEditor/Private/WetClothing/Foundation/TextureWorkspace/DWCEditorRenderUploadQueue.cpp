@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorRenderUploadQueue.h"
 
 #include "Engine/Texture2D.h"
@@ -8,16 +9,14 @@
 FDWCEditorRenderUploadQueue::FDWCEditorRenderUploadQueue(
     const uint64 InStagingBudgetBytes,
     const uint64 InPerFlushBudgetBytes)
-    : StagingBudgetBytes(FMath::Max<uint64>(InStagingBudgetBytes, 1))
-    , PerFlushBudgetBytes(FMath::Max<uint64>(InPerFlushBudgetBytes, 1))
-    , StagingState(MakeShared<FStagingState, ESPMode::ThreadSafe>())
+    : StagingBudgetBytes(FMath::Max<uint64>(InStagingBudgetBytes, 1)), PerFlushBudgetBytes(FMath::Max<uint64>(InPerFlushBudgetBytes, 1)), StagingState(MakeShared<FStagingState, ESPMode::ThreadSafe>())
 {
 }
 
 void FDWCEditorRenderUploadQueue::Enqueue(
-    const FDWCEditorTextureHandle& Entry,
-    const FIntRect& DirtyRect,
-    const bool bWrap,
+    const FDWCEditorTextureHandle&        Entry,
+    const FIntRect&                       DirtyRect,
+    const bool                            bWrap,
     const EDWCEditorTextureUploadPriority Priority)
 {
     check(IsInGameThread());
@@ -44,9 +43,9 @@ void FDWCEditorRenderUploadQueue::Enqueue(
     Pending.ContentRevision = Entry->GetContentRevision();
     Pending.QueuedSerial = ++QueuedSerial;
     Pending.Priority = Existing == nullptr ||
-        static_cast<uint8>(Priority) > static_cast<uint8>(Pending.Priority)
-        ? Priority
-        : Pending.Priority;
+                               static_cast<uint8>(Priority) > static_cast<uint8>(Pending.Priority)
+                           ? Priority
+                           : Pending.Priority;
     Pending.DirtyRegions.Add(DirtyRect, Entry->GetDescriptor().Size, bWrap);
 
     const uint64 FullArea = static_cast<uint64>(Entry->GetDescriptor().Size.X) * Entry->GetDescriptor().Size.Y;
@@ -58,7 +57,6 @@ void FDWCEditorRenderUploadQueue::Enqueue(
             Entry->GetDescriptor().Size,
             false);
     }
-
 }
 
 void FDWCEditorRenderUploadQueue::Cancel(const FDWCEditorTextureKey& Key)
@@ -136,36 +134,36 @@ void FDWCEditorRenderUploadQueue::Flush()
         }
 
         const uint64 RemainingFlushBytes = PerFlushBudgetBytes > SubmittedThisFlush
-            ? PerFlushBudgetBytes - SubmittedThisFlush
-            : 0;
+                                               ? PerFlushBudgetBytes - SubmittedThisFlush
+                                               : 0;
         if (RemainingFlushBytes == 0)
         {
             break;
         }
 
-        const int32 BytesPerPixel = Entry->GetDescriptor().GetBytesPerPixel();
+        const int32  BytesPerPixel = Entry->GetDescriptor().GetBytesPerPixel();
         const uint64 ResourceGeneration = Pending->ResourceGeneration;
         const uint64 ContentRevision = Pending->ContentRevision;
-        bool bDeferredByStaging = false;
+        bool         bDeferredByStaging = false;
         while (!Pending->RemainingRegions.IsEmpty())
         {
             const uint64 AvailableBytes = PerFlushBudgetBytes > SubmittedThisFlush
-                ? PerFlushBudgetBytes - SubmittedThisFlush
-                : 0;
+                                              ? PerFlushBudgetBytes - SubmittedThisFlush
+                                              : 0;
             if (AvailableBytes == 0)
             {
                 break;
             }
 
-            FIntRect& RemainingRegion = Pending->RemainingRegions[0];
+            FIntRect&    RemainingRegion = Pending->RemainingRegions[0];
             const uint64 RowBytes = static_cast<uint64>(RemainingRegion.Width()) * BytesPerPixel;
             if (RowBytes == 0 || RowBytes > AvailableBytes || RowBytes > StagingBudgetBytes)
             {
                 bDeferredByStaging = true;
                 break;
             }
-            const int32 RowsToUpload = FMath::Max(1, static_cast<int32>(
-                FMath::Min<uint64>(RemainingRegion.Height(), AvailableBytes / RowBytes)));
+            const int32    RowsToUpload = FMath::Max(1, static_cast<int32>(
+                                                         FMath::Min<uint64>(RemainingRegion.Height(), AvailableBytes / RowBytes)));
             const FIntRect UploadRegion(
                 RemainingRegion.Min.X,
                 RemainingRegion.Min.Y,
@@ -200,7 +198,6 @@ void FDWCEditorRenderUploadQueue::Flush()
             PendingUploads.Remove(Key);
         }
     }
-
 }
 
 void FDWCEditorRenderUploadQueue::Shutdown()
@@ -212,11 +209,11 @@ void FDWCEditorRenderUploadQueue::Shutdown()
 
 bool FDWCEditorRenderUploadQueue::SubmitRegion(
     const FDWCEditorTextureHandle& Entry,
-    const FIntRect& Region,
-    const uint64 ResourceGeneration,
-    const uint64 ContentRevision)
+    const FIntRect&                Region,
+    const uint64                   ResourceGeneration,
+    const uint64                   ContentRevision)
 {
-    UTexture2D* Texture = Entry->GetTexture();
+    UTexture2D*                        Texture = Entry->GetTexture();
     const FDWCEditorTextureDescriptor& Descriptor = Entry->GetDescriptor();
     if (!Entry->CanAcceptUploads() || Texture == nullptr || Texture->GetResource() == nullptr || Region.IsEmpty() ||
         Entry->GetResourceGeneration() != ResourceGeneration ||
@@ -225,7 +222,7 @@ bool FDWCEditorRenderUploadQueue::SubmitRegion(
         return false;
     }
 
-    const int32 BytesPerPixel = Descriptor.GetBytesPerPixel();
+    const int32  BytesPerPixel = Descriptor.GetBytesPerPixel();
     const uint32 Pitch = static_cast<uint32>(Region.Width() * BytesPerPixel);
     const uint64 UploadBytes = static_cast<uint64>(Pitch) * Region.Height();
 
@@ -233,7 +230,7 @@ bool FDWCEditorRenderUploadQueue::SubmitRegion(
         MakeShared<TArray<uint8>, ESPMode::ThreadSafe>();
     Staging->SetNumUninitialized(static_cast<int32>(UploadBytes));
     const uint8* Source = Entry->GetPixelData();
-    const int32 SourcePitch = Descriptor.Size.X * BytesPerPixel;
+    const int32  SourcePitch = Descriptor.Size.X * BytesPerPixel;
     for (int32 Row = 0; Row < Region.Height(); ++Row)
     {
         FMemory::Memcpy(
@@ -250,7 +247,7 @@ bool FDWCEditorRenderUploadQueue::SubmitRegion(
         0,
         Region.Width(),
         Region.Height());
-    TSharedPtr<TArray<uint8>, ESPMode::ThreadSafe> KeepAlive = Staging;
+    TSharedPtr<TArray<uint8>, ESPMode::ThreadSafe>       KeepAlive = Staging;
     const TSharedRef<FStagingState, ESPMode::ThreadSafe> KeepStagingState = StagingState;
     Texture->UpdateTextureRegions(
         0,
@@ -338,7 +335,7 @@ void FDWCEditorRenderUploadQueue::AppendDiagnosticOperationCounters(
     for (const TPair<FDWCEditorTextureKey, FPendingUpload>& Pair : PendingUploads)
     {
         const FPendingUpload& Pending = Pair.Value;
-        const int32 PriorityIndex = static_cast<int32>(Pending.Priority);
+        const int32           PriorityIndex = static_cast<int32>(Pending.Priority);
         if (PriorityIndex < 0 || PriorityIndex >= UE_ARRAY_COUNT(PendingStats))
         {
             continue;
@@ -364,14 +361,14 @@ void FDWCEditorRenderUploadQueue::AppendDiagnosticOperationCounters(
             PixelCount = Pending.DirtyRegions.GetArea();
         }
         PendingStats[PriorityIndex].EstimatedBytes += PixelCount *
-            static_cast<uint64>(Entry->GetDescriptor().GetBytesPerPixel());
+                                                      static_cast<uint64>(Entry->GetDescriptor().GetBytesPerPixel());
     }
 
     const auto AddPendingCounter = [&OutCounters, &PendingStats](
                                        const EDWCEditorTextureUploadPriority Priority,
-                                       const TCHAR* Name)
+                                       const TCHAR*                          Name)
     {
-        const FPendingPriorityStats& Stats = PendingStats[static_cast<int32>(Priority)];
+        const FPendingPriorityStats&       Stats = PendingStats[static_cast<int32>(Priority)];
         FDWCEditorPreviewOperationCounter& Counter = OutCounters.AddDefaulted_GetRef();
         Counter.Name = Name;
         Counter.Count = Stats.Count;

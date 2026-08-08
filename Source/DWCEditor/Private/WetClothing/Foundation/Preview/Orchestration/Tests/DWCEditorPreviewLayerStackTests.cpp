@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -94,14 +95,14 @@ bool FDWCEditorPreviewTransparencyHoverLayerOrderTest::RunTest(const FString& Pa
     FDWCEditorPreviewParameterSet ParametersOut;
     Stack.BuildParameterSet(ParametersOut);
     TestEqual(TEXT("The ephemeral hover layer overrides the stable transparency layer"),
-        ParametersOut.Scalars.Num(), 1);
+              ParametersOut.Scalars.Num(), 1);
     TestEqual(TEXT("The hover enable value wins regardless of insertion order"),
-        ParametersOut.Scalars[0].Value, 1.0f);
+              ParametersOut.Scalars[0].Value, 1.0f);
 
     Stack.Remove(EDWCEditorPreviewLayerKind::LiveTransparencyHover);
     Stack.BuildParameterSet(ParametersOut);
     TestEqual(TEXT("Removing hover restores the stable transparency value"),
-        ParametersOut.Scalars[0].Value, 0.0f);
+              ParametersOut.Scalars[0].Value, 0.0f);
     return true;
 }
 

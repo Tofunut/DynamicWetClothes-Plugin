@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetWrinkleViewportClient.h"
 
 #include "AdvancedPreviewScene.h"
@@ -11,9 +12,9 @@
 #include "WetWrinkleViewport.h"
 
 FWetWrinkleViewportClient::FWetWrinkleViewportClient(
-    FAdvancedPreviewScene* InPreviewScene,
+    FAdvancedPreviewScene*                 InPreviewScene,
     const TSharedRef<SWetWrinkleViewport>& InViewportWidget,
-    FDWCEditorInteractiveToolsHost* InInputToolsHost)
+    FDWCEditorInteractiveToolsHost*        InInputToolsHost)
     : FEditorViewportClient(
           InInputToolsHost != nullptr ? InInputToolsHost->GetModeTools() : nullptr,
           InPreviewScene,
@@ -92,7 +93,7 @@ void FWetWrinkleViewportClient::FocusOnPreviewMesh(const USkeletalMeshComponent*
     }
 
     const FBoxSphereBounds Bounds = InPreviewMeshComponent->CalcBounds(InPreviewMeshComponent->GetComponentTransform());
-    float Radius = FMath::Max3(
+    float                  Radius = FMath::Max3(
         static_cast<float>(Bounds.BoxExtent.X),
         static_cast<float>(Bounds.BoxExtent.Y),
         static_cast<float>(Bounds.BoxExtent.Z));
@@ -132,4 +133,3 @@ void FWetWrinkleViewportClient::SetPreviewMeshComponent(const USkeletalMeshCompo
 {
     PreviewMeshComponent = InPreviewMeshComponent;
 }
-

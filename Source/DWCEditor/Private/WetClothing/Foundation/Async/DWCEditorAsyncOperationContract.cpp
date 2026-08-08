@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Async/DWCEditorAsyncOperationContract.h"
 
 bool FDWCEditorAsyncOperationContract::CanTransition(
@@ -9,25 +10,25 @@ bool FDWCEditorAsyncOperationContract::CanTransition(
     {
     case EDWCEditorAsyncOperationState::Pending:
         return To == EDWCEditorAsyncOperationState::Admitted ||
-            To == EDWCEditorAsyncOperationState::Completed;
+               To == EDWCEditorAsyncOperationState::Completed;
     case EDWCEditorAsyncOperationState::Admitted:
         return To == EDWCEditorAsyncOperationState::Preparing ||
-            To == EDWCEditorAsyncOperationState::Completed;
+               To == EDWCEditorAsyncOperationState::Completed;
     case EDWCEditorAsyncOperationState::Preparing:
         return To == EDWCEditorAsyncOperationState::Ready ||
-            To == EDWCEditorAsyncOperationState::Completed;
+               To == EDWCEditorAsyncOperationState::Completed;
     case EDWCEditorAsyncOperationState::Ready:
         return To == EDWCEditorAsyncOperationState::Running ||
-            To == EDWCEditorAsyncOperationState::Completed;
+               To == EDWCEditorAsyncOperationState::Completed;
     case EDWCEditorAsyncOperationState::Running:
         return To == EDWCEditorAsyncOperationState::CommitPending ||
-            To == EDWCEditorAsyncOperationState::Completed;
+               To == EDWCEditorAsyncOperationState::Completed;
     case EDWCEditorAsyncOperationState::CommitPending:
         return To == EDWCEditorAsyncOperationState::Committing ||
-            To == EDWCEditorAsyncOperationState::Completed;
+               To == EDWCEditorAsyncOperationState::Completed;
     case EDWCEditorAsyncOperationState::Committing:
         return To == EDWCEditorAsyncOperationState::Retiring ||
-            To == EDWCEditorAsyncOperationState::Completed;
+               To == EDWCEditorAsyncOperationState::Completed;
     case EDWCEditorAsyncOperationState::Retiring:
         return To == EDWCEditorAsyncOperationState::Completed;
     case EDWCEditorAsyncOperationState::Completed:
@@ -39,7 +40,7 @@ bool FDWCEditorAsyncOperationContract::CanTransition(
 bool FDWCEditorAsyncOperationContract::ValidateTransition(
     const EDWCEditorAsyncOperationState From,
     const EDWCEditorAsyncOperationState To,
-    const TCHAR* OperationDebugName)
+    const TCHAR*                        OperationDebugName)
 {
     const bool bValid = CanTransition(From, To);
     ensureMsgf(
@@ -70,7 +71,7 @@ bool FDWCEditorAsyncOperationContract::CanTransitionCancellation(
 bool FDWCEditorAsyncOperationContract::ValidateCancellationTransition(
     const EDWCEditorAsyncCancellationState From,
     const EDWCEditorAsyncCancellationState To,
-    const TCHAR* OperationDebugName)
+    const TCHAR*                           OperationDebugName)
 {
     const bool bValid = CanTransitionCancellation(From, To);
     ensureMsgf(
@@ -84,9 +85,9 @@ bool FDWCEditorAsyncOperationContract::ValidateCancellationTransition(
 
 bool FDWCEditorAsyncOperationContract::CanCommit(
     const FDWCEditorAsyncOperationIdentity& Identity,
-    const FGuid& CurrentSessionEpoch,
-    const uint64 CurrentGeneration,
-    const uint64 CurrentDomainRevision)
+    const FGuid&                            CurrentSessionEpoch,
+    const uint64                            CurrentGeneration,
+    const uint64                            CurrentDomainRevision)
 {
     if (!Identity.IsValid() || Identity.SessionEpoch != CurrentSessionEpoch ||
         Identity.Generation != CurrentGeneration)
@@ -95,7 +96,7 @@ bool FDWCEditorAsyncOperationContract::CanCommit(
     }
 
     return Identity.Domain == EDWCEditorAuthoringDomain::None ||
-        Identity.DomainRevision == CurrentDomainRevision;
+           Identity.DomainRevision == CurrentDomainRevision;
 }
 
 bool FDWCEditorAsyncOperationContract::IsCPUResourcePool(const EDWCEditorResourcePool Pool)
@@ -108,16 +109,26 @@ const TCHAR* FDWCEditorAsyncOperationContract::LexToString(
 {
     switch (State)
     {
-    case EDWCEditorAsyncOperationState::Pending: return TEXT("Pending");
-    case EDWCEditorAsyncOperationState::Admitted: return TEXT("Admitted");
-    case EDWCEditorAsyncOperationState::Preparing: return TEXT("Preparing");
-    case EDWCEditorAsyncOperationState::Ready: return TEXT("Ready");
-    case EDWCEditorAsyncOperationState::Running: return TEXT("Running");
-    case EDWCEditorAsyncOperationState::CommitPending: return TEXT("CommitPending");
-    case EDWCEditorAsyncOperationState::Committing: return TEXT("Committing");
-    case EDWCEditorAsyncOperationState::Retiring: return TEXT("Retiring");
-    case EDWCEditorAsyncOperationState::Completed: return TEXT("Completed");
-    default: return TEXT("Unknown");
+    case EDWCEditorAsyncOperationState::Pending:
+        return TEXT("Pending");
+    case EDWCEditorAsyncOperationState::Admitted:
+        return TEXT("Admitted");
+    case EDWCEditorAsyncOperationState::Preparing:
+        return TEXT("Preparing");
+    case EDWCEditorAsyncOperationState::Ready:
+        return TEXT("Ready");
+    case EDWCEditorAsyncOperationState::Running:
+        return TEXT("Running");
+    case EDWCEditorAsyncOperationState::CommitPending:
+        return TEXT("CommitPending");
+    case EDWCEditorAsyncOperationState::Committing:
+        return TEXT("Committing");
+    case EDWCEditorAsyncOperationState::Retiring:
+        return TEXT("Retiring");
+    case EDWCEditorAsyncOperationState::Completed:
+        return TEXT("Completed");
+    default:
+        return TEXT("Unknown");
     }
 }
 
@@ -125,11 +136,17 @@ const TCHAR* FDWCEditorAsyncOperationContract::LexToString(const EDWCEditorResou
 {
     switch (Pool)
     {
-    case EDWCEditorResourcePool::WorkerPrivateCPU: return TEXT("WorkerPrivateCPU");
-    case EDWCEditorResourcePool::PreviewWorkspaceCPU: return TEXT("PreviewWorkspaceCPU");
-    case EDWCEditorResourcePool::SpatialCacheCPU: return TEXT("SpatialCacheCPU");
-    case EDWCEditorResourcePool::UploadStagingCPU: return TEXT("UploadStagingCPU");
-    case EDWCEditorResourcePool::PreviewGPU: return TEXT("PreviewGPU");
-    default: return TEXT("Unknown");
+    case EDWCEditorResourcePool::WorkerPrivateCPU:
+        return TEXT("WorkerPrivateCPU");
+    case EDWCEditorResourcePool::PreviewWorkspaceCPU:
+        return TEXT("PreviewWorkspaceCPU");
+    case EDWCEditorResourcePool::SpatialCacheCPU:
+        return TEXT("SpatialCacheCPU");
+    case EDWCEditorResourcePool::UploadStagingCPU:
+        return TEXT("UploadStagingCPU");
+    case EDWCEditorResourcePool::PreviewGPU:
+        return TEXT("PreviewGPU");
+    default:
+        return TEXT("Unknown");
     }
 }

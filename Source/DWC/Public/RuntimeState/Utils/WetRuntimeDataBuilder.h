@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -20,18 +21,17 @@ these values without changing the runtime data model.
 */
 struct DWC_API FWetRuntimeDataBuildArgs
 {
-    UObject*                        OwnerForLogs = nullptr;
-    USkeletalMeshComponent*         TargetSkeletalMesh = nullptr;
-    const UWetClothingAsset*        WetClothingAsset = nullptr;
+    UObject*                         OwnerForLogs = nullptr;
+    USkeletalMeshComponent*          TargetSkeletalMesh = nullptr;
+    const UWetClothingAsset*         WetClothingAsset = nullptr;
     const FWetClothingRuntimeData*   RuntimeData = nullptr;
     FWetClothingRuntimeData*         MutableRuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
     TArray<FColor>*                  CachedWetVertexColors = nullptr;
 
-    bool  bUsePrecomputedSimulationData = true;
-    bool  bUsePrecomputedBoneOptimizationCache = true;
-    bool  bPrecomputedDataAlreadyValidated = false;
-
+    bool bUsePrecomputedSimulationData = true;
+    bool bUsePrecomputedBoneOptimizationCache = true;
+    bool bPrecomputedDataAlreadyValidated = false;
 };
 
 class DWC_API FWetRuntimeDataBuilder
@@ -43,12 +43,12 @@ class DWC_API FWetRuntimeDataBuilder
     static bool InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Args);
     static bool InitializeWetPartVertexDataFromPrecomputedData(
         FWetRuntimeDataBuildArgs& Args,
-        int32 VertexCount);
+        int32                     VertexCount);
     /** Builds the common per-vertex Part/Profile lookup from GPU runtime triangles.
      *  This path intentionally does not require CPU neighbor/precomputed data. */
     static bool InitializeWetPartVertexDataFromGPUData(
         FWetRuntimeDataBuildArgs& Args,
-        int32 VertexCount);
+        int32                     VertexCount);
     static bool InitializeNeighborGraphFromPrecomputedData(FWetRuntimeDataBuildArgs& Args);
     static void EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& Args, int32 VertexCount);
     static void EnsureWetnessBufferSize(FWetInputStageArgs& Args, int32 VertexCount);

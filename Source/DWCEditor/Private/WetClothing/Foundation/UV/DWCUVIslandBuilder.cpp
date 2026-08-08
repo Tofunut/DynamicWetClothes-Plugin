@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/UV/DWCUVIslandBuilder.h"
 #include "WetClothing/Foundation/UV/DWCUVEdgeKey.h"
 #include "WetClothing/Foundation/UV/DWCUVGeometry.h"
@@ -7,7 +8,7 @@ namespace DWCUVIslandBuilderPrivate
 {
     class FDisjointSet
     {
-    public:
+      public:
         explicit FDisjointSet(const int32 Count)
         {
             Parents.SetNumUninitialized(Count);
@@ -48,15 +49,15 @@ namespace DWCUVIslandBuilderPrivate
             }
         }
 
-    private:
+      private:
         TArray<int32> Parents;
         TArray<uint8> Ranks;
     };
 
     void BuildMaterialSlot(
         const TArray<FDWCUVIslandBuildTriangle>& Triangles,
-        const TArray<int32>& TriangleInputIndices,
-        const int32 MaterialSlotIndex,
+        const TArray<int32>&                     TriangleInputIndices,
+        const int32                              MaterialSlotIndex,
         TArray<FDWCOriginalUVIslandBuildResult>& OutIslands)
     {
         if (TriangleInputIndices.IsEmpty())
@@ -64,7 +65,7 @@ namespace DWCUVIslandBuilderPrivate
             return;
         }
 
-        FDisjointSet DisjointSet(TriangleInputIndices.Num());
+        FDisjointSet                             DisjointSet(TriangleInputIndices.Num());
         TMap<FDWCCanonicalUVEdge, TArray<int32>> EdgeToLocalTriangles;
 
         for (int32 LocalIndex = 0; LocalIndex < TriangleInputIndices.Num(); ++LocalIndex)
@@ -91,12 +92,12 @@ namespace DWCUVIslandBuilderPrivate
         }
 
         TMap<int32, int32> RootToOutputIndex;
-        int32 NextIslandID = 0;
+        int32              NextIslandID = 0;
         for (int32 LocalIndex = 0; LocalIndex < TriangleInputIndices.Num(); ++LocalIndex)
         {
-            const int32 InputIndex = TriangleInputIndices[LocalIndex];
+            const int32                      InputIndex = TriangleInputIndices[LocalIndex];
             const FDWCUVIslandBuildTriangle& Triangle = Triangles[InputIndex];
-            const int32 Root = DisjointSet.Find(LocalIndex);
+            const int32                      Root = DisjointSet.Find(LocalIndex);
 
             int32* OutputIndex = RootToOutputIndex.Find(Root);
             if (OutputIndex == nullptr)
@@ -118,7 +119,7 @@ namespace DWCUVIslandBuilderPrivate
             Island.UVArea += FDWCUVGeometry::ComputeTriangleArea2D(Triangle.UVs[0], Triangle.UVs[1], Triangle.UVs[2]);
         }
     }
-}
+} // namespace DWCUVIslandBuilderPrivate
 
 void FDWCUVIslandBuilder::Build(
     const TArray<FDWCUVIslandBuildTriangle>& Triangles,

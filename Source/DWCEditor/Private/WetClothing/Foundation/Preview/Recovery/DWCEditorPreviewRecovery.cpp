@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Preview/Recovery/DWCEditorPreviewRecovery.h"
 
 FDWCEditorPreviewRecoveryController::FDWCEditorPreviewRecoveryController(
@@ -106,7 +107,7 @@ void FDWCEditorPreviewRecoveryController::MarkSucceeded()
 
 EDWCEditorPreviewRecoveryAction FDWCEditorPreviewRecoveryController::MarkFailure(
     const EDWCEditorPreviewInvalidationReason Reason,
-    const double CurrentTimeSeconds)
+    const double                              CurrentTimeSeconds)
 {
     LastReason = Reason;
     const int32 RetryLimit = ResolveRetryLimit(Reason);
@@ -125,7 +126,7 @@ EDWCEditorPreviewRecoveryAction FDWCEditorPreviewRecoveryController::MarkFailure
 
 EDWCEditorPreviewRecoveryAction FDWCEditorPreviewRecoveryController::HandleCommitResult(
     const EDWCEditorPreviewCommitResult Result,
-    const double CurrentTimeSeconds)
+    const double                        CurrentTimeSeconds)
 {
     switch (Result)
     {
@@ -183,8 +184,8 @@ void FDWCEditorPreviewRecoveryController::Resume(const bool bRequireFullRebuild)
     }
     const bool bRebuild = bRequireFullRebuild || bRebuildRequiredAfterResume;
     State = bRebuild
-        ? EDWCEditorPreviewRecoveryState::FullRebuildRequired
-        : EDWCEditorPreviewRecoveryState::Ready;
+                ? EDWCEditorPreviewRecoveryState::FullRebuildRequired
+                : EDWCEditorPreviewRecoveryState::Ready;
     if (bRebuild)
     {
         ++Diagnostics.FullRebuildRequestCount;
@@ -195,14 +196,14 @@ void FDWCEditorPreviewRecoveryController::Resume(const bool bRequireFullRebuild)
 bool FDWCEditorPreviewRecoveryController::IsRetryDue(const double CurrentTimeSeconds) const
 {
     return State == EDWCEditorPreviewRecoveryState::RetryBackoff &&
-        CurrentTimeSeconds >= NextRetryTimeSeconds;
+           CurrentTimeSeconds >= NextRetryTimeSeconds;
 }
 
 bool FDWCEditorPreviewRecoveryController::RequiresFullRebuild() const
 {
     return State == EDWCEditorPreviewRecoveryState::FullRebuildRequired ||
-        State == EDWCEditorPreviewRecoveryState::FullRebuildInFlight ||
-        State == EDWCEditorPreviewRecoveryState::RetryBackoff;
+           State == EDWCEditorPreviewRecoveryState::FullRebuildInFlight ||
+           State == EDWCEditorPreviewRecoveryState::RetryBackoff;
 }
 
 int32 FDWCEditorPreviewRecoveryController::ResolveRetryLimit(
@@ -231,4 +232,3 @@ double FDWCEditorPreviewRecoveryController::ResolveBackoffSeconds() const
         Policy.MaximumBackoffSeconds,
         Policy.InitialBackoffSeconds * FMath::Pow(2.0, FMath::Max(AttemptCount - 1, 0)));
 }
-

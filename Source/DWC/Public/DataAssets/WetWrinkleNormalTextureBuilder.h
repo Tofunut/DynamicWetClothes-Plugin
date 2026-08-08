@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -11,29 +12,29 @@ class DWC_API FWetWrinkleNormalTextureBuilder
 {
   public:
     static bool ReadTextureSourcePixels(
-        UTexture2D* Texture,
+        UTexture2D*                    Texture,
         FWetWrinkleTexturePixelBuffer& OutBuffer,
-        FString& OutError);
+        FString&                       OutError);
 
     static bool BuildTextureBuffers(
-        UTexture2D* SourceNormalTexture,
-        bool bUseCorrection,
-        const FWetWrinkleNormalCorrectionSettings& CorrectionSettings,
+        UTexture2D*                                  SourceNormalTexture,
+        bool                                         bUseCorrection,
+        const FWetWrinkleNormalCorrectionSettings&   CorrectionSettings,
         const FWetWrinkleCoverageExtractionSettings& CoverageSettings,
-        FWetWrinkleNormalBuildOutput& OutOutput,
-        FString& OutError,
-        int32 MaxOutputDimension = 0);
+        FWetWrinkleNormalBuildOutput&                OutOutput,
+        FString&                                     OutError,
+        int32                                        MaxOutputDimension = 0);
 
     static bool BuildConvexSeparationBuffer(
-        UTexture2D* CorrectedNormalTexture,
+        UTexture2D*                                  CorrectedNormalTexture,
         const FWetWrinkleCoverageExtractionSettings& Settings,
-        FWetWrinkleTextureScalarBuffer& OutBuffer,
-        FString& OutError);
+        FWetWrinkleTextureScalarBuffer&              OutBuffer,
+        FString&                                     OutError);
 
     static bool BuildConvexSeparationBufferFromPixels(
-        const FWetWrinkleTexturePixelBuffer& CorrectedNormal,
-        bool bFlipGreenChannel,
+        const FWetWrinkleTexturePixelBuffer&         CorrectedNormal,
+        bool                                         bFlipGreenChannel,
         const FWetWrinkleCoverageExtractionSettings& Settings,
-        FWetWrinkleTextureScalarBuffer& OutBuffer,
-        FString& OutError);
+        FWetWrinkleTextureScalarBuffer&              OutBuffer,
+        FString&                                     OutError);
 };

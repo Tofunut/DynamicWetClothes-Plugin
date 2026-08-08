@@ -1,4 +1,4 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
 
 #include "RuntimeState/Utils/WetRuntimeDataBuilder.h"
 #include "Utility/DWCLog.h"
@@ -20,13 +20,12 @@
 #include "DataAssets/WetClothingGPUData.h"
 #include "DataAssets/WetnessProfile.h"
 
-
 namespace
 {
     FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
         const UWetClothingAsset& Asset,
-        const int32 ProfileIndex,
-        const UObject* OwnerForLogs)
+        const int32              ProfileIndex,
+        const UObject*           OwnerForLogs)
     {
         const FWetClothingEditableWetPartData& EditableWetPartData =
             Asset.Authored.PartData.EditableWetPartData;
@@ -66,14 +65,14 @@ namespace
 #endif
 
         return Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)
-            ? Asset.Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
-            : ProfileAssignment->Parameters;
+                   ? Asset.Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
+                   : ProfileAssignment->Parameters;
     }
 
-}
+} // namespace
 void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildArgs& Receiver)
 {
-    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    constexpr int32             RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     FSkeletalMeshLODRenderData* LODData = nullptr;
     if (!GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData))
     {
@@ -158,9 +157,9 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
         const USkeletalMesh* RuntimeMesh = Receiver.TargetSkeletalMesh != nullptr
                                                ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset()
                                                : nullptr;
-        const FString ValidationSummary = Receiver.WetClothingAsset != nullptr
-                                              ? Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(RuntimeMesh)
-                                              : FString(TEXT("CPUPrecomputed{asset=null}"));
+        const FString        ValidationSummary = Receiver.WetClothingAsset != nullptr
+                                                     ? Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(RuntimeMesh)
+                                                     : FString(TEXT("CPUPrecomputed{asset=null}"));
         UE_LOG(
             LogDWC,
             Error,
@@ -175,7 +174,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
 
 bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     FWetRuntimeDataBuildArgs& Receiver,
-    const int32 VertexCount)
+    const int32               VertexCount)
 {
     if (!Receiver.WetClothingAsset || !Receiver.TargetSkeletalMesh)
     {
@@ -307,10 +306,9 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     return true;
 }
 
-
 bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromGPUData(
     FWetRuntimeDataBuildArgs& Receiver,
-    const int32 VertexCount)
+    const int32               VertexCount)
 {
     constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     if (Receiver.MutableRuntimeData == nullptr ||
@@ -404,8 +402,8 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromGPUData(
         }
 
         const int32 EffectiveProfileIndex = WetPartData.Profiles.IsValidIndex(Part->ProfileIndex)
-            ? Part->ProfileIndex
-            : 0;
+                                                ? Part->ProfileIndex
+                                                : 0;
         if (!RuntimeData.WetnessProfileTable.IsValidIndex(EffectiveProfileIndex))
         {
             continue;
@@ -413,8 +411,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromGPUData(
 
         const FWetnessProfileParameters& Profile =
             RuntimeData.WetnessProfileTable[EffectiveProfileIndex];
-        const int32 TriangleVertices[3] =
-        {
+        const int32 TriangleVertices[3] = {
             Triangle.VertexIndices.X,
             Triangle.VertexIndices.Y,
             Triangle.VertexIndices.Z
@@ -479,7 +476,7 @@ bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRunt
     Receiver.MutableRuntimeData->ResetNeighborGraph();
 
     const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
-    FString ErrorMessage;
+    FString              ErrorMessage;
     if (!FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
             Receiver.WetClothingAsset,
             SkeletalMesh,
@@ -806,7 +803,7 @@ bool FWetRuntimeDataBuilder::ResolveSpecificBonesToLoopThrough(
     }
 
     TSet<int32> UniqueBoneIndices;
-    auto AddBoneIndex = [&UniqueBoneIndices, &OutBoneIndices, BoneCount](const int32 BoneIndex)
+    auto        AddBoneIndex = [&UniqueBoneIndices, &OutBoneIndices, BoneCount](const int32 BoneIndex)
     {
         if (BoneIndex < 0 || BoneIndex >= BoneCount || UniqueBoneIndices.Contains(BoneIndex))
         {

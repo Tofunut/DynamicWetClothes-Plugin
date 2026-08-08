@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "SWetnessProfileViewport.h"
 
 #include "AdvancedPreviewScene.h"
@@ -54,8 +55,8 @@ namespace
     constexpr float PreviewSphereScale = 1.35f;
     constexpr float PreviewFixedStep = 0.1f;
     constexpr float PreviewRestartDebounce = 0.12f;
-    const FName PreviewSurfaceWaterOverrideParameter(TEXT("DWC_PreviewSurfaceWaterOverride"));
-    const FName PreviewSurfaceWaterAmountParameter(TEXT("DWC_PreviewSurfaceWaterAmount"));
+    const FName     PreviewSurfaceWaterOverrideParameter(TEXT("DWC_PreviewSurfaceWaterOverride"));
+    const FName     PreviewSurfaceWaterAmountParameter(TEXT("DWC_PreviewSurfaceWaterAmount"));
 
     FWetnessProfileParameters GetSanitizedProfileParameters(const UWetnessProfile* Profile)
     {
@@ -121,7 +122,7 @@ namespace
         }
 
         FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
-        FColor* Data = static_cast<FColor*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
+        FColor*           Data = static_cast<FColor*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
         if (Data != nullptr)
         {
             *Data = Color;
@@ -170,7 +171,7 @@ namespace
         const auto                            AddValue = [&Hash](const auto& Value)
         {
             Hash = HashCombine(Hash, GetTypeHash(Value));
-};
+        };
 
         AddValue(Parameters.AbsorbedWetness.bEnabled);
         AddValue(Resolved.AbsorptionMultiplier);
@@ -277,8 +278,8 @@ void SWetnessProfileViewport::RefreshFromProfile()
 
 void SWetnessProfileViewport::Tick(
     const FGeometry& AllottedGeometry,
-    const double InCurrentTime,
-    const float InDeltaTime)
+    const double     InCurrentTime,
+    const float      InDeltaTime)
 {
     SEditorViewport::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 
@@ -289,7 +290,7 @@ void SWetnessProfileViewport::Tick(
 }
 
 FReply SWetnessProfileViewport::OnMouseButtonDown(
-    const FGeometry& MyGeometry,
+    const FGeometry&     MyGeometry,
     const FPointerEvent& MouseEvent)
 {
     RefreshScenarioSplashUVFromCamera();
@@ -335,7 +336,7 @@ void SWetnessProfileViewport::SetPreviewSurfaceWater(float InAmount)
 }
 
 void SWetnessProfileViewport::SetPreviewDropletDetailSizes(const float InDroplet1DetailSize,
-    const float InDroplet2DetailSize)
+                                                           const float InDroplet2DetailSize)
 {
     const float NewDroplet1DetailSize = FMath::Clamp(InDroplet1DetailSize, 0.0f, 4.0f);
     const float NewDroplet2DetailSize = FMath::Clamp(InDroplet2DetailSize, 0.0f, 4.0f);
@@ -621,115 +622,88 @@ void SWetnessProfileViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Over
         .HAlign(HAlign_Left)
         .VAlign(VAlign_Top)
         .Padding(10.0f)
-        [
-            SNew(SBorder)
-            .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-            .BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.72f))
-            .Padding(FMargin(10.0f, 6.0f))
-            [
-                SAssignNew(OverlayText, STextBlock)
-                .Text(this, &SWetnessProfileViewport::GetOverlayText)
-                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))
-                .ColorAndOpacity(FSlateColor(FLinearColor::White))
-                .ShadowColorAndOpacity(FLinearColor::Black)
-                .ShadowOffset(FVector2D(1.0f, 1.0f))
-            ]
-        ];
+            [SNew(SBorder)
+                 .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                 .BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.72f))
+                 .Padding(FMargin(10.0f, 6.0f))
+                     [SAssignNew(OverlayText, STextBlock)
+                          .Text(this, &SWetnessProfileViewport::GetOverlayText)
+                          .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))
+                          .ColorAndOpacity(FSlateColor(FLinearColor::White))
+                          .ShadowColorAndOpacity(FLinearColor::Black)
+                          .ShadowOffset(FVector2D(1.0f, 1.0f))]];
 
     Overlay->AddSlot()
         .HAlign(HAlign_Right)
         .VAlign(VAlign_Top)
         .Padding(12.0f)
-        [
-            SNew(SButton)
-            .ToolTipText(LOCTEXT("FocusMeshOverlayTooltip", "Frame the preview mesh in the viewport."))
-            .ContentPadding(FMargin(12.0f, 5.0f))
-            .OnClicked_Lambda([this]()
-            {
+            [SNew(SButton)
+                 .ToolTipText(LOCTEXT("FocusMeshOverlayTooltip", "Frame the preview mesh in the viewport."))
+                 .ContentPadding(FMargin(12.0f, 5.0f))
+                 .OnClicked_Lambda([this]()
+                                   {
                 FocusOnPreviewMesh(true);
-                return FReply::Handled();
-            })
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("FocusMeshOverlayLabel", "Focus Mesh"))
-                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11))
-            ]
-        ];
+                return FReply::Handled(); })
+                     [SNew(STextBlock)
+                          .Text(LOCTEXT("FocusMeshOverlayLabel", "Focus Mesh"))
+                          .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11))]];
 
     Overlay->AddSlot()
         .HAlign(HAlign_Center)
         .VAlign(VAlign_Center)
-        [
-            SNew(SBox)
-            .WidthOverride_Lambda([this]() { return GetInteractionCursorVisualSize(); })
-            .HeightOverride_Lambda([this]() { return GetInteractionCursorVisualSize(); })
-            .HAlign(HAlign_Center)
-            .VAlign(VAlign_Center)
-            .Visibility_Lambda([this]()
-            {
-                return PreviewBehavior == EPreviewBehavior::Simulation &&
-                    bHasPreviewWaterSelection && bPreviewSelectedChannelEnabled
-                    ? EVisibility::HitTestInvisible
-                    : EVisibility::Collapsed;
-            })
-            [
-                SNew(SScaleBox)
-                .Stretch(EStretch::ScaleToFit)
-                .StretchDirection(EStretchDirection::Both)
-                [
-                    SNew(SImage)
-                    .Image(FDWCEditorStyle::GetBrush(TEXT("DWCEditor.WetnessProfile.Crosshair")))
-                    .DesiredSizeOverride_Lambda([this]()
-                    {
+            [SNew(SBox)
+                 .WidthOverride_Lambda([this]()
+                                       { return GetInteractionCursorVisualSize(); })
+                 .HeightOverride_Lambda([this]()
+                                        { return GetInteractionCursorVisualSize(); })
+                 .HAlign(HAlign_Center)
+                 .VAlign(VAlign_Center)
+                 .Visibility_Lambda([this]()
+                                    { return PreviewBehavior == EPreviewBehavior::Simulation &&
+                                                     bHasPreviewWaterSelection && bPreviewSelectedChannelEnabled
+                                                 ? EVisibility::HitTestInvisible
+                                                 : EVisibility::Collapsed; })
+                     [SNew(SScaleBox)
+                          .Stretch(EStretch::ScaleToFit)
+                          .StretchDirection(EStretchDirection::Both)
+                              [SNew(SImage)
+                                   .Image(FDWCEditorStyle::GetBrush(TEXT("DWCEditor.WetnessProfile.Crosshair")))
+                                   .DesiredSizeOverride_Lambda([this]()
+                                                               {
                         const float CursorSize = GetInteractionCursorVisualSize();
-                        return TOptional<FVector2D>(FVector2D(CursorSize, CursorSize));
-                    })
-                ]
-            ]
-        ];
+                        return TOptional<FVector2D>(FVector2D(CursorSize, CursorSize)); })]]];
 
     Overlay->AddSlot()
         .HAlign(HAlign_Center)
         .VAlign(VAlign_Bottom)
         .Padding(12.0f, 12.0f, 12.0f, 18.0f)
-        [
-            SNew(SButton)
-            .Visibility_Lambda([this]()
-            {
-                return PreviewBehavior == EPreviewBehavior::Simulation &&
-                    bHasPreviewWaterSelection && bPreviewSelectedChannelEnabled
-                    ? EVisibility::Visible
-                    : EVisibility::Collapsed;
-            })
-            .ToolTipText(LOCTEXT("AddWaterOverlayTooltip", "Add one water contact at the center cursor."))
-            .ContentPadding(FMargin(14.0f, 7.0f))
-            .OnClicked_Lambda([this]()
-            {
+            [SNew(SButton)
+                 .Visibility_Lambda([this]()
+                                    { return PreviewBehavior == EPreviewBehavior::Simulation &&
+                                                     bHasPreviewWaterSelection && bPreviewSelectedChannelEnabled
+                                                 ? EVisibility::Visible
+                                                 : EVisibility::Collapsed; })
+                 .ToolTipText(LOCTEXT("AddWaterOverlayTooltip", "Add one water contact at the center cursor."))
+                 .ContentPadding(FMargin(14.0f, 7.0f))
+                 .OnClicked_Lambda([this]()
+                                   {
                 ApplyPreviewSplash();
-                return FReply::Handled();
-            })
-            [
-                SNew(SHorizontalBox)
+                return FReply::Handled(); })
+                     [SNew(SHorizontalBox)
 
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    SNew(SImage)
-                    .Image(FDWCEditorStyle::GetBrush(TEXT("DWCEditor.WetnessProfile.AddWater")))
-                ]
+                      + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                                [SNew(SImage)
+                                     .Image(FDWCEditorStyle::GetBrush(TEXT("DWCEditor.WetnessProfile.AddWater")))]
 
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT("AddWaterOverlayLabel", "Add Water"))
-                    .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 12))
-                ]
-            ]
-        ];
+                      + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                                [SNew(STextBlock)
+                                     .Text(LOCTEXT("AddWaterOverlayLabel", "Add Water"))
+                                     .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 12))]]];
 }
 
 void SWetnessProfileViewport::OnFocusViewportToSelection()
@@ -902,7 +876,7 @@ void SWetnessProfileViewport::RebuildGeneratedSpherePreviewMaterial()
     GeneratedPreviewMaterialSlotCount = 1;
     bGeneratedSpherePreviewMaterialValid = false;
 
-    UMaterialInterface* SourceMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
+    UMaterialInterface*             SourceMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
     FWCAMaterialGenerator::FOptions Options;
     Options.SimulationMode = EDWCSimulationMode::WetnessMapGPU;
     Options.DWCDataUVChannelIndex = 0;
@@ -1048,12 +1022,12 @@ void SWetnessProfileViewport::RebuildGeneratedPreviewMaterials(USkeletalMesh* Sk
 
 void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
 {
-    const FWetnessProfileParameters Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
+    const FWetnessProfileParameters          Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
     const FAbsorbedWetnessProfileParameters& Absorbed = Parameters.AbsorbedWetness;
-    const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
+    const FSurfaceWaterProfileParameters&    Surface = Parameters.SurfaceWater;
 #if WITH_EDITORONLY_DATA
     const UWetnessProfile* SourceProfile = WetnessProfile.Get();
-    const bool bPreviewSecondaryLayer =
+    const bool             bPreviewSecondaryLayer =
         SourceProfile != nullptr &&
         SourceProfile->EditorActiveDropletLayer == 1u &&
         Surface.bUseSecondaryDroplets;
@@ -1066,9 +1040,9 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
         using namespace DWCWetnessProfilePreviewMaterial;
         const bool bManualPreview = PreviewBehavior == EPreviewBehavior::Manual;
         PreviewMaterialInstance->SetScalarParameterValue(AbsorbedWaterParameter,
-            bManualPreview ? PreviewAbsorbedWater : 0.0f);
+                                                         bManualPreview ? PreviewAbsorbedWater : 0.0f);
         PreviewMaterialInstance->SetScalarParameterValue(SurfaceWaterParameter,
-            bManualPreview ? PreviewSurfaceWater : 0.0f);
+                                                         bManualPreview ? PreviewSurfaceWater : 0.0f);
         const bool bPreviewAbsorbedEnabled = Absorbed.bEnabled &&
                                              (PreviewBehavior == EPreviewBehavior::Manual || bPreviewAbsorbedLayerEnabled);
         const bool bPreviewSurfaceEnabled = Surface.bEnabled &&
@@ -1082,29 +1056,29 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
             AbsorbedGlossinessStrengthParameter,
             Parameters.GetAbsorbedGlossinessStrength());
         const float SelectedTargetRoughness = bPreviewSecondaryLayer
-            ? Surface.DropletFlowTargetRoughness
-            : Surface.SurfaceWaterTargetRoughness;
+                                                  ? Surface.DropletFlowTargetRoughness
+                                                  : Surface.SurfaceWaterTargetRoughness;
         const float SelectedNormalStrength = bPreviewSecondaryLayer
-            ? Surface.DropletFlowNormalStrength
-            : Surface.SurfaceWaterNormalStrength;
+                                                 ? Surface.DropletFlowNormalStrength
+                                                 : Surface.SurfaceWaterNormalStrength;
         const float SelectedRoughnessBlend = bPreviewSecondaryLayer
-            ? Surface.DropletFlowRoughnessBlend
-            : Surface.SurfaceWaterRoughnessBlend;
+                                                 ? Surface.DropletFlowRoughnessBlend
+                                                 : Surface.SurfaceWaterRoughnessBlend;
         const float SelectedTotalStrength = bPreviewSecondaryLayer
-            ? Surface.DropletFlowTotalStrength
-            : Surface.SurfaceWaterTotalStrength;
+                                                ? Surface.DropletFlowTotalStrength
+                                                : Surface.SurfaceWaterTotalStrength;
         const float SelectedSpecular = bPreviewSecondaryLayer
-            ? Surface.DropletFlowSpecular
-            : Surface.SurfaceWaterSpecular;
+                                           ? Surface.DropletFlowSpecular
+                                           : Surface.SurfaceWaterSpecular;
         const float SelectedStampRadius = bPreviewSecondaryLayer
-            ? Surface.DropletFlowRadiusPixels
-            : Surface.DropletRadiusPixels;
+                                              ? Surface.DropletFlowRadiusPixels
+                                              : Surface.DropletRadiusPixels;
         const float SelectedDetailSize = bPreviewSecondaryLayer
-            ? PreviewDroplet2DetailSize
-            : PreviewDroplet1DetailSize;
-        const bool bSelectedDropletVisible = bPreviewSecondaryLayer
-            ? bPreviewDroplet2Enabled
-            : bPreviewDroplet1Enabled;
+                                             ? PreviewDroplet2DetailSize
+                                             : PreviewDroplet1DetailSize;
+        const bool  bSelectedDropletVisible = bPreviewSecondaryLayer
+                                                  ? bPreviewDroplet2Enabled
+                                                  : bPreviewDroplet1Enabled;
 
         PreviewMaterialInstance->SetScalarParameterValue(
             SurfaceTargetRoughnessParameter,
@@ -1135,11 +1109,11 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
             static_cast<float>(PreviewMode));
 
         UTexture2D* SelectedNormalTexture = bPreviewSecondaryLayer
-            ? Surface.DropletFlowNormalTexture.Get()
-            : Surface.DropletNormalTexture.Get();
+                                                ? Surface.DropletFlowNormalTexture.Get()
+                                                : Surface.DropletNormalTexture.Get();
         UTexture2D* SelectedMaskTexture = bPreviewSecondaryLayer
-            ? Surface.DropletFlowMaskTexture.Get()
-            : Surface.DropletMaskTexture.Get();
+                                              ? Surface.DropletFlowMaskTexture.Get()
+                                              : Surface.DropletMaskTexture.Get();
         PreviewMaterialInstance->SetTextureParameterValue(
             DropletNormalTextureParameter,
             SelectedNormalTexture != nullptr
@@ -1167,15 +1141,15 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         return;
     }
 
-    const FWetnessProfileParameters Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
+    const FWetnessProfileParameters       Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
     const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
 
     if (PreviewBehavior == EPreviewBehavior::Manual)
     {
 
-    WriteSinglePixelTexture(PreviewWetnessMapTexture, MakeScalarPreviewColor(PreviewAbsorbedWater));
-    WriteSinglePixelTexture(PreviewSurfaceDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
-    WriteSinglePixelTexture(PreviewSurfaceFlowDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
+        WriteSinglePixelTexture(PreviewWetnessMapTexture, MakeScalarPreviewColor(PreviewAbsorbedWater));
+        WriteSinglePixelTexture(PreviewSurfaceDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
+        WriteSinglePixelTexture(PreviewSurfaceFlowDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
     }
     WriteSinglePixelTexture(
         PreviewWetPartDataTexture,
@@ -1213,7 +1187,7 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         0.0f);
 
     const bool                     bManualPreview = PreviewBehavior == EPreviewBehavior::Manual;
-    const float SurfacePreviewAmount = Surface.bEnabled && bManualPreview ? PreviewSurfaceWater : 0.0f;
+    const float                    SurfacePreviewAmount = Surface.bEnabled && bManualPreview ? PreviewSurfaceWater : 0.0f;
     FWetClothingLocalRenderProfile PreviewLocalProfile;
     PreviewLocalProfile.Parameters = Parameters;
     PreviewLocalProfile.StableKey = FString::Printf(
@@ -1272,12 +1246,12 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         else
         {
 
-        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), PreviewWetnessMapTexture);
-        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), PreviewSurfaceDropletTexture);
-        PreviewMID->SetTextureParameterValue(
-            DWCWetMaterialParameters::SurfaceDroplet2RT(),
-            PreviewSurfaceFlowDropletTexture);
-        PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), 1.0f);
+            PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), PreviewWetnessMapTexture);
+            PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), PreviewSurfaceDropletTexture);
+            PreviewMID->SetTextureParameterValue(
+                DWCWetMaterialParameters::SurfaceDroplet2RT(),
+                PreviewSurfaceFlowDropletTexture);
+            PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), 1.0f);
         }
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::UseRenderProfileLUT(), 0.0f);
         const bool bAppliedProfileTextures =
@@ -1298,7 +1272,7 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(6), FallbackProfile6);
         }
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter,
-            bManualPreview ? 1.0f : 0.0f);
+                                            bManualPreview ? 1.0f : 0.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, SurfacePreviewAmount);
         const bool bSurfaceLayerVisible = bManualPreview || bPreviewSurfaceLayerEnabled;
         PreviewMID->SetScalarParameterValue(
@@ -1416,7 +1390,7 @@ FVector2f SWetnessProfileViewport::ResolveScenarioSplashUV() const
 
 bool SWetnessProfileViewport::TryResolveCameraCenterSplashUV(FVector2f& OutUV) const
 {
-    const USkeletalMesh* SkeletalMesh = GetDisplayedPreviewSkeletalMesh();
+    const USkeletalMesh*       SkeletalMesh = GetDisplayedPreviewSkeletalMesh();
     const UPrimitiveComponent* PreviewComponent = GetActivePreviewComponent();
     if (SkeletalMesh == nullptr || PreviewComponent == nullptr || !ViewportClient.IsValid())
     {
@@ -1431,7 +1405,7 @@ bool SWetnessProfileViewport::TryResolveCameraCenterSplashUV(FVector2f& OutUV) c
     }
 
     TArray<int32> MaterialSlots;
-    const int32 MaterialCount = SkeletalMesh->GetMaterials().Num();
+    const int32   MaterialCount = SkeletalMesh->GetMaterials().Num();
     MaterialSlots.Reserve(MaterialCount);
     for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
     {
@@ -1439,7 +1413,7 @@ bool SWetnessProfileViewport::TryResolveCameraCenterSplashUV(FVector2f& OutUV) c
     }
 
     TArray<FWCAUVPreviewSourceTriangle> Triangles;
-    FString ReadError;
+    FString                             ReadError;
     if (!FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
             SkeletalMesh,
             0,
@@ -1458,11 +1432,11 @@ bool SWetnessProfileViewport::TryResolveCameraCenterSplashUV(FVector2f& OutUV) c
         return false;
     }
 
-    const FTransform ComponentTransform = PreviewComponent->GetComponentTransform();
+    const FTransform                   ComponentTransform = PreviewComponent->GetComponentTransform();
     const FWCAUVPreviewSourceTriangle* BestTriangle = nullptr;
-    double BestDistance = TNumericLimits<double>::Max();
-    double BestU = 0.0;
-    double BestV = 0.0;
+    double                             BestDistance = TNumericLimits<double>::Max();
+    double                             BestU = 0.0;
+    double                             BestV = 0.0;
 
     constexpr double IntersectionEpsilon = 1.0e-8;
     for (const FWCAUVPreviewSourceTriangle& Triangle : Triangles)
@@ -1473,22 +1447,22 @@ bool SWetnessProfileViewport::TryResolveCameraCenterSplashUV(FVector2f& OutUV) c
         const FVector Edge1 = B - A;
         const FVector Edge2 = C - A;
         const FVector P = FVector::CrossProduct(RayDirection, Edge2);
-        const double Determinant = FVector::DotProduct(Edge1, P);
+        const double  Determinant = FVector::DotProduct(Edge1, P);
         if (FMath::Abs(Determinant) <= IntersectionEpsilon)
         {
             continue;
         }
 
-        const double InverseDeterminant = 1.0 / Determinant;
+        const double  InverseDeterminant = 1.0 / Determinant;
         const FVector T = RayOrigin - A;
-        const double U = FVector::DotProduct(T, P) * InverseDeterminant;
+        const double  U = FVector::DotProduct(T, P) * InverseDeterminant;
         if (U < 0.0 || U > 1.0)
         {
             continue;
         }
 
         const FVector Q = FVector::CrossProduct(T, Edge1);
-        const double V = FVector::DotProduct(RayDirection, Q) * InverseDeterminant;
+        const double  V = FVector::DotProduct(RayDirection, Q) * InverseDeterminant;
         if (V < 0.0 || U + V > 1.0)
         {
             continue;
@@ -1512,7 +1486,7 @@ bool SWetnessProfileViewport::TryResolveCameraCenterSplashUV(FVector2f& OutUV) c
     }
 
     const FVector2f UV0 = BestTriangle->UVs[0];
-    const auto UnwrapNear = [](const FVector2f UV, const FVector2f Reference)
+    const auto      UnwrapNear = [](const FVector2f UV, const FVector2f Reference)
     {
         return FVector2f(
             Reference.X + (UV.X - Reference.X) - FMath::RoundToFloat(UV.X - Reference.X),
@@ -1520,7 +1494,7 @@ bool SWetnessProfileViewport::TryResolveCameraCenterSplashUV(FVector2f& OutUV) c
     };
     const FVector2f UV1 = UnwrapNear(BestTriangle->UVs[1], UV0);
     const FVector2f UV2 = UnwrapNear(BestTriangle->UVs[2], UV0);
-    const float Barycentric0 = static_cast<float>(1.0 - BestU - BestV);
+    const float     Barycentric0 = static_cast<float>(1.0 - BestU - BestV);
     const FVector2f UV =
         UV0 * Barycentric0 +
         UV1 * static_cast<float>(BestU) +
@@ -1676,15 +1650,15 @@ void SWetnessProfileViewport::BindGPUPreviewTextures()
         {
             continue;
         }
-            PreviewMID->SetScalarParameterValue(
-                DWCWetMaterialParameters::UseGPUBackend(), 1.0f);
+        PreviewMID->SetScalarParameterValue(
+            DWCWetMaterialParameters::UseGPUBackend(), 1.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter, 0.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, 0.0f);
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), GPUPreviewSimulator->GetWetnessMap());
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), GPUPreviewSimulator->GetDroplet1Map());
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet2RT(), GPUPreviewSimulator->GetDroplet2Map());
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), TexelSize);
-        }
+    }
 }
 
 void SWetnessProfileViewport::ScheduleSimulationRestart()
@@ -1713,9 +1687,9 @@ float SWetnessProfileViewport::GetInteractionCursorVisualSize() const
         if (Profile != nullptr)
         {
             const FSurfaceWaterProfileParameters& Surface = Profile->Parameters.SurfaceWater;
-            const float RadiusPixels = bPreviewSecondarySelection
-                ? Surface.DropletFlowRadiusPixels
-                : Surface.DropletRadiusPixels;
+            const float                           RadiusPixels = bPreviewSecondarySelection
+                                                                     ? Surface.DropletFlowRadiusPixels
+                                                                     : Surface.DropletRadiusPixels;
             // Preserve the previous default visual size at the default 16 px
             // stamp radius while making the cursor grow/shrink with authored size.
             return FMath::Clamp(
@@ -1747,8 +1721,8 @@ FText SWetnessProfileViewport::GetOverlayText() const
         if (!bPreviewSelectedChannelEnabled)
         {
             return bPreviewSurfaceSelection
-                ? LOCTEXT("SimulationPreviewSurfaceDisabled", "GPU Simulation Preview\nSurface Water Disabled")
-                : LOCTEXT("SimulationPreviewAbsorbedDisabled", "GPU Simulation Preview\nAbsorbed Water Disabled");
+                       ? LOCTEXT("SimulationPreviewSurfaceDisabled", "GPU Simulation Preview\nSurface Water Disabled")
+                       : LOCTEXT("SimulationPreviewAbsorbedDisabled", "GPU Simulation Preview\nAbsorbed Water Disabled");
         }
         if (!bPreviewSurfaceSelection)
         {
@@ -1762,7 +1736,7 @@ FText SWetnessProfileViewport::GetOverlayText() const
                 ? LOCTEXT("SimulationPreviewSecondaryLayer", "Secondary")
                 : LOCTEXT("SimulationPreviewPrimaryLayer", "Primary"));
     }
-    const FWetnessProfileParameters Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
+    const FWetnessProfileParameters       Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
     const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
 
     return FText::Format(

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurface.h"
 
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
@@ -25,7 +26,7 @@ bool FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
     const FDWCBakeResolvedLayer& ResolvedLayer,
     const int32                  LODIndex,
     const int32                  UVChannelIndex,
-    FDWCRevealBakeSurface&             OutSurface,
+    FDWCRevealBakeSurface&       OutSurface,
     FString*                     OutErrorMessage)
 {
     OutSurface.Reset();
@@ -119,7 +120,7 @@ bool FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
 
             for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
             {
-                const uint32 VertexIndex = RawIndices[CornerIndex];
+                const uint32  VertexIndex = RawIndices[CornerIndex];
                 const FVector LocalPosition(LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex));
                 const FVector LocalNormal(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex));
 

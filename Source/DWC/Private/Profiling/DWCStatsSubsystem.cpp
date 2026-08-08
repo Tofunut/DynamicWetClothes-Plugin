@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Profiling/DWCStatsSubsystem.h"
 
 #include "Async/DWCLODVertexColorTasks.h"
@@ -13,18 +14,18 @@
 
 namespace
 {
-    constexpr float DWCStatsRefreshIntervalSeconds = 0.25f;
-    constexpr float DWCWorkloadRateIntervalSeconds = 1.0f;
+    constexpr float        DWCStatsRefreshIntervalSeconds = 0.25f;
+    constexpr float        DWCWorkloadRateIntervalSeconds = 1.0f;
     constexpr const TCHAR* DWCCPUMemoryStatCommand = TEXT("stat DWCCPUMemory");
     constexpr const TCHAR* DWCGPUMemoryStatCommand = TEXT("stat DWCGPUMemory");
 
     template <typename PayloadType, typename MemoryFunctionType>
     void AddUniqueSharedPayload(
         const TSharedPtr<const PayloadType, ESPMode::ThreadSafe>& Payload,
-        TSet<const PayloadType*>& SeenPayloads,
-        uint32& OutCount,
-        uint64& OutBytes,
-        MemoryFunctionType&& GetMemoryBytes)
+        TSet<const PayloadType*>&                                 SeenPayloads,
+        uint32&                                                   OutCount,
+        uint64&                                                   OutBytes,
+        MemoryFunctionType&&                                      GetMemoryBytes)
     {
         const PayloadType* Pointer = Payload.Get();
         if (Pointer == nullptr || SeenPayloads.Contains(Pointer))
@@ -38,10 +39,10 @@ namespace
     }
 
     void AddUniqueResidentTexture(
-        UTexture2D* Texture,
+        UTexture2D*              Texture,
         TSet<const UTexture2D*>& SeenTextures,
-        uint32& OutCount,
-        uint64& OutBytes)
+        uint32&                  OutCount,
+        uint64&                  OutBytes)
     {
         if (Texture == nullptr || SeenTextures.Contains(Texture))
         {
@@ -63,7 +64,7 @@ namespace
         const double Rate = static_cast<double>(Current - Previous) / static_cast<double>(SampleSeconds);
         return static_cast<uint32>(FMath::Clamp<double>(FMath::RoundToDouble(Rate), 0.0, MAX_uint32));
     }
-}
+} // namespace
 
 void UDWCStatsSubsystem::Deinitialize()
 {
@@ -108,7 +109,7 @@ void UDWCStatsSubsystem::Tick(const float DeltaTime)
 void UDWCStatsSubsystem::SyncMemoryStatGroups()
 {
 #if STATS
-    UWorld* World = GetWorld();
+    UWorld*              World = GetWorld();
     UGameViewportClient* GameViewport = World != nullptr ? World->GetGameViewport() : nullptr;
     if (GameViewport == nullptr || GEngine == nullptr || GEngine->GameViewport != GameViewport)
     {
@@ -254,7 +255,6 @@ void UDWCStatsSubsystem::CollectBacklogStats(FDWCWorkloadStatsSnapshot& OutSnaps
             {
                 SurfaceWaterPendingStamps += Receiver->GPUBackend->GetStats().PendingSurfaceStampCount;
             }
-
         }
     }
 
@@ -283,11 +283,11 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
     }
 
     TSet<const FWetClothingRuntimeData*> SeenRuntimeData;
-    TSet<const FDWCSkinningStaticData*> SeenSkinningStaticData;
+    TSet<const FDWCSkinningStaticData*>  SeenSkinningStaticData;
     TSet<const FDWCLODVertexStaticData*> SeenLODVertexStaticData;
-    TSet<const TArray<int32>*> SeenLODVertexColorTransferMaps;
-    TSet<const UTexture2D*> SeenWrinkleTextures;
-    TSet<const UTexture2D*> SeenTransparencyTextures;
+    TSet<const TArray<int32>*>           SeenLODVertexColorTransferMaps;
+    TSet<const UTexture2D*>              SeenWrinkleTextures;
+    TSet<const UTexture2D*>              SeenTransparencyTextures;
 
     for (auto It = RegisteredComponents.CreateIterator(); It; ++It)
     {
@@ -344,13 +344,15 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                 SeenRuntimeData,
                 OutSnapshot.SharedRuntimeDataCount,
                 OutSnapshot.SharedRuntimeDataCPUBytes,
-                [](const FWetClothingRuntimeData& Data) { return Data.GetAllocatedMemoryBytes(); });
+                [](const FWetClothingRuntimeData& Data)
+                { return Data.GetAllocatedMemoryBytes(); });
             AddUniqueSharedPayload(
                 Receiver->SkinningStaticData,
                 SeenSkinningStaticData,
                 OutSnapshot.SharedSkinningStaticDataCount,
                 OutSnapshot.SharedSkinningStaticDataCPUBytes,
-                [](const FDWCSkinningStaticData& Data) { return Data.GetAllocatedMemoryBytes(); });
+                [](const FDWCSkinningStaticData& Data)
+                { return Data.GetAllocatedMemoryBytes(); });
 
             for (const TPair<int32, TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>>& Pair : Receiver->LODVertexStaticDataByLOD)
             {
@@ -359,7 +361,8 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                     SeenLODVertexStaticData,
                     OutSnapshot.SharedLODVertexStaticDataCount,
                     OutSnapshot.SharedLODVertexStaticDataCPUBytes,
-                    [](const FDWCLODVertexStaticData& Data) { return Data.GetAllocatedMemoryBytes(); });
+                    [](const FDWCLODVertexStaticData& Data)
+                    { return Data.GetAllocatedMemoryBytes(); });
             }
 
             for (const TPair<int32, TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>>& Pair : Receiver->LODVertexColorTransferMapsByLOD)
@@ -369,7 +372,8 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                     SeenLODVertexColorTransferMaps,
                     OutSnapshot.SharedLODVertexColorTransferMapCount,
                     OutSnapshot.SharedLODVertexColorTransferMapCPUBytes,
-                    [](const TArray<int32>& Data) { return sizeof(Data) + Data.GetAllocatedSize(); });
+                    [](const TArray<int32>& Data)
+                    { return sizeof(Data) + Data.GetAllocatedSize(); });
             }
 
             if (Receiver->SimulationState.IsValid())
@@ -396,7 +400,6 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
             }
             OutSnapshot.PendingLODVertexColorDirtyCPUBytes +=
                 Receiver->PendingLODVertexColorDirtySourceVertices.GetAllocatedSize();
-
 
             if (Receiver->GPUBackend.IsValid())
             {

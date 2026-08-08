@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Async/Async.h"
@@ -16,13 +17,13 @@ namespace
     {
         explicit FTestCacheValue(const uint64 InBytes) : Bytes(InBytes) {}
 
-        static FName StaticCacheTypeName() { return TEXT("DWCEditorTestCacheValue"); }
-        virtual FName GetCacheTypeName() const override { return StaticCacheTypeName(); }
+        static FName   StaticCacheTypeName() { return TEXT("DWCEditorTestCacheValue"); }
+        virtual FName  GetCacheTypeName() const override { return StaticCacheTypeName(); }
         virtual uint64 GetAllocatedSizeBytes() const override { return Bytes; }
 
         uint64 Bytes = 0;
     };
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorCacheStoreReuseTest,
@@ -32,8 +33,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorCacheStoreReuseTest::RunTest(const FString& Parameters)
 {
     FDWCEditorCacheStore Store(1024);
-    UTexture2D* Owner = NewObject<UTexture2D>();
-    FDWCEditorCacheKey Key;
+    UTexture2D*          Owner = NewObject<UTexture2D>();
+    FDWCEditorCacheKey   Key;
     Key.Namespace = TEXT("Test");
     Key.Owner = FObjectKey(Owner);
     Key.MaterialSlotIndex = 2;
@@ -57,10 +58,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorCacheStorePinnedEntryEvictionTest::RunTest(const FString& Parameters)
 {
-    constexpr uint64 PayloadBytes = 512ull * 1024ull;
+    constexpr uint64     PayloadBytes = 512ull * 1024ull;
     FDWCEditorCacheStore Store(1024ull * 1024ull);
-    UTexture2D* Owner = NewObject<UTexture2D>();
-    FDWCEditorCacheKey FirstKey;
+    UTexture2D*          Owner = NewObject<UTexture2D>();
+    FDWCEditorCacheKey   FirstKey;
     FirstKey.Namespace = TEXT("Test");
     FirstKey.Owner = FObjectKey(Owner);
     FirstKey.MaterialSlotIndex = 1;
@@ -81,17 +82,17 @@ bool FDWCEditorCacheStorePinnedEntryEvictionTest::RunTest(const FString& Paramet
     Store.Put(SecondKey, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(PayloadBytes));
 
     TestTrue(TEXT("The cache map stays within budget after evicting an unleased entry"),
-        Store.GetUsedBytes() <= Store.GetBudgetBytes());
+             Store.GetUsedBytes() <= Store.GetBudgetBytes());
     TestTrue(TEXT("The actively leased entry remains cached"), Store.Find<FTestCacheValue>(FirstKey).IsValid());
     TestFalse(TEXT("The unleased entry is evicted when the pinned entry cannot be removed"),
-        Store.Find<FTestCacheValue>(SecondKey).IsValid());
+              Store.Find<FTestCacheValue>(SecondKey).IsValid());
     TestEqual(TEXT("The caller's leased payload remains valid"), PinnedValue->Bytes, PayloadBytes);
 
     Lease.Reset();
     TestEqual(TEXT("Releasing the lease updates the cache count"), Store.GetActiveLeaseCount(), 0);
     Store.Put(SecondKey, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(PayloadBytes));
     TestFalse(TEXT("The former entry becomes evictable after lease release"),
-        Store.Find<FTestCacheValue>(FirstKey).IsValid());
+              Store.Find<FTestCacheValue>(FirstKey).IsValid());
     TestTrue(TEXT("The new entry remains cached after release"), Store.Find<FTestCacheValue>(SecondKey).IsValid());
     return true;
 }
@@ -104,13 +105,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorCacheStoreInvalidationLeaseTest::RunTest(const FString& Parameters)
 {
     FDWCEditorCacheStore Store(1024ull * 1024ull);
-    UTexture2D* Owner = NewObject<UTexture2D>();
-    FDWCEditorCacheKey Key;
+    UTexture2D*          Owner = NewObject<UTexture2D>();
+    FDWCEditorCacheKey   Key;
     Key.Namespace = TEXT("Test");
     Key.Owner = FObjectKey(Owner);
     Key.MaterialSlotIndex = 3;
 
-    constexpr uint64 PayloadBytes = 256ull * 1024ull;
+    constexpr uint64                                 PayloadBytes = 256ull * 1024ull;
     TSharedRef<FTestCacheValue, ESPMode::ThreadSafe> Value =
         MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(PayloadBytes);
     Store.Put(Key, Value);
@@ -120,11 +121,11 @@ bool FDWCEditorCacheStoreInvalidationLeaseTest::RunTest(const FString& Parameter
 
     Store.InvalidateOwner(Owner);
     TestFalse(TEXT("Invalidation removes the entry from the cache index"),
-        Store.Find<FTestCacheValue>(Key).IsValid());
+              Store.Find<FTestCacheValue>(Key).IsValid());
     TestTrue(TEXT("The active lease keeps the invalidated payload alive"), Lease.IsValid());
     TestEqual(TEXT("Invalidated entry is reported as retired"), Store.GetRetiredEntryCount(), 1);
     TestTrue(TEXT("Retired payload remains included in the memory estimate"),
-        Store.GetRetiredBytes() >= PayloadBytes);
+             Store.GetRetiredBytes() >= PayloadBytes);
 
     Lease.Reset();
     TestEqual(TEXT("Released invalidated entry is no longer retired"), Store.GetRetiredEntryCount(), 0);
@@ -140,8 +141,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorCacheStoreAsyncLeaseLifetimeTest::RunTest(const FString& Parameters)
 {
     FDWCEditorCacheStore Store(1024ull * 1024ull);
-    UTexture2D* Owner = NewObject<UTexture2D>();
-    FDWCEditorCacheKey Key;
+    UTexture2D*          Owner = NewObject<UTexture2D>();
+    FDWCEditorCacheKey   Key;
     Key.Namespace = TEXT("Test");
     Key.Owner = FObjectKey(Owner);
     Key.MaterialSlotIndex = 4;
@@ -154,8 +155,8 @@ bool FDWCEditorCacheStoreAsyncLeaseLifetimeTest::RunTest(const FString& Paramete
     TestTrue(TEXT("Async test acquires a lease"), Lease.IsValid());
     TSharedPtr<const IDWCEditorCacheValue, ESPMode::ThreadSafe> Payload = Lease.GetSharedValue();
 
-    FEvent* WorkerStarted = FPlatformProcess::GetSynchEventFromPool(false);
-    FEvent* AllowWorkerRelease = FPlatformProcess::GetSynchEventFromPool(false);
+    FEvent*       WorkerStarted = FPlatformProcess::GetSynchEventFromPool(false);
+    FEvent*       AllowWorkerRelease = FPlatformProcess::GetSynchEventFromPool(false);
     TFuture<void> Worker = Async(
         EAsyncExecution::ThreadPool,
         [WorkerLease = MoveTemp(Lease), WorkerStarted, AllowWorkerRelease]() mutable

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -14,8 +15,7 @@ struct FDWCQuantizedUVPoint
     FDWCQuantizedUVPoint() = default;
 
     explicit FDWCQuantizedUVPoint(const FVector2D& UV)
-        : X(FMath::RoundToInt64(UV.X * QuantizeScale))
-        , Y(FMath::RoundToInt64(UV.Y * QuantizeScale))
+        : X(FMath::RoundToInt64(UV.X * QuantizeScale)), Y(FMath::RoundToInt64(UV.Y * QuantizeScale))
     {
     }
 
@@ -52,8 +52,7 @@ struct FDWCCanonicalUVEdge
     FDWCCanonicalUVEdge() = default;
 
     FDWCCanonicalUVEdge(const FVector2D& InA, const FVector2D& InB)
-        : A(InA)
-        , B(InB)
+        : A(InA), B(InB)
     {
         if (B < A)
         {

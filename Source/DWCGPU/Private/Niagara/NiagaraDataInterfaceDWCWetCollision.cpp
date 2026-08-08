@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Niagara/NiagaraDataInterfaceDWCWetCollision.h"
 
 #include "Niagara/DWCGPUNiagaraWetCollisionBridge.h"
@@ -15,17 +16,17 @@
 
 namespace DWCNiagaraWetCollisionLocal
 {
-static const TCHAR* TemplateShaderFile = TEXT("/DWCGPU/NiagaraDataInterfaceDWCWetCollision.ush");
+    static const TCHAR* TemplateShaderFile = TEXT("/DWCGPU/NiagaraDataInterfaceDWCWetCollision.ush");
 
-static const FString MaxContactsName(TEXT("_MaxContacts"));
-static const FString ContactsName(TEXT("_Contacts"));
-static const FString ContactCountName(TEXT("_ContactCount"));
-static const FString OutputContactsName(TEXT("_OutputContacts"));
-static const FString OutputContactCountName(TEXT("_OutputContactCount"));
+    static const FString MaxContactsName(TEXT("_MaxContacts"));
+    static const FString ContactsName(TEXT("_Contacts"));
+    static const FString ContactCountName(TEXT("_ContactCount"));
+    static const FString OutputContactsName(TEXT("_OutputContacts"));
+    static const FString OutputContactCountName(TEXT("_OutputContactCount"));
 
-static const FName WriteWetContactName(TEXT("WriteWetContact"));
-static constexpr int32 ContactFloat4Count = 2;
-}
+    static const FName     WriteWetContactName(TEXT("WriteWetContact"));
+    static constexpr int32 ContactFloat4Count = 2;
+} // namespace DWCNiagaraWetCollisionLocal
 
 void FDWCWetCollisionInstanceData_RT::ResizeBuffers(FRDGBuilder& GraphBuilder)
 {
@@ -80,7 +81,7 @@ bool UNiagaraDataInterfaceDWCWetCollision::Equals(const UNiagaraDataInterface* O
 }
 
 bool UNiagaraDataInterfaceDWCWetCollision::InitPerInstanceData(
-    void* PerInstanceData,
+    void*                   PerInstanceData,
     FNiagaraSystemInstance* SystemInstance)
 {
     FDWCWetCollisionInstanceData_GT* InstanceData =
@@ -103,7 +104,7 @@ bool UNiagaraDataInterfaceDWCWetCollision::InitPerInstanceData(
 }
 
 void UNiagaraDataInterfaceDWCWetCollision::DestroyPerInstanceData(
-    void* PerInstanceData,
+    void*                   PerInstanceData,
     FNiagaraSystemInstance* SystemInstance)
 {
     FDWCWetCollisionInstanceData_GT* InstanceData =
@@ -122,8 +123,8 @@ void UNiagaraDataInterfaceDWCWetCollision::DestroyPerInstanceData(
 
 void UNiagaraDataInterfaceDWCWetCollision::GetVMExternalFunction(
     const FVMExternalFunctionBindingInfo& BindingInfo,
-    void* InstanceData,
-    FVMExternalFunction& OutFunc)
+    void*                                 InstanceData,
+    FVMExternalFunction&                  OutFunc)
 {
     OutFunc = FVMExternalFunction::CreateLambda([](FVectorVMExternalFunctionContext& Context) {});
 }
@@ -163,7 +164,7 @@ bool UNiagaraDataInterfaceDWCWetCollision::AppendCompileHash(FNiagaraCompileHash
 
 void UNiagaraDataInterfaceDWCWetCollision::GetParameterDefinitionHLSL(
     const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
-    FString& OutHLSL)
+    FString&                                 OutHLSL)
 {
     using namespace DWCNiagaraWetCollisionLocal;
 
@@ -175,10 +176,10 @@ void UNiagaraDataInterfaceDWCWetCollision::GetParameterDefinitionHLSL(
 }
 
 bool UNiagaraDataInterfaceDWCWetCollision::GetFunctionHLSL(
-    const FNiagaraDataInterfaceGPUParamInfo& ParamInfo,
+    const FNiagaraDataInterfaceGPUParamInfo&      ParamInfo,
     const FNiagaraDataInterfaceGeneratedFunction& FunctionInfo,
-    int FunctionInstanceIndex,
-    FString& OutHLSL)
+    int                                           FunctionInstanceIndex,
+    FString&                                      OutHLSL)
 {
     using namespace DWCNiagaraWetCollisionLocal;
     if (FunctionInfo.DefinitionName != WriteWetContactName)
@@ -186,12 +187,11 @@ bool UNiagaraDataInterfaceDWCWetCollision::GetFunctionHLSL(
         return false;
     }
 
-    TMap<FString, FStringFormatArg> FormatArgs =
-    {
-        {TEXT("FunctionName"), FunctionInfo.InstanceName},
-        {TEXT("MaxContacts"), ParamInfo.DataInterfaceHLSLSymbol + MaxContactsName},
-        {TEXT("OutputContacts"), ParamInfo.DataInterfaceHLSLSymbol + OutputContactsName},
-        {TEXT("OutputContactCount"), ParamInfo.DataInterfaceHLSLSymbol + OutputContactCountName},
+    TMap<FString, FStringFormatArg> FormatArgs = {
+        { TEXT("FunctionName"), FunctionInfo.InstanceName },
+        { TEXT("MaxContacts"), ParamInfo.DataInterfaceHLSLSymbol + MaxContactsName },
+        { TEXT("OutputContacts"), ParamInfo.DataInterfaceHLSLSymbol + OutputContactsName },
+        { TEXT("OutputContactCount"), ParamInfo.DataInterfaceHLSLSymbol + OutputContactCountName },
     };
 
     static const TCHAR* FormatHLSL = TEXT(R"(

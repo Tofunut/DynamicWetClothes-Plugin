@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Wrinkle/Editor/WetWrinklePreviewController.h"
 
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleElementListPanel.h"
@@ -53,8 +54,8 @@ void FWetWrinklePreviewController::UpdatePreviewWetness(const float PreviewWetne
 
 void FWetWrinklePreviewController::UpdateElementSelection(
     const EWetWrinkleElementType ElementType,
-    const FGuid& SelectedGuid,
-    const int32 SelectedProceduralPointIndex) const
+    const FGuid&                 SelectedGuid,
+    const int32                  SelectedProceduralPointIndex) const
 {
     if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = Viewport.Pin())
     {

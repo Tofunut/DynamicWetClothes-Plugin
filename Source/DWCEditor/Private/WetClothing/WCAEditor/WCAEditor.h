@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "Core/DWCSimulationMode.h"
 #include "Toolkits/AssetEditorToolkit.h"
@@ -73,14 +75,14 @@ class FWCAEditor : public FAssetEditorToolkit
     bool                 CanBakeTransparencyMaps() const;
     bool                 ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSummary = nullptr);
     void                 RefreshAssetStateAndEditor(
-        bool bRunDeepValidation = false,
-        bool bRebuildActiveModePreview = true);
-    TSharedRef<SWidget>  BuildModeToolbarWidget();
-    TSharedRef<SWidget>  BuildModeToggleButton(EWCAEditorMode Mode, FName IconName, const FText& ToolTipText);
-    void                 SetEditorMode(EWCAEditorMode NewMode);
-    ECheckBoxState       IsModeChecked(EWCAEditorMode Mode) const;
-    void                 HandleModeCheckStateChanged(ECheckBoxState NewState, EWCAEditorMode Mode);
-    FSlateColor          GetModeIconColor(EWCAEditorMode Mode) const;
+                        bool bRunDeepValidation = false,
+                        bool bRebuildActiveModePreview = true);
+    TSharedRef<SWidget> BuildModeToolbarWidget();
+    TSharedRef<SWidget> BuildModeToggleButton(EWCAEditorMode Mode, FName IconName, const FText& ToolTipText);
+    void                SetEditorMode(EWCAEditorMode NewMode);
+    ECheckBoxState      IsModeChecked(EWCAEditorMode Mode) const;
+    void                HandleModeCheckStateChanged(ECheckBoxState NewState, EWCAEditorMode Mode);
+    FSlateColor         GetModeIconColor(EWCAEditorMode Mode) const;
 
   private:
     enum class ECloseConfirmationState : uint8
@@ -93,13 +95,13 @@ class FWCAEditor : public FAssetEditorToolkit
     static const FName EditorAppDisplayName;
     static const FName MainTabId;
 
-    TWeakObjectPtr<UWetClothingAsset>        WetClothingAsset;
-    TSharedPtr<IDetailsView>                 DetailsView;
-    TSharedPtr<SWCAEditorPanel> EditorPanel;
-    TSharedPtr<FWorkspaceItem>               WorkspaceMenuCategory;
-    FDelegateHandle                          ObjectPropertyChangedHandle;
-    FDelegateHandle                          AssetSavedHandle;
-    TSharedPtr<FExtender>                    ToolbarExtender;
-    EWCAEditorMode                           CurrentMode = EWCAEditorMode::PartEdit;
-    ECloseConfirmationState                  CloseConfirmationState = ECloseConfirmationState::Idle;
+    TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
+    TSharedPtr<IDetailsView>          DetailsView;
+    TSharedPtr<SWCAEditorPanel>       EditorPanel;
+    TSharedPtr<FWorkspaceItem>        WorkspaceMenuCategory;
+    FDelegateHandle                   ObjectPropertyChangedHandle;
+    FDelegateHandle                   AssetSavedHandle;
+    TSharedPtr<FExtender>             ToolbarExtender;
+    EWCAEditorMode                    CurrentMode = EWCAEditorMode::PartEdit;
+    ECloseConfirmationState           CloseConfirmationState = ECloseConfirmationState::Idle;
 };

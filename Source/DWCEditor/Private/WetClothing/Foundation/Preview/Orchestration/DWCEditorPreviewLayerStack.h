@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 
 class UTexture;
@@ -26,14 +28,14 @@ struct FDWCEditorPreviewScalarBinding
 
 struct FDWCEditorPreviewVectorBinding
 {
-    FName ParameterName;
+    FName        ParameterName;
     FLinearColor Value = FLinearColor::Black;
     FLinearColor ResetValue = FLinearColor::Black;
 };
 
 struct FDWCEditorPreviewTextureBinding
 {
-    FName ParameterName;
+    FName                    ParameterName;
     TWeakObjectPtr<UTexture> Value;
 };
 
@@ -41,18 +43,18 @@ struct FDWCEditorPreviewTextureBinding
 struct FDWCEditorPreviewLayer
 {
     EDWCEditorPreviewLayerKind Kind = EDWCEditorPreviewLayerKind::Visualization;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    uint64 AuthoringRevision = 0;
-    uint64 ResourceRevision = 0;
-    bool bEnabled = true;
+    int32                      MaterialSlotIndex = INDEX_NONE;
+    uint64                     AuthoringRevision = 0;
+    uint64                     ResourceRevision = 0;
+    bool                       bEnabled = true;
 
-    TArray<FDWCEditorPreviewScalarBinding, TInlineAllocator<8>> Scalars;
-    TArray<FDWCEditorPreviewVectorBinding, TInlineAllocator<4>> Vectors;
+    TArray<FDWCEditorPreviewScalarBinding, TInlineAllocator<8>>  Scalars;
+    TArray<FDWCEditorPreviewVectorBinding, TInlineAllocator<4>>  Vectors;
     TArray<FDWCEditorPreviewTextureBinding, TInlineAllocator<4>> Textures;
 
     void AddScalar(FName ParameterName, float Value, float ResetValue = 0.0f);
     void AddVector(
-        FName ParameterName,
+        FName               ParameterName,
         const FLinearColor& Value,
         const FLinearColor& ResetValue = FLinearColor::Black);
     void AddTexture(FName ParameterName, UTexture* Value);
@@ -61,18 +63,18 @@ struct FDWCEditorPreviewLayer
 /** Flattened parameter set consumed by a preview MID. */
 struct FDWCEditorPreviewParameterSet
 {
-    TArray<FDWCEditorPreviewScalarBinding> Scalars;
-    TArray<FDWCEditorPreviewVectorBinding> Vectors;
+    TArray<FDWCEditorPreviewScalarBinding>  Scalars;
+    TArray<FDWCEditorPreviewVectorBinding>  Vectors;
     TArray<FDWCEditorPreviewTextureBinding> Textures;
 
-    bool IsEmpty() const;
+    bool   IsEmpty() const;
     uint64 GetAllocatedSize() const;
 };
 
 /** Deterministic semantic layer order. Later layers override duplicate parameter bindings. */
 struct FDWCEditorPreviewLayerStack
 {
-    int32 MaterialSlotIndex = INDEX_NONE;
+    int32                                               MaterialSlotIndex = INDEX_NONE;
     TArray<FDWCEditorPreviewLayer, TInlineAllocator<8>> Layers;
 
     void AddOrReplace(FDWCEditorPreviewLayer Layer);

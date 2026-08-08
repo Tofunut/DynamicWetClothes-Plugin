@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,9 +13,9 @@ class USkeletalMesh;
 UENUM()
 enum class EDWCBakeSourceType : uint8
 {
-    Unknown UMETA(DisplayName = "Unknown"),
-    BlueprintPreview UMETA(DisplayName = "Blueprint Preview"),
-    PlacedActor UMETA(DisplayName = "Placed Actor"),
+    Unknown           UMETA(DisplayName = "Unknown"),
+    BlueprintPreview  UMETA(DisplayName = "Blueprint Preview"),
+    PlacedActor       UMETA(DisplayName = "Placed Actor"),
     ComponentTemplate UMETA(DisplayName = "Component Template")
 };
 
@@ -38,7 +39,7 @@ struct FDWCBakeLayer
 {
     GENERATED_BODY()
 
-    //Id is name of Layer which is for human readable
+    // Id is name of Layer which is for human readable
     UPROPERTY(EditAnywhere, Category = "Layer")
     FName LayerId;
 

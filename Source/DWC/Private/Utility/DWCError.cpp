@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Utility/DWCError.h"
 
 #include "Containers/UnrealString.h"
@@ -20,4 +21,4 @@ namespace DWC::Error
             *OutErrorMessage = Message;
         }
     }
-}
+} // namespace DWC::Error

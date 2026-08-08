@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -13,7 +14,7 @@ namespace DWCSurfaceTextureNormalization
 {
     constexpr int32 Resolution = DWCSurfaceTextureSharedAsset::Resolution;
     constexpr int32 Version = DWCSurfaceTextureSharedAsset::Version;
-}
+} // namespace DWCSurfaceTextureNormalization
 
 /**
  * Prepares fixed-resolution Surface Water textures for Texture2DArray upload.
@@ -25,45 +26,45 @@ namespace DWCSurfaceTextureNormalization
  */
 class FWetClothingSurfaceTextureNormalizer
 {
-public:
+  public:
     static UTexture2D* GetOrCreateNeutralNormalTexture(
         UWetClothingAsset& WetClothingAsset,
-        FString& OutErrorMessage);
+        FString&           OutErrorMessage);
 
     static bool ValidateProfileTextures(
         const FWetnessProfileParameters& SourceParameters,
-        FString& OutErrorMessage);
+        FString&                         OutErrorMessage);
 
     static bool PrepareProfileTextures(
         const FWetnessProfileParameters& SourceParameters,
-        FWetClothingLocalRenderProfile& InOutLocalProfile,
-        FString& OutErrorMessage);
+        FWetClothingLocalRenderProfile&  InOutLocalProfile,
+        FString&                         OutErrorMessage);
 
     static bool NormalizeProfileTextures(
-        UWetClothingAsset& WetClothingAsset,
+        UWetClothingAsset&               WetClothingAsset,
         const FWetnessProfileParameters& SourceParameters,
-        FWetClothingLocalRenderProfile& InOutLocalProfile,
-        FString& OutErrorMessage);
+        FWetClothingLocalRenderProfile&  InOutLocalProfile,
+        FString&                         OutErrorMessage);
 
     static bool IsPreparedTextureReferenceCurrent(
         const UTexture2D* PreparedTexture,
         const UTexture2D* SourceTexture,
-        const TCHAR* TextureRole,
-        bool bNormalMap);
+        const TCHAR*      TextureRole,
+        bool              bNormalMap);
 
-private:
+  private:
     static bool ValidateTexture(
-        UTexture2D* SourceTexture,
+        UTexture2D*  SourceTexture,
         const TCHAR* TextureRole,
-        bool bNormalMap,
-        bool bAllowSourceConversion,
-        FString& OutErrorMessage);
+        bool         bNormalMap,
+        bool         bAllowSourceConversion,
+        FString&     OutErrorMessage);
 
     static bool NormalizeTexture(
-        UTexture2D* SourceTexture,
+        UTexture2D*  SourceTexture,
         const TCHAR* TextureRole,
-        bool bNormalMap,
-        bool bAllowSourceConversion,
+        bool         bNormalMap,
+        bool         bAllowSourceConversion,
         UTexture2D*& OutNormalizedTexture,
-        FString& OutErrorMessage);
+        FString&     OutErrorMessage);
 };

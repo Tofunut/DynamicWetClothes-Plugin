@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -34,10 +35,10 @@ class DWCDEMO_API UDWCDemoNiagaraWetContactSourceComponent
     bool                         ShouldLogDebug() const;
     UDynamicWetClothesComponent* FindNearestReceiver(const FVector& Location, float MaxDistance) const;
     bool                         BuildContactsFromParticle(
-                                const FBasicParticleData& Particle,
-                                const FVector&            SimulationPositionOffset,
+                                const FBasicParticleData&     Particle,
+                                const FVector&                SimulationPositionOffset,
                                 UDynamicWetClothesComponent*& InOutReceiver,
-                                TArray<FDWCWetContact>&   OutContacts) const;
+                                TArray<FDWCWetContact>&       OutContacts) const;
 
   public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Receiver")

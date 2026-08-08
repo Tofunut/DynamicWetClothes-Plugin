@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -17,11 +18,11 @@ struct FDWCLODVertexStaticData;
 
 struct DWC_API FDWCSharedRuntimeDataKey
 {
-    FObjectKey WetClothingAsset;
-    FObjectKey SkeletalMesh;
-    int32 DataVersion = 0;
-    FString MeshSignature;
-    FString SourceDataSignature;
+    FObjectKey         WetClothingAsset;
+    FObjectKey         SkeletalMesh;
+    int32              DataVersion = 0;
+    FString            MeshSignature;
+    FString            SourceDataSignature;
     EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
 
     bool operator==(const FDWCSharedRuntimeDataKey& Other) const
@@ -47,8 +48,8 @@ struct DWC_API FDWCSharedRuntimeDataKey
 struct DWC_API FDWCSkinningStaticDataKey
 {
     FObjectKey SkeletalMesh;
-    UPTRINT SkinWeightBufferIdentity = 0;
-    FString MeshSignature;
+    UPTRINT    SkinWeightBufferIdentity = 0;
+    FString    MeshSignature;
 
     bool operator==(const FDWCSkinningStaticDataKey& Other) const
     {
@@ -68,9 +69,9 @@ struct DWC_API FDWCSkinningStaticDataKey
 struct DWC_API FDWCLODVertexStaticDataKey
 {
     FObjectKey SkeletalMesh;
-    UPTRINT LODRenderDataIdentity = 0;
-    int32 LODIndex = INDEX_NONE;
-    FString MeshSignature;
+    UPTRINT    LODRenderDataIdentity = 0;
+    int32      LODIndex = INDEX_NONE;
+    FString    MeshSignature;
 
     bool operator==(const FDWCLODVertexStaticDataKey& Other) const
     {
@@ -92,11 +93,11 @@ struct DWC_API FDWCLODVertexStaticDataKey
 struct DWC_API FDWCLODVertexColorTransferMapKey
 {
     FObjectKey SkeletalMesh;
-    UPTRINT SourceLODRenderDataIdentity = 0;
-    UPTRINT TargetLODRenderDataIdentity = 0;
-    int32 SourceLODIndex = INDEX_NONE;
-    int32 TargetLODIndex = INDEX_NONE;
-    FString MeshSignature;
+    UPTRINT    SourceLODRenderDataIdentity = 0;
+    UPTRINT    TargetLODRenderDataIdentity = 0;
+    int32      SourceLODIndex = INDEX_NONE;
+    int32      TargetLODIndex = INDEX_NONE;
+    FString    MeshSignature;
 
     bool operator==(const FDWCLODVertexColorTransferMapKey& Other) const
     {
@@ -129,53 +130,53 @@ class DWC_API UDWCRuntimeDataSubsystem : public UWorldSubsystem
 {
     GENERATED_BODY()
 
-public:
+  public:
     TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe> AcquireSharedRuntimeData(
         const UWetClothingAsset& WetClothingAsset,
-        USkeletalMeshComponent& TargetSkeletalMesh,
-        EDWCSimulationMode SimulationMode,
-        UObject* OwnerForLogs = nullptr);
+        USkeletalMeshComponent&  TargetSkeletalMesh,
+        EDWCSimulationMode       SimulationMode,
+        UObject*                 OwnerForLogs = nullptr);
 
     void InvalidateSharedRuntimeData(const UWetClothingAsset* WetClothingAsset);
 
     TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> AcquireSkinningStaticData(
         USkeletalMeshComponent& TargetSkeletalMesh,
-        const FString& MeshSignature);
+        const FString&          MeshSignature);
 
     TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> AcquireLODVertexStaticData(
         USkeletalMeshComponent& TargetSkeletalMesh,
-        int32 LODIndex,
-        const FString& MeshSignature);
+        int32                   LODIndex,
+        const FString&          MeshSignature);
 
     TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> FindLODVertexColorTransferMap(
-        const USkeletalMeshComponent& TargetSkeletalMesh,
+        const USkeletalMeshComponent&  TargetSkeletalMesh,
         const FDWCLODVertexStaticData& SourceLODData,
         const FDWCLODVertexStaticData& TargetLODData,
-        const FString& MeshSignature);
+        const FString&                 MeshSignature);
 
     TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> CacheLODVertexColorTransferMap(
-        const USkeletalMeshComponent& TargetSkeletalMesh,
+        const USkeletalMeshComponent&  TargetSkeletalMesh,
         const FDWCLODVertexStaticData& SourceLODData,
         const FDWCLODVertexStaticData& TargetLODData,
-        const FString& MeshSignature,
-        TArray<int32>&& TargetToSourceVertex);
+        const FString&                 MeshSignature,
+        TArray<int32>&&                TargetToSourceVertex);
 
     void PruneExpiredEntries();
 
-private:
+  private:
     FDWCLODVertexStaticDataKey MakeLODVertexStaticDataKey(
         const USkeletalMeshComponent& TargetSkeletalMesh,
-        int32 LODIndex,
-        const FString& MeshSignature) const;
+        int32                         LODIndex,
+        const FString&                MeshSignature) const;
 
     FDWCLODVertexColorTransferMapKey MakeLODVertexColorTransferMapKey(
-        const USkeletalMeshComponent& TargetSkeletalMesh,
+        const USkeletalMeshComponent&  TargetSkeletalMesh,
         const FDWCLODVertexStaticData& SourceLODData,
         const FDWCLODVertexStaticData& TargetLODData,
-        const FString& MeshSignature) const;
+        const FString&                 MeshSignature) const;
 
-    TMap<FDWCSharedRuntimeDataKey, TWeakPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>> SharedRuntimeDataCache;
-    TMap<FDWCSkinningStaticDataKey, TWeakPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>> SkinningStaticDataCache;
+    TMap<FDWCSharedRuntimeDataKey, TWeakPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>>   SharedRuntimeDataCache;
+    TMap<FDWCSkinningStaticDataKey, TWeakPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>>   SkinningStaticDataCache;
     TMap<FDWCLODVertexStaticDataKey, TWeakPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>> LODVertexStaticDataCache;
-    TMap<FDWCLODVertexColorTransferMapKey, TWeakPtr<const TArray<int32>, ESPMode::ThreadSafe>> LODVertexColorTransferMapCache;
+    TMap<FDWCLODVertexColorTransferMapKey, TWeakPtr<const TArray<int32>, ESPMode::ThreadSafe>>     LODVertexColorTransferMapCache;
 };

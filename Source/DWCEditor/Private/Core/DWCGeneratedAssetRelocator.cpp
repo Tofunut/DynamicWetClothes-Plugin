@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Core/DWCGeneratedAssetRelocator.h"
 #include "Core/DWCGeneratedAssetPaths.h"
 
@@ -66,11 +67,11 @@ namespace DWCGeneratedAssetRelocatorPrivate
         }
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Message));
     }
-}
+} // namespace DWCGeneratedAssetRelocatorPrivate
 
 bool FDWCGeneratedAssetRelocator::RelocateGeneratedAssets(
     UWetClothingAsset& Asset,
-    FString& OutMessage)
+    FString&           OutMessage)
 {
     OutMessage.Reset();
     const UPackage* WcaPackage = Asset.GetOutermost();
@@ -88,8 +89,8 @@ bool FDWCGeneratedAssetRelocator::RelocateGeneratedAssets(
         return false;
     }
 
-    const FString WcaFolder = FPackageName::GetLongPackagePath(WcaPackage->GetName());
-    const FString TargetRoot = DWCGeneratedAssetPaths::MakeAssetRoot(WcaFolder, Asset.GetName());
+    const FString            WcaFolder = FPackageName::GetLongPackagePath(WcaPackage->GetName());
+    const FString            TargetRoot = DWCGeneratedAssetPaths::MakeAssetRoot(WcaFolder, Asset.GetName());
     TArray<FAssetRenameData> RenameData;
     RenameData.Reserve(GeneratedAssets.Num());
 
@@ -161,7 +162,7 @@ void FDWCGeneratedAssetRelocator::RegisterContentBrowserMenu(void* Owner)
     }
 
     UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateLambda([Owner]()
-    {
+                                                                                          {
         FToolMenuOwnerScoped OwnerScoped(Owner);
         UToolMenu* ToolMenu = UToolMenus::Get()->ExtendMenu(
             TEXT("ContentBrowser.AssetContextMenu.WetClothingAsset"));
@@ -199,8 +200,7 @@ void FDWCGeneratedAssetRelocator::RegisterContentBrowserMenu(void* Owner)
                     FUIAction(FExecuteAction::CreateStatic(
                         &DWCGeneratedAssetRelocatorPrivate::ExecuteRelocation,
                         TWeakObjectPtr<UWetClothingAsset>(Asset))));
-            }));
-    }));
+            })); }));
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Components/DWCGPUNiagaraWetCollisionBridgeComponent.h"
 
 #include "Components/DynamicWetClothesComponent.h"
@@ -36,8 +37,8 @@ void UDWCGPUNiagaraWetCollisionBridgeComponent::EndPlay(const EEndPlayReason::Ty
 }
 
 void UDWCGPUNiagaraWetCollisionBridgeComponent::TickComponent(
-    const float DeltaTime,
-    const ELevelTick TickType,
+    const float                  DeltaTime,
+    const ELevelTick             TickType,
     FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -204,14 +205,13 @@ void UDWCGPUNiagaraWetCollisionBridgeComponent::BuildTargetReceiverGPUIds(
         AddReceiverGPUIds(Receiver);
     }
 
-
     OutReceiverGPUIds.Sort();
 }
 
 bool UDWCGPUNiagaraWetCollisionBridgeComponent::ApplyTargetReceivers(
-    const int32 SystemInstanceID,
-    const bool bRestrict,
-    const TArray<int32>& ReceiverGPUIds)
+    const FNiagaraSystemInstanceID SystemInstanceID,
+    const bool                     bRestrict,
+    const TArray<int32>&           ReceiverGPUIds)
 {
     if (SystemInstanceID == 0)
     {

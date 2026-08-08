@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,7 +11,7 @@ struct FWetWrinkleBakedMapSet;
 struct FDWCWrinkleSuppressionSource
 {
     const FWetWrinkleBakedMapSet* BakedMap = nullptr;
-    UTexture2D* MaskTexture = nullptr;
+    UTexture2D*                   MaskTexture = nullptr;
 
     bool IsValid() const
     {
@@ -23,31 +24,31 @@ class FDWCWrinkleSuppressionProcessor
   public:
     static FDWCWrinkleSuppressionSource FindExactSource(
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex);
+        int32                    MaterialSlotIndex);
 
     static bool BuildProcessedBuffer(
         const FDWCWrinkleSuppressionSource& Source,
-        FIntPoint OutputSize,
-        float CoverageThreshold,
-        float MaskSoftness,
-        TArray<uint8>& OutBuffer,
-        FString& OutErrorMessage);
+        FIntPoint                           OutputSize,
+        float                               CoverageThreshold,
+        float                               MaskSoftness,
+        TArray<uint8>&                      OutBuffer,
+        FString&                            OutErrorMessage);
 
     // The resampled coverage is independent from threshold and softness. Preview
     // callers can retain it while tuning those settings instead of resampling the
     // baked wrinkle mask every time.
     static bool BuildResampledCoverageBuffer(
         const FDWCWrinkleSuppressionSource& Source,
-        FIntPoint OutputSize,
-        TArray<uint16>& OutCoverage,
-        FString& OutErrorMessage);
+        FIntPoint                           OutputSize,
+        TArray<uint16>&                     OutCoverage,
+        FString&                            OutErrorMessage);
 
     static bool BuildProcessedBufferFromCoverage(
         const TArray<uint16>& Coverage,
-        float CoverageThreshold,
-        float MaskSoftness,
-        TArray<uint8>& OutBuffer,
-        FString& OutErrorMessage);
+        float                 CoverageThreshold,
+        float                 MaskSoftness,
+        TArray<uint8>&        OutBuffer,
+        FString&              OutErrorMessage);
 
     static FString MakeSettingsSignature(
         float CoverageThreshold,

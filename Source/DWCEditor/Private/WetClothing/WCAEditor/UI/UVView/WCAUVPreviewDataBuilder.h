@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,15 +11,15 @@ struct FWetClothingAssetUVIsland;
 /** Converts transient source triangles or persistent WCA topology into UV view data. */
 class FWCAUVPreviewDataBuilder
 {
-public:
+  public:
     static void BuildFromConnectivity(
         const TArray<FWCAUVPreviewSourceTriangle>& SourceTriangles,
-        TArray<FWetClothingAssetUVIsland>& OutIslands);
+        TArray<FWetClothingAssetUVIsland>&         OutIslands);
 
     static bool BuildFromStoredTopology(
-        const TArray<FWCAUVPreviewSourceTriangle>& SourceTriangles,
-        int32 MaterialSlotIndex,
+        const TArray<FWCAUVPreviewSourceTriangle>&  SourceTriangles,
+        int32                                       MaterialSlotIndex,
         const TArray<FDWCOriginalUVIslandTopology>& Topology,
-        TArray<FWetClothingAssetUVIsland>& OutIslands,
-        FString* OutErrorMessage = nullptr);
+        TArray<FWetClothingAssetUVIsland>&          OutIslands,
+        FString*                                    OutErrorMessage = nullptr);
 };

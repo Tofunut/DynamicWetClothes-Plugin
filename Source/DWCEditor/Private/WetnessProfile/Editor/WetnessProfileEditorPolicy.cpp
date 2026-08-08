@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetnessProfile/Editor/WetnessProfileEditorPolicy.h"
 
 #include "DataAssets/WetnessProfile.h"
@@ -9,9 +10,9 @@ namespace
     struct FNumericRule
     {
         const TCHAR* PropertyPath;
-        double MinValue;
-        double MaxValue;
-        double NonFiniteDefault;
+        double       MinValue;
+        double       MaxValue;
+        double       NonFiniteDefault;
     };
 
     // These are hard data-contract limits, not merely slider limits. The
@@ -82,11 +83,11 @@ namespace
     }
 
     bool SanitizeFloatingProperty(
-        FFloatProperty* Property,
-        void* Container,
+        FFloatProperty*     Property,
+        void*               Container,
         const FNumericRule& Rule,
-        const FString& PropertyPath,
-        TArray<FString>* OutChanges)
+        const FString&      PropertyPath,
+        TArray<FString>*    OutChanges)
     {
         const double Original = static_cast<double>(Property->GetPropertyValue_InContainer(Container));
         const double Sanitized = FMath::IsFinite(Original)
@@ -112,11 +113,11 @@ namespace
     }
 
     bool SanitizeFloatingProperty(
-        FDoubleProperty* Property,
-        void* Container,
+        FDoubleProperty*    Property,
+        void*               Container,
         const FNumericRule& Rule,
-        const FString& PropertyPath,
-        TArray<FString>* OutChanges)
+        const FString&      PropertyPath,
+        TArray<FString>*    OutChanges)
     {
         const double Original = Property->GetPropertyValue_InContainer(Container);
         const double Sanitized = FMath::IsFinite(Original)
@@ -142,11 +143,11 @@ namespace
     }
 
     bool SanitizeIntegerProperty(
-        FIntProperty* Property,
-        void* Container,
+        FIntProperty*       Property,
+        void*               Container,
         const FNumericRule& Rule,
-        const FString& PropertyPath,
-        TArray<FString>* OutChanges)
+        const FString&      PropertyPath,
+        TArray<FString>*    OutChanges)
     {
         const int32 Original = Property->GetPropertyValue_InContainer(Container);
         const int32 Sanitized = FMath::Clamp(
@@ -173,9 +174,9 @@ namespace
     }
 
     bool SanitizeStructRecursive(
-        void* StructMemory,
-        UStruct* StructType,
-        const FString& Prefix,
+        void*            StructMemory,
+        UStruct*         StructType,
+        const FString&   Prefix,
         TArray<FString>* OutChanges)
     {
         if (StructMemory == nullptr || StructType == nullptr)
@@ -224,10 +225,10 @@ namespace
 
     void FindFloatingIssue(
         const FFloatProperty* Property,
-        const void* Container,
-        const FNumericRule& Rule,
-        const FString& PropertyPath,
-        TArray<FString>& OutIssues)
+        const void*           Container,
+        const FNumericRule&   Rule,
+        const FString&        PropertyPath,
+        TArray<FString>&      OutIssues)
     {
         const double Value = static_cast<double>(Property->GetPropertyValue_InContainer(Container));
         if (!FMath::IsFinite(Value) || Value < Rule.MinValue || Value > Rule.MaxValue)
@@ -243,10 +244,10 @@ namespace
 
     void FindFloatingIssue(
         const FDoubleProperty* Property,
-        const void* Container,
-        const FNumericRule& Rule,
-        const FString& PropertyPath,
-        TArray<FString>& OutIssues)
+        const void*            Container,
+        const FNumericRule&    Rule,
+        const FString&         PropertyPath,
+        TArray<FString>&       OutIssues)
     {
         const double Value = Property->GetPropertyValue_InContainer(Container);
         if (!FMath::IsFinite(Value) || Value < Rule.MinValue || Value > Rule.MaxValue)
@@ -262,10 +263,10 @@ namespace
 
     void FindIntegerIssue(
         const FIntProperty* Property,
-        const void* Container,
+        const void*         Container,
         const FNumericRule& Rule,
-        const FString& PropertyPath,
-        TArray<FString>& OutIssues)
+        const FString&      PropertyPath,
+        TArray<FString>&    OutIssues)
     {
         const int32 Value = Property->GetPropertyValue_InContainer(Container);
         if (Value < Rule.MinValue || Value > Rule.MaxValue)
@@ -280,9 +281,9 @@ namespace
     }
 
     void FindIssuesRecursive(
-        const void* StructMemory,
-        UStruct* StructType,
-        const FString& Prefix,
+        const void*      StructMemory,
+        UStruct*         StructType,
+        const FString&   Prefix,
         TArray<FString>& OutIssues)
     {
         if (StructMemory == nullptr || StructType == nullptr)
@@ -335,9 +336,9 @@ namespace
     }
 
     bool ClampRenderableFloat(
-        float& Value,
-        const float MinValue,
-        const TCHAR* Label,
+        float&           Value,
+        const float      MinValue,
+        const TCHAR*     Label,
         TArray<FString>* OutChanges)
     {
         if (Value >= MinValue)
@@ -360,7 +361,7 @@ namespace
 
     bool ApplySurfaceWaterRenderableMinimums(
         FWetnessProfileParameters& Parameters,
-        TArray<FString>* OutChanges)
+        TArray<FString>*           OutChanges)
     {
         FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         if (!Surface.bEnabled)
@@ -427,7 +428,7 @@ namespace
 
     void FindSurfaceWaterRenderableIssues(
         const FWetnessProfileParameters& Parameters,
-        TArray<FString>& OutIssues)
+        TArray<FString>&                 OutIssues)
     {
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         if (!Surface.bEnabled)
@@ -491,8 +492,8 @@ bool FWetnessProfileEditorPolicy::SanitizeProfile(UWetnessProfile* Profile, TArr
         return false;
     }
 
-    void* ParametersMemory = ParametersProperty->ContainerPtrToValuePtr<void>(Profile);
-    TArray<FString> PendingChanges;
+    void*            ParametersMemory = ParametersProperty->ContainerPtrToValuePtr<void>(Profile);
+    TArray<FString>  PendingChanges;
     TArray<FString>* ChangeTarget = OutChanges != nullptr ? OutChanges : &PendingChanges;
 
     // First inspect through a temporary copy so Modify() is called only when a
@@ -516,7 +517,7 @@ bool FWetnessProfileEditorPolicy::SanitizeProfile(UWetnessProfile* Profile, TArr
 
 bool FWetnessProfileEditorPolicy::SanitizeParameters(
     FWetnessProfileParameters& Parameters,
-    TArray<FString>* OutChanges)
+    TArray<FString>*           OutChanges)
 {
     bool bChanged = SanitizeStructRecursive(
         &Parameters,
@@ -529,7 +530,7 @@ bool FWetnessProfileEditorPolicy::SanitizeParameters(
 
 void FWetnessProfileEditorPolicy::FindProfileIssues(
     const UWetnessProfile* Profile,
-    TArray<FString>& OutIssues)
+    TArray<FString>&       OutIssues)
 {
     OutIssues.Reset();
     const FStructProperty* ParametersProperty = FindParametersProperty(Profile);

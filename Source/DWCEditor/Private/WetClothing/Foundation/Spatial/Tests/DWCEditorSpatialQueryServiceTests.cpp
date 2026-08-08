@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -14,8 +15,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorSpatialQueryTest::RunTest(const FString& Parameters)
 {
-    TSharedRef<FDWCEditorCacheStore> Store = MakeShared<FDWCEditorCacheStore>();
-    FDWCEditorSpatialQueryService Service(Store);
+    TSharedRef<FDWCEditorCacheStore>                       Store = MakeShared<FDWCEditorCacheStore>();
+    FDWCEditorSpatialQueryService                          Service(Store);
     TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
         MakeShared<FDWCEditorSpatialData, ESPMode::ThreadSafe>();
     Data->UVChannelIndex = 2;
@@ -83,9 +84,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorSpatialLeaseLifetimeTest::RunTest(const FString& Parameters)
 {
     TSharedRef<FDWCEditorCacheStore> Store = MakeShared<FDWCEditorCacheStore>();
-    FDWCEditorSpatialQueryService Service(Store);
-    UTexture2D* Owner = NewObject<UTexture2D>();
-    FDWCEditorCacheKey Key;
+    FDWCEditorSpatialQueryService    Service(Store);
+    UTexture2D*                      Owner = NewObject<UTexture2D>();
+    FDWCEditorCacheKey               Key;
     Key.Namespace = TEXT("Spatial");
     Key.Owner = FObjectKey(Owner);
     Key.LODIndex = 0;
@@ -117,7 +118,7 @@ bool FDWCEditorSpatialLeaseLifetimeTest::RunTest(const FString& Parameters)
         Triangle.UVBounds += Triangle.UVs[CornerIndex];
     }
     const uint64 LookupKey = (static_cast<uint64>(Key.MaterialSlotIndex) << 32) |
-        static_cast<uint32>(Triangle.TriangleID);
+                             static_cast<uint32>(Triangle.TriangleID);
     Data->TriangleLookup.Add(LookupKey, 0);
 
     TSharedRef<const IDWCEditorCacheValue, ESPMode::ThreadSafe> CacheValue = Data;
@@ -132,7 +133,7 @@ bool FDWCEditorSpatialLeaseLifetimeTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("The spatial lease keeps the query payload alive"), Lease.IsValid());
 
     USkeletalMeshComponent* Component = NewObject<USkeletalMeshComponent>();
-    FDWCEditorSurfaceHit Hit;
+    FDWCEditorSurfaceHit    Hit;
     TestTrue(
         TEXT("Spatial queries remain valid after cache invalidation while leased"),
         Service.TraceSurface(

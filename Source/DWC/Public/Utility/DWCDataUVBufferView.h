@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -13,29 +14,29 @@ class FStaticMeshVertexBuffer;
  */
 class DWC_API FDWCDataUVBufferView
 {
-public:
+  public:
     bool Initialize(
         const USkeletalMesh* SkeletalMesh,
-        int32 LODIndex,
-        int32 UVChannelIndex,
-        FString* OutErrorMessage = nullptr);
+        int32                LODIndex,
+        int32                UVChannelIndex,
+        FString*             OutErrorMessage = nullptr);
 
     void Reset();
 
-    bool IsValid() const { return LODData != nullptr && VertexBuffer != nullptr; }
+    bool  IsValid() const { return LODData != nullptr && VertexBuffer != nullptr; }
     int32 NumVertices() const { return VertexCount; }
     int32 GetLODIndex() const { return ResolvedLODIndex; }
     int32 GetUVChannelIndex() const { return ResolvedUVChannelIndex; }
 
-    bool IsValidVertexIndex(int32 RenderVertexIndex) const;
+    bool      IsValidVertexIndex(int32 RenderVertexIndex) const;
     FVector2f GetUV(int32 RenderVertexIndex) const;
 
     const FSkeletalMeshLODRenderData* GetLODData() const { return LODData; }
 
-private:
+  private:
     const FSkeletalMeshLODRenderData* LODData = nullptr;
-    const FStaticMeshVertexBuffer* VertexBuffer = nullptr;
-    int32 VertexCount = 0;
-    int32 ResolvedLODIndex = INDEX_NONE;
-    int32 ResolvedUVChannelIndex = INDEX_NONE;
+    const FStaticMeshVertexBuffer*    VertexBuffer = nullptr;
+    int32                             VertexCount = 0;
+    int32                             ResolvedLODIndex = INDEX_NONE;
+    int32                             ResolvedUVChannelIndex = INDEX_NONE;
 };

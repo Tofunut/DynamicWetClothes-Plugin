@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/Utils/WetSurfaceContactResolver.h"
 
 #include "Components/SkeletalMeshComponent.h"
@@ -13,281 +14,279 @@
 
 namespace DWCWetSurfaceContactResolverPrivate
 {
-struct FNearestVertex
-{
-    int32 VertexIndex = INDEX_NONE;
-    float DistanceSquared = TNumericLimits<float>::Max();
-};
-
-struct FWetAreaCandidate
-{
-    int32 TriangleID = INDEX_NONE;
-    float Exposure = 1.0f;
-    float PickWeight = 1.0f;
-};
-
-constexpr int32 GPUWetAreaNormalExposureCandidateMultiplier = 3;
-constexpr int32 GPUWetAreaNormalExposureMinCandidateCount = 128;
-constexpr float GPUWetAreaNormalExposurePickPower = 2.0f;
-
-FVector3f ComputeTriangleBarycentric(
-    const FVector& Point,
-    const FVector& A,
-    const FVector& B,
-    const FVector& C)
-{
-    const FVector V0 = B - A;
-    const FVector V1 = C - A;
-    const FVector V2 = Point - A;
-    const double D00 = FVector::DotProduct(V0, V0);
-    const double D01 = FVector::DotProduct(V0, V1);
-    const double D11 = FVector::DotProduct(V1, V1);
-    const double D20 = FVector::DotProduct(V2, V0);
-    const double D21 = FVector::DotProduct(V2, V1);
-    const double Denominator = D00 * D11 - D01 * D01;
-    if (FMath::IsNearlyZero(Denominator))
+    struct FNearestVertex
     {
-        return FVector3f(1.0f, 0.0f, 0.0f);
-    }
+        int32 VertexIndex = INDEX_NONE;
+        float DistanceSquared = TNumericLimits<float>::Max();
+    };
 
-    const float WeightB = static_cast<float>((D11 * D20 - D01 * D21) / Denominator);
-    const float WeightC = static_cast<float>((D00 * D21 - D01 * D20) / Denominator);
-    return FVector3f(1.0f - WeightB - WeightC, WeightB, WeightC);
-}
-
-bool PassSurfaceFilter(
-    const FDWCWetContact& Contact,
-    const FWetClothingSettings& Settings,
-    const FVector& ClosestPoint,
-    const FVector& TriangleNormal)
-{
-    const FVector ContactNormal = Contact.Normal.GetSafeNormal();
-    if (ContactNormal.IsNearlyZero())
+    struct FWetAreaCandidate
     {
-        return true;
-    }
+        int32 TriangleID = INDEX_NONE;
+        float Exposure = 1.0f;
+        float PickWeight = 1.0f;
+    };
 
-    const float NormalExposureMin = FMath::Min(Settings.ContactExposureMin, Settings.ContactExposureMax);
-    if (!TriangleNormal.IsNearlyZero() && FVector::DotProduct(TriangleNormal, ContactNormal) < NormalExposureMin)
+    constexpr int32 GPUWetAreaNormalExposureCandidateMultiplier = 3;
+    constexpr int32 GPUWetAreaNormalExposureMinCandidateCount = 128;
+    constexpr float GPUWetAreaNormalExposurePickPower = 2.0f;
+
+    FVector3f ComputeTriangleBarycentric(
+        const FVector& Point,
+        const FVector& A,
+        const FVector& B,
+        const FVector& C)
     {
-        return false;
-    }
-
-    const float BackfaceDepth = FVector::DotProduct(Contact.Location - ClosestPoint, ContactNormal);
-    const float BackfaceDepthTolerance = FMath::Max(
-        Settings.WetContactBackfaceDepthTolerance,
-        FMath::Max(Contact.Radius, KINDA_SMALL_NUMBER) * Settings.WetContactBackfaceDepthRadiusScale);
-    return BackfaceDepth <= BackfaceDepthTolerance;
-}
-
-void AddNearestVertex(
-    TArray<FNearestVertex>& InOutNearest,
-    const int32 MaxCount,
-    const int32 VertexIndex,
-    const float DistanceSquared)
-{
-    if (MaxCount <= 0)
-    {
-        return;
-    }
-
-    if (InOutNearest.Num() < MaxCount)
-    {
-        InOutNearest.Add({VertexIndex, DistanceSquared});
-        return;
-    }
-
-    int32 FarthestIndex = 0;
-    for (int32 Index = 1; Index < InOutNearest.Num(); ++Index)
-    {
-        if (InOutNearest[Index].DistanceSquared > InOutNearest[FarthestIndex].DistanceSquared)
+        const FVector V0 = B - A;
+        const FVector V1 = C - A;
+        const FVector V2 = Point - A;
+        const double  D00 = FVector::DotProduct(V0, V0);
+        const double  D01 = FVector::DotProduct(V0, V1);
+        const double  D11 = FVector::DotProduct(V1, V1);
+        const double  D20 = FVector::DotProduct(V2, V0);
+        const double  D21 = FVector::DotProduct(V2, V1);
+        const double  Denominator = D00 * D11 - D01 * D01;
+        if (FMath::IsNearlyZero(Denominator))
         {
-            FarthestIndex = Index;
+            return FVector3f(1.0f, 0.0f, 0.0f);
+        }
+
+        const float WeightB = static_cast<float>((D11 * D20 - D01 * D21) / Denominator);
+        const float WeightC = static_cast<float>((D00 * D21 - D01 * D20) / Denominator);
+        return FVector3f(1.0f - WeightB - WeightC, WeightB, WeightC);
+    }
+
+    bool PassSurfaceFilter(
+        const FDWCWetContact&       Contact,
+        const FWetClothingSettings& Settings,
+        const FVector&              ClosestPoint,
+        const FVector&              TriangleNormal)
+    {
+        const FVector ContactNormal = Contact.Normal.GetSafeNormal();
+        if (ContactNormal.IsNearlyZero())
+        {
+            return true;
+        }
+
+        const float NormalExposureMin = FMath::Min(Settings.ContactExposureMin, Settings.ContactExposureMax);
+        if (!TriangleNormal.IsNearlyZero() && FVector::DotProduct(TriangleNormal, ContactNormal) < NormalExposureMin)
+        {
+            return false;
+        }
+
+        const float BackfaceDepth = static_cast<float>(FVector::DotProduct(Contact.Location - ClosestPoint, ContactNormal));
+        const float BackfaceDepthTolerance = FMath::Max(
+            Settings.WetContactBackfaceDepthTolerance,
+            FMath::Max(Contact.Radius, KINDA_SMALL_NUMBER) * Settings.WetContactBackfaceDepthRadiusScale);
+        return BackfaceDepth <= BackfaceDepthTolerance;
+    }
+
+    void AddNearestVertex(
+        TArray<FNearestVertex>& InOutNearest,
+        const int32             MaxCount,
+        const int32             VertexIndex,
+        const float             DistanceSquared)
+    {
+        if (MaxCount <= 0)
+        {
+            return;
+        }
+
+        if (InOutNearest.Num() < MaxCount)
+        {
+            InOutNearest.Add({ VertexIndex, DistanceSquared });
+            return;
+        }
+
+        int32 FarthestIndex = 0;
+        for (int32 Index = 1; Index < InOutNearest.Num(); ++Index)
+        {
+            if (InOutNearest[Index].DistanceSquared > InOutNearest[FarthestIndex].DistanceSquared)
+            {
+                FarthestIndex = Index;
+            }
+        }
+
+        if (DistanceSquared < InOutNearest[FarthestIndex].DistanceSquared)
+        {
+            InOutNearest[FarthestIndex] = { VertexIndex, DistanceSquared };
         }
     }
 
-    if (DistanceSquared < InOutNearest[FarthestIndex].DistanceSquared)
+    float ComputeTriangleContactRadius(const FVector& ContactPoint, const FVector& P0, const FVector& P1, const FVector& P2)
     {
-        InOutNearest[FarthestIndex] = {VertexIndex, DistanceSquared};
-    }
-}
-
-float ComputeTriangleContactRadius(const FVector& ContactPoint, const FVector& P0, const FVector& P1, const FVector& P2)
-{
-    return FMath::Max(
-        1.0f,
-        FMath::Max3(
-            static_cast<float>(FVector::Distance(ContactPoint, P0)),
-            static_cast<float>(FVector::Distance(ContactPoint, P1)),
-            static_cast<float>(FVector::Distance(ContactPoint, P2))));
-}
-
-float ComputeWetAreaSampleRadius(const FVector& P0, const FVector& P1, const FVector& P2)
-{
-    const float Edge01 = static_cast<float>(FVector::Distance(P0, P1));
-    const float Edge12 = static_cast<float>(FVector::Distance(P1, P2));
-    const float Edge20 = static_cast<float>(FVector::Distance(P2, P0));
-    const float MinEdge = FMath::Min3(Edge01, Edge12, Edge20);
-    const float TriangleArea = static_cast<float>(0.5 * FVector::CrossProduct(P1 - P0, P2 - P0).Size());
-    const float AreaRadius = TriangleArea > SMALL_NUMBER
-        ? FMath::Sqrt(TriangleArea / UE_PI)
-        : MinEdge * 0.5f;
-
-    return FMath::Max(1.0f, FMath::Min(MinEdge * 0.35f, AreaRadius * 0.75f));
-}
-
-float ResolveGPUAbsorptionMultiplier(
-    const FDWCGPUBakedTriangle& Triangle,
-    const FVector3f& Barycentric,
-    const FWetClothingRuntimeData* RuntimeData,
-    const float Amount)
-{
-    if (Amount < 0.0f)
-    {
-        return 1.0f;
+        return FMath::Max(
+            1.0f,
+            FMath::Max3(
+                static_cast<float>(FVector::Distance(ContactPoint, P0)),
+                static_cast<float>(FVector::Distance(ContactPoint, P1)),
+                static_cast<float>(FVector::Distance(ContactPoint, P2))));
     }
 
-    int32 VertexIndex = Triangle.VertexIndices.X;
-    float BestWeight = Barycentric.X;
-    if (Barycentric.Y > BestWeight)
+    float ComputeWetAreaSampleRadius(const FVector& P0, const FVector& P1, const FVector& P2)
     {
-        BestWeight = Barycentric.Y;
-        VertexIndex = Triangle.VertexIndices.Y;
-    }
-    if (Barycentric.Z > BestWeight)
-    {
-        VertexIndex = Triangle.VertexIndices.Z;
+        const float Edge01 = static_cast<float>(FVector::Distance(P0, P1));
+        const float Edge12 = static_cast<float>(FVector::Distance(P1, P2));
+        const float Edge20 = static_cast<float>(FVector::Distance(P2, P0));
+        const float MinEdge = FMath::Min3(Edge01, Edge12, Edge20);
+        const float TriangleArea = static_cast<float>(0.5 * FVector::CrossProduct(P1 - P0, P2 - P0).Size());
+        const float AreaRadius = TriangleArea > SMALL_NUMBER
+                                     ? FMath::Sqrt(TriangleArea / UE_PI)
+                                     : MinEdge * 0.5f;
+
+        return FMath::Max(1.0f, FMath::Min(MinEdge * 0.35f, AreaRadius * 0.75f));
     }
 
-    const FWetnessProfileParameters* Profile =
-        RuntimeData != nullptr ? RuntimeData->GetWetnessProfileParameters(VertexIndex) : nullptr;
-    return FMath::Max(0.0f, Profile ? Profile->GetAbsorptionMultiplier() : 1.0f);
-}
-
-FVector OrientTriangleNormalForContact(const FVector& TriangleNormal, const FDWCWetContact& Contact)
-{
-    if (TriangleNormal.IsNearlyZero())
+    float ResolveGPUAbsorptionMultiplier(
+        const FDWCGPUBakedTriangle&    Triangle,
+        const FVector3f&               Barycentric,
+        const FWetClothingRuntimeData* RuntimeData,
+        const float                    Amount)
     {
+        if (Amount < 0.0f)
+        {
+            return 1.0f;
+        }
+
+        int32 VertexIndex = Triangle.VertexIndices.X;
+        float BestWeight = Barycentric.X;
+        if (Barycentric.Y > BestWeight)
+        {
+            BestWeight = Barycentric.Y;
+            VertexIndex = Triangle.VertexIndices.Y;
+        }
+        if (Barycentric.Z > BestWeight)
+        {
+            VertexIndex = Triangle.VertexIndices.Z;
+        }
+
+        const FWetnessProfileParameters* Profile =
+            RuntimeData != nullptr ? RuntimeData->GetWetnessProfileParameters(VertexIndex) : nullptr;
+        return FMath::Max(0.0f, Profile ? Profile->GetAbsorptionMultiplier() : 1.0f);
+    }
+
+    FVector OrientTriangleNormalForContact(const FVector& TriangleNormal, const FDWCWetContact& Contact)
+    {
+        if (TriangleNormal.IsNearlyZero())
+        {
+            return TriangleNormal;
+        }
+
+        FVector ReferenceNormal = Contact.Normal.GetSafeNormal();
+        if (ReferenceNormal.IsNearlyZero() && !Contact.Direction.IsNearlyZero())
+        {
+            ReferenceNormal = -Contact.Direction.GetSafeNormal();
+        }
+
+        if (!ReferenceNormal.IsNearlyZero() && FVector::DotProduct(TriangleNormal, ReferenceNormal) < 0.0)
+        {
+            return -TriangleNormal;
+        }
+
         return TriangleNormal;
     }
 
-    FVector ReferenceNormal = Contact.Normal.GetSafeNormal();
-    if (ReferenceNormal.IsNearlyZero() && !Contact.Direction.IsNearlyZero())
+    int32 SelectWetAreaCandidateIndex(
+        const TArray<FWetAreaCandidate>& Candidates,
+        FRandomStream&                   RandomStream)
     {
-        ReferenceNormal = -Contact.Direction.GetSafeNormal();
-    }
-
-    if (!ReferenceNormal.IsNearlyZero() && FVector::DotProduct(TriangleNormal, ReferenceNormal) < 0.0)
-    {
-        return -TriangleNormal;
-    }
-
-    return TriangleNormal;
-}
-
-int32 SelectWetAreaCandidateIndex(
-    const TArray<FWetAreaCandidate>& Candidates,
-    FRandomStream& RandomStream)
-{
-    float TotalPickWeight = 0.0f;
-    for (const FWetAreaCandidate& Candidate : Candidates)
-    {
-        TotalPickWeight += Candidate.PickWeight;
-    }
-
-    if (TotalPickWeight <= KINDA_SMALL_NUMBER)
-    {
-        return Candidates.IsEmpty() ? INDEX_NONE : RandomStream.RandRange(0, Candidates.Num() - 1);
-    }
-
-    float PickValue = RandomStream.FRandRange(0.0f, TotalPickWeight);
-    for (int32 CandidateIndex = 0; CandidateIndex < Candidates.Num(); ++CandidateIndex)
-    {
-        PickValue -= Candidates[CandidateIndex].PickWeight;
-        if (PickValue <= 0.0f)
+        float TotalPickWeight = 0.0f;
+        for (const FWetAreaCandidate& Candidate : Candidates)
         {
-            return CandidateIndex;
+            TotalPickWeight += Candidate.PickWeight;
         }
-    }
 
-    return Candidates.Num() - 1;
-}
-
-void KeepPrimaryContactSurface(
-    const FDWCGPULODBakeData& GPUData,
-    const FDWCWetContact& Contact,
-    TArray<FDWCResolvedSurfaceContact>& InOutContacts)
-{
-    if (InOutContacts.Num() <= 1)
-    {
-        return;
-    }
-
-    InOutContacts.Sort([](const FDWCResolvedSurfaceContact& A, const FDWCResolvedSurfaceContact& B)
-    {
-        return A.DistanceToSurface < B.DistanceToSurface;
-    });
-
-    int32 PrimaryContactIndex = 0;
-    if (Contact.RenderTriangleID != INDEX_NONE)
-    {
-        float BestRenderHitDistance = TNumericLimits<float>::Max();
-        for (int32 ContactIndex = 0; ContactIndex < InOutContacts.Num(); ++ContactIndex)
+        if (TotalPickWeight <= KINDA_SMALL_NUMBER)
         {
-            const FDWCResolvedSurfaceContact& Resolved = InOutContacts[ContactIndex];
-            const FDWCGPUBakedTriangle* Triangle = GPUData.Triangles.IsValidIndex(Resolved.TriangleID)
-                                                       ? &GPUData.Triangles[Resolved.TriangleID]
-                                                       : nullptr;
-            if (Triangle != nullptr &&
-                Triangle->RenderTriangleID == Contact.RenderTriangleID &&
-                Resolved.DistanceToSurface < BestRenderHitDistance)
+            return Candidates.IsEmpty() ? INDEX_NONE : RandomStream.RandRange(0, Candidates.Num() - 1);
+        }
+
+        float PickValue = static_cast<float>(RandomStream.FRandRange(0.0f, TotalPickWeight));
+        for (int32 CandidateIndex = 0; CandidateIndex < Candidates.Num(); ++CandidateIndex)
+        {
+            PickValue -= Candidates[CandidateIndex].PickWeight;
+            if (PickValue <= 0.0f)
             {
-                PrimaryContactIndex = ContactIndex;
-                BestRenderHitDistance = Resolved.DistanceToSurface;
+                return CandidateIndex;
             }
         }
+
+        return Candidates.Num() - 1;
     }
 
-    const FDWCResolvedSurfaceContact& PrimaryContact = InOutContacts[PrimaryContactIndex];
-    const FDWCGPUBakedTriangle* PrimaryTriangle = GPUData.Triangles.IsValidIndex(PrimaryContact.TriangleID)
-                                                     ? &GPUData.Triangles[PrimaryContact.TriangleID]
-                                                     : nullptr;
-    if (PrimaryTriangle == nullptr)
+    void KeepPrimaryContactSurface(
+        const FDWCGPULODBakeData&           GPUData,
+        const FDWCWetContact&               Contact,
+        TArray<FDWCResolvedSurfaceContact>& InOutContacts)
     {
-        return;
-    }
-
-    const int32 PrimaryMaterialSlot = PrimaryTriangle->MaterialSlotIndex;
-    const int32 PrimaryUVIsland = PrimaryTriangle->UVIslandID;
-    const FVector SharedContactWorldPosition = PrimaryContact.ClosestWorldPosition;
-
-    InOutContacts.RemoveAll(
-        [&GPUData, PrimaryMaterialSlot, PrimaryUVIsland](const FDWCResolvedSurfaceContact& Candidate)
+        if (InOutContacts.Num() <= 1)
         {
-            const FDWCGPUBakedTriangle* CandidateTriangle = GPUData.Triangles.IsValidIndex(Candidate.TriangleID)
-                                                               ? &GPUData.Triangles[Candidate.TriangleID]
-                                                               : nullptr;
-            return CandidateTriangle == nullptr ||
-                   CandidateTriangle->MaterialSlotIndex != PrimaryMaterialSlot ||
-                   CandidateTriangle->UVIslandID != PrimaryUVIsland;
-        });
+            return;
+        }
 
-    // One input event is one surface stamp. All triangles retained for that stamp
-    // must evaluate their texels against the same center, otherwise each triangle
-    // creates a separate falloff and triangle boundaries become visible.
-    for (FDWCResolvedSurfaceContact& Candidate : InOutContacts)
-    {
-        Candidate.ContactWorldPosition = SharedContactWorldPosition;
-        Candidate.DistanceToSurface = 0.0f;
+        InOutContacts.Sort([](const FDWCResolvedSurfaceContact& A, const FDWCResolvedSurfaceContact& B)
+                           { return A.DistanceToSurface < B.DistanceToSurface; });
+
+        int32 PrimaryContactIndex = 0;
+        if (Contact.RenderTriangleID != INDEX_NONE)
+        {
+            float BestRenderHitDistance = TNumericLimits<float>::Max();
+            for (int32 ContactIndex = 0; ContactIndex < InOutContacts.Num(); ++ContactIndex)
+            {
+                const FDWCResolvedSurfaceContact& Resolved = InOutContacts[ContactIndex];
+                const FDWCGPUBakedTriangle*       Triangle = GPUData.Triangles.IsValidIndex(Resolved.TriangleID)
+                                                                 ? &GPUData.Triangles[Resolved.TriangleID]
+                                                                 : nullptr;
+                if (Triangle != nullptr &&
+                    Triangle->RenderTriangleID == Contact.RenderTriangleID &&
+                    Resolved.DistanceToSurface < BestRenderHitDistance)
+                {
+                    PrimaryContactIndex = ContactIndex;
+                    BestRenderHitDistance = Resolved.DistanceToSurface;
+                }
+            }
+        }
+
+        const FDWCResolvedSurfaceContact& PrimaryContact = InOutContacts[PrimaryContactIndex];
+        const FDWCGPUBakedTriangle*       PrimaryTriangle = GPUData.Triangles.IsValidIndex(PrimaryContact.TriangleID)
+                                                                ? &GPUData.Triangles[PrimaryContact.TriangleID]
+                                                                : nullptr;
+        if (PrimaryTriangle == nullptr)
+        {
+            return;
+        }
+
+        const int32   PrimaryMaterialSlot = PrimaryTriangle->MaterialSlotIndex;
+        const int32   PrimaryUVIsland = PrimaryTriangle->UVIslandID;
+        const FVector SharedContactWorldPosition = PrimaryContact.ClosestWorldPosition;
+
+        InOutContacts.RemoveAll(
+            [&GPUData, PrimaryMaterialSlot, PrimaryUVIsland](const FDWCResolvedSurfaceContact& Candidate)
+            {
+                const FDWCGPUBakedTriangle* CandidateTriangle = GPUData.Triangles.IsValidIndex(Candidate.TriangleID)
+                                                                    ? &GPUData.Triangles[Candidate.TriangleID]
+                                                                    : nullptr;
+                return CandidateTriangle == nullptr ||
+                       CandidateTriangle->MaterialSlotIndex != PrimaryMaterialSlot ||
+                       CandidateTriangle->UVIslandID != PrimaryUVIsland;
+            });
+
+        // One input event is one surface stamp. All triangles retained for that stamp
+        // must evaluate their texels against the same center, otherwise each triangle
+        // creates a separate falloff and triangle boundaries become visible.
+        for (FDWCResolvedSurfaceContact& Candidate : InOutContacts)
+        {
+            Candidate.ContactWorldPosition = SharedContactWorldPosition;
+            Candidate.DistanceToSurface = 0.0f;
+        }
     }
-}
 } // namespace DWCWetSurfaceContactResolverPrivate
 
 using namespace DWCWetSurfaceContactResolverPrivate;
 
 bool FWetSurfaceContactResolver::ResolveContact(
-    FWetSurfaceContactResolverArgs& Args,
-    const FDWCWetContact& Contact,
+    FWetSurfaceContactResolverArgs&     Args,
+    const FDWCWetContact&               Contact,
     TArray<FDWCResolvedSurfaceContact>& OutContacts)
 {
     OutContacts.Reset();
@@ -305,7 +304,7 @@ bool FWetSurfaceContactResolver::ResolveContact(
         return false;
     }
 
-    FSkeletalMeshLODRenderData* LODData = nullptr;
+    FSkeletalMeshLODRenderData*    LODData = nullptr;
     const FSkinWeightVertexBuffer* SkinWeightBuffer = Args.TargetSkeletalMesh->GetSkinWeightBuffer(Args.LODIndex);
     if (!SkinWeightBuffer ||
         !FWetRuntimeDataBuilder::GetLODRenderData(Args.TargetSkeletalMesh, Args.LODIndex, LODData) ||
@@ -314,9 +313,9 @@ bool FWetSurfaceContactResolver::ResolveContact(
         return false;
     }
 
-    const FTransform ComponentTransform = Args.TargetSkeletalMesh->GetComponentTransform();
+    const FTransform     ComponentTransform = Args.TargetSkeletalMesh->GetComponentTransform();
     TMap<int32, FVector> WorldPositionCache;
-    auto GetWorldPosition = [&](const int32 VertexIndex, FVector& OutWorldPosition) -> bool
+    auto                 GetWorldPosition = [&](const int32 VertexIndex, FVector& OutWorldPosition) -> bool
     {
         if (const FVector* Cached = WorldPositionCache.Find(VertexIndex))
         {
@@ -358,13 +357,13 @@ bool FWetSurfaceContactResolver::ResolveContact(
         }
     }
 
-    const float SafeRadius = FMath::Max(Contact.Radius, KINDA_SMALL_NUMBER);
-    const float RadiusSquared = SafeRadius * SafeRadius;
-    TSet<int32> SeedVertices;
+    const float            SafeRadius = FMath::Max(Contact.Radius, KINDA_SMALL_NUMBER);
+    const float            RadiusSquared = SafeRadius * SafeRadius;
+    TSet<int32>            SeedVertices;
     TArray<FNearestVertex> NearestVertices;
-    TArray<int32> CandidateVertices;
-    FString FallbackReason;
-    const bool bCacheResolved = FWetRuntimeDataBuilder::GetBoneCandidateVertexIndices(
+    TArray<int32>          CandidateVertices;
+    FString                FallbackReason;
+    const bool             bCacheResolved = FWetRuntimeDataBuilder::GetBoneCandidateVertexIndices(
         *Args.RuntimeData,
         Args.TargetSkeletalMesh,
         Contact.BoneName,
@@ -380,7 +379,7 @@ bool FWetSurfaceContactResolver::ResolveContact(
             return;
         }
 
-        const float DistanceSquared = FVector::DistSquared(Contact.Location, WorldPosition);
+        const float DistanceSquared = static_cast<float>(FVector::DistSquared(Contact.Location, WorldPosition));
         if (DistanceSquared <= RadiusSquared)
         {
             SeedVertices.Add(VertexIndex);
@@ -451,7 +450,7 @@ bool FWetSurfaceContactResolver::ResolveContact(
         }
 
         const FVector ClosestPoint = FMath::ClosestPointOnTriangleToPoint(Contact.Location, P0, P1, P2);
-        const float Distance = FVector::Distance(Contact.Location, ClosestPoint);
+        const float   Distance = static_cast<float>(FVector::Distance(Contact.Location, ClosestPoint));
         if (Distance > SafeRadius)
         {
             continue;
@@ -466,7 +465,7 @@ bool FWetSurfaceContactResolver::ResolveContact(
         }
 
         const FVector3f Barycentric = ComputeTriangleBarycentric(ClosestPoint, P0, P1, P2);
-        const float Exposure = FWetInputStage::CalculateContactExposure(
+        const float     Exposure = FWetInputStage::CalculateContactExposure(
             TriangleNormal,
             Contact.Direction.IsNearlyZero() ? FVector::ZeroVector : Contact.Direction.GetSafeNormal(),
             Contact.Normal.IsNearlyZero() ? FVector::ZeroVector : Contact.Normal.GetSafeNormal(),
@@ -505,8 +504,8 @@ bool FWetSurfaceContactResolver::ResolveContact(
 }
 
 bool FWetSurfaceContactResolver::ResolveContacts(
-    FWetSurfaceContactResolverArgs& Args,
-    const TArray<FDWCWetContact>& Contacts,
+    FWetSurfaceContactResolverArgs&     Args,
+    const TArray<FDWCWetContact>&       Contacts,
     TArray<FDWCResolvedSurfaceContact>& OutContacts)
 {
     OutContacts.Reset();
@@ -522,8 +521,8 @@ bool FWetSurfaceContactResolver::ResolveContacts(
 }
 
 bool FWetSurfaceContactResolver::ResolveWetArea(
-    FWetSurfaceContactResolverArgs& Args,
-    const FDWCWetAreaData& AreaData,
+    FWetSurfaceContactResolverArgs&     Args,
+    const FDWCWetAreaData&              AreaData,
     TArray<FDWCResolvedSurfaceContact>& OutContacts)
 {
     OutContacts.Reset();
@@ -541,7 +540,7 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
         return false;
     }
 
-    FSkeletalMeshLODRenderData* LODData = nullptr;
+    FSkeletalMeshLODRenderData*    LODData = nullptr;
     const FSkinWeightVertexBuffer* SkinWeightBuffer = Args.TargetSkeletalMesh->GetSkinWeightBuffer(Args.LODIndex);
     if (!SkinWeightBuffer ||
         !FWetRuntimeDataBuilder::GetLODRenderData(Args.TargetSkeletalMesh, Args.LODIndex, LODData) ||
@@ -550,12 +549,12 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
         return false;
     }
 
-    const bool bWantsNormalExposure = AreaData.bUseNormalExposure && !AreaData.Direction.IsNearlyZero();
+    const bool    bWantsNormalExposure = AreaData.bUseNormalExposure && !AreaData.Direction.IsNearlyZero();
     const FVector SafeDirection =
         AreaData.Direction.IsNearlyZero()
             ? FVector::DownVector
             : AreaData.Direction.GetSafeNormal();
-    const FVector SafeNormal = -SafeDirection;
+    const FVector    SafeNormal = -SafeDirection;
     const FTransform ComponentTransform = Args.TargetSkeletalMesh->GetComponentTransform();
 
     TArray<int32> WettableTriangleIDs;
@@ -587,7 +586,7 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
     }
 
     TMap<int32, FVector> WorldPositionCache;
-    auto GetWorldPosition = [&](const int32 VertexIndex, FVector& OutWorldPosition) -> bool
+    auto                 GetWorldPosition = [&](const int32 VertexIndex, FVector& OutWorldPosition) -> bool
     {
         if (const FVector* Cached = WorldPositionCache.Find(VertexIndex))
         {
@@ -607,7 +606,7 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
     };
 
     TMap<int32, FVector> WorldNormalCache;
-    auto GetWorldNormal = [&](const int32 VertexIndex, FVector& OutWorldNormal) -> bool
+    auto                 GetWorldNormal = [&](const int32 VertexIndex, FVector& OutWorldNormal) -> bool
     {
         if (const FVector* Cached = WorldNormalCache.Find(VertexIndex))
         {
@@ -626,8 +625,8 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
         {
             OutWorldNormal =
                 ComponentTransform.TransformVectorNoScale(
-                    FVector(LODData->StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex)))
-                .GetSafeNormal();
+                                      FVector(LODData->StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex)))
+                    .GetSafeNormal();
         }
         else
         {
@@ -682,7 +681,7 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
     }
     else
     {
-        int32 Attempts = 0;
+        int32       Attempts = 0;
         const int32 MaxAttempts = CandidateCount * 8;
         while (CandidateTriangleIDs.Num() < CandidateCount && Attempts < MaxAttempts)
         {
@@ -724,10 +723,9 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
 
         const float MinInfluence = FMath::Clamp(Args.WetnessSettings->AreaExposureMinInfluence, 0.0f, 1.0f);
         const float EffectiveExposure = FMath::Clamp(RawExposure, MinInfluence, 1.0f);
-        Candidates.Add({
-            TriangleID,
-            EffectiveExposure,
-            FMath::Pow(EffectiveExposure, GPUWetAreaNormalExposurePickPower)});
+        Candidates.Add({ TriangleID,
+                         EffectiveExposure,
+                         FMath::Pow(EffectiveExposure, GPUWetAreaNormalExposurePickPower) });
     }
 
     const int32 PickCount = FMath::Min(SamplesToProcess, Candidates.Num());
@@ -768,8 +766,8 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
         }
 
         const FVector3f Barycentric(1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f);
-        const FVector ContactWorldPosition = (P0 + P1 + P2) / 3.0;
-        FVector AverageWorldNormal;
+        const FVector   ContactWorldPosition = (P0 + P1 + P2) / 3.0;
+        FVector         AverageWorldNormal;
         if (!GetAverageWorldNormal(Triangle, AverageWorldNormal))
         {
             AverageWorldNormal = FVector::CrossProduct(P1 - P0, P2 - P0).GetSafeNormal();
@@ -807,9 +805,9 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
 }
 
 bool FWetSurfaceContactResolver::ResolveWaterSurface(
-    FWetSurfaceContactResolverArgs& Args,
-    const FDWCWaterSurfaceData& WaterSurfaceData,
-    const float Amount,
+    FWetSurfaceContactResolverArgs&     Args,
+    const FDWCWaterSurfaceData&         WaterSurfaceData,
+    const float                         Amount,
     TArray<FDWCResolvedSurfaceContact>& OutContacts)
 {
     OutContacts.Reset();
@@ -836,7 +834,7 @@ bool FWetSurfaceContactResolver::ResolveWaterSurface(
         return false;
     }
 
-    FSkeletalMeshLODRenderData* LODData = nullptr;
+    FSkeletalMeshLODRenderData*    LODData = nullptr;
     const FSkinWeightVertexBuffer* SkinWeightBuffer = Args.TargetSkeletalMesh->GetSkinWeightBuffer(Args.LODIndex);
     if (!SkinWeightBuffer ||
         !FWetRuntimeDataBuilder::GetLODRenderData(Args.TargetSkeletalMesh, Args.LODIndex, LODData) ||
@@ -845,9 +843,9 @@ bool FWetSurfaceContactResolver::ResolveWaterSurface(
         return false;
     }
 
-    const FTransform ComponentTransform = Args.TargetSkeletalMesh->GetComponentTransform();
+    const FTransform     ComponentTransform = Args.TargetSkeletalMesh->GetComponentTransform();
     TMap<int32, FVector> WorldPositionCache;
-    auto GetWorldPosition = [&](const int32 VertexIndex, FVector& OutWorldPosition) -> bool
+    auto                 GetWorldPosition = [&](const int32 VertexIndex, FVector& OutWorldPosition) -> bool
     {
         if (const FVector* Cached = WorldPositionCache.Find(VertexIndex))
         {
@@ -892,8 +890,8 @@ bool FWetSurfaceContactResolver::ResolveWaterSurface(
         }
 
         const FVector Centroid = (P0 + P1 + P2) / 3.0;
-        FVector ContactPoint = FVector::ZeroVector;
-        int32 SubmergedSamples = 0;
+        FVector       ContactPoint = FVector::ZeroVector;
+        int32         SubmergedSamples = 0;
 
         if (IsSubmerged(Centroid))
         {
@@ -929,7 +927,7 @@ bool FWetSurfaceContactResolver::ResolveWaterSurface(
             continue;
         }
 
-        const FVector3f Barycentric = ComputeTriangleBarycentric(ContactPoint, P0, P1, P2);
+        const FVector3f             Barycentric = ComputeTriangleBarycentric(ContactPoint, P0, P1, P2);
         FDWCResolvedSurfaceContact& Resolved = OutContacts.AddDefaulted_GetRef();
         Resolved.TriangleID = TriangleID;
         Resolved.MaterialSlotIndex = Triangle.MaterialSlotIndex;

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -14,8 +15,8 @@ DECLARE_MULTICAST_DELEGATE_ThreeParams(
 class FDWCEditorSessionStore final : public TSharedFromThis<FDWCEditorSessionStore>
 {
   public:
-    const FDWCEditorSessionState& GetState() const { return State; }
-    uint64 GetRevision() const { return State.SessionRevision; }
+    const FDWCEditorSessionState&  GetState() const { return State; }
+    uint64                         GetRevision() const { return State.SessionRevision; }
     FDWCEditorSessionStateChanged& OnChanged() { return ChangedDelegate; }
 
     template <typename ActionType>
@@ -50,8 +51,8 @@ class FDWCEditorSessionStore final : public TSharedFromThis<FDWCEditorSessionSto
     }
 
   private:
-    FDWCEditorSessionState State;
-    FDWCEditorSessionStateChanged ChangedDelegate;
+    FDWCEditorSessionState          State;
+    FDWCEditorSessionStateChanged   ChangedDelegate;
     TArray<TUniqueFunction<void()>> DeferredActions;
-    bool bDispatching = false;
+    bool                            bDispatching = false;
 };

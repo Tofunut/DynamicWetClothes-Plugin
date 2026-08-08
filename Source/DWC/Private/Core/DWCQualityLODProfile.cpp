@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Core/DWCQualityLODProfile.h"
 
 namespace
@@ -13,7 +14,7 @@ namespace
         Entry.Policy = UDWCQualityLODProfile::MakeDefaultPolicyForLOD(InQualityLOD);
         return Entry;
     }
-}
+} // namespace
 
 UDWCQualityLODProfile::UDWCQualityLODProfile()
 {
@@ -32,7 +33,7 @@ FDWCQualityLODPolicy UDWCQualityLODProfile::MakeDefaultPolicyForLOD(const int32 
     const int32 SafeLOD = FMath::Max(0, InQualityLOD);
 
     FDWCQualityLODPolicy DefaultPolicy;
-    const float IntervalMultiplier = SafeLOD == 0 ? 1.0f : FMath::Pow(2.0f, static_cast<float>(FMath::Min(SafeLOD, 4)));
+    const float          IntervalMultiplier = SafeLOD == 0 ? 1.0f : FMath::Pow(2.0f, static_cast<float>(FMath::Min(SafeLOD, 4)));
     DefaultPolicy.RenderUpdateInterval = DefaultCPUWetnessRenderUpdateInterval * IntervalMultiplier;
 
     if (SafeLOD == 2)

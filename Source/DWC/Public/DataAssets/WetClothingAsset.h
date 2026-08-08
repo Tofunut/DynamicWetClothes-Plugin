@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -29,7 +30,6 @@ struct DWC_API FWCAAuthoredData
 
     UPROPERTY(EditAnywhere, Category = "Wet Clothing|Transparency")
     FWetClothingTransparencyData TransparencyData;
-
 };
 
 USTRUCT()
@@ -182,7 +182,6 @@ struct DWC_API FWCAMetadata
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Generated Assets")
     TArray<TSoftObjectPtr<UObject>> GeneratedAssetManifest;
 #endif
-
 };
 
 UCLASS(BlueprintType)
@@ -198,70 +197,70 @@ class DWC_API UWetClothingAsset : public UDataAsset
     static constexpr int32 CurrentRuntimeBulkDataVersion = 7;
     static constexpr int32 RuntimeSimulationLODIndex = 0;
 
-    virtual void Serialize(FArchive& Ar) override;
-    virtual void PostLoad() override;
+    virtual void   Serialize(FArchive& Ar) override;
+    virtual void   PostLoad() override;
     static FString BuildMeshContentSignature(
         const USkeletalMesh* SkeletalMesh,
-        int32 LODIndex,
-        int32 UVChannelIndex = INDEX_NONE);
+        int32                LODIndex,
+        int32                UVChannelIndex = INDEX_NONE);
 
 #if WITH_EDITOR
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
     virtual void PreSave(FObjectPreSaveContext SaveContext) override;
-    bool InitializeNewAsset(USkeletalMesh* InSourceMesh, const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutErrorMessage = nullptr);
-    bool ApplySetupSettings(const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutChangeSummary = nullptr);
+    bool         InitializeNewAsset(USkeletalMesh* InSourceMesh, const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutErrorMessage = nullptr);
+    bool         ApplySetupSettings(const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutChangeSummary = nullptr);
 
     /** True after the first successful DWC UV Channel build seals the Original UV topology and packed layout. */
     bool HasLockedDataUVLayout() const;
 
     /** Atomically stores and seals the first successful DWC UV Channel layout. This API refuses every later replacement attempt. */
     bool CommitInitialDataUVLayout(
-        USkeletalMesh* InRuntimeMesh,
-        int32 InDWCDataUVChannelIndex,
-        TArray<FDWCDataUVLODMetadata>&& InMetadata,
+        USkeletalMesh*                     InRuntimeMesh,
+        int32                              InDWCDataUVChannelIndex,
+        TArray<FDWCDataUVLODMetadata>&&    InMetadata,
         TArray<FDWCEditorUVTopologyData>&& InTopologies,
-        FString* OutErrorMessage = nullptr);
+        FString*                           OutErrorMessage = nullptr);
 
     /** Atomically replaces an existing generated DWC UV Channel layout after a deliberate editor rebuild. */
     bool ReplaceDataUVLayout(
-        USkeletalMesh* InRuntimeMesh,
-        int32 InDWCDataUVChannelIndex,
-        TArray<FDWCDataUVLODMetadata>&& InMetadata,
+        USkeletalMesh*                     InRuntimeMesh,
+        int32                              InDWCDataUVChannelIndex,
+        TArray<FDWCDataUVLODMetadata>&&    InMetadata,
         TArray<FDWCEditorUVTopologyData>&& InTopologies,
-        FString* OutErrorMessage = nullptr);
+        FString*                           OutErrorMessage = nullptr);
 
     /** Commits a channel-only relocation after the prepared mesh UV values have been copied verbatim. */
     bool CommitDataUVChannelRelocation(int32 InDWCDataUVChannelIndex, FString* OutErrorMessage = nullptr);
 
     /** Removes stored per-LOD DWC UV/runtime records outside the supplied retained LOD set. */
-    int32 PruneDataUVLODData(const TSet<int32>& RetainedLODIndices);
+    int32                                PruneDataUVLODData(const TSet<int32>& RetainedLODIndices);
     const TArray<FDWCDataUVLODMetadata>& GetDataUVMetadata() const { return Derived.Inline.DataUVMetadata; }
-    void MarkGeneratedDataUVOutOfDate();
-    void MarkSimulationBakeOutOfDate();
-    void MarkWrinkleBakeOutOfDate();
-    void MarkVisualBakeOutOfDate();
-    void SetLastBakeFailure(const FString& InFailure);
+    void                                 MarkGeneratedDataUVOutOfDate();
+    void                                 MarkSimulationBakeOutOfDate();
+    void                                 MarkWrinkleBakeOutOfDate();
+    void                                 MarkVisualBakeOutOfDate();
+    void                                 SetLastBakeFailure(const FString& InFailure);
     /** Returns true when the referenced Original Mesh no longer matches the content signature accepted by this WCA. */
-    bool HasSourceMeshContentChanged(FString* OutCurrentSignature = nullptr) const;
-    void SetCPURuntimeDataStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
-    void SetGPURuntimeDataStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
-    void SetGPUMapBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
-    void SetWrinkleBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
-    void SetTransparencyBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
-    void MarkBakeOutputGenerated(int32 OutputMask);
-    void MarkBakeOutputsSaved(int32 OutputMask);
-    bool HasGeneratedBakeOutput(int32 OutputMask) const;
-    bool HasSavedBakeOutput(int32 OutputMask) const;
-    void RefreshBakeState(bool bRunDeepValidation = false);
-    bool RebuildPrecomputedSimulationData(FString* OutErrorMessage = nullptr);
-    bool RebuildGPURuntimeData(FString* OutErrorMessage = nullptr);
-    bool BakeGPUWetnessMaps(FString* OutErrorMessage = nullptr);
-    bool RebuildRuntimeDataForSave(FString* OutErrorMessage = nullptr);
-    bool CanPrepareRuntimeDataForEditorSave(FString* OutSkipReason = nullptr) const;
-    bool PrepareRuntimeDataForEditorSave(FString* OutErrorMessage = nullptr);
-    void ReleaseLoadedRuntimeBulkPayloadForEditor();
+    bool   HasSourceMeshContentChanged(FString* OutCurrentSignature = nullptr) const;
+    void   SetCPURuntimeDataStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
+    void   SetGPURuntimeDataStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
+    void   SetGPUMapBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
+    void   SetWrinkleBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
+    void   SetTransparencyBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
+    void   MarkBakeOutputGenerated(int32 OutputMask);
+    void   MarkBakeOutputsSaved(int32 OutputMask);
+    bool   HasGeneratedBakeOutput(int32 OutputMask) const;
+    bool   HasSavedBakeOutput(int32 OutputMask) const;
+    void   RefreshBakeState(bool bRunDeepValidation = false);
+    bool   RebuildPrecomputedSimulationData(FString* OutErrorMessage = nullptr);
+    bool   RebuildGPURuntimeData(FString* OutErrorMessage = nullptr);
+    bool   BakeGPUWetnessMaps(FString* OutErrorMessage = nullptr);
+    bool   RebuildRuntimeDataForSave(FString* OutErrorMessage = nullptr);
+    bool   CanPrepareRuntimeDataForEditorSave(FString* OutSkipReason = nullptr) const;
+    bool   PrepareRuntimeDataForEditorSave(FString* OutErrorMessage = nullptr);
+    void   ReleaseLoadedRuntimeBulkPayloadForEditor();
     uint64 GetResidentRuntimeBulkPayloadBytesForEditor() const;
-    void ClearRuntimeDataEditorSavePreparation();
+    void   ClearRuntimeDataEditorSavePreparation();
     /** Saves a targeted CPU/GPU runtime segment without rebuilding the other segment during PreSave. */
     void SkipNextRuntimeDataPreSaveRebuild();
     void BeginRuntimeDataEditorSaveAttempt();
@@ -308,30 +307,30 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void ClearGPUWetMapData();
     void ClearGPUMapData();
 
-    bool IsPrecomputedSimulationDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh) const;
-    bool IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh) const;
-    bool IsGPURuntimeDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
-    bool IsGPURuntimeDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
-    bool IsGPUWetMapDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
-    bool IsGPUWetMapDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
-    FString GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh) const;
-    bool IsMaterialSlotWettable(int32 MaterialSlotIndex) const;
-    bool HasAnyWettableMaterialSlot() const;
-    bool DoesMaterialSlotUseSurfaceWater(int32 MaterialSlotIndex) const;
-    bool UsesSurfaceWater() const;
-    bool HasWrinkleBakeContent() const;
-    bool HasTransparencyBakeContent() const;
+    bool                                         IsPrecomputedSimulationDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh) const;
+    bool                                         IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh) const;
+    bool                                         IsGPURuntimeDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
+    bool                                         IsGPURuntimeDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
+    bool                                         IsGPUWetMapDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
+    bool                                         IsGPUWetMapDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
+    FString                                      GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh) const;
+    bool                                         IsMaterialSlotWettable(int32 MaterialSlotIndex) const;
+    bool                                         HasAnyWettableMaterialSlot() const;
+    bool                                         DoesMaterialSlotUseSurfaceWater(int32 MaterialSlotIndex) const;
+    bool                                         UsesSurfaceWater() const;
+    bool                                         HasWrinkleBakeContent() const;
+    bool                                         HasTransparencyBakeContent() const;
     const FWetClothingPrecomputedSimulationData& GetPrecomputedSimulationData() const;
-    const FDWCGPULODBakeData& GetGPUWetMapRuntimeData(int32 LODIndex = 0) const;
-    const FDWCGPULODBakeData& GetGPUWetMapRuntimeDataMetadata(int32 LODIndex = 0) const;
-    bool IsCurrentAssetDataVersion() const { return Metadata.AssetDataVersion == CurrentAssetDataVersion; }
-    bool HasCPURuntimeDataPayload() const;
-    bool HasGPURuntimeDataPayload() const;
-    bool HasGPUMapDataPayload() const;
+    const FDWCGPULODBakeData&                    GetGPUWetMapRuntimeData(int32 LODIndex = 0) const;
+    const FDWCGPULODBakeData&                    GetGPUWetMapRuntimeDataMetadata(int32 LODIndex = 0) const;
+    bool                                         IsCurrentAssetDataVersion() const { return Metadata.AssetDataVersion == CurrentAssetDataVersion; }
+    bool                                         HasCPURuntimeDataPayload() const;
+    bool                                         HasGPURuntimeDataPayload() const;
+    bool                                         HasGPUMapDataPayload() const;
 
     USkeletalMesh* GetSourceSkeletalMesh() const { return Metadata.SourceSkeletalMesh.Get(); }
     USkeletalMesh* GetDWCSkeletalMesh() const { return Metadata.DWCSkeletalMesh.Get(); }
-    const FGuid& GetAssetGuid() const { return Metadata.AssetGuid; }
+    const FGuid&   GetAssetGuid() const { return Metadata.AssetGuid; }
 
     UFUNCTION(BlueprintPure, Category = "Wet Clothing|Mesh")
     USkeletalMesh* GetRuntimeSkeletalMesh() const
@@ -354,8 +353,8 @@ class DWC_API UWetClothingAsset : public UDataAsset
     int32 GetSurfaceWaterNormalUVChannelIndex() const
     {
         return Metadata.SetupSettings.SurfaceWaterNormalUVChannelIndex != INDEX_NONE
-            ? Metadata.SetupSettings.SurfaceWaterNormalUVChannelIndex
-            : Metadata.OriginalUVChannelIndex;
+                   ? Metadata.SetupSettings.SurfaceWaterNormalUVChannelIndex
+                   : Metadata.OriginalUVChannelIndex;
     }
 
     UFUNCTION(BlueprintPure, Category = "Wet Clothing|Mesh")
@@ -364,17 +363,17 @@ class DWC_API UWetClothingAsset : public UDataAsset
     UFUNCTION(BlueprintPure, Category = "Wet Clothing|Mesh")
     int32 GetDWCDataUVChannelIndex() const { return Metadata.DWCDataUVChannelIndex; }
 
-    const FDWCDataUVLODMetadata* FindDataUVMetadataForLOD(int32 LODIndex) const;
-    bool HasValidDataUVForLOD(int32 LODIndex) const;
-    int32 GetDataUVMetadataLODCount() const { return Derived.Inline.DataUVMetadata.Num(); }
+    const FDWCDataUVLODMetadata*             FindDataUVMetadataForLOD(int32 LODIndex) const;
+    bool                                     HasValidDataUVForLOD(int32 LODIndex) const;
+    int32                                    GetDataUVMetadataLODCount() const { return Derived.Inline.DataUVMetadata.Num(); }
     const FDWCWetClothingAssetSetupSettings& GetSetupSettings() const { return Metadata.SetupSettings; }
 
 #if WITH_EDITORONLY_DATA
-    const FDWCEditorUVTopologyData* FindOriginalUVTopologyForLOD(int32 LODIndex) const;
-    const FDWCAssetBakeState& GetBakeState() const { return Derived.Inline.BakeState; }
-    const FString& GetSourceMeshSignature() const { return Derived.Inline.SourceMeshSignature; }
+    const FDWCEditorUVTopologyData*      FindOriginalUVTopologyForLOD(int32 LODIndex) const;
+    const FDWCAssetBakeState&            GetBakeState() const { return Derived.Inline.BakeState; }
+    const FString&                       GetSourceMeshSignature() const { return Derived.Inline.SourceMeshSignature; }
     const FDWCTriangleValidationSummary& GetValidationSummary() const { return Derived.Inline.ValidationSummary; }
-    void SetValidationSummary(const FDWCTriangleValidationSummary& InSummary);
+    void                                 SetValidationSummary(const FDWCTriangleValidationSummary& InSummary);
 #endif
 
     UPROPERTY(EditAnywhere, Category = "Wet Clothing|Authored")
@@ -399,16 +398,16 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void RefreshBakeStateDeep();
     void RefreshBakeStateInternal(bool bRunDeepValidation);
 
-    bool bRuntimeDataRebuildInProgress = false;
-    bool bSkipNextPreSaveRuntimeDataRebuild = false;
-    bool bRuntimeDataEditorSaveAttemptActive = false;
+    bool  bRuntimeDataRebuildInProgress = false;
+    bool  bSkipNextPreSaveRuntimeDataRebuild = false;
+    bool  bRuntimeDataEditorSaveAttemptActive = false;
     int32 PendingRuntimeSaveOutputMask = 0;
     int32 EditorSavePendingOutputMaskSnapshot = 0;
     int32 EditorSaveSavedOutputMaskSnapshot = 0;
 #endif
 
     mutable FByteBulkData RuntimeBulkData;
-    mutable bool bRuntimeBulkDataLoaded = false;
-    mutable bool bRuntimeBulkDataLoadFailed = false;
-    bool bRuntimeBulkDataDirty = false;
+    mutable bool          bRuntimeBulkDataLoaded = false;
+    mutable bool          bRuntimeBulkDataLoadFailed = false;
+    bool                  bRuntimeBulkDataDirty = false;
 };

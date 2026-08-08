@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetWrinkleEditorSettings.h"
 
 FString UWetWrinkleEditorSettings::NormalizeContentPath(const FString& InPath)
@@ -52,7 +53,7 @@ bool UWetWrinkleEditorSettings::AddNormalTextureSearchPath(const FString& InPath
 void UWetWrinkleEditorSettings::RemoveNormalTextureSearchPath(const FString& InPath)
 {
     const FString Normalized = NormalizeContentPath(InPath);
-    const int32 Removed = AdditionalNormalTexturePaths.RemoveAll(
+    const int32   Removed = AdditionalNormalTexturePaths.RemoveAll(
         [&Normalized](const FDirectoryPath& Existing)
         {
             return NormalizeContentPath(Existing.Path).Equals(Normalized, ESearchCase::IgnoreCase);

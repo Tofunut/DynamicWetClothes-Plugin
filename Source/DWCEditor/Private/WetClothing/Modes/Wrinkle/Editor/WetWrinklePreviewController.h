@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -19,8 +20,8 @@ class FWetWrinklePreviewController
     void UpdatePreviewWetness(float PreviewWetness) const;
     void UpdateElementSelection(
         EWetWrinkleElementType ElementType,
-        const FGuid& SelectedGuid,
-        int32 SelectedProceduralPointIndex) const;
+        const FGuid&           SelectedGuid,
+        int32                  SelectedProceduralPointIndex) const;
     void RefreshStoredElements(bool bRebuildAccumulatedPreview) const;
 
   private:

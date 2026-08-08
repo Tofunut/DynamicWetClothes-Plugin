@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -26,9 +27,9 @@ namespace
     {
       public:
         FWaitForPreviewMaterialReady(
-            FAutomationTestBase* InTest,
+            FAutomationTestBase*                       InTest,
             TSharedRef<FDWCEditorPreviewMaterialCache> InCache,
-            UMaterialInterface* InSourceMaterial)
+            UMaterialInterface*                        InSourceMaterial)
             : Test(InTest),
               Cache(MoveTemp(InCache)),
               SourceMaterial(InSourceMaterial),
@@ -55,7 +56,7 @@ namespace
                     Result.PreviewMID->SetScalarParameterValue(
                         DWCEditorPreviewMaterialParameters::PreviewWetness(),
                         ExpectedWetness);
-                    float ActualWetness = -1.0f;
+                    float      ActualWetness = -1.0f;
                     const bool bReadParameter = Result.PreviewMID->GetScalarParameterValue(
                         DWCEditorPreviewMaterialParameters::PreviewWetness(),
                         ActualWetness);
@@ -94,12 +95,12 @@ namespace
         }
 
       private:
-        FAutomationTestBase* Test = nullptr;
+        FAutomationTestBase*                       Test = nullptr;
         TSharedRef<FDWCEditorPreviewMaterialCache> Cache;
-        TObjectPtr<UMaterialInterface> SourceMaterial = nullptr;
-        double DeadlineSeconds = 0.0;
+        TObjectPtr<UMaterialInterface>             SourceMaterial = nullptr;
+        double                                     DeadlineSeconds = 0.0;
     };
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorPreviewMaterialCacheInvalidRequestTest,
@@ -158,7 +159,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorPreviewMaterialCachePendingLifecycleTest::RunTest(const FString&)
 {
     TSharedRef<FDWCEditorPreviewMaterialCache> Cache = MakeShared<FDWCEditorPreviewMaterialCache>();
-    UMaterialInterface* SourceMaterial = LoadObject<UMaterialInterface>(
+    UMaterialInterface*                        SourceMaterial = LoadObject<UMaterialInterface>(
         nullptr,
         TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"));
     TestNotNull(TEXT("Engine default material is available for the pending fixture"), SourceMaterial);
@@ -193,7 +194,6 @@ bool FDWCEditorPreviewMaterialCachePendingLifecycleTest::RunTest(const FString&)
         const FDWCEditorPreviewMaterialCacheStats PendingStats = Cache->GetStats();
         TestEqual(TEXT("Pruning does not remove a graph owned by the shader compiler"), PendingStats.GraphEntryCount, 1);
         TestEqual(TEXT("The pending graph remains pending after pruning"), PendingStats.PendingGraphEntryCount, 1);
-
     }
 
     ADD_LATENT_AUTOMATION_COMMAND(FWaitForPreviewMaterialReady(this, Cache, SourceMaterial));

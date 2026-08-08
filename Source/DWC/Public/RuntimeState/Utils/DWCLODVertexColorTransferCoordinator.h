@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -17,22 +18,22 @@ class FDWCLODVertexColorTransferCoordinator
   public:
     bool InitializeReceiver(
         FDWCWetMeshReceiverRuntime& Receiver,
-        UDWCRuntimeDataSubsystem& RuntimeDataSubsystem,
-        int32 RuntimeLODIndex) const;
+        UDWCRuntimeDataSubsystem&   RuntimeDataSubsystem,
+        int32                       RuntimeLODIndex) const;
 
     bool RequestTask(
         UDynamicWetClothesComponent& Owner,
-        FDWCTaskQueue* AsyncTaskQueue,
-        UWorld* World,
-        FDWCWetMeshReceiverRuntime& Receiver) const;
+        FDWCTaskQueue*               AsyncTaskQueue,
+        UWorld*                      World,
+        FDWCWetMeshReceiverRuntime&  Receiver) const;
 
     void CommitTaskResult(
-        UDynamicWetClothesComponent& Owner,
+        UDynamicWetClothesComponent&                    Owner,
         TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>& Receivers,
-        FDWCTaskQueue* AsyncTaskQueue,
-        UWorld* World,
-        FDWCLODVertexColorTransferResult&& Result,
-        bool bHasPendingCpuSkinningTasks) const;
+        FDWCTaskQueue*                                  AsyncTaskQueue,
+        UWorld*                                         World,
+        FDWCLODVertexColorTransferResult&&              Result,
+        bool                                            bHasPendingCpuSkinningTasks) const;
 
     bool HasPendingTasks(
         const TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>& Receivers) const;

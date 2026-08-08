@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCGPUBackend.h"
 
 #include "Utility/DWCDataUVBufferView.h"
@@ -42,583 +43,583 @@ DECLARE_GPU_STAT_NAMED(DWC_SeamGather, TEXT("DWC SeamGather"));
 
 namespace DWCGPUBackendPrivate
 {
-constexpr int32 DWCFullSimulationMapVersion = FDWCGPULODBakeData::CurrentMapBakeVersion;
-constexpr float DWCSeamTransferScale = 1.0f;
-constexpr int32 DWCAbsorptionBinTileSize = 16;
-constexpr int32 DWCAbsorptionBinMinDispatches = 32;
-constexpr int32 DWCAbsorptionContactFloat4Count = 6;
-constexpr int32 DWCMaxComputeGroupsPerDimension = 65535;
+    constexpr int32 DWCFullSimulationMapVersion = FDWCGPULODBakeData::CurrentMapBakeVersion;
+    constexpr float DWCSeamTransferScale = 1.0f;
+    constexpr int32 DWCAbsorptionBinTileSize = 16;
+    constexpr int32 DWCAbsorptionBinMinDispatches = 32;
+    constexpr int32 DWCAbsorptionContactFloat4Count = 6;
+    constexpr int32 DWCMaxComputeGroupsPerDimension = 65535;
 
-static TAutoConsoleVariable<int32> CVarDWCGPUBinnedAbsorption(
-    TEXT("r.DWC.GPU.BinnedAbsorption"),
-    1,
-    TEXT("Use tile-binned GPU absorption for large positive wetness input batches. 0 disables the optimized tile-binned path."),
-    ECVF_Default);
+    static TAutoConsoleVariable<int32> CVarDWCGPUBinnedAbsorption(
+        TEXT("r.DWC.GPU.BinnedAbsorption"),
+        1,
+        TEXT("Use tile-binned GPU absorption for large positive wetness input batches. 0 disables the optimized tile-binned path."),
+        ECVF_Default);
 
-static TAutoConsoleVariable<float> CVarDWCGPUWetAreaStampRadiusPixels(
-    TEXT("r.DWC.GPU.WetAreaStampRadiusPixels"),
-    3.0f,
-    TEXT("Circular Data-UV stamp radius, in wetness-map texels, for GPU WetArea samples."),
-    ECVF_Default);
+    static TAutoConsoleVariable<float> CVarDWCGPUWetAreaStampRadiusPixels(
+        TEXT("r.DWC.GPU.WetAreaStampRadiusPixels"),
+        3.0f,
+        TEXT("Circular Data-UV stamp radius, in wetness-map texels, for GPU WetArea samples."),
+        ECVF_Default);
 
-uint32 FloatToBits(const float Value)
-{
-    uint32 Bits = 0;
-    FMemory::Memcpy(&Bits, &Value, sizeof(uint32));
-    return Bits;
-}
+    uint32 FloatToBits(const float Value)
+    {
+        uint32 Bits = 0;
+        FMemory::Memcpy(&Bits, &Value, sizeof(uint32));
+        return Bits;
+    }
 
     FResolvedAbsorbedWaterSimulationParameters MakeRuntimeAbsorbedWaterSimulationProfile(const FWetnessProfileParameters& Parameters)
-{
-        return Parameters.ResolveAbsorbedWaterSimulation();
-}
-
-FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
-    const UWetClothingAsset& Asset,
-    const int32 ProfileIndex)
-{
-    const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
-    const FWetPartProfileAssignment* AuthoredProfile = WetPartData.FindProfile(ProfileIndex);
-    if (AuthoredProfile == nullptr)
     {
-        return FWetnessProfileParameters();
+        return Parameters.ResolveAbsorbedWaterSimulation();
     }
+
+    FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
+        const UWetClothingAsset& Asset,
+        const int32              ProfileIndex)
+    {
+        const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
+        const FWetPartProfileAssignment*       AuthoredProfile = WetPartData.FindProfile(ProfileIndex);
+        if (AuthoredProfile == nullptr)
+        {
+            return FWetnessProfileParameters();
+        }
 
 #if WITH_EDITOR
-    if (AuthoredProfile->GetSourceProfilePath().IsValid())
-    {
-        UObject* SourceObject = AuthoredProfile->GetSourceProfilePath().ResolveObject();
-        if (SourceObject == nullptr)
+        if (AuthoredProfile->GetSourceProfilePath().IsValid())
         {
-            SourceObject = AuthoredProfile->GetSourceProfilePath().TryLoad();
-        }
+            UObject* SourceObject = AuthoredProfile->GetSourceProfilePath().ResolveObject();
+            if (SourceObject == nullptr)
+            {
+                SourceObject = AuthoredProfile->GetSourceProfilePath().TryLoad();
+            }
 
-        if (const UWetnessProfile* SourceProfile =
-                Cast<UWetnessProfile>(SourceObject))
-        {
-            return SourceProfile->GetParameters();
+            if (const UWetnessProfile* SourceProfile =
+                    Cast<UWetnessProfile>(SourceObject))
+            {
+                return SourceProfile->GetParameters();
+            }
+            else
+            {
+                UE_LOG(
+                    LogDWCGPU,
+                    Warning,
+                    TEXT("DWCGPU: Failed to resolve Wetness Profile '%s' for WCA '%s'. Using the WCA snapshot/fallback profile."),
+                    *AuthoredProfile->GetSourceProfilePath().ToString(),
+                    *GetNameSafe(&Asset));
+            }
         }
-        else
-        {
-            UE_LOG(
-                LogDWCGPU,
-                Warning,
-                TEXT("DWCGPU: Failed to resolve Wetness Profile '%s' for WCA '%s'. Using the WCA snapshot/fallback profile."),
-                *AuthoredProfile->GetSourceProfilePath().ToString(),
-                *GetNameSafe(&Asset));
-        }
-    }
 #endif
 
-    return Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)
-        ? Asset.Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
-        : AuthoredProfile->Parameters;
-}
-
-int32 FindOrAddGPUProfile(
-    TArray<FVector4f>& Profiles,
-    TArray<float>& PendingWaterLimits,
-    const FResolvedAbsorbedWaterSimulationParameters& Candidate,
-    const float MaxPendingWaterPerPixel,
-    const float DropletDryRatePerSecond,
-    const float SpreadRateScale,
-    const float DryRateScale,
-    const float GravityFlowStrengthScale,
-    float& OutMaxSpreadRate,
-    float& OutMaxDryRate,
-    float& OutMaxGravityFlowStrength)
-{
-    const float SpreadRate = FMath::Max(0.0f, Candidate.SpreadRatePerSecond * SpreadRateScale);
-    const float DryRate = FMath::Max(0.0f, Candidate.DryRatePerSecond * DryRateScale);
-    const float GravityFlowStrength = FMath::Max(0.0f, Candidate.GravityFlowStrength * GravityFlowStrengthScale);
-    const float DropletDryRate = FMath::Max(0.0f, DropletDryRatePerSecond * DryRateScale);
-    const float PendingWaterLimit = FMath::IsFinite(MaxPendingWaterPerPixel)
-        ? FMath::Max(0.0f, MaxPendingWaterPerPixel)
-        : 0.0f;
-    const FVector4f PackedProfile(
-        SpreadRate,
-        DryRate,
-        GravityFlowStrength,
-        DropletDryRate);
-    for (int32 ProfileIndex = 0; ProfileIndex < Profiles.Num(); ++ProfileIndex)
-    {
-        const FVector4f& Existing = Profiles[ProfileIndex];
-        if (FMath::IsNearlyEqual(Existing.X, PackedProfile.X, KINDA_SMALL_NUMBER) &&
-            FMath::IsNearlyEqual(Existing.Y, PackedProfile.Y, KINDA_SMALL_NUMBER) &&
-            FMath::IsNearlyEqual(Existing.Z, PackedProfile.Z, KINDA_SMALL_NUMBER) &&
-            FMath::IsNearlyEqual(Existing.W, PackedProfile.W, KINDA_SMALL_NUMBER) &&
-            PendingWaterLimits.IsValidIndex(ProfileIndex) &&
-            FMath::IsNearlyEqual(
-                PendingWaterLimits[ProfileIndex],
-                PendingWaterLimit,
-                KINDA_SMALL_NUMBER))
-        {
-            return ProfileIndex;
-        }
+        return Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)
+                   ? Asset.Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
+                   : AuthoredProfile->Parameters;
     }
 
-    OutMaxSpreadRate = FMath::Max(OutMaxSpreadRate, SpreadRate);
-    OutMaxDryRate = FMath::Max(OutMaxDryRate, FMath::Max(DryRate, DropletDryRate));
-    OutMaxGravityFlowStrength = FMath::Max(OutMaxGravityFlowStrength, GravityFlowStrength);
-    const int32 ProfileIndex = Profiles.Add(PackedProfile);
-    PendingWaterLimits.Add(PendingWaterLimit);
-    check(PendingWaterLimits.Num() == Profiles.Num());
-    return ProfileIndex;
-}
-
-const FWetClothingWetPartEntry* ResolveWetPartForBakedTriangle(
-    const UWetClothingAsset& Asset,
-    const FDWCGPUBakedTriangle& Triangle)
-{
-    const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
-    const FWetClothingAuthoredMaterialSlot* Slot = WetPartData.FindMaterialSlot(Triangle.MaterialSlotIndex);
-    if (Slot == nullptr)
+    int32 FindOrAddGPUProfile(
+        TArray<FVector4f>&                                Profiles,
+        TArray<float>&                                    PendingWaterLimits,
+        const FResolvedAbsorbedWaterSimulationParameters& Candidate,
+        const float                                       MaxPendingWaterPerPixel,
+        const float                                       DropletDryRatePerSecond,
+        const float                                       SpreadRateScale,
+        const float                                       DryRateScale,
+        const float                                       GravityFlowStrengthScale,
+        float&                                            OutMaxSpreadRate,
+        float&                                            OutMaxDryRate,
+        float&                                            OutMaxGravityFlowStrength)
     {
+        const float     SpreadRate = FMath::Max(0.0f, Candidate.SpreadRatePerSecond * SpreadRateScale);
+        const float     DryRate = FMath::Max(0.0f, Candidate.DryRatePerSecond * DryRateScale);
+        const float     GravityFlowStrength = FMath::Max(0.0f, Candidate.GravityFlowStrength * GravityFlowStrengthScale);
+        const float     DropletDryRate = FMath::Max(0.0f, DropletDryRatePerSecond * DryRateScale);
+        const float     PendingWaterLimit = FMath::IsFinite(MaxPendingWaterPerPixel)
+                                                ? FMath::Max(0.0f, MaxPendingWaterPerPixel)
+                                                : 0.0f;
+        const FVector4f PackedProfile(
+            SpreadRate,
+            DryRate,
+            GravityFlowStrength,
+            DropletDryRate);
+        for (int32 ProfileIndex = 0; ProfileIndex < Profiles.Num(); ++ProfileIndex)
+        {
+            const FVector4f& Existing = Profiles[ProfileIndex];
+            if (FMath::IsNearlyEqual(Existing.X, PackedProfile.X, KINDA_SMALL_NUMBER) &&
+                FMath::IsNearlyEqual(Existing.Y, PackedProfile.Y, KINDA_SMALL_NUMBER) &&
+                FMath::IsNearlyEqual(Existing.Z, PackedProfile.Z, KINDA_SMALL_NUMBER) &&
+                FMath::IsNearlyEqual(Existing.W, PackedProfile.W, KINDA_SMALL_NUMBER) &&
+                PendingWaterLimits.IsValidIndex(ProfileIndex) &&
+                FMath::IsNearlyEqual(
+                    PendingWaterLimits[ProfileIndex],
+                    PendingWaterLimit,
+                    KINDA_SMALL_NUMBER))
+            {
+                return ProfileIndex;
+            }
+        }
+
+        OutMaxSpreadRate = FMath::Max(OutMaxSpreadRate, SpreadRate);
+        OutMaxDryRate = FMath::Max(OutMaxDryRate, FMath::Max(DryRate, DropletDryRate));
+        OutMaxGravityFlowStrength = FMath::Max(OutMaxGravityFlowStrength, GravityFlowStrength);
+        const int32 ProfileIndex = Profiles.Add(PackedProfile);
+        PendingWaterLimits.Add(PendingWaterLimit);
+        check(PendingWaterLimits.Num() == Profiles.Num());
+        return ProfileIndex;
+    }
+
+    const FWetClothingWetPartEntry* ResolveWetPartForBakedTriangle(
+        const UWetClothingAsset&    Asset,
+        const FDWCGPUBakedTriangle& Triangle)
+    {
+        const FWetClothingEditableWetPartData&  WetPartData = Asset.Authored.PartData.EditableWetPartData;
+        const FWetClothingAuthoredMaterialSlot* Slot = WetPartData.FindMaterialSlot(Triangle.MaterialSlotIndex);
+        if (Slot == nullptr)
+        {
+            return nullptr;
+        }
+        for (const FWetClothingWetPartEntry& Entry : Slot->WetPartEntries)
+        {
+            if (Entry.WetPartID != 0 && Entry.AssignedUVIslandIDs.Contains(Triangle.UVIslandID))
+            {
+                return &Entry;
+            }
+        }
         return nullptr;
     }
-    for (const FWetClothingWetPartEntry& Entry : Slot->WetPartEntries)
+
+    int32 ResolveAuthoredProfileIndexForBakedTriangle(
+        const UWetClothingAsset&    Asset,
+        const FDWCGPUBakedTriangle& Triangle)
     {
-        if (Entry.WetPartID != 0 &&Entry.AssignedUVIslandIDs.Contains(Triangle.UVIslandID))
+        const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
+        if (const FWetClothingWetPartEntry* Part = ResolveWetPartForBakedTriangle(Asset, Triangle))
         {
-                return &Entry;
+            return WetPartData.Profiles.IsValidIndex(Part->ProfileIndex)
+                       ? Part->ProfileIndex
+                       : 0;
         }
-    }
-    return nullptr;
-}
-
-int32 ResolveAuthoredProfileIndexForBakedTriangle(
-    const UWetClothingAsset& Asset,
-    const FDWCGPUBakedTriangle& Triangle)
-{
-    const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
-    if (const FWetClothingWetPartEntry* Part = ResolveWetPartForBakedTriangle(Asset, Triangle))
-    {
-        return WetPartData.Profiles.IsValidIndex(Part->ProfileIndex)
-            ? Part->ProfileIndex
-            : 0;
-    }
-    return INDEX_NONE;
-}
-
-struct alignas(16) FUint4GPU
-{
-    uint32 X = 0;
-    uint32 Y = 0;
-    uint32 Z = 0;
-    uint32 W = 0;
-
-    FUint4GPU() = default;
-    FUint4GPU(uint32 InX, uint32 InY, uint32 InZ, uint32 InW)
-        : X(InX), Y(InY), Z(InZ), W(InW)
-    {
-    }
-};
-
-struct FUint2GPU
-{
-    uint32 X = 0;
-    uint32 Y = 0;
-
-    FUint2GPU() = default;
-    FUint2GPU(uint32 InX, uint32 InY)
-        : X(InX), Y(InY)
-    {
-    }
-};
-
-static_assert(sizeof(FUint4GPU) == 16, "FUint4GPU must match HLSL uint4.");
-static_assert(sizeof(FUint2GPU) == 8, "FUint2GPU must match HLSL uint2.");
-static_assert(sizeof(FVector4f) == 16, "FVector4f must match HLSL float4.");
-
-struct FTriangleAbsorptionDispatch
-{
-    FIntPoint DispatchMin = FIntPoint::ZeroValue;
-    FIntPoint DispatchSize = FIntPoint::ZeroValue;
-    FVector4f UV01 = FVector4f(0, 0, 0, 0);
-    FVector4f UV2AndSettings = FVector4f(0, 0, 0, 0);
-    FVector4f ContactAndRadius = FVector4f(0, 0, 0, 1);
-    FVector4f P0AndAmount = FVector4f(0, 0, 0, 0);
-    FVector4f P1AndMaxWetness = FVector4f(0, 0, 0, 1);
-    FVector4f P2AndMode = FVector4f(0, 0, 0, 0);
-};
-
-struct FSurfaceStampDispatch
-{
-    FIntPoint DispatchMin = FIntPoint::ZeroValue;
-    FIntPoint DispatchSize = FIntPoint::ZeroValue;
-    FVector2f UV = FVector2f::ZeroVector;
-    FVector2f CenterPixels = FVector2f::ZeroVector;
-    FVector2f HalfSizePixels = FVector2f::ZeroVector;
-    float Amount = 0.0f;
-    bool      bDroplet2 = false;
-};
-
-struct FSlotRenderDispatch
-{
-    int32 SlotRuntimeIndex = INDEX_NONE;
-    int32 StaticSlotIndex = INDEX_NONE;
-    int32 Resolution = 0;
-    int32 SurfaceWaterResolution = 0;
-    FTextureRenderTargetResource* CurrentResource = nullptr;
-    FTextureRenderTargetResource* NextResource = nullptr;
-    FTextureRenderTargetResource* CurrentPendingResource = nullptr;
-    FTextureRenderTargetResource* NextPendingResource = nullptr;
-    FTextureRenderTargetResource*       SurfaceDroplet1Resource = nullptr;
-    FTextureRenderTargetResource*       SurfaceDroplet2Resource = nullptr;
-    TArray<FTriangleAbsorptionDispatch> AbsorptionDispatches;
-    TArray<FVector4f> BinnedAbsorptionContacts;
-    TArray<FUint2GPU> BinnedAbsorptionTileBins;
-    TArray<uint32> BinnedAbsorptionTileContactIndices;
-    FIntPoint BinnedAbsorptionTileGridSize = FIntPoint::ZeroValue;
-    TArray<FSurfaceStampDispatch> SurfaceStampDispatches;
-};
-
-bool BuildSurfaceStampDispatch(
-    const FDWCSurfaceStampRequest& Request,
-    const int32 Resolution,
-    FSurfaceStampDispatch& OutDispatch)
-{
-    if (Resolution <= 0 ||
-        Request.UV.ContainsNaN() ||
-        !FMath::IsFinite(Request.UV.X) ||
-        !FMath::IsFinite(Request.UV.Y) ||
-        Request.Amount <= 0.0f)
-    {
-        return false;
+        return INDEX_NONE;
     }
 
-    const FVector2f HalfSize(
-        FMath::Max(0.5f, Request.HalfSizePixels.X),
-        FMath::Max(0.5f, Request.HalfSizePixels.Y));
-    const FVector2f Center(
-        FMath::Clamp(Request.UV.X, 0.0f, 1.0f) * static_cast<float>(Resolution),
-        FMath::Clamp(Request.UV.Y, 0.0f, 1.0f) * static_cast<float>(Resolution));
-
-    const int32 MinX = FMath::FloorToInt(Center.X - HalfSize.X - 1.0f);
-    const int32 MinY = FMath::FloorToInt(Center.Y - HalfSize.Y - 1.0f);
-    const int32 MaxX = FMath::CeilToInt(Center.X + HalfSize.X + 1.0f);
-    const int32 MaxY = FMath::CeilToInt(Center.Y + HalfSize.Y + 1.0f);
-
-    OutDispatch.DispatchMin = FIntPoint(MinX, MinY);
-    OutDispatch.DispatchSize = FIntPoint(MaxX - MinX + 1, MaxY - MinY + 1);
-    OutDispatch.UV = Request.UV;
-    OutDispatch.CenterPixels = Center;
-    OutDispatch.HalfSizePixels = HalfSize;
-    OutDispatch.Amount = FMath::Clamp(Request.Amount, 0.0f, 1.0f);
-    OutDispatch.bDroplet2 = Request.bDroplet2;
-    return OutDispatch.DispatchSize.X > 0 && OutDispatch.DispatchSize.Y > 0;
-}
-
-bool BuildAbsorptionStampDispatch(
-    const FDWCResolvedSurfaceContact& Contact,
-    const FDWCGPUBakedTriangle& Triangle,
-    const float RadiusPixels,
-    const int32 Resolution,
-    FTriangleAbsorptionDispatch& OutDispatch)
-{
-    if (Resolution <= 0 || Contact.ContactUV.ContainsNaN() ||
-        !FMath::IsFinite(Contact.ContactUV.X) || !FMath::IsFinite(Contact.ContactUV.Y))
+    struct alignas(16) FUint4GPU
     {
-        return false;
-    }
+        uint32 X = 0;
+        uint32 Y = 0;
+        uint32 Z = 0;
+        uint32 W = 0;
 
-    const float SafeRadiusPixels = FMath::Max(0.5f, RadiusPixels);
-    const FVector2f ClampedUV(
-        FMath::Clamp(Contact.ContactUV.X, 0.0f, 1.0f),
-        FMath::Clamp(Contact.ContactUV.Y, 0.0f, 1.0f));
-    const FIntPoint CenterTexel(
-        FMath::Clamp(FMath::FloorToInt(ClampedUV.X * Resolution), 0, Resolution - 1),
-        FMath::Clamp(FMath::FloorToInt(ClampedUV.Y * Resolution), 0, Resolution - 1));
-    const FVector2f CenterPixels(
-        static_cast<float>(CenterTexel.X) + 0.5f,
-        static_cast<float>(CenterTexel.Y) + 0.5f);
-
-    const int32 MinX = FMath::Clamp(
-        FMath::FloorToInt(CenterPixels.X - SafeRadiusPixels - 1.0f),
-        0,
-        Resolution - 1);
-    const int32 MinY = FMath::Clamp(
-        FMath::FloorToInt(CenterPixels.Y - SafeRadiusPixels - 1.0f),
-        0,
-        Resolution - 1);
-    const int32 MaxX = FMath::Clamp(
-        FMath::CeilToInt(CenterPixels.X + SafeRadiusPixels + 1.0f),
-        0,
-        Resolution - 1);
-    const int32 MaxY = FMath::Clamp(
-        FMath::CeilToInt(CenterPixels.Y + SafeRadiusPixels + 1.0f),
-        0,
-        Resolution - 1);
-    if (MaxX < MinX || MaxY < MinY)
-    {
-        return false;
-    }
-
-    const float InverseResolution = 1.0f / static_cast<float>(Resolution);
-    OutDispatch.DispatchMin = FIntPoint(MinX, MinY);
-    OutDispatch.DispatchSize = FIntPoint(MaxX - MinX + 1, MaxY - MinY + 1);
-    OutDispatch.UV01 = FVector4f(
-        CenterPixels.X * InverseResolution,
-        CenterPixels.Y * InverseResolution,
-        SafeRadiusPixels * InverseResolution,
-        SafeRadiusPixels * InverseResolution);
-    OutDispatch.UV2AndSettings.X =
-        static_cast<float>(FMath::Max(0, Triangle.UVIslandID) + 1);
-    return true;
-}
-
-bool IsSampledWetAreaContact(const FDWCResolvedSurfaceContact& Contact)
-{
-    constexpr float TriangleCenterWeight = 1.0f / 3.0f;
-    constexpr float WeightTolerance = 1.0e-4f;
-
-    // ResolveWetArea has always emitted one contact at the exact triangle centroid.
-    // Keep that CPU contract untouched and select the GPU-only stamp path here.
-    return FMath::IsNearlyEqual(Contact.Barycentric.X, TriangleCenterWeight, WeightTolerance) &&
-           FMath::IsNearlyEqual(Contact.Barycentric.Y, TriangleCenterWeight, WeightTolerance) &&
-           FMath::IsNearlyEqual(Contact.Barycentric.Z, TriangleCenterWeight, WeightTolerance) &&
-           FMath::IsNearlyZero(Contact.DistanceToSurface) &&
-           FMath::IsNearlyEqual(Contact.TriangleInfluence, 1.0f, WeightTolerance);
-}
-
-bool BuildDispatchBounds(
-    const FDWCGPUBakedTriangle& Triangle,
-    const int32 Resolution,
-    FIntPoint& OutMin,
-    FIntPoint& OutSize)
-{
-    if (Resolution <= 0)
-    {
-        return false;
-    }
-
-    const double MinU = FMath::Min3(Triangle.UV0.X, Triangle.UV1.X, Triangle.UV2.X);
-    const double MaxU = FMath::Max3(Triangle.UV0.X, Triangle.UV1.X, Triangle.UV2.X);
-    const double MinV = FMath::Min3(Triangle.UV0.Y, Triangle.UV1.Y, Triangle.UV2.Y);
-    const double MaxV = FMath::Max3(Triangle.UV0.Y, Triangle.UV1.Y, Triangle.UV2.Y);
-
-    const int32 MinX = FMath::Clamp(FMath::FloorToInt(MinU * Resolution), 0, Resolution - 1);
-    const int32 MinY = FMath::Clamp(FMath::FloorToInt(MinV * Resolution), 0, Resolution - 1);
-    const int32 MaxX = FMath::Clamp(FMath::CeilToInt(MaxU * Resolution) - 1, 0, Resolution - 1);
-    const int32 MaxY = FMath::Clamp(FMath::CeilToInt(MaxV * Resolution) - 1, 0, Resolution - 1);
-
-    if (MaxX < MinX || MaxY < MinY)
-    {
-        return false;
-    }
-
-    OutMin = FIntPoint(MinX, MinY);
-    OutSize = FIntPoint(MaxX - MinX + 1, MaxY - MinY + 1);
-    return OutSize.X > 0 && OutSize.Y > 0;
-}
-
-bool CanUseBinnedAbsorption(const FTriangleAbsorptionDispatch& Dispatch)
-{
-    const bool bSupportedMode = Dispatch.P2AndMode.W < 0.5f || Dispatch.P2AndMode.W > 1.5f;
-    return bSupportedMode &&
-           Dispatch.P0AndAmount.W > 0.0f &&
-           Dispatch.DispatchSize.X > 0 &&
-           Dispatch.DispatchSize.Y > 0;
-}
-
-void AppendBinnedAbsorptionContact(
-    const FTriangleAbsorptionDispatch& Dispatch,
-    TArray<FVector4f>& OutContacts)
-{
-    OutContacts.Add(Dispatch.UV01);
-    OutContacts.Add(Dispatch.UV2AndSettings);
-    OutContacts.Add(Dispatch.ContactAndRadius);
-    OutContacts.Add(Dispatch.P0AndAmount);
-    OutContacts.Add(Dispatch.P1AndMaxWetness);
-    OutContacts.Add(Dispatch.P2AndMode);
-}
-
-void BuildBinnedAbsorptionDispatches(FSlotRenderDispatch& SlotDispatch)
-{
-    if (SlotDispatch.Resolution <= 0 ||
-        CVarDWCGPUBinnedAbsorption.GetValueOnAnyThread() == 0 ||
-        SlotDispatch.AbsorptionDispatches.Num() < DWCAbsorptionBinMinDispatches)
-    {
-        return;
-    }
-
-    const FIntPoint TileGridSize(
-        FMath::DivideAndRoundUp(SlotDispatch.Resolution, DWCAbsorptionBinTileSize),
-        FMath::DivideAndRoundUp(SlotDispatch.Resolution, DWCAbsorptionBinTileSize));
-    const int32 TileCount = TileGridSize.X * TileGridSize.Y;
-    if (TileCount <= 0)
-    {
-        return;
-    }
-
-    TArray<TArray<uint32>> TileContactLists;
-    TileContactLists.SetNum(TileCount);
-
-    TArray<FVector4f> BinnedContacts;
-    BinnedContacts.Reserve(SlotDispatch.AbsorptionDispatches.Num() * DWCAbsorptionContactFloat4Count);
-
-    TArray<FTriangleAbsorptionDispatch> FallbackDispatches;
-    FallbackDispatches.Reserve(SlotDispatch.AbsorptionDispatches.Num());
-
-    for (const FTriangleAbsorptionDispatch& Dispatch : SlotDispatch.AbsorptionDispatches)
-    {
-        if (!CanUseBinnedAbsorption(Dispatch))
+        FUint4GPU() = default;
+        FUint4GPU(uint32 InX, uint32 InY, uint32 InZ, uint32 InW)
+            : X(InX), Y(InY), Z(InZ), W(InW)
         {
-            FallbackDispatches.Add(Dispatch);
-            continue;
+        }
+    };
+
+    struct FUint2GPU
+    {
+        uint32 X = 0;
+        uint32 Y = 0;
+
+        FUint2GPU() = default;
+        FUint2GPU(uint32 InX, uint32 InY)
+            : X(InX), Y(InY)
+        {
+        }
+    };
+
+    static_assert(sizeof(FUint4GPU) == 16, "FUint4GPU must match HLSL uint4.");
+    static_assert(sizeof(FUint2GPU) == 8, "FUint2GPU must match HLSL uint2.");
+    static_assert(sizeof(FVector4f) == 16, "FVector4f must match HLSL float4.");
+
+    struct FTriangleAbsorptionDispatch
+    {
+        FIntPoint DispatchMin = FIntPoint::ZeroValue;
+        FIntPoint DispatchSize = FIntPoint::ZeroValue;
+        FVector4f UV01 = FVector4f(0, 0, 0, 0);
+        FVector4f UV2AndSettings = FVector4f(0, 0, 0, 0);
+        FVector4f ContactAndRadius = FVector4f(0, 0, 0, 1);
+        FVector4f P0AndAmount = FVector4f(0, 0, 0, 0);
+        FVector4f P1AndMaxWetness = FVector4f(0, 0, 0, 1);
+        FVector4f P2AndMode = FVector4f(0, 0, 0, 0);
+    };
+
+    struct FSurfaceStampDispatch
+    {
+        FIntPoint DispatchMin = FIntPoint::ZeroValue;
+        FIntPoint DispatchSize = FIntPoint::ZeroValue;
+        FVector2f UV = FVector2f::ZeroVector;
+        FVector2f CenterPixels = FVector2f::ZeroVector;
+        FVector2f HalfSizePixels = FVector2f::ZeroVector;
+        float     Amount = 0.0f;
+        bool      bDroplet2 = false;
+    };
+
+    struct FSlotRenderDispatch
+    {
+        int32                               SlotRuntimeIndex = INDEX_NONE;
+        int32                               StaticSlotIndex = INDEX_NONE;
+        int32                               Resolution = 0;
+        int32                               SurfaceWaterResolution = 0;
+        FTextureRenderTargetResource*       CurrentResource = nullptr;
+        FTextureRenderTargetResource*       NextResource = nullptr;
+        FTextureRenderTargetResource*       CurrentPendingResource = nullptr;
+        FTextureRenderTargetResource*       NextPendingResource = nullptr;
+        FTextureRenderTargetResource*       SurfaceDroplet1Resource = nullptr;
+        FTextureRenderTargetResource*       SurfaceDroplet2Resource = nullptr;
+        TArray<FTriangleAbsorptionDispatch> AbsorptionDispatches;
+        TArray<FVector4f>                   BinnedAbsorptionContacts;
+        TArray<FUint2GPU>                   BinnedAbsorptionTileBins;
+        TArray<uint32>                      BinnedAbsorptionTileContactIndices;
+        FIntPoint                           BinnedAbsorptionTileGridSize = FIntPoint::ZeroValue;
+        TArray<FSurfaceStampDispatch>       SurfaceStampDispatches;
+    };
+
+    bool BuildSurfaceStampDispatch(
+        const FDWCSurfaceStampRequest& Request,
+        const int32                    Resolution,
+        FSurfaceStampDispatch&         OutDispatch)
+    {
+        if (Resolution <= 0 ||
+            Request.UV.ContainsNaN() ||
+            !FMath::IsFinite(Request.UV.X) ||
+            !FMath::IsFinite(Request.UV.Y) ||
+            Request.Amount <= 0.0f)
+        {
+            return false;
         }
 
-        const uint32 ContactIndex = static_cast<uint32>(BinnedContacts.Num() / DWCAbsorptionContactFloat4Count);
-        AppendBinnedAbsorptionContact(Dispatch, BinnedContacts);
+        const FVector2f HalfSize(
+            FMath::Max(0.5f, Request.HalfSizePixels.X),
+            FMath::Max(0.5f, Request.HalfSizePixels.Y));
+        const FVector2f Center(
+            FMath::Clamp(Request.UV.X, 0.0f, 1.0f) * static_cast<float>(Resolution),
+            FMath::Clamp(Request.UV.Y, 0.0f, 1.0f) * static_cast<float>(Resolution));
 
-        const FIntPoint MaxTexel = Dispatch.DispatchMin + Dispatch.DispatchSize - FIntPoint(1, 1);
-        const int32 MinTileX = FMath::Clamp(Dispatch.DispatchMin.X / DWCAbsorptionBinTileSize, 0, TileGridSize.X - 1);
-        const int32 MinTileY = FMath::Clamp(Dispatch.DispatchMin.Y / DWCAbsorptionBinTileSize, 0, TileGridSize.Y - 1);
-        const int32 MaxTileX = FMath::Clamp(MaxTexel.X / DWCAbsorptionBinTileSize, 0, TileGridSize.X - 1);
-        const int32 MaxTileY = FMath::Clamp(MaxTexel.Y / DWCAbsorptionBinTileSize, 0, TileGridSize.Y - 1);
+        const int32 MinX = FMath::FloorToInt(Center.X - HalfSize.X - 1.0f);
+        const int32 MinY = FMath::FloorToInt(Center.Y - HalfSize.Y - 1.0f);
+        const int32 MaxX = FMath::CeilToInt(Center.X + HalfSize.X + 1.0f);
+        const int32 MaxY = FMath::CeilToInt(Center.Y + HalfSize.Y + 1.0f);
 
-        for (int32 TileY = MinTileY; TileY <= MaxTileY; ++TileY)
+        OutDispatch.DispatchMin = FIntPoint(MinX, MinY);
+        OutDispatch.DispatchSize = FIntPoint(MaxX - MinX + 1, MaxY - MinY + 1);
+        OutDispatch.UV = Request.UV;
+        OutDispatch.CenterPixels = Center;
+        OutDispatch.HalfSizePixels = HalfSize;
+        OutDispatch.Amount = FMath::Clamp(Request.Amount, 0.0f, 1.0f);
+        OutDispatch.bDroplet2 = Request.bDroplet2;
+        return OutDispatch.DispatchSize.X > 0 && OutDispatch.DispatchSize.Y > 0;
+    }
+
+    bool BuildAbsorptionStampDispatch(
+        const FDWCResolvedSurfaceContact& Contact,
+        const FDWCGPUBakedTriangle&       Triangle,
+        const float                       RadiusPixels,
+        const int32                       Resolution,
+        FTriangleAbsorptionDispatch&      OutDispatch)
+    {
+        if (Resolution <= 0 || Contact.ContactUV.ContainsNaN() ||
+            !FMath::IsFinite(Contact.ContactUV.X) || !FMath::IsFinite(Contact.ContactUV.Y))
         {
-            for (int32 TileX = MinTileX; TileX <= MaxTileX; ++TileX)
+            return false;
+        }
+
+        const float     SafeRadiusPixels = FMath::Max(0.5f, RadiusPixels);
+        const FVector2f ClampedUV(
+            FMath::Clamp(Contact.ContactUV.X, 0.0f, 1.0f),
+            FMath::Clamp(Contact.ContactUV.Y, 0.0f, 1.0f));
+        const FIntPoint CenterTexel(
+            FMath::Clamp(FMath::FloorToInt(ClampedUV.X * Resolution), 0, Resolution - 1),
+            FMath::Clamp(FMath::FloorToInt(ClampedUV.Y * Resolution), 0, Resolution - 1));
+        const FVector2f CenterPixels(
+            static_cast<float>(CenterTexel.X) + 0.5f,
+            static_cast<float>(CenterTexel.Y) + 0.5f);
+
+        const int32 MinX = FMath::Clamp(
+            FMath::FloorToInt(CenterPixels.X - SafeRadiusPixels - 1.0f),
+            0,
+            Resolution - 1);
+        const int32 MinY = FMath::Clamp(
+            FMath::FloorToInt(CenterPixels.Y - SafeRadiusPixels - 1.0f),
+            0,
+            Resolution - 1);
+        const int32 MaxX = FMath::Clamp(
+            FMath::CeilToInt(CenterPixels.X + SafeRadiusPixels + 1.0f),
+            0,
+            Resolution - 1);
+        const int32 MaxY = FMath::Clamp(
+            FMath::CeilToInt(CenterPixels.Y + SafeRadiusPixels + 1.0f),
+            0,
+            Resolution - 1);
+        if (MaxX < MinX || MaxY < MinY)
+        {
+            return false;
+        }
+
+        const float InverseResolution = 1.0f / static_cast<float>(Resolution);
+        OutDispatch.DispatchMin = FIntPoint(MinX, MinY);
+        OutDispatch.DispatchSize = FIntPoint(MaxX - MinX + 1, MaxY - MinY + 1);
+        OutDispatch.UV01 = FVector4f(
+            CenterPixels.X * InverseResolution,
+            CenterPixels.Y * InverseResolution,
+            SafeRadiusPixels * InverseResolution,
+            SafeRadiusPixels * InverseResolution);
+        OutDispatch.UV2AndSettings.X =
+            static_cast<float>(FMath::Max(0, Triangle.UVIslandID) + 1);
+        return true;
+    }
+
+    bool IsSampledWetAreaContact(const FDWCResolvedSurfaceContact& Contact)
+    {
+        constexpr float TriangleCenterWeight = 1.0f / 3.0f;
+        constexpr float WeightTolerance = 1.0e-4f;
+
+        // ResolveWetArea has always emitted one contact at the exact triangle centroid.
+        // Keep that CPU contract untouched and select the GPU-only stamp path here.
+        return FMath::IsNearlyEqual(Contact.Barycentric.X, TriangleCenterWeight, WeightTolerance) &&
+               FMath::IsNearlyEqual(Contact.Barycentric.Y, TriangleCenterWeight, WeightTolerance) &&
+               FMath::IsNearlyEqual(Contact.Barycentric.Z, TriangleCenterWeight, WeightTolerance) &&
+               FMath::IsNearlyZero(Contact.DistanceToSurface) &&
+               FMath::IsNearlyEqual(Contact.TriangleInfluence, 1.0f, WeightTolerance);
+    }
+
+    bool BuildDispatchBounds(
+        const FDWCGPUBakedTriangle& Triangle,
+        const int32                 Resolution,
+        FIntPoint&                  OutMin,
+        FIntPoint&                  OutSize)
+    {
+        if (Resolution <= 0)
+        {
+            return false;
+        }
+
+        const double MinU = FMath::Min3(Triangle.UV0.X, Triangle.UV1.X, Triangle.UV2.X);
+        const double MaxU = FMath::Max3(Triangle.UV0.X, Triangle.UV1.X, Triangle.UV2.X);
+        const double MinV = FMath::Min3(Triangle.UV0.Y, Triangle.UV1.Y, Triangle.UV2.Y);
+        const double MaxV = FMath::Max3(Triangle.UV0.Y, Triangle.UV1.Y, Triangle.UV2.Y);
+
+        const int32 MinX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(MinU * Resolution), 0, Resolution - 1));
+        const int32 MinY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(MinV * Resolution), 0, Resolution - 1));
+        const int32 MaxX = IntCastChecked<int32>(FMath::Clamp(FMath::CeilToInt(MaxU * Resolution) - 1, 0, Resolution - 1));
+        const int32 MaxY = IntCastChecked<int32>(FMath::Clamp(FMath::CeilToInt(MaxV * Resolution) - 1, 0, Resolution - 1));
+
+        if (MaxX < MinX || MaxY < MinY)
+        {
+            return false;
+        }
+
+        OutMin = FIntPoint(MinX, MinY);
+        OutSize = FIntPoint(MaxX - MinX + 1, MaxY - MinY + 1);
+        return OutSize.X > 0 && OutSize.Y > 0;
+    }
+
+    bool CanUseBinnedAbsorption(const FTriangleAbsorptionDispatch& Dispatch)
+    {
+        const bool bSupportedMode = Dispatch.P2AndMode.W < 0.5f || Dispatch.P2AndMode.W > 1.5f;
+        return bSupportedMode &&
+               Dispatch.P0AndAmount.W > 0.0f &&
+               Dispatch.DispatchSize.X > 0 &&
+               Dispatch.DispatchSize.Y > 0;
+    }
+
+    void AppendBinnedAbsorptionContact(
+        const FTriangleAbsorptionDispatch& Dispatch,
+        TArray<FVector4f>&                 OutContacts)
+    {
+        OutContacts.Add(Dispatch.UV01);
+        OutContacts.Add(Dispatch.UV2AndSettings);
+        OutContacts.Add(Dispatch.ContactAndRadius);
+        OutContacts.Add(Dispatch.P0AndAmount);
+        OutContacts.Add(Dispatch.P1AndMaxWetness);
+        OutContacts.Add(Dispatch.P2AndMode);
+    }
+
+    void BuildBinnedAbsorptionDispatches(FSlotRenderDispatch& SlotDispatch)
+    {
+        if (SlotDispatch.Resolution <= 0 ||
+            CVarDWCGPUBinnedAbsorption.GetValueOnAnyThread() == 0 ||
+            SlotDispatch.AbsorptionDispatches.Num() < DWCAbsorptionBinMinDispatches)
+        {
+            return;
+        }
+
+        const FIntPoint TileGridSize(
+            FMath::DivideAndRoundUp(SlotDispatch.Resolution, DWCAbsorptionBinTileSize),
+            FMath::DivideAndRoundUp(SlotDispatch.Resolution, DWCAbsorptionBinTileSize));
+        const int32 TileCount = TileGridSize.X * TileGridSize.Y;
+        if (TileCount <= 0)
+        {
+            return;
+        }
+
+        TArray<TArray<uint32>> TileContactLists;
+        TileContactLists.SetNum(TileCount);
+
+        TArray<FVector4f> BinnedContacts;
+        BinnedContacts.Reserve(SlotDispatch.AbsorptionDispatches.Num() * DWCAbsorptionContactFloat4Count);
+
+        TArray<FTriangleAbsorptionDispatch> FallbackDispatches;
+        FallbackDispatches.Reserve(SlotDispatch.AbsorptionDispatches.Num());
+
+        for (const FTriangleAbsorptionDispatch& Dispatch : SlotDispatch.AbsorptionDispatches)
+        {
+            if (!CanUseBinnedAbsorption(Dispatch))
             {
-                TileContactLists[TileY * TileGridSize.X + TileX].Add(ContactIndex);
+                FallbackDispatches.Add(Dispatch);
+                continue;
+            }
+
+            const uint32 ContactIndex = static_cast<uint32>(BinnedContacts.Num() / DWCAbsorptionContactFloat4Count);
+            AppendBinnedAbsorptionContact(Dispatch, BinnedContacts);
+
+            const FIntPoint MaxTexel = Dispatch.DispatchMin + Dispatch.DispatchSize - FIntPoint(1, 1);
+            const int32     MinTileX = FMath::Clamp(Dispatch.DispatchMin.X / DWCAbsorptionBinTileSize, 0, TileGridSize.X - 1);
+            const int32     MinTileY = FMath::Clamp(Dispatch.DispatchMin.Y / DWCAbsorptionBinTileSize, 0, TileGridSize.Y - 1);
+            const int32     MaxTileX = FMath::Clamp(MaxTexel.X / DWCAbsorptionBinTileSize, 0, TileGridSize.X - 1);
+            const int32     MaxTileY = FMath::Clamp(MaxTexel.Y / DWCAbsorptionBinTileSize, 0, TileGridSize.Y - 1);
+
+            for (int32 TileY = MinTileY; TileY <= MaxTileY; ++TileY)
+            {
+                for (int32 TileX = MinTileX; TileX <= MaxTileX; ++TileX)
+                {
+                    TileContactLists[TileY * TileGridSize.X + TileX].Add(ContactIndex);
+                }
+            }
+        }
+
+        if (BinnedContacts.IsEmpty())
+        {
+            return;
+        }
+
+        TArray<FUint2GPU> TileBins;
+        TileBins.SetNum(TileCount);
+        TArray<uint32> TileContactIndices;
+        for (int32 TileIndex = 0; TileIndex < TileCount; ++TileIndex)
+        {
+            const TArray<uint32>& ContactList = TileContactLists[TileIndex];
+            const uint32          Offset = static_cast<uint32>(TileContactIndices.Num());
+            const uint32          Count = static_cast<uint32>(ContactList.Num());
+            TileBins[TileIndex] = FUint2GPU(Offset, Count);
+            TileContactIndices.Append(ContactList);
+        }
+
+        if (TileContactIndices.IsEmpty())
+        {
+            return;
+        }
+
+        SlotDispatch.AbsorptionDispatches = MoveTemp(FallbackDispatches);
+        SlotDispatch.BinnedAbsorptionContacts = MoveTemp(BinnedContacts);
+        SlotDispatch.BinnedAbsorptionTileBins = MoveTemp(TileBins);
+        SlotDispatch.BinnedAbsorptionTileContactIndices = MoveTemp(TileContactIndices);
+        SlotDispatch.BinnedAbsorptionTileGridSize = TileGridSize;
+    }
+
+    FVector4f MakePositionAndValue(const FVector& Position, const float Value)
+    {
+        return FVector4f(
+            static_cast<float>(Position.X),
+            static_cast<float>(Position.Y),
+            static_cast<float>(Position.Z),
+            Value);
+    }
+
+    void FillTriangleUVs(const FDWCGPUBakedTriangle& Triangle, FTriangleAbsorptionDispatch& OutDispatch)
+    {
+        OutDispatch.UV01 = FVector4f(
+            static_cast<float>(Triangle.UV0.X),
+            static_cast<float>(Triangle.UV0.Y),
+            static_cast<float>(Triangle.UV1.X),
+            static_cast<float>(Triangle.UV1.Y));
+        OutDispatch.UV2AndSettings = FVector4f(
+            static_cast<float>(Triangle.UV2.X),
+            static_cast<float>(Triangle.UV2.Y),
+            0.0f,
+            0.0f);
+    }
+
+    void CollectExpectedWettableSlots(const UWetClothingAsset& Asset, TSet<int32>& OutMaterialSlots)
+    {
+        OutMaterialSlots.Reset();
+        for (const FWetClothingAuthoredMaterialSlot& SlotState : Asset.Authored.PartData.EditableWetPartData.MaterialSlots)
+        {
+            if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
+            {
+                OutMaterialSlots.Add(SlotState.MaterialSlotIndex);
             }
         }
     }
 
-    if (BinnedContacts.IsEmpty())
+    FString JoinSortedSlotSet(const TSet<int32>& MaterialSlots)
     {
-        return;
-    }
+        TArray<int32> SortedSlots = MaterialSlots.Array();
+        SortedSlots.Sort();
 
-    TArray<FUint2GPU> TileBins;
-    TileBins.SetNum(TileCount);
-    TArray<uint32> TileContactIndices;
-    for (int32 TileIndex = 0; TileIndex < TileCount; ++TileIndex)
-    {
-        const TArray<uint32>& ContactList = TileContactLists[TileIndex];
-        const uint32 Offset = static_cast<uint32>(TileContactIndices.Num());
-        const uint32 Count = static_cast<uint32>(ContactList.Num());
-        TileBins[TileIndex] = FUint2GPU(Offset, Count);
-        TileContactIndices.Append(ContactList);
-    }
-
-    if (TileContactIndices.IsEmpty())
-    {
-        return;
-    }
-
-    SlotDispatch.AbsorptionDispatches = MoveTemp(FallbackDispatches);
-    SlotDispatch.BinnedAbsorptionContacts = MoveTemp(BinnedContacts);
-    SlotDispatch.BinnedAbsorptionTileBins = MoveTemp(TileBins);
-    SlotDispatch.BinnedAbsorptionTileContactIndices = MoveTemp(TileContactIndices);
-    SlotDispatch.BinnedAbsorptionTileGridSize = TileGridSize;
-}
-
-FVector4f MakePositionAndValue(const FVector& Position, const float Value)
-{
-    return FVector4f(
-        static_cast<float>(Position.X),
-        static_cast<float>(Position.Y),
-        static_cast<float>(Position.Z),
-        Value);
-}
-
-void FillTriangleUVs(const FDWCGPUBakedTriangle& Triangle, FTriangleAbsorptionDispatch& OutDispatch)
-{
-    OutDispatch.UV01 = FVector4f(
-        static_cast<float>(Triangle.UV0.X),
-        static_cast<float>(Triangle.UV0.Y),
-        static_cast<float>(Triangle.UV1.X),
-        static_cast<float>(Triangle.UV1.Y));
-    OutDispatch.UV2AndSettings = FVector4f(
-        static_cast<float>(Triangle.UV2.X),
-        static_cast<float>(Triangle.UV2.Y),
-        0.0f,
-        0.0f);
-}
-
-void CollectExpectedWettableSlots(const UWetClothingAsset& Asset, TSet<int32>& OutMaterialSlots)
-{
-    OutMaterialSlots.Reset();
-    for (const FWetClothingAuthoredMaterialSlot& SlotState : Asset.Authored.PartData.EditableWetPartData.MaterialSlots)
-    {
-        if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
+        TArray<FString> SlotStrings;
+        SlotStrings.Reserve(SortedSlots.Num());
+        for (const int32 MaterialSlot : SortedSlots)
         {
-            OutMaterialSlots.Add(SlotState.MaterialSlotIndex);
+            SlotStrings.Add(FString::FromInt(MaterialSlot));
         }
+        return FString::Join(SlotStrings, TEXT(","));
     }
-}
 
-FString JoinSortedSlotSet(const TSet<int32>& MaterialSlots)
-{
-    TArray<int32> SortedSlots = MaterialSlots.Array();
-    SortedSlots.Sort();
-
-    TArray<FString> SlotStrings;
-    SlotStrings.Reserve(SortedSlots.Num());
-    for (const int32 MaterialSlot : SortedSlots)
+    bool MaterialHasTextureParameter(UMaterialInterface* Material, const FName ParameterName)
     {
-        SlotStrings.Add(FString::FromInt(MaterialSlot));
-    }
-    return FString::Join(SlotStrings, TEXT(","));
-}
-
-bool MaterialHasTextureParameter(UMaterialInterface* Material, const FName ParameterName)
-{
-    if (Material == nullptr || ParameterName.IsNone())
-    {
-        return false;
-    }
-
-    TArray<FMaterialParameterInfo> ParameterInfos;
-    TArray<FGuid> ParameterIds;
-    Material->GetAllTextureParameterInfo(ParameterInfos, ParameterIds);
-    return ParameterInfos.ContainsByPredicate(
-        [ParameterName](const FMaterialParameterInfo& ParameterInfo)
+        if (Material == nullptr || ParameterName.IsNone())
         {
-            return ParameterInfo.Name == ParameterName;
-        });
-}
+            return false;
+        }
 
-bool MaterialHasScalarParameter(UMaterialInterface* Material, const FName ParameterName)
-{
-    if (Material == nullptr || ParameterName.IsNone())
-    {
-        return false;
+        TArray<FMaterialParameterInfo> ParameterInfos;
+        TArray<FGuid>                  ParameterIds;
+        Material->GetAllTextureParameterInfo(ParameterInfos, ParameterIds);
+        return ParameterInfos.ContainsByPredicate(
+            [ParameterName](const FMaterialParameterInfo& ParameterInfo)
+            {
+                return ParameterInfo.Name == ParameterName;
+            });
     }
 
-    TArray<FMaterialParameterInfo> ParameterInfos;
-    TArray<FGuid> ParameterIds;
-    Material->GetAllScalarParameterInfo(ParameterInfos, ParameterIds);
-    return ParameterInfos.ContainsByPredicate(
-        [ParameterName](const FMaterialParameterInfo& ParameterInfo)
+    bool MaterialHasScalarParameter(UMaterialInterface* Material, const FName ParameterName)
+    {
+        if (Material == nullptr || ParameterName.IsNone())
         {
-            return ParameterInfo.Name == ParameterName;
-        });
-}
+            return false;
+        }
 
-template <typename ElementType>
-FRDGBufferRef RegisterOrUploadStructuredBuffer(
-    FRDGBuilder& GraphBuilder,
-    TRefCountPtr<FRDGPooledBuffer>& PooledBuffer,
-    const TCHAR* Name,
-    const TArray<ElementType>& Data)
-{
-    if (PooledBuffer.IsValid())
-    {
-        return GraphBuilder.RegisterExternalBuffer(PooledBuffer, Name);
+        TArray<FMaterialParameterInfo> ParameterInfos;
+        TArray<FGuid>                  ParameterIds;
+        Material->GetAllScalarParameterInfo(ParameterInfos, ParameterIds);
+        return ParameterInfos.ContainsByPredicate(
+            [ParameterName](const FMaterialParameterInfo& ParameterInfo)
+            {
+                return ParameterInfo.Name == ParameterName;
+            });
     }
 
-    if (Data.IsEmpty())
+    template <typename ElementType>
+    FRDGBufferRef RegisterOrUploadStructuredBuffer(
+        FRDGBuilder&                    GraphBuilder,
+        TRefCountPtr<FRDGPooledBuffer>& PooledBuffer,
+        const TCHAR*                    Name,
+        const TArray<ElementType>&      Data)
     {
-        return nullptr;
-    }
+        if (PooledBuffer.IsValid())
+        {
+            return GraphBuilder.RegisterExternalBuffer(PooledBuffer, Name);
+        }
 
-    FRDGBufferRef Buffer = CreateStructuredBuffer(GraphBuilder, Name, Data);
-    GraphBuilder.QueueBufferExtraction(Buffer, &PooledBuffer);
-    return Buffer;
-}
+        if (Data.IsEmpty())
+        {
+            return nullptr;
+        }
+
+        FRDGBufferRef Buffer = CreateStructuredBuffer(GraphBuilder, Name, Data);
+        GraphBuilder.QueueBufferExtraction(Buffer, &PooledBuffer);
+        return Buffer;
+    }
 } // namespace DWCGPUBackendPrivate
 
 using namespace DWCGPUBackendPrivate;
@@ -635,27 +636,27 @@ struct FDWCGPUBackend::FStaticSimulationData
 
     struct FSlotData
     {
-        int32 MaterialSlotIndex = INDEX_NONE;
-        int32 Resolution = 0;
-        int32 SurfaceWaterResolution = 0;
+        int32             MaterialSlotIndex = INDEX_NONE;
+        int32             Resolution = 0;
+        int32             SurfaceWaterResolution = 0;
         TArray<FUint4GPU> TexelLookup;
         TArray<FUint4GPU> SurfaceTexelLookup;
         TArray<FUint4GPU> SeamDestinations;
         TArray<FVector4f> SeamIncoming;
     };
 
-    int32 TriangleCount = 0;
+    int32                TriangleCount = 0;
     TArray<FSectionData> Sections;
-    TArray<FVector4f> Profiles;
+    TArray<FVector4f>    Profiles;
     TArray<float>        PendingWaterLimits;
-    TArray<uint32> TriangleProfileIndices;
-    TArray<FVector4f> TriangleDataToSurfaceWaterNormalUV;
-    TArray<FVector4f> TriangleUV01;
-    TArray<FVector4f> TriangleUV2AndDroplet;
-    TArray<FVector4f> TriangleFlowDropletSettings;
-    TArray<float> TriangleFlowSpawnPositionSpread;
-    TArray<FUint4GPU> TriangleSurfaceMetadata;
-    TArray<FSlotData> Slots;
+    TArray<uint32>       TriangleProfileIndices;
+    TArray<FVector4f>    TriangleDataToSurfaceWaterNormalUV;
+    TArray<FVector4f>    TriangleUV01;
+    TArray<FVector4f>    TriangleUV2AndDroplet;
+    TArray<FVector4f>    TriangleFlowDropletSettings;
+    TArray<float>        TriangleFlowSpawnPositionSpread;
+    TArray<FUint4GPU>    TriangleSurfaceMetadata;
+    TArray<FSlotData>    Slots;
 };
 
 struct FDWCGPUBackend::FRenderState
@@ -677,11 +678,10 @@ struct FDWCGPUBackend::FRenderState
     TRefCountPtr<FRDGPooledBuffer> NiagaraTriangleSurfaceMetadata;
 
     /** Per-character buffers updated from the current skinned pose. */
-    TRefCountPtr<FRDGPooledBuffer> TriangleFlow;
-    TRefCountPtr<FRDGPooledBuffer> TriangleMetric;
-    TRefCountPtr<FRDGPooledBuffer> TrianglePositions;
+    TRefCountPtr<FRDGPooledBuffer>         TriangleFlow;
+    TRefCountPtr<FRDGPooledBuffer>         TriangleMetric;
+    TRefCountPtr<FRDGPooledBuffer>         TrianglePositions;
     TArray<TRefCountPtr<FRDGPooledBuffer>> RestPositionBuffers;
-
 };
 
 UTextureRenderTarget2D* FDWCGPUBackend::FMaterialSlotRuntime::GetCurrentMap() const
@@ -698,16 +698,16 @@ UTextureRenderTarget2D* FDWCGPUBackend::FMaterialSlotRuntime::GetNextMap() const
 UTextureRenderTarget2D* FDWCGPUBackend::FMaterialSlotRuntime::GetCurrentPendingMap() const
 {
     return PendingWetnessMaps.IsValidIndex(CurrentPendingTextureIndex)
-        ? PendingWetnessMaps[CurrentPendingTextureIndex].Get()
-        : nullptr;
+               ? PendingWetnessMaps[CurrentPendingTextureIndex].Get()
+               : nullptr;
 }
 
 UTextureRenderTarget2D* FDWCGPUBackend::FMaterialSlotRuntime::GetNextPendingMap() const
 {
     const int32 NextIndex = 1 - CurrentPendingTextureIndex;
     return PendingWetnessMaps.IsValidIndex(NextIndex)
-        ? PendingWetnessMaps[NextIndex].Get()
-        : nullptr;
+               ? PendingWetnessMaps[NextIndex].Get()
+               : nullptr;
 }
 
 void FDWCGPUBackend::FMaterialSlotRuntime::SwapMaps()
@@ -731,7 +731,7 @@ bool FDWCGPUBackend::Initialize(const FDWCGPUBackendInitArgs& Args)
         return false;
     }
 
-    const USkeletalMesh* SkeletalMesh = Args.TargetSkeletalMesh->GetSkeletalMeshAsset();
+    const USkeletalMesh*      SkeletalMesh = Args.TargetSkeletalMesh->GetSkeletalMeshAsset();
     const FDWCGPULODBakeData& GPUData = Args.WetClothingAsset->GetGPUWetMapRuntimeData(Args.LODIndex);
     if (!SkeletalMesh || !Args.WetClothingAsset->IsGPUWetMapDataValidForMesh(SkeletalMesh, Args.LODIndex) ||
         !GPUData.bMapDataValid || GPUData.MapBakeVersion != DWCFullSimulationMapVersion || GPUData.LODIndex != Args.LODIndex)
@@ -798,16 +798,16 @@ bool FDWCGPUBackend::Initialize(const FDWCGPUBackendInitArgs& Args)
 
 bool FDWCGPUBackend::BuildStaticSimulationData()
 {
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const UWetClothingAsset*      Asset = WetClothingAsset.Get();
     const USkeletalMeshComponent* MeshComponent = TargetSkeletalMesh.Get();
-    const USkeletalMesh* SkeletalMesh = MeshComponent ? MeshComponent->GetSkeletalMeshAsset() : nullptr;
+    const USkeletalMesh*          SkeletalMesh = MeshComponent ? MeshComponent->GetSkeletalMeshAsset() : nullptr;
     if (!Asset || !SkeletalMesh)
     {
         return false;
     }
 
     const FDWCGPULODBakeData& Baked = Asset->GetGPUWetMapRuntimeData(LODIndex);
-    const int32 ExpectedDWCDataUVChannel = Asset->GetDWCDataUVChannelIndex();
+    const int32               ExpectedDWCDataUVChannel = Asset->GetDWCDataUVChannelIndex();
     if (ExpectedDWCDataUVChannel == INDEX_NONE)
     {
         UE_LOG(
@@ -834,9 +834,9 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
     Data->TriangleCount = Baked.Triangles.Num();
     Data->Profiles.Reserve(FMath::Max(1, Baked.Profiles.Num()));
     Data->PendingWaterLimits.Reserve(FMath::Max(1, Baked.Profiles.Num()));
-    const FWetClothingEditableWetPartData& WetPartData = Asset->Authored.PartData.EditableWetPartData;
+    const FWetClothingEditableWetPartData&             WetPartData = Asset->Authored.PartData.EditableWetPartData;
     TArray<FResolvedAbsorbedWaterSimulationParameters> CurrentAuthoredProfiles;
-    TArray<FWetnessProfileParameters> CurrentResolvedProfiles;
+    TArray<FWetnessProfileParameters>                  CurrentResolvedProfiles;
     CurrentAuthoredProfiles.SetNum(WetPartData.Profiles.Num());
     CurrentResolvedProfiles.SetNum(WetPartData.Profiles.Num());
     for (int32 ProfileIndex = 0; ProfileIndex < WetPartData.Profiles.Num(); ++ProfileIndex)
@@ -875,14 +875,14 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
     }
     Data->Sections.SetNum(FMath::Max(0, MaxSectionIndex + 1));
 
-    const FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
+    const FSkeletalMeshRenderData*    RenderData = SkeletalMesh->GetResourceForRendering();
     const FSkeletalMeshLODRenderData* LODData =
         RenderData && RenderData->LODRenderData.IsValidIndex(LODIndex)
             ? &RenderData->LODRenderData[LODIndex]
             : nullptr;
     const int32 VertexCount = LODData
-        ? static_cast<int32>(LODData->StaticVertexBuffers.PositionVertexBuffer.GetNumVertices())
-        : 0;
+                                  ? static_cast<int32>(LODData->StaticVertexBuffers.PositionVertexBuffer.GetNumVertices())
+                                  : 0;
     TBitArray<> UsedSections(false, Data->Sections.Num());
 
     for (const FDWCGPUBakedTriangle& Triangle : Baked.Triangles)
@@ -933,18 +933,18 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
         const FWetnessProfileParameters& ResolvedProfile =
             CurrentResolvedProfiles[AuthoredProfileIndex];
         const FSurfaceWaterProfileParameters& Surface = ResolvedProfile.SurfaceWater;
-        const float DropletRadiusScale = WetPart != nullptr
-            ? WetPart->SurfaceWater.GetResolvedDropletStampSizeScale()
-            : 1.0f;
-        const float DropletRadiusPixels =
+        const float                           DropletRadiusScale = WetPart != nullptr
+                                                                       ? WetPart->SurfaceWater.GetResolvedDropletStampSizeScale()
+                                                                       : 1.0f;
+        const float                           DropletRadiusPixels =
             Surface.bEnabled
-                ? FMath::Max(0.0f, Surface.DropletRadiusPixels * DropletRadiusScale)
-                : 0.0f;
+                                          ? FMath::Max(0.0f, Surface.DropletRadiusPixels * DropletRadiusScale)
+                                          : 0.0f;
         const float DropletSpawnProbability =
             Surface.bEnabled ? FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f) : 0.0f;
         const float DropletFlowSizeScale = WetPart != nullptr
-            ? WetPart->SurfaceWater.GetResolvedDropletFlowStampSizeScale()
-            : 1.0f;
+                                               ? WetPart->SurfaceWater.GetResolvedDropletFlowStampSizeScale()
+                                               : 1.0f;
         const bool  bEnableDroplet2 = Surface.bEnabled;
         const float DropletFlowRadiusPixels =
             bEnableDroplet2
@@ -989,7 +989,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             FloatToBits(RejectedWaterFraction));
 
         const FResolvedAbsorbedWaterSimulationParameters& CurrentProfile = CurrentAuthoredProfiles[AuthoredProfileIndex];
-        const int32 RuntimeProfileIndex = FindOrAddGPUProfile(
+        const int32                                       RuntimeProfileIndex = FindOrAddGPUProfile(
             Data->Profiles,
             Data->PendingWaterLimits,
             CurrentProfile,
@@ -1104,49 +1104,49 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
 
         const auto BuildLookup =
             [&Baked, &BakedSlot](
-                const TArray<int32>& TriangleIDs,
+                const TArray<int32>&  TriangleIDs,
                 const TArray<uint32>& PackedBarycentricXY,
-                const TArray<float>& RestTexelAreas,
-                const TArray<uint8>& ValidMask,
-                TArray<FUint4GPU>& OutLookup)
+                const TArray<float>&  RestTexelAreas,
+                const TArray<uint8>&  ValidMask,
+                TArray<FUint4GPU>&    OutLookup)
+        {
+            if (TriangleIDs.Num() != PackedBarycentricXY.Num() ||
+                TriangleIDs.Num() != RestTexelAreas.Num() ||
+                TriangleIDs.Num() != ValidMask.Num())
             {
-                if (TriangleIDs.Num() != PackedBarycentricXY.Num() ||
-                    TriangleIDs.Num() != RestTexelAreas.Num() ||
-                    TriangleIDs.Num() != ValidMask.Num())
+                return false;
+            }
+
+            OutLookup.Reset(TriangleIDs.Num());
+            for (int32 TexelIndex = 0; TexelIndex < TriangleIDs.Num(); ++TexelIndex)
+            {
+                const int32 SignedTriangleID = TriangleIDs[TexelIndex];
+                const bool  bValidTexel = ValidMask[TexelIndex] != 0;
+                if ((bValidTexel && (!Baked.Triangles.IsValidIndex(SignedTriangleID) ||
+                                     Baked.Triangles[SignedTriangleID].MaterialSlotIndex != BakedSlot.MaterialSlotIndex ||
+                                     RestTexelAreas[TexelIndex] <= 0.0f)) ||
+                    (!bValidTexel && SignedTriangleID != INDEX_NONE))
                 {
                     return false;
                 }
 
-                OutLookup.Reset(TriangleIDs.Num());
-                for (int32 TexelIndex = 0; TexelIndex < TriangleIDs.Num(); ++TexelIndex)
+                const uint32 TriangleID = SignedTriangleID == INDEX_NONE
+                                              ? MAX_uint32
+                                              : static_cast<uint32>(SignedTriangleID);
+                uint32       IslandAndValid = 0u;
+                if (bValidTexel)
                 {
-                    const int32 SignedTriangleID = TriangleIDs[TexelIndex];
-                    const bool bValidTexel = ValidMask[TexelIndex] != 0;
-                    if ((bValidTexel && (!Baked.Triangles.IsValidIndex(SignedTriangleID) ||
-                                        Baked.Triangles[SignedTriangleID].MaterialSlotIndex != BakedSlot.MaterialSlotIndex ||
-                                        RestTexelAreas[TexelIndex] <= 0.0f)) ||
-                        (!bValidTexel && SignedTriangleID != INDEX_NONE))
-                    {
-                        return false;
-                    }
-
-                    const uint32 TriangleID = SignedTriangleID == INDEX_NONE
-                        ? MAX_uint32
-                        : static_cast<uint32>(SignedTriangleID);
-                    uint32 IslandAndValid = 0u;
-                    if (bValidTexel)
-                    {
-                        IslandAndValid = static_cast<uint32>(
-                            FMath::Max(0, Baked.Triangles[SignedTriangleID].UVIslandID) + 1);
-                    }
-                    OutLookup.Add(FUint4GPU(
-                        TriangleID,
-                        PackedBarycentricXY[TexelIndex],
-                        FloatToBits(RestTexelAreas[TexelIndex]),
-                        IslandAndValid));
+                    IslandAndValid = static_cast<uint32>(
+                        FMath::Max(0, Baked.Triangles[SignedTriangleID].UVIslandID) + 1);
                 }
-                return true;
-            };
+                OutLookup.Add(FUint4GPU(
+                    TriangleID,
+                    PackedBarycentricXY[TexelIndex],
+                    FloatToBits(RestTexelAreas[TexelIndex]),
+                    IslandAndValid));
+            }
+            return true;
+        };
 
         if (!BuildLookup(
                 BakedSlot.TexelTriangleIDs,
@@ -1269,14 +1269,13 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
     return true;
 }
 
-
 bool FDWCGPUBackend::AcquireSharedStaticResources()
 {
     SharedStaticSlotResources.Reset();
 
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const UWetClothingAsset*           Asset = WetClothingAsset.Get();
     const UDynamicWetClothesComponent* Component = OwnerComponent.Get();
-    UWorld* World = Component != nullptr ? Component->GetWorld() : nullptr;
+    UWorld*                            World = Component != nullptr ? Component->GetWorld() : nullptr;
     if (Asset == nullptr || World == nullptr || !StaticSimulationData.IsValid())
     {
         return false;
@@ -1300,7 +1299,7 @@ bool FDWCGPUBackend::AcquireSharedStaticResources()
     SharedStaticSlotResources.SetNum(StaticSimulationData->Slots.Num());
     for (int32 StaticSlotIndex = 0; StaticSlotIndex < StaticSimulationData->Slots.Num(); ++StaticSlotIndex)
     {
-        const FStaticSimulationData::FSlotData& Slot = StaticSimulationData->Slots[StaticSlotIndex];
+        const FStaticSimulationData::FSlotData&                     Slot = StaticSimulationData->Slots[StaticSlotIndex];
         TSharedPtr<FDWCGPUStaticSlotResources, ESPMode::ThreadSafe> Shared =
             ResourceSubsystem->AcquireStaticSlotResources(
                 Asset,
@@ -1361,7 +1360,7 @@ bool FDWCGPUBackend::BuildDebugVertexLookup()
     }
 
     const FWetClothingPrecomputedSimulationData& Precomputed = Asset->GetPrecomputedSimulationData();
-    const int32 VertexCount = DataUVView.NumVertices();
+    const int32                                  VertexCount = DataUVView.NumVertices();
     if (VertexCount <= 0 || Precomputed.Vertices.Num() != VertexCount)
     {
         UE_LOG(
@@ -1535,9 +1534,9 @@ bool FDWCGPUBackend::BindMaterialSlot(FMaterialSlotRuntime& Slot)
 
 bool FDWCGPUBackend::CreateSlotResources()
 {
-    USkeletalMeshComponent* MeshComponent = TargetSkeletalMesh.Get();
+    USkeletalMeshComponent*      MeshComponent = TargetSkeletalMesh.Get();
     UDynamicWetClothesComponent* Component = OwnerComponent.Get();
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const UWetClothingAsset*     Asset = WetClothingAsset.Get();
     if (!MeshComponent || !Component || !Asset || !WetMaterialInstances || !StaticSimulationData.IsValid())
     {
         return false;
@@ -1553,7 +1552,7 @@ bool FDWCGPUBackend::CreateSlotResources()
     for (int32 StaticSlotIndex = 0; StaticSlotIndex < StaticSimulationData->Slots.Num(); ++StaticSlotIndex)
     {
         const FStaticSimulationData::FSlotData& StaticSlot = StaticSimulationData->Slots[StaticSlotIndex];
-        FMaterialSlotRuntime& Slot = MaterialSlots.AddDefaulted_GetRef();
+        FMaterialSlotRuntime&                   Slot = MaterialSlots.AddDefaulted_GetRef();
         Slot.MaterialSlotIndex = StaticSlot.MaterialSlotIndex;
         Slot.StaticSlotIndex = StaticSlotIndex;
         Slot.Resolution = StaticSlot.Resolution;
@@ -1621,13 +1620,13 @@ bool FDWCGPUBackend::CreateSlotResources()
             };
             Slot.SurfaceDroplet1RT = CreateSurfaceRenderTarget(
                 FName(*FString::Printf(TEXT("DWC_SurfaceDroplet1RT_Slot%d"), Slot.MaterialSlotIndex)));
-                Slot.SurfaceDroplet2RT =CreateSurfaceRenderTarget(
-                    FName(*FString::Printf(
-                        TEXT("DWC_SurfaceDroplet2RT_Slot%d"),
-                        Slot.MaterialSlotIndex)));
-                }
-                if (!BindMaterialSlot(Slot))
-                {
+            Slot.SurfaceDroplet2RT = CreateSurfaceRenderTarget(
+                FName(*FString::Printf(
+                    TEXT("DWC_SurfaceDroplet2RT_Slot%d"),
+                    Slot.MaterialSlotIndex)));
+        }
+        if (!BindMaterialSlot(Slot))
+        {
             bAllMaterialBindingsValid = false;
         }
     }
@@ -1806,25 +1805,25 @@ void FDWCGPUBackend::Update(const float DeltaSeconds)
 
 void FDWCGPUBackend::DispatchSimulation(
     TArray<FDWCResolvedSurfaceContact>&& Contacts,
-    TArray<FDWCSurfaceStampRequest>&& SurfaceStamps,
-    const float WetAllAmount,
-    const float DeltaSeconds)
+    TArray<FDWCSurfaceStampRequest>&&    SurfaceStamps,
+    const float                          WetAllAmount,
+    const float                          DeltaSeconds)
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    USkeletalMeshComponent* MeshComponent = TargetSkeletalMesh.Get();
+    USkeletalMeshComponent*  MeshComponent = TargetSkeletalMesh.Get();
     if (!Asset || !MeshComponent || !StaticSimulationData.IsValid() || !RenderState.IsValid())
     {
         return;
     }
 
-    const FDWCGPULODBakeData& BakedData = Asset->GetGPUWetMapRuntimeData(LODIndex);
+    const FDWCGPULODBakeData&   BakedData = Asset->GetGPUWetMapRuntimeData(LODIndex);
     TArray<FSlotRenderDispatch> SlotDispatches;
     SlotDispatches.Reserve(MaterialSlots.Num());
-    const bool bHadWetInput = !Contacts.IsEmpty() || !FMath::IsNearlyZero(WetAllAmount);
-    const bool bHadSurfaceInput = !SurfaceStamps.IsEmpty();
-    int32 TotalAbsorptionDispatches = 0;
-    int32 TotalBinnedAbsorptionContacts = 0;
-    int32 TotalSurfaceStampDispatches = 0;
+    const bool                         bHadWetInput = !Contacts.IsEmpty() || !FMath::IsNearlyZero(WetAllAmount);
+    const bool                         bHadSurfaceInput = !SurfaceStamps.IsEmpty();
+    int32                              TotalAbsorptionDispatches = 0;
+    int32                              TotalBinnedAbsorptionContacts = 0;
+    int32                              TotalSurfaceStampDispatches = 0;
     const UDynamicWetClothesComponent* Component = OwnerComponent.Get();
     const float                        DryRateScaleValue = Component != nullptr
                                                                ? FMath::Max(0.0f, Component->WetnessSettings.DryRateScale)
@@ -1832,7 +1831,7 @@ void FDWCGPUBackend::DispatchSimulation(
 
     for (int32 SlotRuntimeIndex = 0; SlotRuntimeIndex < MaterialSlots.Num(); ++SlotRuntimeIndex)
     {
-        FMaterialSlotRuntime& Slot = MaterialSlots[SlotRuntimeIndex];
+        FMaterialSlotRuntime&   Slot = MaterialSlots[SlotRuntimeIndex];
         UTextureRenderTarget2D* CurrentMap = Slot.GetCurrentMap();
         UTextureRenderTarget2D* NextMap = Slot.GetNextMap();
         UTextureRenderTarget2D* CurrentPendingMap = Slot.GetCurrentPendingMap();
@@ -1852,8 +1851,8 @@ void FDWCGPUBackend::DispatchSimulation(
         SlotDispatch.StaticSlotIndex = Slot.StaticSlotIndex;
         SlotDispatch.Resolution = Slot.Resolution;
         SlotDispatch.SurfaceWaterResolution = Slot.bUsesSurfaceWater
-            ? Slot.SurfaceWaterResolution
-            : 0;
+                                                  ? Slot.SurfaceWaterResolution
+                                                  : 0;
         SlotDispatch.CurrentResource = CurrentMap->GameThread_GetRenderTargetResource();
         SlotDispatch.NextResource = NextMap->GameThread_GetRenderTargetResource();
         SlotDispatch.CurrentPendingResource =
@@ -1861,11 +1860,11 @@ void FDWCGPUBackend::DispatchSimulation(
         SlotDispatch.NextPendingResource =
             NextPendingMap->GameThread_GetRenderTargetResource();
         SlotDispatch.SurfaceDroplet1Resource = Slot.SurfaceDroplet1RT.IsValid()
-            ? Slot.SurfaceDroplet1RT->GameThread_GetRenderTargetResource()
-            : nullptr;
+                                                   ? Slot.SurfaceDroplet1RT->GameThread_GetRenderTargetResource()
+                                                   : nullptr;
         SlotDispatch.SurfaceDroplet2Resource = Slot.SurfaceDroplet2RT.IsValid()
-            ? Slot.SurfaceDroplet2RT->GameThread_GetRenderTargetResource()
-            : nullptr;
+                                                   ? Slot.SurfaceDroplet2RT->GameThread_GetRenderTargetResource()
+                                                   : nullptr;
 
         for (const FDWCSurfaceStampRequest& Request : SurfaceStamps)
         {
@@ -1899,15 +1898,15 @@ void FDWCGPUBackend::DispatchSimulation(
 
             const FDWCGPUBakedTriangle& Triangle = BakedData.Triangles[Contact.TriangleID];
             FTriangleAbsorptionDispatch Dispatch;
-            const bool bUseUVStamp = IsSampledWetAreaContact(Contact);
-            const bool bBuiltDispatch = bUseUVStamp
-                ? BuildAbsorptionStampDispatch(
-                      Contact,
-                      Triangle,
-                      CVarDWCGPUWetAreaStampRadiusPixels.GetValueOnAnyThread(),
-                      Slot.Resolution,
-                      Dispatch)
-                : BuildDispatchBounds(Triangle, Slot.Resolution, Dispatch.DispatchMin, Dispatch.DispatchSize);
+            const bool                  bUseUVStamp = IsSampledWetAreaContact(Contact);
+            const bool                  bBuiltDispatch = bUseUVStamp
+                                                             ? BuildAbsorptionStampDispatch(
+                                                  Contact,
+                                                  Triangle,
+                                                  CVarDWCGPUWetAreaStampRadiusPixels.GetValueOnAnyThread(),
+                                                  Slot.Resolution,
+                                                  Dispatch)
+                                                             : BuildDispatchBounds(Triangle, Slot.Resolution, Dispatch.DispatchMin, Dispatch.DispatchSize);
             if (!bBuiltDispatch)
             {
                 continue;
@@ -1982,7 +1981,6 @@ void FDWCGPUBackend::DispatchSimulation(
             *GetNameSafe(MeshComponent));
     }
 
-
     if (bHadSurfaceInput && TotalSurfaceStampDispatches <= 0)
     {
         UE_LOG(
@@ -2002,8 +2000,8 @@ void FDWCGPUBackend::DispatchSimulation(
         for (const FSlotRenderDispatch& SlotDispatch : SlotDispatches)
         {
             const int32 MaterialSlotIndex = MaterialSlots.IsValidIndex(SlotDispatch.SlotRuntimeIndex)
-                ? MaterialSlots[SlotDispatch.SlotRuntimeIndex].MaterialSlotIndex
-                : INDEX_NONE;
+                                                ? MaterialSlots[SlotDispatch.SlotRuntimeIndex].MaterialSlotIndex
+                                                : INDEX_NONE;
             SlotSummaries.Add(FString::Printf(
                 TEXT("slot%d:absorb%d:binned%d:bins%d:surface%d:res%d"),
                 MaterialSlotIndex,
@@ -2029,7 +2027,7 @@ void FDWCGPUBackend::DispatchSimulation(
     }
 
     const FSkeletalMeshObject* MeshObject = MeshComponent->GetMeshObject();
-    FVector GravityDirection(0.0, 0.0, -1.0);
+    FVector                    GravityDirection(0.0, 0.0, -1.0);
     if (const UWorld* World = OwnerComponent.IsValid() ? OwnerComponent->GetWorld() : nullptr)
     {
         GravityDirection = FVector(0.0, 0.0, World->GetGravityZ()).GetSafeNormal();
@@ -2043,13 +2041,13 @@ void FDWCGPUBackend::DispatchSimulation(
         static_cast<float>(GravityDirection.Y),
         static_cast<float>(GravityDirection.Z),
         0.0f);
-    const FBox ReceiverWorldBounds = MeshComponent->Bounds.GetBox();
-    const FVector3f ReceiverBoundsMinValue(ReceiverWorldBounds.Min);
-    const FVector3f ReceiverBoundsMaxValue(ReceiverWorldBounds.Max);
+    const FBox       ReceiverWorldBounds = MeshComponent->Bounds.GetBox();
+    const FVector3f  ReceiverBoundsMinValue(ReceiverWorldBounds.Min);
+    const FVector3f  ReceiverBoundsMaxValue(ReceiverWorldBounds.Max);
     const FMatrix44f ReceiverLocalToWorldValue(MeshComponent->GetComponentTransform().ToMatrixWithScale());
 
-    const TSharedPtr<const FStaticSimulationData, ESPMode::ThreadSafe> StaticData = StaticSimulationData;
-    const TSharedPtr<FRenderState, ESPMode::ThreadSafe> RTState = RenderState;
+    const TSharedPtr<const FStaticSimulationData, ESPMode::ThreadSafe>        StaticData = StaticSimulationData;
+    const TSharedPtr<FRenderState, ESPMode::ThreadSafe>                       RTState = RenderState;
     const TArray<TSharedPtr<FDWCGPUStaticSlotResources, ESPMode::ThreadSafe>> SharedStaticResources =
         SharedStaticSlotResources;
     const float MaxWetnessValue = MaxWetness;
@@ -2069,7 +2067,7 @@ void FDWCGPUBackend::DispatchSimulation(
         Slot.SwapMaps();
         Slot.SwapPendingMaps();
         if (MeshComponent->GetMaterial(
-        Slot.MaterialSlotIndex) != Slot.MaterialInstance.Get() &&
+                Slot.MaterialSlotIndex) != Slot.MaterialInstance.Get() &&
             !BindMaterialSlot(Slot))
         {
             continue;
@@ -2226,7 +2224,7 @@ void FDWCGPUBackend::DispatchSimulation(
             }
 
             FCachedGeometry CachedGeometry;
-            const bool bHasCachedGeometry =
+            const bool      bHasCachedGeometry =
                 MeshObject &&
                 MeshObject->GetCachedGeometry(GraphBuilder, CachedGeometry) &&
                 CachedGeometry.LODIndex == SimulationLODIndex;
@@ -2360,23 +2358,22 @@ void FDWCGPUBackend::DispatchSimulation(
                         Parameters,
                         FIntVector(FMath::DivideAndRoundUp(SectionData.TriangleIndices.Num(), 64), 1, 1));
                 }
-
             }
 
-            FRDGBufferSRVRef FlowSRV = GraphBuilder.CreateSRV(TriangleFlowBuffer);
-            FRDGBufferSRVRef MetricSRV = GraphBuilder.CreateSRV(TriangleMetricBuffer);
-            FRDGBufferSRVRef TrianglePositionsSRV = GraphBuilder.CreateSRV(TrianglePositionsBuffer);
-            TShaderMapRef<FDWCApplyTriangleAbsorptionCS> AbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-            TShaderMapRef<FDWCApplyBinnedAbsorptionCS> BinnedAbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-            TShaderMapRef<FDWCApplyNiagaraWetCollisionCS> NiagaraWetCollisionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            FRDGBufferSRVRef                                   FlowSRV = GraphBuilder.CreateSRV(TriangleFlowBuffer);
+            FRDGBufferSRVRef                                   MetricSRV = GraphBuilder.CreateSRV(TriangleMetricBuffer);
+            FRDGBufferSRVRef                                   TrianglePositionsSRV = GraphBuilder.CreateSRV(TrianglePositionsBuffer);
+            TShaderMapRef<FDWCApplyTriangleAbsorptionCS>       AbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCApplyBinnedAbsorptionCS>         BinnedAbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCApplyNiagaraWetCollisionCS>      NiagaraWetCollisionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCResolveNiagaraDropletContactsCS> ResolveNiagaraDropletContactsShader(
                 GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCStampNiagaraDropletsCS> StampNiagaraDropletsShader(
                 GetGlobalShaderMap(GMaxRHIFeatureLevel));
-            TShaderMapRef<FDWCDiffuseDryCS> DiffuseDry4Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-            TShaderMapRef<FDWCDiffuseDry8CS> DiffuseDry8Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-            TShaderMapRef<FDWCSeamGatherCS> SeamShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-            TShaderMapRef<FDWCSurfaceDropletStampCS>      DropletStampShader(
+            TShaderMapRef<FDWCDiffuseDryCS>          DiffuseDry4Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCDiffuseDry8CS>         DiffuseDry8Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCSeamGatherCS>          SeamShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCSurfaceDropletStampCS> DropletStampShader(
                 GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCSurfaceWetnessDryInPlaceCS> SurfaceDryShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
 
@@ -2385,7 +2382,7 @@ void FDWCGPUBackend::DispatchSimulation(
 
             struct FPreparedNiagaraWetCollisionResources
             {
-                int32 MaxContacts = 0;
+                int32            MaxContacts = 0;
                 FRDGBufferSRVRef Contacts = nullptr;
                 FRDGBufferSRVRef ContactCount = nullptr;
                 FRDGBufferSRVRef ResolvedStaticDropletContacts = nullptr;
@@ -2502,7 +2499,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     continue;
                 }
 
-                const FStaticSimulationData::FSlotData& StaticSlot = StaticData->Slots[SlotDispatch.StaticSlotIndex];
+                const FStaticSimulationData::FSlotData&                     StaticSlot = StaticData->Slots[SlotDispatch.StaticSlotIndex];
                 TSharedPtr<FDWCGPUStaticSlotResources, ESPMode::ThreadSafe> SharedSlot =
                     SharedStaticResources[SlotDispatch.StaticSlotIndex];
                 FRDGBufferRef LookupBuffer = RegisterOrUploadStructuredBuffer(
@@ -2523,7 +2520,7 @@ void FDWCGPUBackend::DispatchSimulation(
                 const bool bHasDroplet2Resource =
                     SlotDispatch.SurfaceDroplet2Resource != nullptr &&
                     SlotDispatch.SurfaceDroplet2Resource->GetRenderTargetTexture() != nullptr;
-                if ((bHasDroplet1Resource ||!SlotDispatch.SurfaceStampDispatches.IsEmpty() ||
+                if ((bHasDroplet1Resource || !SlotDispatch.SurfaceStampDispatches.IsEmpty() ||
                      bHasDroplet2Resource ||
                      !PreparedNiagaraWetCollisionResources.IsEmpty()) &&
                     !StaticSlot.SurfaceTexelLookup.IsEmpty())
@@ -2600,7 +2597,7 @@ void FDWCGPUBackend::DispatchSimulation(
                 for (int32 StampIndex = 0; StampIndex < SlotDispatch.SurfaceStampDispatches.Num(); ++StampIndex)
                 {
                     const FSurfaceStampDispatch& Stamp = SlotDispatch.SurfaceStampDispatches[StampIndex];
-                    const FIntVector GroupCount(
+                    const FIntVector             GroupCount(
                         FMath::DivideAndRoundUp(Stamp.DispatchSize.X, 8),
                         FMath::DivideAndRoundUp(Stamp.DispatchSize.Y, 8),
                         1);
@@ -2711,7 +2708,7 @@ void FDWCGPUBackend::DispatchSimulation(
 
                 for (int32 DispatchIndex = 0; DispatchIndex < SlotDispatch.AbsorptionDispatches.Num(); ++DispatchIndex)
                 {
-                    const FTriangleAbsorptionDispatch& Dispatch = SlotDispatch.AbsorptionDispatches[DispatchIndex];
+                    const FTriangleAbsorptionDispatch&          Dispatch = SlotDispatch.AbsorptionDispatches[DispatchIndex];
                     FDWCApplyTriangleAbsorptionCS::FParameters* Parameters =
                         GraphBuilder.AllocParameters<FDWCApplyTriangleAbsorptionCS::FParameters>();
                     Parameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
@@ -2777,63 +2774,63 @@ void FDWCGPUBackend::DispatchSimulation(
                         {
                             const auto AddNiagaraDropletStampPass =
                                 [&](const bool        bDroplet2,
-                                    FRDGBufferSRVRef ResolvedContacts,
+                                    FRDGBufferSRVRef  ResolvedContacts,
                                     FRDGTextureUAVRef TargetSurfaceUAV)
+                            {
+                                if (ResolvedContacts == nullptr || TargetSurfaceUAV == nullptr)
                                 {
-                                    if (ResolvedContacts == nullptr || TargetSurfaceUAV == nullptr)
-                                    {
-                                        return;
-                                    }
+                                    return;
+                                }
 
-                                    FDWCStampNiagaraDropletsCS::FParameters* DropletParameters =
-                                        GraphBuilder.AllocParameters<FDWCStampNiagaraDropletsCS::FParameters>();
-                                    DropletParameters->TextureSize = FIntPoint(
-                                        SlotDispatch.SurfaceWaterResolution,
-                                        SlotDispatch.SurfaceWaterResolution);
-                                    DropletParameters->TriangleCount =
-                                        static_cast<uint32>(StaticData->TriangleCount);
-                                    DropletParameters->MaterialSlotIndex =
-                                        static_cast<uint32>(StaticSlot.MaterialSlotIndex);
-                                    DropletParameters->bDroplet2 = bDroplet2 ? 1u : 0u;
-                                    DropletParameters->MaxContacts =
-                                        CollisionResources.MaxContacts;
-                                    DropletParameters->Contacts =
-                                        CollisionResources.Contacts;
-                                    DropletParameters->ContactCount =
-                                        CollisionResources.ContactCount;
-                                    DropletParameters->ResolvedContacts =
-                                        ResolvedContacts;
-                                    DropletParameters->TriangleUV2AndDroplet =
-                                        NiagaraTriangleUV2AndDropletSRV;
-                                    DropletParameters->TriangleFlowDropletSettings =
-                                        NiagaraTriangleFlowDropletSettingsSRV;
-                                    DropletParameters->TriangleSurfaceMetadata =
-                                        NiagaraTriangleSurfaceMetadataSRV;
-                                    DropletParameters->TexelLookup = SurfaceLookupSRV;
-                                    DropletParameters->TargetSurface = TargetSurfaceUAV;
-                                    FDWCWorkloadStats::RecordGPUBackendDispatch();
-                                    RDG_EVENT_SCOPE_STAT(
-                                        GraphBuilder,
-                                        DWC_NiagaraDropletStamp,
-                                        "DWC NiagaraDropletStamp");
-                                    FComputeShaderUtils::AddPass(
-                                        GraphBuilder,
-                                        RDG_EVENT_NAME(
-                                            "DWC Stamp Niagara %s Droplets Slot %d MaxContacts %d",
+                                FDWCStampNiagaraDropletsCS::FParameters* DropletParameters =
+                                    GraphBuilder.AllocParameters<FDWCStampNiagaraDropletsCS::FParameters>();
+                                DropletParameters->TextureSize = FIntPoint(
+                                    SlotDispatch.SurfaceWaterResolution,
+                                    SlotDispatch.SurfaceWaterResolution);
+                                DropletParameters->TriangleCount =
+                                    static_cast<uint32>(StaticData->TriangleCount);
+                                DropletParameters->MaterialSlotIndex =
+                                    static_cast<uint32>(StaticSlot.MaterialSlotIndex);
+                                DropletParameters->bDroplet2 = bDroplet2 ? 1u : 0u;
+                                DropletParameters->MaxContacts =
+                                    CollisionResources.MaxContacts;
+                                DropletParameters->Contacts =
+                                    CollisionResources.Contacts;
+                                DropletParameters->ContactCount =
+                                    CollisionResources.ContactCount;
+                                DropletParameters->ResolvedContacts =
+                                    ResolvedContacts;
+                                DropletParameters->TriangleUV2AndDroplet =
+                                    NiagaraTriangleUV2AndDropletSRV;
+                                DropletParameters->TriangleFlowDropletSettings =
+                                    NiagaraTriangleFlowDropletSettingsSRV;
+                                DropletParameters->TriangleSurfaceMetadata =
+                                    NiagaraTriangleSurfaceMetadataSRV;
+                                DropletParameters->TexelLookup = SurfaceLookupSRV;
+                                DropletParameters->TargetSurface = TargetSurfaceUAV;
+                                FDWCWorkloadStats::RecordGPUBackendDispatch();
+                                RDG_EVENT_SCOPE_STAT(
+                                    GraphBuilder,
+                                    DWC_NiagaraDropletStamp,
+                                    "DWC NiagaraDropletStamp");
+                                FComputeShaderUtils::AddPass(
+                                    GraphBuilder,
+                                    RDG_EVENT_NAME(
+                                        "DWC Stamp Niagara %s Droplets Slot %d MaxContacts %d",
                                         bDroplet2 ? TEXT("Droplet2") : TEXT("Droplet1"),
-                                            StaticSlot.MaterialSlotIndex,
-                                            CollisionResources.MaxContacts),
-                                        StampNiagaraDropletsShader,
-                                        DropletParameters,
-                                        FIntVector(
-                                            FMath::DivideAndRoundUp(
-                                                SlotDispatch.SurfaceWaterResolution,
-                                                8),
-                                            FMath::DivideAndRoundUp(
-                                                SlotDispatch.SurfaceWaterResolution,
-                                                8),
-                                            1));
-                                };
+                                        StaticSlot.MaterialSlotIndex,
+                                        CollisionResources.MaxContacts),
+                                    StampNiagaraDropletsShader,
+                                    DropletParameters,
+                                    FIntVector(
+                                        FMath::DivideAndRoundUp(
+                                            SlotDispatch.SurfaceWaterResolution,
+                                            8),
+                                        FMath::DivideAndRoundUp(
+                                            SlotDispatch.SurfaceWaterResolution,
+                                            8),
+                                        1));
+                            };
 
                             AddNiagaraDropletStampPass(
                                 false,
@@ -2969,9 +2966,7 @@ void FDWCGPUBackend::DispatchSimulation(
 
             GraphBuilder.Execute();
         });
-
 }
-
 
 FDWCGPUBackendStats FDWCGPUBackend::GetStats() const
 {
@@ -3000,7 +2995,7 @@ FDWCGPUBackendStats FDWCGPUBackend::GetStats() const
             const uint64 SurfacePixelCount =
                 static_cast<uint64>(Slot.SurfaceWaterResolution) * Slot.SurfaceWaterResolution;
             const uint64 SurfaceRenderTargetCount =
-                (Slot.SurfaceDroplet1RT.IsValid() ? 1ull : 0ull) +(Slot.SurfaceDroplet2RT.IsValid() ? 1ull : 0ull);
+                (Slot.SurfaceDroplet1RT.IsValid() ? 1ull : 0ull) + (Slot.SurfaceDroplet2RT.IsValid() ? 1ull : 0ull);
             Stats.GPUBytes +=
                 SurfacePixelCount * sizeof(uint16) * SurfaceRenderTargetCount;
         }
@@ -3011,16 +3006,16 @@ FDWCGPUBackendStats FDWCGPUBackend::GetStats() const
         const FStaticSimulationData& Data = *StaticSimulationData;
         Stats.CPUBytes += sizeof(Data) +
                           Data.Sections.GetAllocatedSize() +
-                           Data.Profiles.GetAllocatedSize() +
+                          Data.Profiles.GetAllocatedSize() +
                           Data.PendingWaterLimits.GetAllocatedSize() +
-                           Data.TriangleProfileIndices.GetAllocatedSize() +
-                           Data.TriangleDataToSurfaceWaterNormalUV.GetAllocatedSize() +
-                           Data.TriangleUV01.GetAllocatedSize() +
-                           Data.TriangleUV2AndDroplet.GetAllocatedSize() +
-                           Data.TriangleFlowDropletSettings.GetAllocatedSize() +
-                           Data.TriangleFlowSpawnPositionSpread.GetAllocatedSize() +
-                           Data.TriangleSurfaceMetadata.GetAllocatedSize() +
-                           Data.Slots.GetAllocatedSize();
+                          Data.TriangleProfileIndices.GetAllocatedSize() +
+                          Data.TriangleDataToSurfaceWaterNormalUV.GetAllocatedSize() +
+                          Data.TriangleUV01.GetAllocatedSize() +
+                          Data.TriangleUV2AndDroplet.GetAllocatedSize() +
+                          Data.TriangleFlowDropletSettings.GetAllocatedSize() +
+                          Data.TriangleFlowSpawnPositionSpread.GetAllocatedSize() +
+                          Data.TriangleSurfaceMetadata.GetAllocatedSize() +
+                          Data.Slots.GetAllocatedSize();
 
         // Lookup/section/profile-index buffers are owned by the world subsystem.
         // Profile values include per-component simulation scale overrides, so the

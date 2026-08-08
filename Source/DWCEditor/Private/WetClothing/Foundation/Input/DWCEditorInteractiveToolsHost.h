@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -14,16 +15,16 @@ class FDWCEditorInteractiveToolsHost
 {
   public:
     FDWCEditorInteractiveToolsHost(
-        FPreviewScene* InPreviewScene,
+        FPreviewScene*               InPreviewScene,
         IDWCEditorSurfaceToolTarget* InTarget);
     ~FDWCEditorInteractiveToolsHost();
 
     FEditorModeTools* GetModeTools() const;
-    bool CancelActiveInteraction();
-    void Shutdown();
+    bool              CancelActiveInteraction();
+    void              Shutdown();
 
   private:
-    TSharedPtr<FAssetEditorModeManager> ModeManager;
+    TSharedPtr<FAssetEditorModeManager>                     ModeManager;
     TStrongObjectPtr<UDWCEditorSurfaceAuthoringToolBuilder> ToolBuilder;
-    bool bShutdown = false;
+    bool                                                    bShutdown = false;
 };

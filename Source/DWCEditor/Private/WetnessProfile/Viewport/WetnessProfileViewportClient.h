@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "EditorViewportClient.h"
 
@@ -19,6 +21,6 @@ class FWetnessProfileViewportClient : public FEditorViewportClient
     void SetPreviewMeshComponent(const UPrimitiveComponent* InPreviewMeshComponent);
 
   private:
-    FAdvancedPreviewScene*                     PreviewScene = nullptr;
+    FAdvancedPreviewScene*                    PreviewScene = nullptr;
     TWeakObjectPtr<const UPrimitiveComponent> PreviewMeshComponent;
 };

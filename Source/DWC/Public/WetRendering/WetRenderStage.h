@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "WetRendering/WetMaterialParameters.h"
 
@@ -27,34 +29,33 @@ struct DWC_API FWetRenderStageArgs
 
     const FWetClothingRuntimeData*   RuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
-    bool bShowWetPartDebugColors = false;
-    bool bShowSurfaceWaterDebugColors = false;
-    bool bDroplet1RenderingEnabled = true;
-    bool bDroplet2RenderingEnabled = true;
-    bool bGPUWetnessMode = false;
+    bool                             bShowWetPartDebugColors = false;
+    bool                             bShowSurfaceWaterDebugColors = false;
+    bool                             bDroplet1RenderingEnabled = true;
+    bool                             bDroplet2RenderingEnabled = true;
+    bool                             bGPUWetnessMode = false;
 
     TArray<TObjectPtr<UMaterialInstanceDynamic>>* WetMaterialInstances = nullptr;
 
     float WrinkleStrength = DWCWetMaterialParameters::DefaultWrinkleStrength();
     float WrinkleWetnessMin = DWCWetMaterialParameters::DefaultWrinkleWetnessMin();
     float WrinkleWetnessMax = DWCWetMaterialParameters::DefaultWrinkleWetnessMax();
-    bool bEnableWrinkle = true;
+    bool  bEnableWrinkle = true;
     float TransparencyWetnessMin = DWCWetMaterialParameters::DefaultTransparencyWetnessMin();
     float TransparencyWetnessMax = DWCWetMaterialParameters::DefaultTransparencyWetnessMax();
-    bool bEnableTransparency = true;
+    bool  bEnableTransparency = true;
 
     FLinearColor UnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
     float        UnderColorBlendStrength = 0.3f;
-    int32 LODIndex = 0;
-
+    int32        LODIndex = 0;
 };
 
 class DWC_API FWetRenderStage
 {
   public:
     uint64 GetAllocatedMemoryBytes() const;
-    void ResetCachedVertexColors();
-    void InitializeCachedVertexColors(int32 VertexCount);
+    void   ResetCachedVertexColors();
+    void   InitializeCachedVertexColors(int32 VertexCount);
 
     void         InitializeWetMaterialInstance(FWetRenderStageArgs& Args);
     void         ApplyWetMaterialParameters(FWetRenderStageArgs& Args);
@@ -67,7 +68,7 @@ class DWC_API FWetRenderStage
     // because all material parameter updates are performed through this stage.
     TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
 
-    TArray<FColor> CachedWetVertexColors; // VertexColor
-    TMap<int32, FLinearColor> CachedWetPartDebugColorsByID; // ID is at FWetClothingRuntimeData.
+    TArray<FColor>                    CachedWetVertexColors;        // VertexColor
+    TMap<int32, FLinearColor>         CachedWetPartDebugColorsByID; // ID is at FWetClothingRuntimeData.
     TWeakObjectPtr<UWetClothingAsset> CachedWetPartDebugColorAsset; // What Asset is Debug Color based on
 };

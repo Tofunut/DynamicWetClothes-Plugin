@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -13,9 +14,9 @@
 namespace
 {
     FDWCEditorTextureKey MakeTextureKey(
-        UTexture2D* Owner,
+        UTexture2D*                    Owner,
         const EDWCEditorTexturePurpose Purpose,
-        const int32 MaterialSlotIndex)
+        const int32                    MaterialSlotIndex)
     {
         FDWCEditorTextureKey Key;
         Key.Owner = FObjectKey(Owner);
@@ -44,7 +45,7 @@ namespace
 
     const FDWCEditorPreviewMemoryBucket* FindMemoryBucket(
         const TArray<FDWCEditorPreviewMemoryBucket>& Buckets,
-        const TCHAR* Name)
+        const TCHAR*                                 Name)
     {
         return Buckets.FindByPredicate(
             [Name](const FDWCEditorPreviewMemoryBucket& Bucket)
@@ -68,7 +69,7 @@ namespace
 
     const FDWCEditorPreviewOperationCounter* FindOperationCounter(
         const TArray<FDWCEditorPreviewOperationCounter>& Counters,
-        const TCHAR* Name)
+        const TCHAR*                                     Name)
     {
         return Counters.FindByPredicate(
             [Name](const FDWCEditorPreviewOperationCounter& Counter)
@@ -78,7 +79,7 @@ namespace
     }
 
     void ShutdownWorkspaceAfterRenderFence(
-        FDWCEditorTextureWorkspace& Workspace,
+        FDWCEditorTextureWorkspace&                    Workspace,
         const TSharedRef<FDWCEditorRenderUploadQueue>& UploadQueue)
     {
         Workspace.Reset();
@@ -86,7 +87,7 @@ namespace
         Workspace.ProcessRetiredGPUResources();
         UploadQueue->Shutdown();
     }
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorDirtyRegionSetTest,
@@ -119,7 +120,7 @@ bool FDWCEditorTextureWorkspaceReuseTest::RunTest(const FString&)
         MakeShared<FDWCEditorRenderUploadQueue>();
     FDWCEditorTextureWorkspace Workspace(UploadQueue);
 
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    UTexture2D*          Owner = NewObject<UTexture2D>();
     FDWCEditorTextureKey Key;
     Key.Owner = FObjectKey(Owner);
     Key.Purpose = EDWCEditorTexturePurpose::WrinkleAccumulated;
@@ -162,7 +163,7 @@ bool FDWCEditorTextureWorkspaceLeaseTest::RunTest(const FString&)
         MakeShared<FDWCEditorRenderUploadQueue>();
     FDWCEditorTextureWorkspace Workspace(UploadQueue, 1);
 
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    UTexture2D*          Owner = NewObject<UTexture2D>();
     FDWCEditorTextureKey Key;
     Key.Owner = FObjectKey(Owner);
     Key.Purpose = EDWCEditorTexturePurpose::WrinkleAccumulated;
@@ -175,8 +176,8 @@ bool FDWCEditorTextureWorkspaceLeaseTest::RunTest(const FString&)
 
     TArray<FColor> Pixels;
     Pixels.Init(Descriptor.InitialBGRA8, 16);
-    FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(Key, Descriptor, MoveTemp(Pixels));
-    FDWCEditorTextureLease Lease = Workspace.AcquireLease(Handle);
+    FDWCEditorTextureHandle                         Handle = Workspace.PublishBGRA8(Key, Descriptor, MoveTemp(Pixels));
+    FDWCEditorTextureLease                          Lease = Workspace.AcquireLease(Handle);
     const TWeakPtr<FDWCEditorTextureWorkspaceEntry> WeakLeasedEntry = Lease.GetHandle();
     Handle.Reset();
 
@@ -191,8 +192,8 @@ bool FDWCEditorTextureWorkspaceLeaseTest::RunTest(const FString&)
     // longer be retained as the cache entry for this key, however.
     const FDWCEditorTextureHandle Reacquired = Workspace.Acquire(Key, Descriptor);
     TestTrue(TEXT("Released lease allows a new retained entry to be acquired"),
-        Reacquired.IsValid() && Reacquired != WeakLeasedEntry.Pin() &&
-        Reacquired->GetActiveLeaseCount() == 0);
+             Reacquired.IsValid() && Reacquired != WeakLeasedEntry.Pin() &&
+                 Reacquired->GetActiveLeaseCount() == 0);
 
     ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
     return true;
@@ -209,7 +210,7 @@ bool FDWCEditorTextureWorkspaceDiscardLeaseTest::RunTest(const FString&)
         MakeShared<FDWCEditorRenderUploadQueue>();
     FDWCEditorTextureWorkspace Workspace(UploadQueue);
 
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    UTexture2D*          Owner = NewObject<UTexture2D>();
     FDWCEditorTextureKey Key;
     Key.Owner = FObjectKey(Owner);
     Key.Purpose = EDWCEditorTexturePurpose::WrinkleProcedural;
@@ -222,8 +223,8 @@ bool FDWCEditorTextureWorkspaceDiscardLeaseTest::RunTest(const FString&)
 
     TArray<FColor> Pixels;
     Pixels.Init(Descriptor.InitialBGRA8, 16);
-    FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(Key, Descriptor, MoveTemp(Pixels));
-    FDWCEditorTextureLease Lease = Workspace.AcquireLease(Handle);
+    FDWCEditorTextureHandle                         Handle = Workspace.PublishBGRA8(Key, Descriptor, MoveTemp(Pixels));
+    FDWCEditorTextureLease                          Lease = Workspace.AcquireLease(Handle);
     const TWeakPtr<FDWCEditorTextureWorkspaceEntry> WeakEntry = Lease.GetHandle();
     Handle.Reset();
 
@@ -245,7 +246,7 @@ bool FDWCEditorTextureWorkspaceDiscardLeaseTest::RunTest(const FString&)
     Lease.Reset();
     Workspace.ProcessRetiredGPUResources();
     TestFalse(TEXT("Discarded transient entry no longer has an active lease"),
-        WeakEntry.IsValid() && WeakEntry.Pin()->GetActiveLeaseCount() > 0);
+              WeakEntry.IsValid() && WeakEntry.Pin()->GetActiveLeaseCount() > 0);
 
     ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
     return true;
@@ -260,8 +261,8 @@ bool FDWCEditorTextureWorkspaceGPUResidencyDiagnosticsTest::RunTest(const FStrin
 {
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
-    FDWCEditorTextureWorkspace Workspace(UploadQueue);
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace        Workspace(UploadQueue);
+    UTexture2D*                       Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
 
     const FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(
@@ -305,8 +306,8 @@ bool FDWCEditorTextureWorkspaceGPUBudgetRejectTest::RunTest(const FString&)
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
     // A 4x4 BGRA8 resource needs 64 bytes, so this workspace must reject it.
-    FDWCEditorTextureWorkspace Workspace(UploadQueue, 1024, 1);
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace        Workspace(UploadQueue, 1024, 1);
+    UTexture2D*                       Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
 
     const FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(
@@ -349,10 +350,10 @@ bool FDWCEditorTextureWorkspaceGPURetireDiagnosticsTest::RunTest(const FString&)
 {
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
-    FDWCEditorTextureWorkspace Workspace(UploadQueue);
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace        Workspace(UploadQueue);
+    UTexture2D*                       Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
-    const FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(
+    const FDWCEditorTextureHandle     Handle = Workspace.PublishBGRA8(
         MakeTextureKey(Owner, EDWCEditorTexturePurpose::WrinkleProcedural, 22),
         Descriptor,
         MakeFlatNormalPixels(Descriptor));
@@ -397,8 +398,8 @@ bool FDWCEditorTextureWorkspaceGPUHighWaterResetTest::RunTest(const FString&)
 {
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
-    FDWCEditorTextureWorkspace Workspace(UploadQueue);
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace        Workspace(UploadQueue);
+    UTexture2D*                       Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor SmallDescriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
 
     Workspace.PublishBGRA8(
@@ -448,7 +449,7 @@ bool FDWCEditorTextureWorkspaceFourKPIERetirementTest::RunTest(const FString&)
         UploadQueue,
         FourKBGRA8Bytes * 3,
         FourKBGRA8Bytes * 3);
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    UTexture2D*                       Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4096, 4096));
 
     const FDWCEditorTextureHandle Accumulated = Workspace.PublishBGRA8(
@@ -464,11 +465,11 @@ bool FDWCEditorTextureWorkspaceFourKPIERetirementTest::RunTest(const FString&)
         Descriptor,
         MakeFlatNormalPixels(Descriptor));
     TestTrue(TEXT("4K accumulated preview texture is resident"),
-        Accumulated.IsValid() && Accumulated->IsGPUResident());
+             Accumulated.IsValid() && Accumulated->IsGPUResident());
     TestTrue(TEXT("4K procedural preview texture is resident"),
-        Procedural.IsValid() && Procedural->IsGPUResident());
+             Procedural.IsValid() && Procedural->IsGPUResident());
     TestTrue(TEXT("4K transparency preview texture is resident"),
-        Transparency.IsValid() && Transparency->IsGPUResident());
+             Transparency.IsValid() && Transparency->IsGPUResident());
 
     TArray<FDWCEditorPreviewMemoryBucket> Buckets;
     Workspace.AppendDiagnosticMemoryBucket(Buckets);
@@ -480,8 +481,8 @@ bool FDWCEditorTextureWorkspaceFourKPIERetirementTest::RunTest(const FString&)
     {
         TestEqual(TEXT("Three 4K preview layers are resident"), Resident->EntryCount, 3);
         TestEqual(TEXT("4K resident bytes match the preview layers"),
-            Resident->UsedBytes,
-            FourKBGRA8Bytes * 3);
+                  Resident->UsedBytes,
+                  FourKBGRA8Bytes * 3);
     }
 
     // Preview viewports own leases. PIE suspension discards their workspace
@@ -506,12 +507,12 @@ bool FDWCEditorTextureWorkspaceFourKPIERetirementTest::RunTest(const FString&)
     {
         TestEqual(TEXT("All 4K preview layers begin GPU retirement"), Retiring->EntryCount, 3);
         TestEqual(TEXT("Retiring bytes remain visible until the render fence completes"),
-            Retiring->UsedBytes,
-            FourKBGRA8Bytes * 3);
+                  Retiring->UsedBytes,
+                  FourKBGRA8Bytes * 3);
     }
 
     TestTrue(TEXT("4K preview resources are released after the PIE retire fence"),
-        WaitForGPUResourceRetire(Workspace));
+             WaitForGPUResourceRetire(Workspace));
     ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
     return true;
 }
@@ -523,8 +524,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorPreviewSessionPIESuspendResumeTest::RunTest(const FString&)
 {
-    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
-    FDWCEditorPreviewSession Session;
+    UWetClothingAsset*             Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    FDWCEditorPreviewSession       Session;
     FDWCEditorPreviewSessionConfig Config;
     Config.bObserveRelevantObjectChanges = false;
     Session.Initialize(Asset, nullptr, Config);
@@ -532,11 +533,11 @@ bool FDWCEditorPreviewSessionPIESuspendResumeTest::RunTest(const FString&)
     TestTrue(TEXT("Preview session initializes for an editor-owned WCA"), Session.IsInitialized());
     Session.Suspend(EDWCEditorPreviewSuspendReason::BeginPIE);
     TestTrue(TEXT("PreBeginPIE preview suspension is idempotently represented by the session"),
-        Session.IsSuspended());
+             Session.IsSuspended());
 
     Session.Suspend(EDWCEditorPreviewSuspendReason::BeginPIE);
     TestTrue(TEXT("Repeated PreBeginPIE notifications keep the session suspended"),
-        Session.IsSuspended());
+             Session.IsSuspended());
 
     Session.Resume();
     TestFalse(TEXT("Preview session resumes lazily after EndPIE"), Session.IsSuspended());
@@ -555,8 +556,8 @@ bool FDWCEditorRenderUploadQueuePriorityDiagnosticsTest::RunTest(const FString&)
 {
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
-    FDWCEditorTextureWorkspace Workspace(UploadQueue);
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace        Workspace(UploadQueue);
+    UTexture2D*                       Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
 
     const FDWCEditorTextureHandle Background = Workspace.PublishBGRA8(
@@ -572,7 +573,7 @@ bool FDWCEditorRenderUploadQueuePriorityDiagnosticsTest::RunTest(const FString&)
         Descriptor,
         MakeFlatNormalPixels(Descriptor));
     TestTrue(TEXT("Upload priority diagnostics fixtures publish textures"),
-        Background.IsValid() && Normal.IsValid() && Interactive.IsValid());
+             Background.IsValid() && Normal.IsValid() && Interactive.IsValid());
 
     const FIntRect DirtyRect(0, 0, 2, 2);
     Workspace.MarkDirty(Background, DirtyRect, false, EDWCEditorTextureUploadPriority::Background);
@@ -596,7 +597,7 @@ bool FDWCEditorRenderUploadQueuePriorityDiagnosticsTest::RunTest(const FString&)
         TestEqual(TEXT("One normal upload is pending"), PendingNormal->Count, 1ull);
         TestEqual(TEXT("One interactive upload is pending"), PendingInteractive->Count, 1ull);
         TestTrue(TEXT("Pending upload byte estimates are reported"),
-            PendingBackground->Bytes > 0 && PendingNormal->Bytes > 0 && PendingInteractive->Bytes > 0);
+                 PendingBackground->Bytes > 0 && PendingNormal->Bytes > 0 && PendingInteractive->Bytes > 0);
     }
 
     ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);

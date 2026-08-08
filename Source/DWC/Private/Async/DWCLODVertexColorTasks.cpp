@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Async/DWCLODVertexColorTasks.h"
 
 #include "Components/DynamicWetClothesComponent.h"
@@ -35,11 +36,11 @@ namespace
         return true;
     }
 
-}
+} // namespace
 
 TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> BuildDWCLODVertexStaticData(
     USkeletalMeshComponent* TargetSkeletalMesh,
-    const int32 LODIndex)
+    const int32             LODIndex)
 {
     DWC_PROFILE_SCOPE(DWC_BuildLODVertexStaticData);
 
@@ -75,7 +76,7 @@ TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> BuildDWCLODVertex
         }
 
         const FSkelMeshRenderSection& Section = LODData->RenderSections[SectionIndex];
-        const int32 BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
+        const int32                   BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
         if (BufferVertexIndex < 0 || BufferVertexIndex >= VertexCount)
         {
             continue;
@@ -154,7 +155,6 @@ FDWCLODVertexColorTransferTask::FDWCLODVertexColorTransferTask(
 {
 }
 
-
 void FDWCLODVertexColorTransferTask::ExecuteWorker()
 {
     DWC_PROFILE_SCOPE(DWC_LODVertexColorTransferTask_ExecuteWorker);
@@ -190,22 +190,18 @@ void FDWCLODVertexColorTransferTask::ExecuteWorker()
             continue;
         }
 
-        MissingTargetGeometries.Add({
-            TargetLODData->LODIndex,
-            FDWCLODVertexColorTransferGeometryView{
-                TargetLODData->Geometry.LocalPositions,
-                TargetLODData->Geometry.LocalNormals
-            }
-        });
+        MissingTargetGeometries.Add({ TargetLODData->LODIndex,
+                                      FDWCLODVertexColorTransferGeometryView{
+                                          TargetLODData->Geometry.LocalPositions,
+                                          TargetLODData->Geometry.LocalNormals } });
     }
 
-    TMap<int32, TArray<int32>> BuiltTargetToSourceByLOD;
+    TMap<int32, TArray<int32>>                       BuiltTargetToSourceByLOD;
     TArray<FDWCLODVertexColorTransferMapBuildResult> BuiltTransferMaps;
     if (BuildDWCLODVertexColorTransferMaps(
             FDWCLODVertexColorTransferGeometryView{
                 Snapshot.SourceLODData->Geometry.LocalPositions,
-                Snapshot.SourceLODData->Geometry.LocalNormals
-            },
+                Snapshot.SourceLODData->Geometry.LocalNormals },
             MissingTargetGeometries,
             BuiltTransferMaps))
     {
@@ -232,7 +228,7 @@ void FDWCLODVertexColorTransferTask::ExecuteWorker()
         const TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>* CachedMap =
             Snapshot.CachedTargetToSourceVertexByLOD.Find(LODResult.LODIndex);
         const TArray<int32>* TransferMap = nullptr;
-        const bool bHasCachedMap =
+        const bool           bHasCachedMap =
             CachedMap != nullptr &&
             CachedMap->IsValid() &&
             (*CachedMap)->Num() == TargetLODData->Geometry.LocalPositions.Num();
@@ -294,4 +290,3 @@ void FDWCLODVertexColorTransferTask::CommitGameThread()
 
     Owner->CommitLODVertexColorTransferResult(MoveTemp(Result));
 }
-

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -58,10 +59,10 @@ namespace
     }
 
     bool CompareIncrementalResultToFullSurface(
-        FAutomationTestBase& Test,
+        FAutomationTestBase&                          Test,
         const FWetWrinkleIncrementalPreviewJobResult& Result,
-        const FDWCEditorNormalRasterSurface& FullSurface,
-        TConstArrayView<FColor> FullPixels)
+        const FDWCEditorNormalRasterSurface&          FullSurface,
+        TConstArrayView<FColor>                       FullPixels)
     {
         for (const FDWCEditorNormalRegionPayload& Region : Result.Regions)
         {
@@ -103,8 +104,8 @@ namespace
 
     bool ApplyIncrementalNormalRegions(
         const FWetWrinkleIncrementalPreviewJobResult& Result,
-        FDWCEditorNormalRasterSurface& InOutSurface,
-        TArray<FColor>& InOutPixels)
+        FDWCEditorNormalRasterSurface&                InOutSurface,
+        TArray<FColor>&                               InOutPixels)
     {
         for (const FDWCEditorNormalRegionPayload& Region : Result.Regions)
         {
@@ -149,11 +150,11 @@ namespace
     }
 
     bool RunIncrementalWrinkleBatch(
-        FAutomationTestBase& Test,
+        FAutomationTestBase&                  Test,
         TArray<FWetWrinkleIncrementalCommand> Commands,
-        FDWCEditorNormalRasterSurface& InOutSurface,
-        TArray<FColor>& InOutPixels,
-        const FIntPoint OutputSize)
+        FDWCEditorNormalRasterSurface&        InOutSurface,
+        TArray<FColor>&                       InOutPixels,
+        const FIntPoint                       OutputSize)
     {
         TArray<FWetWrinkleIncrementalRegionPlan> Plan;
         if (!FWetWrinkleIncrementalPreviewWorker::BuildRegionPlan(
@@ -198,7 +199,7 @@ namespace
         }
         return true;
     }
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorNormalRasterIncrementalParityTest,
@@ -212,7 +213,7 @@ bool FDWCEditorNormalRasterIncrementalParityTest::RunTest(const FString&)
     BatchSurface.Initialize(FIntPoint(32, 32), true);
     IncrementalSurface.Initialize(FIntPoint(32, 32), true);
     const FDWCEditorNormalStampCommand First = MakeTestStamp(FVector2f(0.35f, 0.5f));
-    FDWCEditorNormalStampCommand Second = MakeTestStamp(FVector2f(0.62f, 0.5f));
+    FDWCEditorNormalStampCommand       Second = MakeTestStamp(FVector2f(0.62f, 0.5f));
     Second.Footprint.RotationRadians = 0.7f;
 
     FDWCEditorNormalRasterCore::RasterizeStamp(First, BatchSurface);
@@ -223,7 +224,7 @@ bool FDWCEditorNormalRasterIncrementalParityTest::RunTest(const FString&)
         FDWCEditorNormalRasterCore::RasterizeStamp(Second, IncrementalSurface);
 
     TestTrue(TEXT("Both incremental stamps affect pixels"),
-        FirstResult.bAffectedPixels && SecondResult.bAffectedPixels);
+             FirstResult.bAffectedPixels && SecondResult.bAffectedPixels);
     TestEqual(TEXT("Normal counts match"), BatchSurface.GetPixelCount(), IncrementalSurface.GetPixelCount());
     for (int32 Index = 0; Index < BatchSurface.GetPixelCount(); ++Index)
     {
@@ -276,15 +277,15 @@ bool FDWCEditorNormalRasterPostProcessTest::RunTest(const FString&)
 
     const int32 NeighborIndex = 2 * Surface.Size.X + 3;
     TestTrue(TEXT("Dilation copies the boundary normal"),
-        Surface.GetNormal(NeighborIndex).Equals(Surface.GetNormal(CenterIndex), 1.0e-4f));
+             Surface.GetNormal(NeighborIndex).Equals(Surface.GetNormal(CenterIndex), 1.0e-4f));
     TestTrue(TEXT("Dilation copies coverage"),
-        FMath::IsNearlyEqual(Surface.Coverage[NeighborIndex], 0.75f));
+             FMath::IsNearlyEqual(Surface.Coverage[NeighborIndex], 0.75f));
 
     FDWCEditorNormalRasterSurface Downsampled;
     TestTrue(TEXT("Normal-aware downsample succeeds"),
-        FDWCEditorRasterPostProcess::DownsampleNormalSurface(Surface, FIntPoint(1, 1), Downsampled));
+             FDWCEditorRasterPostProcess::DownsampleNormalSurface(Surface, FIntPoint(1, 1), Downsampled));
     TestTrue(TEXT("Downsampled normal stays normalized"),
-        FMath::IsNearlyEqual(Downsampled.GetNormal(0).Size(), 1.0f, 1.0e-5f));
+             FMath::IsNearlyEqual(Downsampled.GetNormal(0).Size(), 1.0f, 1.0e-5f));
     return true;
 }
 
@@ -295,8 +296,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorWrinklePatchRegionParityTest::RunTest(const FString&)
 {
-    const FIntPoint WorkingSize(64, 64);
-    const FIntPoint OutputSize(32, 32);
+    const FIntPoint               WorkingSize(64, 64);
+    const FIntPoint               OutputSize(32, 32);
     FWetWrinkleIncrementalCommand Command;
     Command.Kind = EWetWrinkleIncrementalCommandKind::Patch;
     Command.Patch = MakeTestStamp(FVector2f(0.98f, 0.53f));
@@ -307,13 +308,13 @@ bool FDWCEditorWrinklePatchRegionParityTest::RunTest(const FString&)
     FDWCEditorNormalRasterCore::RasterizeStamp(Command.Patch, FullSurface);
     TArray<FColor> FullPixels;
     TestTrue(TEXT("Full patch output encodes"),
-        FDWCEditorRasterPostProcess::ResampleAndEncodeNormalPixels(
-            FullSurface, OutputSize, FullPixels));
+             FDWCEditorRasterPostProcess::ResampleAndEncodeNormalPixels(
+                 FullSurface, OutputSize, FullPixels));
 
     TArray<FWetWrinkleIncrementalRegionPlan> Plan;
     TestTrue(TEXT("Patch region plan builds"),
-        FWetWrinkleIncrementalPreviewWorker::BuildRegionPlan(
-            Commands, WorkingSize, OutputSize, Plan));
+             FWetWrinkleIncrementalPreviewWorker::BuildRegionPlan(
+                 Commands, WorkingSize, OutputSize, Plan));
     FWetWrinkleIncrementalPreviewJobInput Input;
     Input.TextureSize = OutputSize;
     Input.WorkingTextureSize = WorkingSize;
@@ -324,7 +325,7 @@ bool FDWCEditorWrinklePatchRegionParityTest::RunTest(const FString&)
         FWetWrinkleIncrementalRegionSnapshot& Snapshot = Input.Regions.AddDefaulted_GetRef();
         Snapshot.Plan = Item;
         TestTrue(TEXT("Patch source region initializes"),
-            Snapshot.Region.Initialize(WorkingSize, Item.WorkingRect, false));
+                 Snapshot.Region.Initialize(WorkingSize, Item.WorkingRect, false));
     }
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> Token =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
@@ -334,7 +335,7 @@ bool FDWCEditorWrinklePatchRegionParityTest::RunTest(const FString&)
     if (Result.IsValid() && Result->bSucceeded)
     {
         TestTrue(TEXT("Patch region result matches full raster"),
-            CompareIncrementalResultToFullSurface(*this, *Result, FullSurface, FullPixels));
+                 CompareIncrementalResultToFullSurface(*this, *Result, FullSurface, FullPixels));
     }
 
     const FDWCEditorWorkerMemoryEstimate Estimate =
@@ -343,7 +344,7 @@ bool FDWCEditorWrinklePatchRegionParityTest::RunTest(const FString&)
         static_cast<uint64>(WorkingSize.X) * WorkingSize.Y * sizeof(uint32) +
         static_cast<uint64>(OutputSize.X) * OutputSize.Y * sizeof(FColor);
     TestTrue(TEXT("Patch region job stays below a full-buffer snapshot"),
-        Estimate.GetTotalBytes() < FullSurfaceBytes);
+             Estimate.GetTotalBytes() < FullSurfaceBytes);
     return true;
 }
 
@@ -354,9 +355,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorWrinkleRidgeRegionParityTest::RunTest(const FString&)
 {
-    const FIntPoint Size(64, 64);
+    const FIntPoint                 Size(64, 64);
     const FWetProceduralRidgeStroke Stroke = MakeTestRidge();
-    FWetWrinkleIncrementalCommand Command;
+    FWetWrinkleIncrementalCommand   Command;
     Command.Kind = EWetWrinkleIncrementalCommandKind::Ridge;
     Command.Ridge = Stroke;
     TArray<FWetWrinkleIncrementalCommand> Commands = { Command };
@@ -366,11 +367,11 @@ bool FDWCEditorWrinkleRidgeRegionParityTest::RunTest(const FString&)
     FWetProceduralRidgeRasterizer::RasterizeToSurface(Stroke, FullSurface);
     TArray<FColor> FullPixels;
     TestTrue(TEXT("Full ridge output encodes"),
-        FDWCEditorRasterPostProcess::ResampleAndEncodeNormalPixels(FullSurface, Size, FullPixels));
+             FDWCEditorRasterPostProcess::ResampleAndEncodeNormalPixels(FullSurface, Size, FullPixels));
 
     TArray<FWetWrinkleIncrementalRegionPlan> Plan;
     TestTrue(TEXT("Ridge region plan builds"),
-        FWetWrinkleIncrementalPreviewWorker::BuildRegionPlan(Commands, Size, Size, Plan));
+             FWetWrinkleIncrementalPreviewWorker::BuildRegionPlan(Commands, Size, Size, Plan));
     FWetWrinkleIncrementalPreviewJobInput Input;
     Input.TextureSize = Size;
     Input.WorkingTextureSize = Size;
@@ -382,7 +383,7 @@ bool FDWCEditorWrinkleRidgeRegionParityTest::RunTest(const FString&)
         FWetWrinkleIncrementalRegionSnapshot& Snapshot = Input.Regions.AddDefaulted_GetRef();
         Snapshot.Plan = Item;
         TestTrue(TEXT("Ridge source region initializes"),
-            Snapshot.Region.Initialize(Size, Item.WorkingRect, false));
+                 Snapshot.Region.Initialize(Size, Item.WorkingRect, false));
     }
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> Token =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
@@ -392,7 +393,7 @@ bool FDWCEditorWrinkleRidgeRegionParityTest::RunTest(const FString&)
     if (Result.IsValid() && Result->bSucceeded)
     {
         TestTrue(TEXT("Ridge region result matches full raster"),
-            CompareIncrementalResultToFullSurface(*this, *Result, FullSurface, FullPixels));
+                 CompareIncrementalResultToFullSurface(*this, *Result, FullSurface, FullPixels));
     }
     return true;
 }
@@ -404,8 +405,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorWrinkleMixedIncrementalLifecycleParityTest::RunTest(const FString&)
 {
-    const FIntPoint WorkingSize(64, 64);
-    const FIntPoint OutputSize(32, 32);
+    const FIntPoint              WorkingSize(64, 64);
+    const FIntPoint              OutputSize(32, 32);
     FDWCEditorNormalStampCommand FirstPatch = MakeTestStamp(FVector2f(0.31f, 0.47f));
     FDWCEditorNormalStampCommand WrappedPatch = MakeTestStamp(FVector2f(0.98f, 0.56f));
     WrappedPatch.Footprint.RadiusUV = 0.12f;
@@ -416,8 +417,8 @@ bool FDWCEditorWrinkleMixedIncrementalLifecycleParityTest::RunTest(const FString
     FWetWrinkleAccumulatedPreviewJobInput FullInput;
     FullInput.TextureSize = OutputSize;
     FullInput.WorkingTextureSize = WorkingSize;
-    FullInput.Patches = {FirstPatch, WrappedPatch};
-    FullInput.RidgeStrokes = {Ridge};
+    FullInput.Patches = { FirstPatch, WrappedPatch };
+    FullInput.RidgeStrokes = { Ridge };
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> FullToken =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
     const TSharedPtr<FWetWrinkleAccumulatedPreviewJobResult, ESPMode::ThreadSafe> FullResult =
@@ -445,7 +446,7 @@ bool FDWCEditorWrinkleMixedIncrementalLifecycleParityTest::RunTest(const FString
         TEXT("Overlapping and wrapped patches commit incrementally"),
         RunIncrementalWrinkleBatch(
             *this,
-            {FirstCommand, WrappedCommand},
+            { FirstCommand, WrappedCommand },
             IncrementalSurface,
             IncrementalPixels,
             OutputSize));
@@ -458,7 +459,7 @@ bool FDWCEditorWrinkleMixedIncrementalLifecycleParityTest::RunTest(const FString
         TEXT("Ridge commits on top of the current incremental surface"),
         RunIncrementalWrinkleBatch(
             *this,
-            {RidgeCommand},
+            { RidgeCommand },
             IncrementalSurface,
             IncrementalPixels,
             OutputSize));
@@ -503,11 +504,11 @@ bool FDWCTransparencyPixelComposerParityTest::RunTest(const FString&)
     Context.VisualizationMode = EDWCTransparencyVisualizationMode::AutoAlpha;
     TArray<FColor> Pixels;
     TestTrue(TEXT("Batch composition succeeds"),
-        FDWCTransparencyComposite::ComposeVisualizationPixels(Context, Pixels));
+             FDWCTransparencyComposite::ComposeVisualizationPixels(Context, Pixels));
     TestEqual(TEXT("Batch and single-pixel composition match"),
-        Pixels[0], FDWCTransparencyComposite::ComposeVisualizationPixel(Context, 0));
+              Pixels[0], FDWCTransparencyComposite::ComposeVisualizationPixel(Context, 0));
     TestEqual(TEXT("Batch and single-pixel composition match for second pixel"),
-        Pixels[1], FDWCTransparencyComposite::ComposeVisualizationPixel(Context, 1));
+              Pixels[1], FDWCTransparencyComposite::ComposeVisualizationPixel(Context, 1));
 
     TestTrue(
         TEXT("Outer island IDs fit in the compact representation"),

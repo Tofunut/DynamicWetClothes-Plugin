@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 
 uint64 FAbsorbedWetnessSimulationState::GetAllocatedMemoryBytes() const

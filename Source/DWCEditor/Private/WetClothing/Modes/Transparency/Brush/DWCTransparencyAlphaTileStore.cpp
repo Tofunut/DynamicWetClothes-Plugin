@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyAlphaTileStore.h"
 
 namespace
@@ -7,11 +8,11 @@ namespace
     {
         return (Value % Divisor + Divisor) % Divisor;
     }
-}
+} // namespace
 
 bool FDWCTransparencyAlphaTilePayload::IsValidFor(
     const FIntPoint& Resolution,
-    const int32 TileSize) const
+    const int32      TileSize) const
 {
     if (TileSize <= 0 || Rect.IsEmpty() || Rect.Min.X < 0 || Rect.Min.Y < 0 ||
         Rect.Max.X > Resolution.X || Rect.Max.Y > Resolution.Y ||
@@ -26,7 +27,7 @@ bool FDWCTransparencyAlphaTilePayload::IsValidFor(
 uint64 FDWCTransparencyAlphaTilePayload::GetAllocatedBytes() const
 {
     return static_cast<uint64>(Premultiplied.GetAllocatedSize()) +
-        static_cast<uint64>(Weight.GetAllocatedSize());
+           static_cast<uint64>(Weight.GetAllocatedSize());
 }
 
 void FDWCTransparencyAlphaTileStore::Initialize(const FIntPoint& InResolution)
@@ -68,11 +69,11 @@ uint8 FDWCTransparencyAlphaTileStore::GetPremultiplied(const int32 PixelIndex) c
     {
         return 0;
     }
-    int32 LocalIndex = INDEX_NONE;
+    int32        LocalIndex = INDEX_NONE;
     const FTile* Tile = FindTileForPixel(PixelIndex % Resolution.X, PixelIndex / Resolution.X, LocalIndex);
     return Tile != nullptr && Tile->Premultiplied.IsValidIndex(LocalIndex)
-        ? Tile->Premultiplied[LocalIndex]
-        : 0;
+               ? Tile->Premultiplied[LocalIndex]
+               : 0;
 }
 
 uint8 FDWCTransparencyAlphaTileStore::GetWeight(const int32 PixelIndex) const
@@ -81,11 +82,11 @@ uint8 FDWCTransparencyAlphaTileStore::GetWeight(const int32 PixelIndex) const
     {
         return 0;
     }
-    int32 LocalIndex = INDEX_NONE;
+    int32        LocalIndex = INDEX_NONE;
     const FTile* Tile = FindTileForPixel(PixelIndex % Resolution.X, PixelIndex / Resolution.X, LocalIndex);
     return Tile != nullptr && Tile->Weight.IsValidIndex(LocalIndex)
-        ? Tile->Weight[LocalIndex]
-        : 0;
+               ? Tile->Weight[LocalIndex]
+               : 0;
 }
 
 void FDWCTransparencyAlphaTileStore::SetPixel(
@@ -99,9 +100,9 @@ void FDWCTransparencyAlphaTileStore::SetPixel(
         return;
     }
     const FIntPoint Coordinate(X / TileSize, Y / TileSize);
-    FTile& Tile = FindOrAddTile(Coordinate);
-    const FIntRect Rect = GetTileRect(Coordinate);
-    const int32 LocalIndex = (Y - Rect.Min.Y) * Rect.Width() + X - Rect.Min.X;
+    FTile&          Tile = FindOrAddTile(Coordinate);
+    const FIntRect  Rect = GetTileRect(Coordinate);
+    const int32     LocalIndex = (Y - Rect.Min.Y) * Rect.Width() + X - Rect.Min.X;
     Tile.Premultiplied[LocalIndex] = Premultiplied;
     Tile.Weight[LocalIndex] = Weight;
 }
@@ -122,9 +123,9 @@ FIntRect FDWCTransparencyAlphaTileStore::GetTileRect(const FIntPoint& TileCoordi
 
 void FDWCTransparencyAlphaTileStore::GatherTileCoordinates(
     const TConstArrayView<FIntRect> Regions,
-    const bool bIncludeOnePixelHalo,
-    const bool bWrap,
-    TArray<FIntPoint>& OutTileCoordinates) const
+    const bool                      bIncludeOnePixelHalo,
+    const bool                      bWrap,
+    TArray<FIntPoint>&              OutTileCoordinates) const
 {
     OutTileCoordinates.Reset();
     if (!IsValid())
@@ -132,8 +133,8 @@ void FDWCTransparencyAlphaTileStore::GatherTileCoordinates(
         return;
     }
     TSet<FIntPoint> UniqueCoordinates;
-    const int32 TileCountX = FMath::DivideAndRoundUp(Resolution.X, TileSize);
-    const int32 TileCountY = FMath::DivideAndRoundUp(Resolution.Y, TileSize);
+    const int32     TileCountX = FMath::DivideAndRoundUp(Resolution.X, TileSize);
+    const int32     TileCountY = FMath::DivideAndRoundUp(Resolution.Y, TileSize);
     for (FIntRect Region : Regions)
     {
         if (bIncludeOnePixelHalo)
@@ -141,10 +142,10 @@ void FDWCTransparencyAlphaTileStore::GatherTileCoordinates(
             Region.Min -= FIntPoint(1, 1);
             Region.Max += FIntPoint(1, 1);
         }
-        const int32 MinTileX = FMath::FloorToInt(static_cast<double>(Region.Min.X) / TileSize);
-        const int32 MinTileY = FMath::FloorToInt(static_cast<double>(Region.Min.Y) / TileSize);
-        const int32 MaxTileX = FMath::FloorToInt(static_cast<double>(Region.Max.X - 1) / TileSize);
-        const int32 MaxTileY = FMath::FloorToInt(static_cast<double>(Region.Max.Y - 1) / TileSize);
+        const int32 MinTileX = IntCastChecked<int32>(FMath::FloorToInt(static_cast<double>(Region.Min.X) / TileSize));
+        const int32 MinTileY = IntCastChecked<int32>(FMath::FloorToInt(static_cast<double>(Region.Min.Y) / TileSize));
+        const int32 MaxTileX = IntCastChecked<int32>(FMath::FloorToInt(static_cast<double>(Region.Max.X - 1) / TileSize));
+        const int32 MaxTileY = IntCastChecked<int32>(FMath::FloorToInt(static_cast<double>(Region.Max.Y - 1) / TileSize));
         for (int32 RawY = MinTileY; RawY <= MaxTileY; ++RawY)
         {
             for (int32 RawX = MinTileX; RawX <= MaxTileX; ++RawX)
@@ -165,13 +166,11 @@ void FDWCTransparencyAlphaTileStore::GatherTileCoordinates(
         OutTileCoordinates.Add(Coordinate);
     }
     OutTileCoordinates.Sort([](const FIntPoint& A, const FIntPoint& B)
-    {
-        return A.Y == B.Y ? A.X < B.X : A.Y < B.Y;
-    });
+                            { return A.Y == B.Y ? A.X < B.X : A.Y < B.Y; });
 }
 
 void FDWCTransparencyAlphaTileStore::SnapshotTiles(
-    const TArray<FIntPoint>& TileCoordinates,
+    const TArray<FIntPoint>&                  TileCoordinates,
     TArray<FDWCTransparencyAlphaTilePayload>& OutTiles) const
 {
     OutTiles.Reset(TileCoordinates.Num());
@@ -200,7 +199,7 @@ void FDWCTransparencyAlphaTileStore::SnapshotTiles(
 }
 
 bool FDWCTransparencyAlphaTileStore::CanCommit(
-    const uint64 ExpectedRevision,
+    const uint64                                    ExpectedRevision,
     const TArray<FDWCTransparencyAlphaTilePayload>& Payloads) const
 {
     if (!IsValid() || Revision != ExpectedRevision || Payloads.IsEmpty())
@@ -220,7 +219,7 @@ bool FDWCTransparencyAlphaTileStore::CanCommit(
 }
 
 bool FDWCTransparencyAlphaTileStore::Commit(
-    const uint64 ExpectedRevision,
+    const uint64                                    ExpectedRevision,
     const TArray<FDWCTransparencyAlphaTilePayload>& Payloads)
 {
     if (!CanCommit(ExpectedRevision, Payloads))
@@ -261,8 +260,8 @@ void FDWCTransparencyAlphaTileStore::BuildFromDense(
         for (int32 TileX = 0; TileX < TileCountX; ++TileX)
         {
             const FIntPoint Coordinate(TileX, TileY);
-            const FIntRect Rect = GetTileRect(Coordinate);
-            FTile Tile;
+            const FIntRect  Rect = GetTileRect(Coordinate);
+            FTile           Tile;
             Tile.Premultiplied.SetNumUninitialized(Rect.Width() * Rect.Height());
             Tile.Weight.SetNumUninitialized(Rect.Width() * Rect.Height());
             bool bAny = false;
@@ -318,11 +317,11 @@ void FDWCTransparencyAlphaTileStore::BuildDense(
 const FDWCTransparencyAlphaTileStore::FTile* FDWCTransparencyAlphaTileStore::FindTileForPixel(
     const int32 X,
     const int32 Y,
-    int32& OutLocalIndex) const
+    int32&      OutLocalIndex) const
 {
     OutLocalIndex = INDEX_NONE;
     const FIntPoint Coordinate(X / TileSize, Y / TileSize);
-    const FTile* Tile = Tiles.Find(Coordinate);
+    const FTile*    Tile = Tiles.Find(Coordinate);
     if (Tile != nullptr)
     {
         const FIntRect Rect = GetTileRect(Coordinate);
@@ -334,9 +333,9 @@ const FDWCTransparencyAlphaTileStore::FTile* FDWCTransparencyAlphaTileStore::Fin
 FDWCTransparencyAlphaTileStore::FTile& FDWCTransparencyAlphaTileStore::FindOrAddTile(
     const FIntPoint& TileCoordinate)
 {
-    FTile& Tile = Tiles.FindOrAdd(TileCoordinate);
+    FTile&         Tile = Tiles.FindOrAdd(TileCoordinate);
     const FIntRect Rect = GetTileRect(TileCoordinate);
-    const int32 PixelCount = Rect.Width() * Rect.Height();
+    const int32    PixelCount = Rect.Width() * Rect.Height();
     if (Tile.Premultiplied.Num() != PixelCount)
     {
         Tile.Premultiplied.Init(0, PixelCount);

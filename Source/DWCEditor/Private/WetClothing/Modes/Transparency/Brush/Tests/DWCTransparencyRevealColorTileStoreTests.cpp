@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -35,9 +36,9 @@ namespace
     }
 
     bool RasterizeRevealColorIncrementally(
-        const FDWCTransparencyAutoBakeResult& AutoResult,
+        const FDWCTransparencyAutoBakeResult&    AutoResult,
         const FDWCTransparencyRevealColorStroke& Stroke,
-        FDWCTransparencyRevealColorTileStore& InOutStore)
+        FDWCTransparencyRevealColorTileStore&    InOutStore)
     {
         FDWCEditorDirtyRegionSet DirtyRegions;
         for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
@@ -82,7 +83,7 @@ namespace
             Payloads,
             MakeArrayView(AutoResult.InnerColorBuffer));
     }
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyRevealColorTileParityTest,
@@ -91,7 +92,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCTransparencyRevealColorTileParityTest::RunTest(const FString& Parameters)
 {
-    const FIntPoint Resolution(512, 384);
+    const FIntPoint                      Resolution(512, 384);
     const FDWCTransparencyAutoBakeResult AutoResult = BuildRevealColorTestResult(Resolution);
 
     FDWCTransparencyRevealColorStroke Stroke;
@@ -130,7 +131,7 @@ bool FDWCTransparencyRevealColorTileParityTest::RunTest(const FString& Parameter
     TArray<FColor> DenseColors = AutoResult.InnerColorBuffer;
     FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
         AutoResult,
-        {Stroke, SmoothStroke},
+        { Stroke, SmoothStroke },
         Stroke.MaterialSlotIndex,
         FLinearColor(0.1f, 0.2f, 0.3f),
         DenseColors);
@@ -167,23 +168,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCTransparencyRevealColorTileRevisionTest::RunTest(const FString& Parameters)
 {
     const FIntPoint Resolution(256, 256);
-    TArray<FColor> BaseColors;
+    TArray<FColor>  BaseColors;
     BaseColors.Init(FColor(17, 29, 43, 255), Resolution.X * Resolution.Y);
 
     FDWCTransparencyRevealColorTileStore Store;
     Store.Initialize(Resolution);
     TArray<FDWCTransparencyRevealColorTilePayload> Payloads;
-    Store.SnapshotTiles({FIntPoint(0, 0)}, MakeArrayView(BaseColors), Payloads);
+    Store.SnapshotTiles({ FIntPoint(0, 0) }, MakeArrayView(BaseColors), Payloads);
     const uint64 SnapshotRevision = Store.GetRevision();
     TestTrue(TEXT("A current reveal snapshot is committable"),
-        Store.CanCommit(SnapshotRevision, Payloads, MakeArrayView(BaseColors)));
+             Store.CanCommit(SnapshotRevision, Payloads, MakeArrayView(BaseColors)));
     TestTrue(TEXT("The current reveal snapshot commits"),
-        Store.Commit(SnapshotRevision, Payloads, MakeArrayView(BaseColors)));
+             Store.Commit(SnapshotRevision, Payloads, MakeArrayView(BaseColors)));
     TestFalse(TEXT("The same reveal snapshot is rejected after revision advances"),
-        Store.CanCommit(SnapshotRevision, Payloads, MakeArrayView(BaseColors)));
+              Store.CanCommit(SnapshotRevision, Payloads, MakeArrayView(BaseColors)));
     TestEqual(TEXT("Base-only reveal tiles are not retained"), Store.GetTileCount(), 0);
     TestEqual(TEXT("A missing sparse tile resolves the immutable base"),
-        Store.GetColor(0, MakeArrayView(BaseColors)), BaseColors[0]);
+              Store.GetColor(0, MakeArrayView(BaseColors)), BaseColors[0]);
     return true;
 }
 
@@ -194,9 +195,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCTransparencyCompositeIncrementalLifecycleParityTest::RunTest(const FString&)
 {
-    const FIntPoint Resolution(256, 192);
+    const FIntPoint                Resolution(256, 192);
     FDWCTransparencyAutoBakeResult AutoResult = BuildRevealColorTestResult(Resolution);
-    const int32 PixelCount = Resolution.X * Resolution.Y;
+    const int32                    PixelCount = Resolution.X * Resolution.Y;
     AutoResult.AutoAlphaBuffer.SetNumUninitialized(PixelCount);
     AutoResult.ValidHitBuffer.Init(true, PixelCount);
     AutoResult.HitDistanceBuffer.Init(1.0f, PixelCount);
@@ -236,7 +237,7 @@ bool FDWCTransparencyCompositeIncrementalLifecycleParityTest::RunTest(const FStr
     TArray<uint8> DenseWeight;
     FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
         AutoResult,
-        {AlphaStroke},
+        { AlphaStroke },
         0,
         3,
         0,
@@ -272,8 +273,8 @@ bool FDWCTransparencyCompositeIncrementalLifecycleParityTest::RunTest(const FStr
     FullInput.AutoResult = SharedAutoResult;
     FullInput.bRebuildManualOverridesFromStrokes = true;
     FullInput.bRebuildRevealColorFromStrokes = true;
-    FullInput.EditableStrokes = {AlphaStroke};
-    FullInput.RevealColorPaintStrokes = {RevealStroke};
+    FullInput.EditableStrokes = { AlphaStroke };
+    FullInput.RevealColorPaintStrokes = { RevealStroke };
     FullInput.BaseRevealColor = FLinearColor(0.1f, 0.2f, 0.3f);
     FullInput.MaterialSlotIndex = 3;
     FullInput.UVChannelIndex = 0;

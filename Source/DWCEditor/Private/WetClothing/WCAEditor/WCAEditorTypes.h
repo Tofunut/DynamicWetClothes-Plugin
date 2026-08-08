@@ -1,10 +1,12 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Shared item types used by the Wet Clothing Asset editor UI for material slots, textures, selection tools, and profiles.
  */
 
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "WetClothing/WCAEditor/UI/UVView/SWCAUVView.h"
 
@@ -28,7 +30,7 @@ struct FWCATextureItem
 struct FWCAUVSelectionToolItem
 {
     EWCAUVSelectionTool Tool = EWCAUVSelectionTool::Select;
-    FText                            Label;
-    FText                            Tooltip;
-    FName                            IconBrushDisplayName;
+    FText               Label;
+    FText               Tooltip;
+    FName               IconBrushDisplayName;
 };

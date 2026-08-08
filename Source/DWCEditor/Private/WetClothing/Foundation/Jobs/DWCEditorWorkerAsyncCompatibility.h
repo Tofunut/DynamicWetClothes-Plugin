@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "WetClothing/Foundation/Async/DWCEditorAsyncOperationTypes.h"
@@ -48,7 +49,7 @@ namespace DWCEditorWorkerAsyncCompatibility
 
     inline FDWCEditorAsyncOperationIdentity MakeOperationIdentity(
         const FDWCEditorWorkerJobTicket& Ticket,
-        const FGuid& SessionEpoch)
+        const FGuid&                     SessionEpoch)
     {
         FDWCEditorAsyncOperationIdentity Result;
         Result.Key = MakeOperationKey(Ticket.Key);
@@ -59,4 +60,4 @@ namespace DWCEditorWorkerAsyncCompatibility
         Result.DomainRevision = Ticket.DomainRevision;
         return Result;
     }
-}
+} // namespace DWCEditorWorkerAsyncCompatibility

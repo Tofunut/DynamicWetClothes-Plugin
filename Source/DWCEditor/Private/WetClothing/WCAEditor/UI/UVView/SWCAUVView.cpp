@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "SWCAUVView.h"
 
 #include "Engine/Texture.h"
@@ -17,8 +18,8 @@ namespace
 {
     struct FUVOutlineEdgeDrawData
     {
-        int32 ForwardCount = 0;
-        int32 ReverseCount = 0;
+        int32                       ForwardCount = 0;
+        int32                       ReverseCount = 0;
         TPair<FVector2D, FVector2D> Points;
     };
 
@@ -181,11 +182,11 @@ void SWCAUVView::SetIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>&
         }
     }
 
-    UTexture* CurrentAddressTexture = BackgroundTexture.Get();
+    UTexture*         CurrentAddressTexture = BackgroundTexture.Get();
     const UTexture2D* CurrentAddressTexture2D = Cast<UTexture2D>(CurrentAddressTexture);
-    const uint8 CurrentAddressX = CurrentAddressTexture2D != nullptr ? static_cast<uint8>(CurrentAddressTexture2D->AddressX) : 0xFF;
-    const uint8 CurrentAddressY = CurrentAddressTexture2D != nullptr ? static_cast<uint8>(CurrentAddressTexture2D->AddressY) : 0xFF;
-    bool bSameIslandSources = IslandSources.Num() == NewIslandSources.Num();
+    const uint8       CurrentAddressX = CurrentAddressTexture2D != nullptr ? static_cast<uint8>(CurrentAddressTexture2D->AddressX) : 0xFF;
+    const uint8       CurrentAddressY = CurrentAddressTexture2D != nullptr ? static_cast<uint8>(CurrentAddressTexture2D->AddressY) : 0xFF;
+    bool              bSameIslandSources = IslandSources.Num() == NewIslandSources.Num();
     if (bSameIslandSources)
     {
         for (int32 Index = 0; Index < NewIslandSources.Num(); ++Index)
@@ -489,11 +490,11 @@ int32 SWCAUVView::OnPaint(
                                             ? SelectedIslandLineColor
                                             : (bHasAssignedColor ? *AssignedColor : (bOutlineOnly ? FLinearColor(0.72f, 0.72f, 0.72f, 0.95f) : FLinearColor(0.45f, 0.45f, 0.45f, 0.25f)));
         LineColor.A *= LineOpacity;
-        const float         BaseThickness = bOutlineOnly
-                                                ? (bSelected ? 2.3f : (bHasAssignedColor ? 1.7f : 1.45f))
-                                                : (bSelected ? 1.15f : (bIsDefaultGrayOverlay ? 0.35f : (bHasAssignedColor ? 0.75f : 0.35f)));
-        const float         Thickness = FMath::Max(0.25f, BaseThickness * LineThicknessScale);
-        const int32         DrawLayer = bSelected ? SelectedLayer : WireLayer;
+        const float BaseThickness = bOutlineOnly
+                                        ? (bSelected ? 2.3f : (bHasAssignedColor ? 1.7f : 1.45f))
+                                        : (bSelected ? 1.15f : (bIsDefaultGrayOverlay ? 0.35f : (bHasAssignedColor ? 0.75f : 0.35f)));
+        const float Thickness = FMath::Max(0.25f, BaseThickness * LineThicknessScale);
+        const int32 DrawLayer = bSelected ? SelectedLayer : WireLayer;
 
         if (bSelected && !bOutlineOnly)
         {
@@ -564,8 +565,6 @@ int32 SWCAUVView::OnPaint(
         }
     }
 
-
-
     for (const FWCAUVViewCircleMarker& Marker : CircleMarkers)
     {
         if (Marker.RadiusUV <= UE_SMALL_NUMBER)
@@ -590,7 +589,7 @@ int32 SWCAUVView::OnPaint(
             Marker.FillColor);
 
         TArray<FVector2D> CirclePoints;
-        constexpr int32 CircleSegmentCount = 48;
+        constexpr int32   CircleSegmentCount = 48;
         CirclePoints.Reserve(CircleSegmentCount + 1);
         for (int32 SegmentIndex = 0; SegmentIndex <= CircleSegmentCount; ++SegmentIndex)
         {
@@ -767,10 +766,10 @@ FReply SWCAUVView::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointer
         ZoomAmount,
         ClampViewOffset(MyGeometry, UVBounds, ZoomAmount, ViewOffset));
 
-    const int32                          HitUVIslandID = HitTestIslandAtUV(ClickedUV);
+    const int32             HitUVIslandID = HitTestIslandAtUV(ClickedUV);
     const EWCAUVSelectionOp SelectionOp = MouseEvent.IsShiftDown()
-                                                           ? EWCAUVSelectionOp::Add
-                                                           : EWCAUVSelectionOp::Replace;
+                                              ? EWCAUVSelectionOp::Add
+                                              : EWCAUVSelectionOp::Replace;
 
     if (HitUVIslandID != INDEX_NONE)
     {
@@ -949,17 +948,19 @@ void SWCAUVView::RebuildGeometryCache()
             for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
             {
                 CachedContentUVBounds += Triangle.UVs[VertexIndex];
-                const int32 NextIndex = (VertexIndex + 1) % 3;
-                const FVector2D StartUV = Triangle.UVs[VertexIndex];
-                const FVector2D EndUV = Triangle.UVs[NextIndex];
+                const int32               NextIndex = (VertexIndex + 1) % 3;
+                const FVector2D           StartUV = Triangle.UVs[VertexIndex];
+                const FVector2D           EndUV = Triangle.UVs[NextIndex];
                 const FDWCCanonicalUVEdge EdgeKey(StartUV, EndUV);
-                FUVOutlineEdgeDrawData& EdgeData = OutlineMap.FindOrAdd(EdgeKey);
+                FUVOutlineEdgeDrawData&   EdgeData = OutlineMap.FindOrAdd(EdgeKey);
                 if (EdgeData.ForwardCount == 0 && EdgeData.ReverseCount == 0)
                 {
                     EdgeData.Points = TPair<FVector2D, FVector2D>(StartUV, EndUV);
                 }
-                if (EdgeKey.IsForward(StartUV, EndUV)) ++EdgeData.ForwardCount;
-                else ++EdgeData.ReverseCount;
+                if (EdgeKey.IsForward(StartUV, EndUV))
+                    ++EdgeData.ForwardCount;
+                else
+                    ++EdgeData.ReverseCount;
             }
         }
 

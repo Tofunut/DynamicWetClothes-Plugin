@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/DWCRuntimeDataSubsystem.h"
 
 #include "Async/DWCLODVertexColorTasks.h"
@@ -17,13 +18,13 @@
 TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     const UWetClothingAsset& WetClothingAsset,
-    USkeletalMeshComponent& TargetSkeletalMesh,
+    USkeletalMeshComponent&  TargetSkeletalMesh,
     const EDWCSimulationMode SimulationMode,
-    UObject* OwnerForLogs)
+    UObject*                 OwnerForLogs)
 {
     constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
-    const bool bGPUWetnessMode = SimulationMode == EDWCSimulationMode::WetnessMapGPU;
-    USkeletalMesh* SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
+    const bool      bGPUWetnessMode = SimulationMode == EDWCSimulationMode::WetnessMapGPU;
+    USkeletalMesh*  SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
     if (SkeletalMesh == nullptr ||
         WetClothingAsset.GetDWCSkeletalMesh() != SkeletalMesh)
     {
@@ -31,7 +32,7 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     }
 
     const FWetClothingPrecomputedSimulationData* CPUData = nullptr;
-    const FDWCGPULODBakeData* GPUData = nullptr;
+    const FDWCGPULODBakeData*                    GPUData = nullptr;
 
     FDWCSharedRuntimeDataKey Key;
     Key.WetClothingAsset = FObjectKey(&WetClothingAsset);
@@ -178,11 +179,11 @@ void UDWCRuntimeDataSubsystem::InvalidateSharedRuntimeData(const UWetClothingAss
 
 FDWCLODVertexStaticDataKey UDWCRuntimeDataSubsystem::MakeLODVertexStaticDataKey(
     const USkeletalMeshComponent& TargetSkeletalMesh,
-    const int32 LODIndex,
-    const FString& MeshSignature) const
+    const int32                   LODIndex,
+    const FString&                MeshSignature) const
 {
     FDWCLODVertexStaticDataKey Key;
-    const USkeletalMesh* SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
+    const USkeletalMesh*       SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
     Key.SkeletalMesh = FObjectKey(SkeletalMesh);
     Key.LODIndex = LODIndex;
     Key.MeshSignature = MeshSignature;
@@ -197,10 +198,10 @@ FDWCLODVertexStaticDataKey UDWCRuntimeDataSubsystem::MakeLODVertexStaticDataKey(
 }
 
 FDWCLODVertexColorTransferMapKey UDWCRuntimeDataSubsystem::MakeLODVertexColorTransferMapKey(
-    const USkeletalMeshComponent& TargetSkeletalMesh,
+    const USkeletalMeshComponent&  TargetSkeletalMesh,
     const FDWCLODVertexStaticData& SourceLODData,
     const FDWCLODVertexStaticData& TargetLODData,
-    const FString& MeshSignature) const
+    const FString&                 MeshSignature) const
 {
     FDWCLODVertexColorTransferMapKey Key;
     Key.SkeletalMesh = FObjectKey(TargetSkeletalMesh.GetSkeletalMeshAsset());
@@ -215,7 +216,7 @@ FDWCLODVertexColorTransferMapKey UDWCRuntimeDataSubsystem::MakeLODVertexColorTra
 TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::AcquireSkinningStaticData(
     USkeletalMeshComponent& TargetSkeletalMesh,
-    const FString& MeshSignature)
+    const FString&          MeshSignature)
 {
     USkeletalMesh* SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
     if (SkeletalMesh == nullptr || MeshSignature.IsEmpty())
@@ -223,7 +224,7 @@ UDWCRuntimeDataSubsystem::AcquireSkinningStaticData(
         return nullptr;
     }
 
-    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    constexpr int32                RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh.GetSkinWeightBuffer(RuntimeLODIndex);
     if (SkinWeightBuffer == nullptr)
     {
@@ -258,8 +259,8 @@ UDWCRuntimeDataSubsystem::AcquireSkinningStaticData(
 TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::AcquireLODVertexStaticData(
     USkeletalMeshComponent& TargetSkeletalMesh,
-    const int32 LODIndex,
-    const FString& MeshSignature)
+    const int32             LODIndex,
+    const FString&          MeshSignature)
 {
     USkeletalMesh* SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
     if (SkeletalMesh == nullptr || MeshSignature.IsEmpty())
@@ -295,10 +296,10 @@ UDWCRuntimeDataSubsystem::AcquireLODVertexStaticData(
 
 TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::FindLODVertexColorTransferMap(
-    const USkeletalMeshComponent& TargetSkeletalMesh,
+    const USkeletalMeshComponent&  TargetSkeletalMesh,
     const FDWCLODVertexStaticData& SourceLODData,
     const FDWCLODVertexStaticData& TargetLODData,
-    const FString& MeshSignature)
+    const FString&                 MeshSignature)
 {
     if (TargetSkeletalMesh.GetSkeletalMeshAsset() == nullptr ||
         MeshSignature.IsEmpty() ||
@@ -330,11 +331,11 @@ UDWCRuntimeDataSubsystem::FindLODVertexColorTransferMap(
 
 TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::CacheLODVertexColorTransferMap(
-    const USkeletalMeshComponent& TargetSkeletalMesh,
+    const USkeletalMeshComponent&  TargetSkeletalMesh,
     const FDWCLODVertexStaticData& SourceLODData,
     const FDWCLODVertexStaticData& TargetLODData,
-    const FString& MeshSignature,
-    TArray<int32>&& TargetToSourceVertex)
+    const FString&                 MeshSignature,
+    TArray<int32>&&                TargetToSourceVertex)
 {
     if (TargetSkeletalMesh.GetSkeletalMeshAsset() == nullptr ||
         MeshSignature.IsEmpty() ||

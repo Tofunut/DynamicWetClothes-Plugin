@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleAccumulatedPreviewWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -8,7 +9,7 @@
 
 TSharedPtr<FWetWrinkleAccumulatedPreviewJobResult, ESPMode::ThreadSafe>
 FWetWrinkleAccumulatedPreviewWorker::Build(
-    FWetWrinkleAccumulatedPreviewJobInput Input,
+    FWetWrinkleAccumulatedPreviewJobInput                               Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FWetWrinkleAccumulatedPreviewJobResult, ESPMode::ThreadSafe> Result =

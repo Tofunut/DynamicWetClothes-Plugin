@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/WCALODVertexColorBuilder.h"
 
 #include "DerivedData/DWCMeshContentSignature.h"
@@ -28,7 +29,7 @@ namespace
         }
 
         const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
-        const int32 VertexCount = LODData.GetNumVertices();
+        const int32                       VertexCount = LODData.GetNumVertices();
         if (VertexCount <= 0)
         {
             return false;
@@ -48,7 +49,7 @@ namespace
             }
 
             const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
-            const int32 BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
+            const int32                   BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
             if (BufferVertexIndex < 0 || BufferVertexIndex >= VertexCount)
             {
                 continue;
@@ -62,12 +63,12 @@ namespace
 
         return true;
     }
-}
+} // namespace
 
 bool FWCALODVertexColorBuilder::IsCurrent(
-    const USkeletalMesh* Mesh,
-    const int32 FirstMappedLODIndex,
-    const int32 LastMappedLODIndex,
+    const USkeletalMesh*                         Mesh,
+    const int32                                  FirstMappedLODIndex,
+    const int32                                  LastMappedLODIndex,
     const TArray<FWCALODVertexColorRuntimeData>& RuntimeData)
 {
     const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
@@ -98,8 +99,8 @@ bool FWCALODVertexColorBuilder::IsCurrent(
     }
 
     const FSkeletalMeshLODRenderData& SourceLODData = RenderData->LODRenderData[SourceLODIndex];
-    const int32 SourceVertexCount = SourceLODData.GetNumVertices();
-    const FString MeshSignature = FDWCMeshContentSignature::BuildStructure(Mesh, SourceLODData, SourceLODIndex);
+    const int32                       SourceVertexCount = SourceLODData.GetNumVertices();
+    const FString                     MeshSignature = FDWCMeshContentSignature::BuildStructure(Mesh, SourceLODData, SourceLODIndex);
     if (SourceVertexCount <= 0 || MeshSignature.IsEmpty())
     {
         return false;
@@ -135,11 +136,11 @@ bool FWCALODVertexColorBuilder::IsCurrent(
 }
 
 bool FWCALODVertexColorBuilder::Build(
-    const USkeletalMesh* Mesh,
-    const int32 FirstMappedLODIndex,
-    const int32 LastMappedLODIndex,
+    const USkeletalMesh*                   Mesh,
+    const int32                            FirstMappedLODIndex,
+    const int32                            LastMappedLODIndex,
     TArray<FWCALODVertexColorRuntimeData>& OutRuntimeData,
-    FString* OutErrorMessage)
+    FString*                               OutErrorMessage)
 {
     DWC_PROFILE_SCOPE(DWC_WCA_BuildLODVertexColorRuntimeData);
 
@@ -157,7 +158,7 @@ bool FWCALODVertexColorBuilder::Build(
         return true;
     }
 
-    constexpr int32 SourceLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    constexpr int32    SourceLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     FLODVertexGeometry SourceGeometry;
     if (!ReadLODGeometry(Mesh, SourceLODIndex, SourceGeometry))
     {
@@ -178,7 +179,7 @@ bool FWCALODVertexColorBuilder::Build(
         return true;
     }
 
-    TArray<FLODVertexGeometry> TargetGeometries;
+    TArray<FLODVertexGeometry>                           TargetGeometries;
     TArray<FDWCLODVertexColorTransferTargetGeometryView> TargetGeometryViews;
     TargetGeometries.Reserve(LastTargetLODIndex - FirstTargetLODIndex + 1);
     TargetGeometryViews.Reserve(LastTargetLODIndex - FirstTargetLODIndex + 1);
@@ -192,15 +193,13 @@ bool FWCALODVertexColorBuilder::Build(
             continue;
         }
 
-        TargetGeometryViews.Add({
-            TargetLODIndex,
-            FDWCLODVertexColorTransferGeometryView{TargetGeometry.Positions, TargetGeometry.Normals}
-        });
+        TargetGeometryViews.Add({ TargetLODIndex,
+                                  FDWCLODVertexColorTransferGeometryView{ TargetGeometry.Positions, TargetGeometry.Normals } });
     }
 
     TArray<FDWCLODVertexColorTransferMapBuildResult> TransferMapResults;
     if (BuildDWCLODVertexColorTransferMaps(
-            FDWCLODVertexColorTransferGeometryView{SourceGeometry.Positions, SourceGeometry.Normals},
+            FDWCLODVertexColorTransferGeometryView{ SourceGeometry.Positions, SourceGeometry.Normals },
             TargetGeometryViews,
             TransferMapResults))
     {

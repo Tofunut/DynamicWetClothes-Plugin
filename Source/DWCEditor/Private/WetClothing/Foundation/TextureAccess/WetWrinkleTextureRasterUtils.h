@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -22,4 +23,4 @@ namespace WetWrinkleTextureRaster
             FMath::Max(FinalTextureSize.X, FinalTextureSize.Y));
         return FIntPoint(WorkingResolution, WorkingResolution);
     }
-}
+} // namespace WetWrinkleTextureRaster

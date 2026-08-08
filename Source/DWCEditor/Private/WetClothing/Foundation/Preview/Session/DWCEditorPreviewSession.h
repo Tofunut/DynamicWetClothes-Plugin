@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "UObject/ObjectKey.h"
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialCache.h"
@@ -37,8 +39,8 @@ class FDWCEditorPreviewSession final
     FDWCEditorPreviewSession& operator=(const FDWCEditorPreviewSession&) = delete;
 
     void Initialize(
-        UWetClothingAsset* WetClothingAsset,
-        UWorld* PreviewWorld,
+        UWetClothingAsset*                    WetClothingAsset,
+        UWorld*                               PreviewWorld,
         const FDWCEditorPreviewSessionConfig& Config);
     void Shutdown();
 
@@ -50,15 +52,15 @@ class FDWCEditorPreviewSession final
     /** Re-enables lazy preview material creation. Does not eagerly rebuild any slot. */
     void Resume();
 
-    bool RefreshSlotStates();
+    bool                                   RefreshSlotStates();
     const FDWCEditorPreviewSlotCollection& GetSlotStates() const;
-    const FDWCEditorPreviewSessionSlot* FindSlot(int32 MaterialSlotIndex) const;
-    TConstArrayView<int32> GetReadyWettableSlots() const;
+    const FDWCEditorPreviewSessionSlot*    FindSlot(int32 MaterialSlotIndex) const;
+    TConstArrayView<int32>                 GetReadyWettableSlots() const;
 
-    bool SetPreviewMaterialScope(EDWCEditorPreviewMaterialScope Scope, int32 MaterialSlotIndex = INDEX_NONE);
+    bool                           SetPreviewMaterialScope(EDWCEditorPreviewMaterialScope Scope, int32 MaterialSlotIndex = INDEX_NONE);
     EDWCEditorPreviewMaterialScope GetPreviewMaterialScope() const { return PreviewMaterialScope; }
-    TConstArrayView<int32> GetActivePreviewMaterialSlots() const { return ActivePreviewMaterialSlots; }
-    bool SetSelectedMaterialSlot(int32 MaterialSlotIndex);
+    TConstArrayView<int32>         GetActivePreviewMaterialSlots() const { return ActivePreviewMaterialSlots; }
+    bool                           SetSelectedMaterialSlot(int32 MaterialSlotIndex);
 
     void SetPreviewWetness(float PreviewWetness);
 
@@ -69,9 +71,9 @@ class FDWCEditorPreviewSession final
     /** Builds the requested slot MIDs first, then applies shared render resources once. */
     void PreparePreviewMaterials(TConstArrayView<int32> MaterialSlotIndices);
     /** Polls shader compilation and promotes completed slots without blocking. */
-    void TickPendingMaterialCompilations();
+    void                                   TickPendingMaterialCompilations();
     FDWCEditorPreviewSessionMaterialResult GetOrCreatePreviewMaterial(int32 MaterialSlotIndex);
-    void ForEachActiveBuiltMID(TFunctionRef<void(int32, UMaterialInstanceDynamic&)> Visitor) const;
+    void                                   ForEachActiveBuiltMID(TFunctionRef<void(int32, UMaterialInstanceDynamic&)> Visitor) const;
 
     void NotifySourceMaterialChanged(UMaterialInterface* SourceMaterial);
     void NotifyWCADataChanged();
@@ -81,60 +83,60 @@ class FDWCEditorPreviewSession final
     void DumpDiagnostics(int32 SessionIndex) const;
     void ResetDiagnosticCounters();
 
-    FDWCEditorPreviewSessionSlotsChanged& OnSlotsChanged();
+    FDWCEditorPreviewSessionSlotsChanged&  OnSlotsChanged();
     FDWCEditorPreviewSessionMaterialReady& OnMaterialReady();
 
   private:
     FDWCEditorPreviewSessionMaterialResult GetOrCreatePreviewMaterialInternal(
         int32 MaterialSlotIndex,
-        bool bFlushRenderResourceBindings);
+        bool  bFlushRenderResourceBindings);
     FDWCEditorPreviewSessionSlot* FindMutableSlot(int32 MaterialSlotIndex);
-    uint32 GetSourceParameterRevision(UMaterialInterface* SourceMaterial) const;
-    void ApplyCommonParameters(UMaterialInstanceDynamic& MID) const;
-    bool ApplyLayerParameterDiff(FDWCEditorPreviewSessionSlot& Slot, UMaterialInstanceDynamic& MID);
-    void ClearBuiltMaterials();
-    void TrimIdlePreviewMaterials(bool bReleaseAllIdle = false);
-    void RebuildActivePreviewMaterialSlots();
-    bool IsPreviewMaterialSlotActive(int32 MaterialSlotIndex) const;
-    void HandleObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
-    bool IsSourceOrBaseMaterial(const UObject* Object, UMaterialInterface* SourceMaterial) const;
+    uint32                        GetSourceParameterRevision(UMaterialInterface* SourceMaterial) const;
+    void                          ApplyCommonParameters(UMaterialInstanceDynamic& MID) const;
+    bool                          ApplyLayerParameterDiff(FDWCEditorPreviewSessionSlot& Slot, UMaterialInstanceDynamic& MID);
+    void                          ClearBuiltMaterials();
+    void                          TrimIdlePreviewMaterials(bool bReleaseAllIdle = false);
+    void                          RebuildActivePreviewMaterialSlots();
+    bool                          IsPreviewMaterialSlotActive(int32 MaterialSlotIndex) const;
+    void                          HandleObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
+    bool                          IsSourceOrBaseMaterial(const UObject* Object, UMaterialInterface* SourceMaterial) const;
 
-    TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
-    TWeakObjectPtr<UWorld> PreviewWorld;
-    FDWCEditorPreviewSessionConfig SessionConfig;
-    FDWCEditorPreviewSlotCollection SlotCollection;
-    TArray<FDWCEditorPreviewSessionSlot> RuntimeSlots;
+    TWeakObjectPtr<UWetClothingAsset>            WetClothingAsset;
+    TWeakObjectPtr<UWorld>                       PreviewWorld;
+    FDWCEditorPreviewSessionConfig               SessionConfig;
+    FDWCEditorPreviewSlotCollection              SlotCollection;
+    TArray<FDWCEditorPreviewSessionSlot>         RuntimeSlots;
     TArray<TObjectPtr<UMaterialInstanceDynamic>> ResourceBindingMIDs;
-    TArray<int32, TInlineAllocator<16>> ActivePreviewMaterialSlots;
-    TMap<FObjectKey, uint32> SourceParameterRevisions;
-    FDWCEditorPreviewMaterialCache MaterialCache;
+    TArray<int32, TInlineAllocator<16>>          ActivePreviewMaterialSlots;
+    TMap<FObjectKey, uint32>                     SourceParameterRevisions;
+    FDWCEditorPreviewMaterialCache               MaterialCache;
 
-    int32 SelectedMaterialSlotIndex = AllWettableSlots;
+    int32                          SelectedMaterialSlotIndex = AllWettableSlots;
     EDWCEditorPreviewMaterialScope PreviewMaterialScope = EDWCEditorPreviewMaterialScope::AllWettableSlots;
-    int32 CachedDataUVChannelIndex = INDEX_NONE;
-    float PreviewWetness = 1.0f;
-    bool bInitialized = false;
-    bool bSuspended = false;
-    bool bRenderResourcesDirty = false;
-    uint64 SlotRefreshCount = 0;
-    uint64 SlotStateChangeCount = 0;
-    uint64 MaterialRequestCount = 0;
-    uint64 ExistingMIDReuseCount = 0;
-    uint64 IdleMIDTrimCount = 0;
-    uint64 IdleMIDTrimmedEntryCount = 0;
-    uint64 MaterialUseSerial = 0;
-    uint64 ObjectPropertyChangeCount = 0;
-    uint64 RelevantObjectPropertyChangeCount = 0;
-    uint64 WCAInvalidationCount = 0;
-    uint64 SourceMaterialInvalidationCount = 0;
-    uint64 GraphInvalidationCount = 0;
-    uint64 RenderBindingFlushCount = 0;
-    uint64 LayerStackUpdateCount = 0;
-    uint64 LayerStackNoChangeCount = 0;
-    uint64 LayerParameterWriteCount = 0;
-    static constexpr int32 MaxIdleSlotMIDCount = 8;
-    FDelegateHandle ObjectPropertyChangedHandle;
+    int32                          CachedDataUVChannelIndex = INDEX_NONE;
+    float                          PreviewWetness = 1.0f;
+    bool                           bInitialized = false;
+    bool                           bSuspended = false;
+    bool                           bRenderResourcesDirty = false;
+    uint64                         SlotRefreshCount = 0;
+    uint64                         SlotStateChangeCount = 0;
+    uint64                         MaterialRequestCount = 0;
+    uint64                         ExistingMIDReuseCount = 0;
+    uint64                         IdleMIDTrimCount = 0;
+    uint64                         IdleMIDTrimmedEntryCount = 0;
+    uint64                         MaterialUseSerial = 0;
+    uint64                         ObjectPropertyChangeCount = 0;
+    uint64                         RelevantObjectPropertyChangeCount = 0;
+    uint64                         WCAInvalidationCount = 0;
+    uint64                         SourceMaterialInvalidationCount = 0;
+    uint64                         GraphInvalidationCount = 0;
+    uint64                         RenderBindingFlushCount = 0;
+    uint64                         LayerStackUpdateCount = 0;
+    uint64                         LayerStackNoChangeCount = 0;
+    uint64                         LayerParameterWriteCount = 0;
+    static constexpr int32         MaxIdleSlotMIDCount = 8;
+    FDelegateHandle                ObjectPropertyChangedHandle;
 
-    FDWCEditorPreviewSessionSlotsChanged SlotsChangedDelegate;
+    FDWCEditorPreviewSessionSlotsChanged  SlotsChangedDelegate;
     FDWCEditorPreviewSessionMaterialReady MaterialReadyDelegate;
 };

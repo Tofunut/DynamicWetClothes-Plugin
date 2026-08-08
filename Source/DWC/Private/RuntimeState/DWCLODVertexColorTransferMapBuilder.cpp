@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/DWCLODVertexColorTransferMapBuilder.h"
 
 #include "Math/GenericOctree.h"
@@ -10,15 +11,24 @@ namespace
 
     struct FDWCLODVertexOctreeElement
     {
-        int32 VertexIndex = INDEX_NONE;
+        int32               VertexIndex = INDEX_NONE;
         FBoxCenterAndExtent Bounds;
     };
 
     struct FDWCLODVertexOctreeSemantics
     {
-        enum { MaxElementsPerLeaf = 16 };
-        enum { MinInclusiveElementsPerNode = 7 };
-        enum { MaxNodeDepth = 12 };
+        enum
+        {
+            MaxElementsPerLeaf = 16
+        };
+        enum
+        {
+            MinInclusiveElementsPerNode = 7
+        };
+        enum
+        {
+            MaxNodeDepth = 12
+        };
 
         typedef TInlineAllocator<MaxElementsPerLeaf> ElementAllocator;
 
@@ -87,12 +97,12 @@ namespace
 
         return BestIndex;
     }
-}
+} // namespace
 
 bool BuildDWCLODVertexColorTransferMaps(
-    const FDWCLODVertexColorTransferGeometryView& SourceGeometry,
+    const FDWCLODVertexColorTransferGeometryView&                 SourceGeometry,
     TConstArrayView<FDWCLODVertexColorTransferTargetGeometryView> TargetGeometries,
-    TArray<FDWCLODVertexColorTransferMapBuildResult>& OutResults)
+    TArray<FDWCLODVertexColorTransferMapBuildResult>&             OutResults)
 {
     DWC_PROFILE_SCOPE(DWC_BuildLODVertexColorTransferMap);
 
@@ -125,7 +135,7 @@ bool BuildDWCLODVertexColorTransferMaps(
         return false;
     }
 
-    const double OctreeExtent = CompleteBounds.GetExtent().GetMax();
+    const double        OctreeExtent = CompleteBounds.GetExtent().GetMax();
     FDWCLODVertexOctree SourceOctree(CompleteBounds.GetCenter(), OctreeExtent);
 
     {
@@ -134,7 +144,7 @@ bool BuildDWCLODVertexColorTransferMaps(
         for (int32 SourceIndex = 0; SourceIndex < SourceGeometry.Positions.Num(); ++SourceIndex)
         {
             const FVector SourcePosition(SourceGeometry.Positions[SourceIndex]);
-            SourceOctree.AddElement({SourceIndex, FBoxCenterAndExtent(SourcePosition, FVector::ZeroVector)});
+            SourceOctree.AddElement({ SourceIndex, FBoxCenterAndExtent(SourcePosition, FVector::ZeroVector) });
         }
     }
 

@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "Async/DWCTask.h"
 
 class UDynamicWetClothesComponent;
@@ -23,20 +25,20 @@ struct DWC_API FDWCSkinningVertexSnapshot
 
 struct DWC_API FDWCSkinningTaskSnapshot
 {
-    FName ReceiverId = NAME_None;
+    FName  ReceiverId = NAME_None;
     uint64 FrameNumber = 0;
-    bool bComputePositions = true;
-    bool bComputeNormals = false;
+    bool   bComputePositions = true;
+    bool   bComputeNormals = false;
 
     TSharedPtr<const struct FDWCSkinningStaticData, ESPMode::ThreadSafe> StaticData;
-    TArray<FMatrix44f> RefToLocalMatrices;
+    TArray<FMatrix44f>                                                   RefToLocalMatrices;
 };
 
 struct DWC_API FDWCSkinningStaticData
 {
-    FDWCVertexGeometryStaticData Geometry;
-    UPTRINT SkinWeightBufferIdentity = 0;
-    TArray<FDWCSkinningVertexSnapshot> Vertices;
+    FDWCVertexGeometryStaticData          Geometry;
+    UPTRINT                               SkinWeightBufferIdentity = 0;
+    TArray<FDWCSkinningVertexSnapshot>    Vertices;
     TArray<FDWCSkinningInfluenceSnapshot> Influences;
 
     uint64 GetAllocatedMemoryBytes() const
@@ -56,8 +58,8 @@ struct DWC_API FDWCSkinningStaticData
 
 struct DWC_API FDWCSkinningTaskResult
 {
-    FName ReceiverId = NAME_None;
-    uint64 FrameNumber = 0;
+    FName             ReceiverId = NAME_None;
+    uint64            FrameNumber = 0;
     TArray<FVector3f> SkinnedPositions;
     TArray<FVector3f> SkinnedNormals;
 
@@ -79,8 +81,8 @@ class DWC_API FDWCCpuSkinningTask final : public IDWCTaskRequest
         TWeakObjectPtr<UDynamicWetClothesComponent> InOwner,
         FDWCSkinningTaskSnapshot&&                  InSnapshot);
 
-    virtual void         ExecuteWorker() override;
-    virtual void         CommitGameThread() override;
+    virtual void ExecuteWorker() override;
+    virtual void CommitGameThread() override;
 
     const FDWCSkinningTaskResult& GetResult() const
     {
@@ -89,17 +91,17 @@ class DWC_API FDWCCpuSkinningTask final : public IDWCTaskRequest
 
   private:
     TWeakObjectPtr<UDynamicWetClothesComponent> Owner;
-    FDWCSkinningTaskSnapshot Snapshot;
-    FDWCSkinningTaskResult Result;
+    FDWCSkinningTaskSnapshot                    Snapshot;
+    FDWCSkinningTaskResult                      Result;
 };
 
 DWC_API bool BuildDWCSkinningTaskSnapshot(
-    USkeletalMeshComponent*       TargetSkeletalMesh,
-    FName                         ReceiverId,
+    USkeletalMeshComponent*                                              TargetSkeletalMesh,
+    FName                                                                ReceiverId,
     const TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>& StaticData,
-    bool                          bComputePositions,
-    bool                          bComputeNormals,
-    FDWCSkinningTaskSnapshot&     OutSnapshot);
+    bool                                                                 bComputePositions,
+    bool                                                                 bComputeNormals,
+    FDWCSkinningTaskSnapshot&                                            OutSnapshot);
 
 DWC_API TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningStaticData(
     USkeletalMeshComponent* TargetSkeletalMesh);

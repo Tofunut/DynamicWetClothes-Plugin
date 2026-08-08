@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
 
 #include "Engine/Texture2D.h"
@@ -10,7 +11,7 @@ namespace
     bool IsRegionRectValid(const FIntRect& Rect, const FIntPoint& Size)
     {
         return !Rect.IsEmpty() && Rect.Min.X >= 0 && Rect.Min.Y >= 0 &&
-            Rect.Max.X <= Size.X && Rect.Max.Y <= Size.Y;
+               Rect.Max.X <= Size.X && Rect.Max.Y <= Size.Y;
     }
 
     int64 GetRegionPixelCount(const FIntRect& Rect)
@@ -39,29 +40,26 @@ namespace
     template <typename ElementType>
     void CopyRegionRows(
         const TArray<ElementType>& Source,
-        const FIntRect& DestinationRect,
-        const int32 DestinationWidth,
-        TArray<ElementType>& Destination)
+        const FIntRect&            DestinationRect,
+        const int32                DestinationWidth,
+        TArray<ElementType>&       Destination)
     {
         const int32 RegionWidth = DestinationRect.Width();
         for (int32 RowIndex = 0; RowIndex < DestinationRect.Height(); ++RowIndex)
         {
             const ElementType* SourceRow = Source.GetData() + RowIndex * RegionWidth;
-            ElementType* DestinationRow = Destination.GetData() +
-                (DestinationRect.Min.Y + RowIndex) * DestinationWidth + DestinationRect.Min.X;
+            ElementType*       DestinationRow = Destination.GetData() +
+                                          (DestinationRect.Min.Y + RowIndex) * DestinationWidth + DestinationRect.Min.X;
             FMemory::Memcpy(DestinationRow, SourceRow, RegionWidth * sizeof(ElementType));
         }
     }
-}
+} // namespace
 
 FDWCEditorTextureWorkspace::FDWCEditorTextureWorkspace(
     TSharedRef<FDWCEditorRenderUploadQueue> InUploadQueue,
-    const uint64 InCPUBudgetBytes,
-    const uint64 InGPUBudgetBytes)
-    : UploadQueue(MoveTemp(InUploadQueue))
-    , LeaseState(MakeShared<FDWCEditorTextureLeaseState>())
-    , CPUBudgetBytes(FMath::Max<uint64>(InCPUBudgetBytes, 1))
-    , GPUBudgetBytes(FMath::Max<uint64>(InGPUBudgetBytes, 1))
+    const uint64                            InCPUBudgetBytes,
+    const uint64                            InGPUBudgetBytes)
+    : UploadQueue(MoveTemp(InUploadQueue)), LeaseState(MakeShared<FDWCEditorTextureLeaseState>()), CPUBudgetBytes(FMath::Max<uint64>(InCPUBudgetBytes, 1)), GPUBudgetBytes(FMath::Max<uint64>(InGPUBudgetBytes, 1))
 {
     LeaseState->ReleaseCallback = [this](const FDWCEditorTextureHandle& Entry, const uint64 LeaseId)
     {
@@ -78,7 +76,7 @@ FDWCEditorTextureWorkspace::~FDWCEditorTextureWorkspace()
 }
 
 FDWCEditorTextureHandle FDWCEditorTextureWorkspace::Acquire(
-    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureKey&        Key,
     const FDWCEditorTextureDescriptor& Descriptor)
 {
     check(IsInGameThread());
@@ -86,9 +84,9 @@ FDWCEditorTextureHandle FDWCEditorTextureWorkspace::Acquire(
 }
 
 FDWCEditorTextureHandle FDWCEditorTextureWorkspace::FindOrCreateEntry(
-    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureKey&        Key,
     const FDWCEditorTextureDescriptor& Descriptor,
-    const bool bInitializeBuffers)
+    const bool                         bInitializeBuffers)
 {
     if (!Descriptor.IsValid())
     {
@@ -161,9 +159,9 @@ FDWCEditorTextureLease FDWCEditorTextureWorkspace::AcquireLease(const FDWCEditor
 }
 
 FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferBGRA8AndAcquireLease(
-    const FDWCEditorTextureKey& Key,
-    const FDWCEditorTextureDescriptor& Descriptor,
-    TArray<FColor>&& Pixels,
+    const FDWCEditorTextureKey&           Key,
+    const FDWCEditorTextureDescriptor&    Descriptor,
+    TArray<FColor>&&                      Pixels,
     const EDWCEditorTextureUploadPriority Priority)
 {
     check(IsInGameThread());
@@ -171,10 +169,10 @@ FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferBGRA8AndAcquireLease(
 }
 
 FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferNormalBGRA8AndAcquireLease(
-    const FDWCEditorTextureKey& Key,
-    const FDWCEditorTextureDescriptor& Descriptor,
-    TArray<FColor>&& Pixels,
-    FDWCEditorNormalRasterSurface&& WorkingSurface,
+    const FDWCEditorTextureKey&           Key,
+    const FDWCEditorTextureDescriptor&    Descriptor,
+    TArray<FColor>&&                      Pixels,
+    FDWCEditorNormalRasterSurface&&       WorkingSurface,
     const EDWCEditorTextureUploadPriority Priority)
 {
     check(IsInGameThread());
@@ -187,9 +185,9 @@ FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferNormalBGRA8AndAcquire
 }
 
 FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferG8AndAcquireLease(
-    const FDWCEditorTextureKey& Key,
-    const FDWCEditorTextureDescriptor& Descriptor,
-    TArray<uint8>&& Pixels,
+    const FDWCEditorTextureKey&           Key,
+    const FDWCEditorTextureDescriptor&    Descriptor,
+    TArray<uint8>&&                       Pixels,
     const EDWCEditorTextureUploadPriority Priority)
 {
     check(IsInGameThread());
@@ -197,9 +195,9 @@ FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferG8AndAcquireLease(
 }
 
 FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishBGRA8(
-    const FDWCEditorTextureKey& Key,
-    const FDWCEditorTextureDescriptor& Descriptor,
-    TArray<FColor>&& Pixels,
+    const FDWCEditorTextureKey&           Key,
+    const FDWCEditorTextureDescriptor&    Descriptor,
+    TArray<FColor>&&                      Pixels,
     const EDWCEditorTextureUploadPriority Priority)
 {
     check(IsInGameThread());
@@ -238,9 +236,9 @@ FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishBGRA8(
 }
 
 FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishG8(
-    const FDWCEditorTextureKey& Key,
-    const FDWCEditorTextureDescriptor& Descriptor,
-    TArray<uint8>&& Pixels,
+    const FDWCEditorTextureKey&           Key,
+    const FDWCEditorTextureDescriptor&    Descriptor,
+    TArray<uint8>&&                       Pixels,
     const EDWCEditorTextureUploadPriority Priority)
 {
     check(IsInGameThread());
@@ -278,10 +276,10 @@ FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishG8(
 }
 
 FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishNormalBGRA8(
-    const FDWCEditorTextureKey& Key,
-    const FDWCEditorTextureDescriptor& Descriptor,
-    TArray<FColor>&& Pixels,
-    FDWCEditorNormalRasterSurface&& WorkingSurface,
+    const FDWCEditorTextureKey&           Key,
+    const FDWCEditorTextureDescriptor&    Descriptor,
+    TArray<FColor>&&                      Pixels,
+    FDWCEditorNormalRasterSurface&&       WorkingSurface,
     const EDWCEditorTextureUploadPriority Priority)
 {
     check(IsInGameThread());
@@ -321,9 +319,9 @@ FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishNormalBGRA8(
 }
 
 void FDWCEditorTextureWorkspace::MarkDirty(
-    const FDWCEditorTextureHandle& Entry,
-    const FIntRect& DirtyRect,
-    const bool bWrap,
+    const FDWCEditorTextureHandle&        Entry,
+    const FIntRect&                       DirtyRect,
+    const bool                            bWrap,
     const EDWCEditorTextureUploadPriority Priority)
 {
     check(IsInGameThread());
@@ -344,23 +342,23 @@ void FDWCEditorTextureWorkspace::MarkDirty(
 }
 
 void FDWCEditorTextureWorkspace::MarkDirty(
-    const FDWCEditorTextureLease& Lease,
-    const FIntRect& DirtyRect,
-    const bool bWrap,
+    const FDWCEditorTextureLease&         Lease,
+    const FIntRect&                       DirtyRect,
+    const bool                            bWrap,
     const EDWCEditorTextureUploadPriority Priority)
 {
     MarkDirty(Lease.GetHandle(), DirtyRect, bWrap, Priority);
 }
 
 void FDWCEditorTextureWorkspace::MarkPresentationDirty(
-    const FDWCEditorTextureLease& Lease,
-    const FIntRect& DirtyRect,
-    const bool bWrap,
+    const FDWCEditorTextureLease&         Lease,
+    const FIntRect&                       DirtyRect,
+    const bool                            bWrap,
     const EDWCEditorTextureUploadPriority Priority)
 {
     check(IsInGameThread());
     const FDWCEditorTextureHandle& Entry = Lease.GetHandle();
-    bool bDeferredInitialUpload = false;
+    bool                           bDeferredInitialUpload = false;
     if (!Entry.IsValid() || Entries.FindRef(Entry->Key) != Entry ||
         Entry->GetActiveLeaseCount() == 0 || DirtyRect.IsEmpty() ||
         !EnsureTexture(Entry, true, &bDeferredInitialUpload))
@@ -379,9 +377,9 @@ void FDWCEditorTextureWorkspace::MarkPresentationDirty(
 }
 
 EDWCEditorPreviewRegionCommitResult FDWCEditorTextureWorkspace::ValidateRegionTarget(
-    const FDWCEditorTextureLease& Lease,
+    const FDWCEditorTextureLease&        Lease,
     const FDWCEditorPreviewRegionTarget& Target,
-    FDWCEditorTextureHandle& OutEntry) const
+    FDWCEditorTextureHandle&             OutEntry) const
 {
     OutEntry = Lease.GetHandle();
     const FDWCEditorTextureHandle RetainedEntry = Entries.FindRef(Target.Key);
@@ -405,10 +403,10 @@ EDWCEditorPreviewRegionCommitResult FDWCEditorTextureWorkspace::ValidateRegionTa
 }
 
 void FDWCEditorTextureWorkspace::QueueCommittedRegions(
-    const FDWCEditorTextureHandle& Entry,
-    const TArray<FIntRect>& DirtyRegions,
+    const FDWCEditorTextureHandle&        Entry,
+    const TArray<FIntRect>&               DirtyRegions,
     const EDWCEditorTextureUploadPriority Priority,
-    const bool bDeferredInitialUpload)
+    const bool                            bDeferredInitialUpload)
 {
     if (bDeferredInitialUpload)
     {
@@ -426,26 +424,30 @@ void FDWCEditorTextureWorkspace::QueueCommittedRegions(
 }
 
 FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitBGRA8Regions(
-    const FDWCEditorTextureLease& Lease,
-    const FDWCEditorPreviewRegionTarget& Target,
+    const FDWCEditorTextureLease&               Lease,
+    const FDWCEditorPreviewRegionTarget&        Target,
     const TArray<FDWCEditorBGRA8RegionPayload>& Regions,
-    const EDWCEditorTextureUploadPriority Priority)
+    const EDWCEditorTextureUploadPriority       Priority)
 {
     check(IsInGameThread());
     ++RegionCommitRequestCount;
     FDWCEditorPreviewRegionCommitOutcome Outcome;
-    FDWCEditorTextureHandle Entry;
+    FDWCEditorTextureHandle              Entry;
     Outcome.Result = ValidateRegionTarget(Lease, Target, Entry);
     if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied)
     {
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing) ++RegionCommitEntryMissingCount;
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch) ++RegionCommitDataRevisionMismatchCount;
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch) ++RegionCommitResourceGenerationMismatchCount;
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DescriptorMismatch) ++RegionCommitDescriptorMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing)
+            ++RegionCommitEntryMissingCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch)
+            ++RegionCommitDataRevisionMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch)
+            ++RegionCommitResourceGenerationMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DescriptorMismatch)
+            ++RegionCommitDescriptorMismatchCount;
         return Outcome;
     }
 
-    TArray<FIntRect> DirtyRegions;
+    TArray<FIntRect>                      DirtyRegions;
     FDWCEditorPreviewRegionMemoryEstimate MemoryEstimate;
     if (Target.Descriptor.PixelFormat != PF_B8G8R8A8 || Regions.IsEmpty() ||
         Entry->BGRA8Pixels.Num() != Target.Descriptor.Size.X * Target.Descriptor.Size.Y ||
@@ -500,26 +502,30 @@ FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitBGRA8Regi
 }
 
 FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitG8Regions(
-    const FDWCEditorTextureLease& Lease,
-    const FDWCEditorPreviewRegionTarget& Target,
+    const FDWCEditorTextureLease&            Lease,
+    const FDWCEditorPreviewRegionTarget&     Target,
     const TArray<FDWCEditorG8RegionPayload>& Regions,
-    const EDWCEditorTextureUploadPriority Priority)
+    const EDWCEditorTextureUploadPriority    Priority)
 {
     check(IsInGameThread());
     ++RegionCommitRequestCount;
     FDWCEditorPreviewRegionCommitOutcome Outcome;
-    FDWCEditorTextureHandle Entry;
+    FDWCEditorTextureHandle              Entry;
     Outcome.Result = ValidateRegionTarget(Lease, Target, Entry);
     if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied)
     {
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing) ++RegionCommitEntryMissingCount;
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch) ++RegionCommitDataRevisionMismatchCount;
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch) ++RegionCommitResourceGenerationMismatchCount;
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DescriptorMismatch) ++RegionCommitDescriptorMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing)
+            ++RegionCommitEntryMissingCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch)
+            ++RegionCommitDataRevisionMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch)
+            ++RegionCommitResourceGenerationMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DescriptorMismatch)
+            ++RegionCommitDescriptorMismatchCount;
         return Outcome;
     }
 
-    TArray<FIntRect> DirtyRegions;
+    TArray<FIntRect>                      DirtyRegions;
     FDWCEditorPreviewRegionMemoryEstimate MemoryEstimate;
     if (Target.Descriptor.PixelFormat != PF_G8 || Regions.IsEmpty() ||
         Entry->G8Pixels.Num() != Target.Descriptor.Size.X * Target.Descriptor.Size.Y ||
@@ -574,28 +580,32 @@ FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitG8Regions
 }
 
 FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitNormalRegions(
-    const FDWCEditorTextureLease& Lease,
-    const FDWCEditorPreviewRegionTarget& Target,
+    const FDWCEditorTextureLease&                Lease,
+    const FDWCEditorPreviewRegionTarget&         Target,
     const TArray<FDWCEditorNormalRegionPayload>& Regions,
-    const EDWCEditorTextureUploadPriority Priority)
+    const EDWCEditorTextureUploadPriority        Priority)
 {
     check(IsInGameThread());
     ++RegionCommitRequestCount;
     FDWCEditorPreviewRegionCommitOutcome Outcome;
-    FDWCEditorTextureHandle Entry;
+    FDWCEditorTextureHandle              Entry;
     Outcome.Result = ValidateRegionTarget(Lease, Target, Entry);
     if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied)
     {
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing) ++RegionCommitEntryMissingCount;
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch) ++RegionCommitDataRevisionMismatchCount;
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch) ++RegionCommitResourceGenerationMismatchCount;
-        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DescriptorMismatch) ++RegionCommitDescriptorMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing)
+            ++RegionCommitEntryMissingCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch)
+            ++RegionCommitDataRevisionMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch)
+            ++RegionCommitResourceGenerationMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DescriptorMismatch)
+            ++RegionCommitDescriptorMismatchCount;
         return Outcome;
     }
 
-    FDWCEditorNormalRasterSurface& WorkingSurface = Entry->WorkingNormalSurface;
-    TArray<FIntRect> WorkingRects;
-    TArray<FIntRect> OutputRects;
+    FDWCEditorNormalRasterSurface&        WorkingSurface = Entry->WorkingNormalSurface;
+    TArray<FIntRect>                      WorkingRects;
+    TArray<FIntRect>                      OutputRects;
     FDWCEditorPreviewRegionMemoryEstimate MemoryEstimate;
     if (Target.Descriptor.PixelFormat != PF_B8G8R8A8 || Regions.IsEmpty() ||
         !WorkingSurface.IsValid() || WorkingSurface.Size != Target.Descriptor.WorkingSize ||
@@ -607,8 +617,8 @@ FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitNormalReg
     for (const FDWCEditorNormalRegionPayload& Region : Regions)
     {
         const bool bCoverageMatches = WorkingSurface.HasCoverage()
-            ? Region.Coverage.Num() == GetRegionPixelCount(Region.WorkingRect)
-            : Region.Coverage.IsEmpty();
+                                          ? Region.Coverage.Num() == GetRegionPixelCount(Region.WorkingRect)
+                                          : Region.Coverage.IsEmpty();
         if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied ||
             !IsRegionRectValid(Region.WorkingRect, Target.Descriptor.WorkingSize) ||
             !IsRegionRectValid(Region.OutputRect, Target.Descriptor.Size) ||
@@ -676,8 +686,8 @@ FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitNormalReg
 
 void FDWCEditorTextureWorkspace::RecreateWithAddressMode(
     const FDWCEditorTextureHandle& Entry,
-    const TextureAddress AddressX,
-    const TextureAddress AddressY)
+    const TextureAddress           AddressX,
+    const TextureAddress           AddressY)
 {
     check(IsInGameThread());
     if (!Entry.IsValid() ||
@@ -721,8 +731,8 @@ void FDWCEditorTextureWorkspace::RecreateWithAddressMode(
 
 void FDWCEditorTextureWorkspace::RecreateWithAddressMode(
     const FDWCEditorTextureLease& Lease,
-    const TextureAddress AddressX,
-    const TextureAddress AddressY)
+    const TextureAddress          AddressX,
+    const TextureAddress          AddressY)
 {
     RecreateWithAddressMode(Lease.GetHandle(), AddressX, AddressY);
 }
@@ -800,7 +810,7 @@ void FDWCEditorTextureWorkspace::TrimToBudget(const FDWCEditorTextureHandle& Pro
     while (UsedGPUBytes > GPUBudgetBytes)
     {
         const FDWCEditorTextureKey* OldestKey = nullptr;
-        uint64 OldestSerial = MAX_uint64;
+        uint64                      OldestSerial = MAX_uint64;
         for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
         {
             if (Pair.Value.IsValid() && Pair.Value != ProtectedEntry &&
@@ -827,7 +837,7 @@ void FDWCEditorTextureWorkspace::TrimToBudget(const FDWCEditorTextureHandle& Pro
     while (UsedCPUBytes > CPUBudgetBytes)
     {
         const FDWCEditorTextureKey* OldestKey = nullptr;
-        uint64 OldestSerial = MAX_uint64;
+        uint64                      OldestSerial = MAX_uint64;
         for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
         {
             if (Pair.Value.IsValid() && Pair.Value != ProtectedEntry &&
@@ -848,8 +858,8 @@ void FDWCEditorTextureWorkspace::TrimToBudget(const FDWCEditorTextureHandle& Pro
 
 bool FDWCEditorTextureWorkspace::EnsureTexture(
     const FDWCEditorTextureHandle& Entry,
-    const bool bDeferLargeInitialUpload,
-    bool* const bOutDeferredInitialUpload)
+    const bool                     bDeferLargeInitialUpload,
+    bool* const                    bOutDeferredInitialUpload)
 {
     check(IsInGameThread());
     if (bOutDeferredInitialUpload != nullptr)
@@ -871,8 +881,8 @@ bool FDWCEditorTextureWorkspace::EnsureTexture(
 
     TrimToBudget(Entry);
     const uint64 NewResourceBytes = static_cast<uint64>(Entry->Descriptor.Size.X) *
-        static_cast<uint64>(Entry->Descriptor.Size.Y) *
-        static_cast<uint64>(Entry->Descriptor.GetBytesPerPixel());
+                                    static_cast<uint64>(Entry->Descriptor.Size.Y) *
+                                    static_cast<uint64>(Entry->Descriptor.GetBytesPerPixel());
     if (CalculateGPUUsedBytes() + NewResourceBytes > GPUBudgetBytes)
     {
         ++GPUBudgetRejectCount;
@@ -901,9 +911,9 @@ bool FDWCEditorTextureWorkspace::EnsureTexture(
     Texture->NeverStream = true;
 
     FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
-    void* MipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
-    const int64 ExpectedBytes = static_cast<int64>(Entry->Descriptor.Size.X) *
-        Entry->Descriptor.Size.Y * Entry->Descriptor.GetBytesPerPixel();
+    void*             MipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+    const int64       ExpectedBytes = static_cast<int64>(Entry->Descriptor.Size.X) *
+                                Entry->Descriptor.Size.Y * Entry->Descriptor.GetBytesPerPixel();
     if (MipData == nullptr || Entry->GetPixelDataBytes() != ExpectedBytes)
     {
         Mip.BulkData.Unlock();
@@ -911,7 +921,7 @@ bool FDWCEditorTextureWorkspace::EnsureTexture(
         return false;
     }
     const bool bShouldDeferUpload = bDeferLargeInitialUpload &&
-        ExpectedBytes > static_cast<int64>(FDWCEditorRenderUploadQueue::DefaultPerFlushBudgetBytes);
+                                    ExpectedBytes > static_cast<int64>(FDWCEditorRenderUploadQueue::DefaultPerFlushBudgetBytes);
     if (bShouldDeferUpload)
     {
         // Resource creation must happen on the game thread, but copying a 4K
@@ -920,7 +930,7 @@ bool FDWCEditorTextureWorkspace::EnsureTexture(
         // it in rows. A zeroed normal map is not a flat tangent normal.
         if (Entry->Descriptor.PixelFormat == PF_B8G8R8A8)
         {
-            FColor* InitialPixels = static_cast<FColor*>(MipData);
+            FColor*     InitialPixels = static_cast<FColor*>(MipData);
             const int64 PixelCount = static_cast<int64>(Entry->Descriptor.Size.X) * Entry->Descriptor.Size.Y;
             for (int64 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
             {
@@ -965,7 +975,7 @@ void FDWCEditorTextureWorkspace::InitializeBuffers(const FDWCEditorTextureHandle
 
 void FDWCEditorTextureWorkspace::RemoveEntry(
     const FDWCEditorTextureKey& Key,
-    const bool bCountEviction)
+    const bool                  bCountEviction)
 {
     const FDWCEditorTextureHandle Entry = Entries.FindRef(Key);
     if (!Entry.IsValid())
@@ -1088,14 +1098,14 @@ void FDWCEditorTextureWorkspace::RemoveCompletedRetiredEntries()
         [](const FDWCEditorTextureHandle& Entry)
         {
             return !Entry.IsValid() ||
-                (Entry->bRetired && Entry->ActiveLeaseCount == 0 && !Entry->IsGPURetiring());
+                   (Entry->bRetired && Entry->ActiveLeaseCount == 0 && !Entry->IsGPURetiring());
         },
         EAllowShrinking::No);
 }
 
 void FDWCEditorTextureWorkspace::ReleaseTextureLease(
     const FDWCEditorTextureHandle& Entry,
-    const uint64 LeaseId)
+    const uint64                   LeaseId)
 {
     check(IsInGameThread());
     (void)LeaseId;
@@ -1156,7 +1166,7 @@ uint64 FDWCEditorTextureWorkspace::CalculateGPUUsedBytes() const
 FDWCEditorTextureWorkspace::FGPUResidencyStats FDWCEditorTextureWorkspace::CollectGPUResidencyStats() const
 {
     FGPUResidencyStats Stats;
-    const auto AccumulateEntry = [&Stats](const FDWCEditorTextureHandle& Entry)
+    const auto         AccumulateEntry = [&Stats](const FDWCEditorTextureHandle& Entry)
     {
         if (!Entry.IsValid())
         {
@@ -1203,11 +1213,11 @@ void FDWCEditorTextureWorkspace::AppendDiagnosticMemoryBucket(
 {
     auto AddBucket = [this, &OutBuckets](
                          const FString& Name,
-                         const uint64 UsedBytes,
-                         const uint64 BudgetBytes,
-                         const int32 EntryCount,
-                         const int32 ActiveLeaseCount,
-                         const int32 RetiredEntryCount)
+                         const uint64   UsedBytes,
+                         const uint64   BudgetBytes,
+                         const int32    EntryCount,
+                         const int32    ActiveLeaseCount,
+                         const int32    RetiredEntryCount)
     {
         FDWCEditorPreviewMemoryBucket& Bucket = OutBuckets.AddDefaulted_GetRef();
         Bucket.Name = Name;
@@ -1222,7 +1232,7 @@ void FDWCEditorTextureWorkspace::AppendDiagnosticMemoryBucket(
     };
 
     const int32 TotalEntryCount = Entries.Num() + RetiredEntries.Num();
-    int32 TotalLeaseCount = 0;
+    int32       TotalLeaseCount = 0;
     for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
     {
         if (Pair.Value.IsValid())
@@ -1239,8 +1249,8 @@ void FDWCEditorTextureWorkspace::AppendDiagnosticMemoryBucket(
     }
 
     const FGPUResidencyStats GPUStats = CollectGPUResidencyStats();
-    const uint64 CPUUsedBytes = CalculateCPUUsedBytes();
-    const uint64 GPUUsedBytes = GPUStats.ResidentBytes + GPUStats.RetiringBytes;
+    const uint64             CPUUsedBytes = CalculateCPUUsedBytes();
+    const uint64             GPUUsedBytes = GPUStats.ResidentBytes + GPUStats.RetiringBytes;
 
     // Keep aggregate buckets for existing diagnostics consumers, then add the
     // GPU lifecycle split used to investigate VRAM pressure after PIE.
@@ -1300,7 +1310,7 @@ void FDWCEditorTextureWorkspace::AppendDiagnosticOperationCounters(
     GPURejects.Name = TEXT("Preview GPU budget rejects");
     GPURejects.Count = GPUBudgetRejectCount;
 
-    const FGPUResidencyStats GPUStats = CollectGPUResidencyStats();
+    const FGPUResidencyStats           GPUStats = CollectGPUResidencyStats();
     FDWCEditorPreviewOperationCounter& ResidentEntries = OutCounters.AddDefaulted_GetRef();
     ResidentEntries.Name = TEXT("Preview GPU resident entries");
     ResidentEntries.Count = GPUStats.ResidentEntryCount;

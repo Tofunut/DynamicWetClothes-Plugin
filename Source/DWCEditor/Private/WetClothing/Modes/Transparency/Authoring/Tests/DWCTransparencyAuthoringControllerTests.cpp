@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -69,13 +70,13 @@ namespace
             return Hit;
         }
 
-        UWetClothingAsset* Asset = nullptr;
-        FGuid LayerGuid;
-        TSharedPtr<FDWCEditorAuthoringDocument> Document;
-        TSharedPtr<FDWCEditorSessionStore> Store;
+        UWetClothingAsset*                              Asset = nullptr;
+        FGuid                                           LayerGuid;
+        TSharedPtr<FDWCEditorAuthoringDocument>         Document;
+        TSharedPtr<FDWCEditorSessionStore>              Store;
         TSharedPtr<FDWCTransparencyAuthoringController> Controller;
     };
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyAuthoringControllerStrokeTest,
@@ -149,23 +150,23 @@ bool FDWCTransparencyAuthoringControllerRevealToggleTest::RunTest(const FString&
     Fixture.SetRevealPaintEnabled(false);
 
     TestEqual(TEXT("Disabling Reveal Paint keeps the reveal target context"),
-        Fixture.Store->GetState().Transparency.EditContext.PaintTarget,
-        EDWCTransparencyPaintTarget::RevealColor);
+              Fixture.Store->GetState().Transparency.EditContext.PaintTarget,
+              EDWCTransparencyPaintTarget::RevealColor);
     TestFalse(TEXT("Disabled Reveal Paint blocks stroke begin"),
-        Fixture.Controller->CanBeginSurfaceInteraction(Fixture.MakeHit(FVector2D(0.2, 0.2))));
+              Fixture.Controller->CanBeginSurfaceInteraction(Fixture.MakeHit(FVector2D(0.2, 0.2))));
     TestFalse(TEXT("Disabling Reveal Paint does not create an interaction"),
-        Fixture.Controller->IsInteracting());
+              Fixture.Controller->IsInteracting());
 
     Fixture.SetRevealPaintEnabled(true);
     TestEqual(TEXT("Re-enabling Reveal Paint preserves the context"),
-        Fixture.Store->GetState().Transparency.EditContext.PaintTarget,
-        OriginalContext.PaintTarget);
+              Fixture.Store->GetState().Transparency.EditContext.PaintTarget,
+              OriginalContext.PaintTarget);
     TestTrue(TEXT("Re-enabling Reveal Paint restores stroke input"),
-        Fixture.Controller->CanBeginSurfaceInteraction(Fixture.MakeHit(FVector2D(0.2, 0.2))));
+             Fixture.Controller->CanBeginSurfaceInteraction(Fixture.MakeHit(FVector2D(0.2, 0.2))));
 
     Fixture.Controller->BeginSurfaceInteraction(Fixture.MakeHit(FVector2D(0.2, 0.2)));
     TestTrue(TEXT("The first click begins a reveal interaction immediately"),
-        Fixture.Controller->IsInteracting());
+             Fixture.Controller->IsInteracting());
     Fixture.Controller->CancelActiveInteraction(false);
     return true;
 }

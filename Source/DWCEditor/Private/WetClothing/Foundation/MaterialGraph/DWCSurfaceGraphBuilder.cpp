@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/MaterialGraph/DWCSurfaceGraphBuilder.h"
 
 #include "Engine/Texture.h"
@@ -84,7 +85,7 @@ namespace
 
     bool HasStaticSwitchParameter(
         const UMaterialFunctionInterface* FunctionInterface,
-        const FName ParameterName)
+        const FName                       ParameterName)
     {
         const UMaterialFunction* Function = Cast<UMaterialFunction>(FunctionInterface);
         if (Function == nullptr)
@@ -106,8 +107,8 @@ namespace
 
     bool IsExpectedFunctionCall(
         const UMaterialExpressionMaterialFunctionCall* FunctionCall,
-        const UMaterialFunctionInterface* ExpectedFunction,
-        const TCHAR* ExpectedFunctionName)
+        const UMaterialFunctionInterface*              ExpectedFunction,
+        const TCHAR*                                   ExpectedFunctionName)
     {
         return FunctionCall != nullptr && FunctionCall->MaterialFunction != nullptr &&
                (FunctionCall->MaterialFunction == ExpectedFunction ||
@@ -115,9 +116,9 @@ namespace
     }
 
     bool HasFunctionCall(
-        const UMaterialFunction* MaterialFunction,
+        const UMaterialFunction*          MaterialFunction,
         const UMaterialFunctionInterface* CalledFunction,
-        const TCHAR* ExpectedFunctionName)
+        const TCHAR*                      ExpectedFunctionName)
     {
         if (MaterialFunction == nullptr || CalledFunction == nullptr)
         {
@@ -138,10 +139,10 @@ namespace
 
     bool ValidateFunctionContract(
         const UMaterialFunctionInterface* Function,
-        const TCHAR* FunctionName,
-        const TArray<FName>& RequiredInputs,
-        const TArray<FName>& RequiredOutputs,
-        TArray<FString>& OutFailureReasons)
+        const TCHAR*                      FunctionName,
+        const TArray<FName>&              RequiredInputs,
+        const TArray<FName>&              RequiredOutputs,
+        TArray<FString>&                  OutFailureReasons)
     {
         if (Function == nullptr)
         {
@@ -202,9 +203,9 @@ namespace
 
     bool Connect(
         const FDWCMaterialGraphPin& From,
-        UMaterialExpression* ToExpression,
-        const FString& ToInputName,
-        TArray<FString>& FailureReasons)
+        UMaterialExpression*        ToExpression,
+        const FString&              ToInputName,
+        TArray<FString>&            FailureReasons)
     {
         if (!From.IsValid() || ToExpression == nullptr)
         {
@@ -238,9 +239,9 @@ namespace
     }
 
     bool ConnectTextureCoordinate(
-        UMaterialExpressionTextureCoordinate* TextureCoordinate,
+        UMaterialExpressionTextureCoordinate*        TextureCoordinate,
         UMaterialExpressionTextureSampleParameter2D* TextureSample,
-        TArray<FString>& FailureReasons)
+        TArray<FString>&                             FailureReasons)
     {
         if (TextureCoordinate == nullptr || TextureSample == nullptr)
         {
@@ -249,7 +250,7 @@ namespace
         }
 
         const TArray<FString> InputNames = UMaterialEditingLibrary::GetMaterialExpressionInputNames(TextureSample);
-        static const FString CandidateInputNames[] = { TEXT("UVs"), TEXT("Coordinates") };
+        static const FString  CandidateInputNames[] = { TEXT("UVs"), TEXT("Coordinates") };
         for (const FString& CandidateInputName : CandidateInputNames)
         {
             if (InputNames.Contains(CandidateInputName) &&
@@ -268,10 +269,10 @@ namespace
     }
 
     UMaterialExpressionMaterialFunctionCall* CreateFunctionCall(
-        UMaterial* Material,
+        UMaterial*                  Material,
         UMaterialFunctionInterface* Function,
-        const int32 NodeX,
-        const int32 NodeY)
+        const int32                 NodeX,
+        const int32                 NodeY)
     {
         UMaterialExpressionMaterialFunctionCall* FunctionCall =
             Cast<UMaterialExpressionMaterialFunctionCall>(UMaterialEditingLibrary::CreateMaterialExpression(
@@ -285,9 +286,9 @@ namespace
     }
 
     FDWCMaterialGraphPin ResolvePropertyInputOrFallback(
-        UMaterial* Material,
+        UMaterial*              Material,
         const EMaterialProperty Property,
-        const FVector2D& NodePosition)
+        const FVector2D&        NodePosition)
     {
         if (UMaterialExpression* Existing = UMaterialEditingLibrary::GetMaterialPropertyInputNode(Material, Property))
         {
@@ -298,19 +299,19 @@ namespace
         {
             UMaterialExpressionConstant3Vector* Fallback = Cast<UMaterialExpressionConstant3Vector>(
                 UMaterialEditingLibrary::CreateMaterialExpression(
-                    Material, UMaterialExpressionConstant3Vector::StaticClass(), NodePosition.X, NodePosition.Y));
+                    Material, UMaterialExpressionConstant3Vector::StaticClass(), static_cast<int32>(NodePosition.X), static_cast<int32>(NodePosition.Y)));
             if (Fallback != nullptr)
             {
                 Fallback->Constant = Property == MP_Normal
-                    ? FLinearColor(0.0f, 0.0f, 1.0f)
-                    : FLinearColor::White;
+                                         ? FLinearColor(0.0f, 0.0f, 1.0f)
+                                         : FLinearColor::White;
             }
             return { Fallback, FString() };
         }
 
         UMaterialExpressionConstant* Fallback = Cast<UMaterialExpressionConstant>(
             UMaterialEditingLibrary::CreateMaterialExpression(
-                Material, UMaterialExpressionConstant::StaticClass(), NodePosition.X, NodePosition.Y));
+                Material, UMaterialExpressionConstant::StaticClass(), static_cast<int32>(NodePosition.X), static_cast<int32>(NodePosition.Y)));
         if (Fallback != nullptr)
         {
             Fallback->R = Property == MP_Metallic ? 0.0f : 0.5f;
@@ -319,7 +320,7 @@ namespace
     }
 
     UMaterialExpressionScalarParameter* CreateScalarParameter(
-        UMaterial* Material,
+        UMaterial*  Material,
         const FName Name,
         const float DefaultValue,
         const int32 NodeX,
@@ -355,13 +356,13 @@ namespace
     }
 
     UMaterialExpressionTextureSampleParameter2D* CreateTextureParameter(
-        UMaterial* Material,
-        const FName Name,
+        UMaterial*                 Material,
+        const FName                Name,
         const EMaterialSamplerType SamplerType,
-        UTexture* DefaultTexture,
-        const TCHAR* Description,
-        const int32 NodeX,
-        const int32 NodeY)
+        UTexture*                  DefaultTexture,
+        const TCHAR*               Description,
+        const int32                NodeX,
+        const int32                NodeY)
     {
         UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(
             UMaterialEditingLibrary::CreateMaterialExpression(
@@ -377,11 +378,11 @@ namespace
     }
 
     UMaterialExpressionTextureCoordinate* CreateTextureCoordinate(
-        UMaterial* Material,
-        const int32 CoordinateIndex,
+        UMaterial*   Material,
+        const int32  CoordinateIndex,
         const TCHAR* Description,
-        const int32 NodeX,
-        const int32 NodeY)
+        const int32  NodeX,
+        const int32  NodeY)
     {
         UMaterialExpressionTextureCoordinate* Coordinate = Cast<UMaterialExpressionTextureCoordinate>(
             UMaterialEditingLibrary::CreateMaterialExpression(
@@ -395,10 +396,10 @@ namespace
     }
 
     bool ResolveOutputPin(
-        UMaterialExpression* Expression,
-        const FString& OutputName,
+        UMaterialExpression*  Expression,
+        const FString&        OutputName,
         FDWCMaterialGraphPin& OutPin,
-        TArray<FString>& FailureReasons)
+        TArray<FString>&      FailureReasons)
     {
         if (!GetOutputNames(Expression).Contains(OutputName))
         {
@@ -414,7 +415,7 @@ namespace
     }
 
     void DeleteExpressionsCreatedAfter(
-        UMaterial* Material,
+        UMaterial*                        Material,
         const TSet<UMaterialExpression*>& PreExistingExpressions)
     {
         if (Material == nullptr)
@@ -435,10 +436,10 @@ namespace
             UMaterialEditingLibrary::DeleteMaterialExpression(Material, Expression);
         }
     }
-}
+} // namespace
 
 bool FDWCSurfaceGraphBuilder::ValidateDependencies(
-    TArray<FString>& OutFailureReasons,
+    TArray<FString>&             OutFailureReasons,
     UMaterialFunctionInterface** OutEvaluateFunction)
 {
     if (OutEvaluateFunction != nullptr)

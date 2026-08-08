@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/WetBoneOptimizationCacheBuilder.h"
 
 #include "Engine/SkeletalMesh.h"
@@ -49,11 +50,11 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
     }
 
     static void CollectCollisionlessParentsRecursive(
-        const int32                 ChildBoneIndex,
-        const UPhysicsAsset*        PhysicsAsset,
-        const FReferenceSkeleton&   RefSkeleton,
-        TSet<int32>&                UniqueBoneIndices,
-        TArray<int32>&              OutIncludedBoneIndices)
+        const int32               ChildBoneIndex,
+        const UPhysicsAsset*      PhysicsAsset,
+        const FReferenceSkeleton& RefSkeleton,
+        TSet<int32>&              UniqueBoneIndices,
+        TArray<int32>&            OutIncludedBoneIndices)
     {
         const int32 ParentBoneIndex = RefSkeleton.GetParentIndex(ChildBoneIndex);
         if (ParentBoneIndex == INDEX_NONE ||
@@ -77,12 +78,12 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
     }
 
     static void CollectCollisionlessChildrenDepthFirst(
-        const int32                       ParentBoneIndex,
-        const UPhysicsAsset*              PhysicsAsset,
-        const FReferenceSkeleton&         RefSkeleton,
-        const TArray<TArray<int32>>&      ChildBoneIndices,
-        TSet<int32>&                      UniqueBoneIndices,
-        TArray<int32>&                    OutIncludedBoneIndices)
+        const int32                  ParentBoneIndex,
+        const UPhysicsAsset*         PhysicsAsset,
+        const FReferenceSkeleton&    RefSkeleton,
+        const TArray<TArray<int32>>& ChildBoneIndices,
+        TSet<int32>&                 UniqueBoneIndices,
+        TArray<int32>&               OutIncludedBoneIndices)
     {
         if (!ChildBoneIndices.IsValidIndex(ParentBoneIndex))
         {

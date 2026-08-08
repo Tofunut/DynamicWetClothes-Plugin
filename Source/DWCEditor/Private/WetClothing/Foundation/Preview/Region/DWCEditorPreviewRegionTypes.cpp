@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Preview/Region/DWCEditorPreviewRegionTypes.h"
 
 namespace
@@ -34,11 +35,11 @@ namespace
         InOutBytes += Bytes;
         return true;
     }
-}
+} // namespace
 
 bool FDWCEditorPreviewRegionMemory::TryEstimateBGRA8(
     const TArray<FDWCEditorBGRA8RegionPayload>& Regions,
-    FDWCEditorPreviewRegionMemoryEstimate& OutEstimate)
+    FDWCEditorPreviewRegionMemoryEstimate&      OutEstimate)
 {
     OutEstimate = {};
     for (const FDWCEditorBGRA8RegionPayload& Region : Regions)
@@ -57,7 +58,7 @@ bool FDWCEditorPreviewRegionMemory::TryEstimateBGRA8(
 
 bool FDWCEditorPreviewRegionMemory::TryEstimateG8(
     const TArray<FDWCEditorG8RegionPayload>& Regions,
-    FDWCEditorPreviewRegionMemoryEstimate& OutEstimate)
+    FDWCEditorPreviewRegionMemoryEstimate&   OutEstimate)
 {
     OutEstimate = {};
     for (const FDWCEditorG8RegionPayload& Region : Regions)
@@ -76,7 +77,7 @@ bool FDWCEditorPreviewRegionMemory::TryEstimateG8(
 
 bool FDWCEditorPreviewRegionMemory::TryEstimateNormal(
     const TArray<FDWCEditorNormalRegionPayload>& Regions,
-    FDWCEditorPreviewRegionMemoryEstimate& OutEstimate)
+    FDWCEditorPreviewRegionMemoryEstimate&       OutEstimate)
 {
     OutEstimate = {};
     for (const FDWCEditorNormalRegionPayload& Region : Regions)
@@ -100,4 +101,3 @@ bool FDWCEditorPreviewRegionMemory::TryEstimateNormal(
     }
     return !Regions.IsEmpty();
 }
-

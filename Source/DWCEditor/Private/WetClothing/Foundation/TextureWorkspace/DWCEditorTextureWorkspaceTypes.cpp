@@ -1,10 +1,9 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
 
 FDWCEditorTextureLease::FDWCEditorTextureLease(FDWCEditorTextureLease&& Other) noexcept
-    : State(MoveTemp(Other.State))
-    , Entry(MoveTemp(Other.Entry))
-    , LeaseId(Other.LeaseId)
+    : State(MoveTemp(Other.State)), Entry(MoveTemp(Other.Entry)), LeaseId(Other.LeaseId)
 {
     Other.LeaseId = 0;
 }
@@ -45,9 +44,9 @@ namespace
     }
 
     void BuildWrappedIntervals(
-        const int32 MinValue,
-        const int32 MaxValue,
-        const int32 Extent,
+        const int32                             MinValue,
+        const int32                             MaxValue,
+        const int32                             Extent,
         TArray<FIntPoint, TInlineAllocator<2>>& OutIntervals)
     {
         OutIntervals.Reset();
@@ -73,12 +72,12 @@ namespace
             OutIntervals.Add(FIntPoint(0, WrappedMax - Extent));
         }
     }
-}
+} // namespace
 
 void FDWCEditorDirtyRegionSet::Add(
-    const FIntRect& DirtyRect,
+    const FIntRect&  DirtyRect,
     const FIntPoint& TextureSize,
-    const bool bWrap)
+    const bool       bWrap)
 {
     if (DirtyRect.IsEmpty() || TextureSize.X <= 0 || TextureSize.Y <= 0)
     {
@@ -115,7 +114,7 @@ uint64 FDWCEditorDirtyRegionSet::GetArea() const
 }
 
 void FDWCEditorDirtyRegionSet::AddClamped(
-    const FIntRect& DirtyRect,
+    const FIntRect&  DirtyRect,
     const FIntPoint& TextureSize)
 {
     FIntRect Pending(
@@ -135,7 +134,7 @@ void FDWCEditorDirtyRegionSet::AddClamped(
         for (int32 Index = Regions.Num() - 1; Index >= 0; --Index)
         {
             const FIntRect& Existing = Regions[Index];
-            const bool bTouches =
+            const bool      bTouches =
                 Pending.Min.X <= Existing.Max.X + 1 && Pending.Max.X + 1 >= Existing.Min.X &&
                 Pending.Min.Y <= Existing.Max.Y + 1 && Pending.Max.Y + 1 >= Existing.Min.Y;
             if (!bTouches)
@@ -151,8 +150,7 @@ void FDWCEditorDirtyRegionSet::AddClamped(
             Regions.RemoveAtSwap(Index, 1, EAllowShrinking::No);
             bMerged = true;
         }
-    }
-    while (bMerged);
+    } while (bMerged);
 
     Regions.Add(Pending);
     ReduceRegionCount();

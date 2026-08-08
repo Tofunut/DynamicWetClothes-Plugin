@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -31,14 +32,14 @@ namespace
 
     struct FExpectedWetPartRenderProfile
     {
-        int32 MaterialSlotIndex = INDEX_NONE;
-        const FWetClothingWetPartEntry* Entry = nullptr;
+        int32                            MaterialSlotIndex = INDEX_NONE;
+        const FWetClothingWetPartEntry*  Entry = nullptr;
         const FWetPartProfileAssignment* Profile = nullptr;
     };
 
     bool IsWetPartRenderProfileBakeable(
         const FWetClothingAuthoredMaterialSlot& SlotData,
-        const FWetClothingWetPartEntry& Entry)
+        const FWetClothingWetPartEntry&         Entry)
     {
         return SlotData.bIsWettableSlot &&
                SlotData.MaterialSlotIndex != INDEX_NONE &&
@@ -47,7 +48,7 @@ namespace
     }
 
     void CollectExpectedWetPartRenderProfiles(
-        const UWetClothingAsset& Asset,
+        const UWetClothingAsset&               Asset,
         TArray<FExpectedWetPartRenderProfile>& OutProfiles)
     {
         OutProfiles.Reset();
@@ -87,9 +88,9 @@ namespace
     }
 
     void AppendMissingRenderProfileBakeData(
-        const UWetClothingAsset& Asset,
+        const UWetClothingAsset&            Asset,
         const FWetClothingBakedWetPartData& Baked,
-        TArray<FString>& PendingLines)
+        TArray<FString>&                    PendingLines)
     {
         TArray<FExpectedWetPartRenderProfile> ExpectedProfiles;
         CollectExpectedWetPartRenderProfiles(Asset, ExpectedProfiles);
@@ -98,8 +99,8 @@ namespace
             return;
         }
 
-        TSet<int32> CheckedMaterialSlots;
-        TSet<FString> CheckedProfileKeys;
+        TSet<int32>                                          CheckedMaterialSlots;
+        TSet<FString>                                        CheckedProfileKeys;
         TMap<FString, const FWetClothingLocalRenderProfile*> BakedProfilesByKey;
         for (const FWetClothingLocalRenderProfile& LocalProfile : Baked.LocalProfiles)
         {
@@ -139,8 +140,8 @@ namespace
             if (BakedProfile == nullptr)
             {
                 const int32 WetPartID = ExpectedProfile.Entry != nullptr
-                    ? ExpectedProfile.Entry->WetPartID
-                    : INDEX_NONE;
+                                            ? ExpectedProfile.Entry->WetPartID
+                                            : INDEX_NONE;
                 PendingLines.Add(FString::Printf(
                     TEXT("Wet Part %d in slot %d uses a profile that is missing from baked Render Profile Lookup Texture."),
                     WetPartID,
@@ -167,12 +168,12 @@ namespace
             }
 
             const auto SourcePathMatches = [](
-                const UTexture2D* AuthoredTexture,
-                const FSoftObjectPath& BakedSourcePath)
+                                               const UTexture2D*      AuthoredTexture,
+                                               const FSoftObjectPath& BakedSourcePath)
             {
                 return AuthoredTexture != nullptr
-                    ? BakedSourcePath == FSoftObjectPath(AuthoredTexture)
-                    : !BakedSourcePath.IsValid();
+                           ? BakedSourcePath == FSoftObjectPath(AuthoredTexture)
+                           : !BakedSourcePath.IsValid();
             };
 
             if (!SourcePathMatches(
@@ -241,11 +242,11 @@ namespace
         }
     }
 
-}
+} // namespace
 
 bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
     const UWetClothingAsset* WetClothingAsset,
-    FString* OutSummary)
+    FString*                 OutSummary)
 {
     TArray<FString> PendingLines;
     if (WetClothingAsset == nullptr || WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
@@ -293,7 +294,7 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
             }
 
             const FWetClothingBakedWetPartData& Baked = WetClothingAsset->Derived.Inline.BakedWetPartData;
-            const FString ExpectedSignature = FWetClothingWetPartDataTextureBaker::MakeBuildSignature(WetClothingAsset);
+            const FString                       ExpectedSignature = FWetClothingWetPartDataTextureBaker::MakeBuildSignature(WetClothingAsset);
             if (!Baked.IsValid())
             {
                 PendingLines.Add(TEXT("Wet Part Data Texture bake is required."));
@@ -323,16 +324,16 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
     if (OutSummary != nullptr)
     {
         *OutSummary = PendingLines.IsEmpty()
-            ? TEXT("Render profile data is up to date.")
-            : FString::Printf(TEXT("Pending Render Profile Bake:\n- %s"), *FString::Join(PendingLines, TEXT("\n- ")));
+                          ? TEXT("Render profile data is up to date.")
+                          : FString::Printf(TEXT("Pending Render Profile Bake:\n- %s"), *FString::Join(PendingLines, TEXT("\n- ")));
     }
     return !PendingLines.IsEmpty();
 }
 
 bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMaterials(
     UWetClothingAsset* WetClothingAsset,
-    FString& OutSummary,
-    bool* OutHadWarnings)
+    FString&           OutSummary,
+    bool*              OutHadWarnings)
 {
     if (OutHadWarnings != nullptr)
     {
@@ -442,7 +443,7 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
     }
 
     FWetClothingWetPartDataTextureBakeResult WetPartDataResult;
-    FString WetPartDataError;
+    FString                                  WetPartDataError;
     if (!FWetClothingWetPartDataTextureBaker::Bake(WetClothingAsset, WetPartDataResult, WetPartDataError))
     {
         OutSummary = FString::Printf(TEXT("Wet Part Data Texture bake failed: %s"), *WetPartDataError);
@@ -509,9 +510,8 @@ bool FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(UWetClot
     for (const FWetClothingLocalRenderProfile& LocalProfile :
          WetClothingAsset->Derived.Inline.BakedWetPartData.LocalProfiles)
     {
-        const auto AddGeneratedSurfaceTexture = [
-            &PackagesToSave,
-            &SharedSurfaceFolder](UTexture2D* Texture)
+        const auto AddGeneratedSurfaceTexture = [&PackagesToSave,
+                                                 &SharedSurfaceFolder](UTexture2D* Texture)
         {
             if (Texture != nullptr && Texture->GetPathName().StartsWith(SharedSurfaceFolder))
             {

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -16,7 +17,7 @@ namespace
 
     TSharedRef<FDWCTransparencyAutoBakeResult> BuildReplayTestResult()
     {
-        constexpr int32 Size = FDWCTransparencyAlphaTileStore::TileSize;
+        constexpr int32                            Size = FDWCTransparencyAlphaTileStore::TileSize;
         TSharedRef<FDWCTransparencyAutoBakeResult> Result = MakeShared<FDWCTransparencyAutoBakeResult>();
         Result->Resolution = FIntPoint(Size, Size);
         const int32 PixelCount = Size * Size;
@@ -41,7 +42,7 @@ namespace
 
     FDWCTransparencyBrushStroke MakeAlphaStroke(
         const FVector2D Position,
-        const float TargetAlpha)
+        const float     TargetAlpha)
     {
         FDWCTransparencyBrushStroke Stroke;
         Stroke.StrokeGuid = FGuid::NewGuid();
@@ -55,7 +56,7 @@ namespace
     }
 
     FDWCTransparencyRevealColorStroke MakeRevealStroke(
-        const FVector2D Position,
+        const FVector2D    Position,
         const FLinearColor Color)
     {
         FDWCTransparencyRevealColorStroke Stroke;
@@ -68,7 +69,7 @@ namespace
         Stroke.Samples.Add(MakeSample(Position, 0.24f, 0.8f));
         return Stroke;
     }
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyAlphaDirtyTileReplayParityTest,
@@ -78,27 +79,27 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCTransparencyAlphaDirtyTileReplayParityTest::RunTest(const FString&)
 {
     const TSharedRef<FDWCTransparencyAutoBakeResult> AutoResult = BuildReplayTestResult();
-    const FDWCTransparencyBrushStroke SurvivingStroke = MakeAlphaStroke(FVector2D(0.58, 0.5), 0.8f);
+    const FDWCTransparencyBrushStroke                SurvivingStroke = MakeAlphaStroke(FVector2D(0.58, 0.5), 0.8f);
 
     FDWCTransparencyAlphaTileStore ExpectedStore;
     ExpectedStore.Initialize(AutoResult->Resolution);
     TArray<FDWCTransparencyAlphaTilePayload> ExpectedTiles;
-    ExpectedStore.SnapshotTiles({FIntPoint::ZeroValue}, ExpectedTiles);
+    ExpectedStore.SnapshotTiles({ FIntPoint::ZeroValue }, ExpectedTiles);
     TestTrue(
         TEXT("The surviving alpha stroke rasterizes for the full-replay reference"),
         FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
             *AutoResult,
             SurvivingStroke,
             SurvivingStroke.Samples,
-            {FIntPoint::ZeroValue},
+            { FIntPoint::ZeroValue },
             ExpectedTiles));
 
     FDWCTransparencyDirtyTileReplayJobInput Input;
     Input.Target = EDWCTransparencyDirtyReplayTarget::Alpha;
     Input.AutoResult = AutoResult;
     Input.MaterialSlotIndex = ReplayTestSlot;
-    Input.AlphaStrokes = {SurvivingStroke};
-    Input.DirtyTileCoordinates = {FIntPoint::ZeroValue};
+    Input.AlphaStrokes = { SurvivingStroke };
+    Input.DirtyTileCoordinates = { FIntPoint::ZeroValue };
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> Token =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
     const TSharedPtr<FDWCTransparencyDirtyTileReplayJobResult, ESPMode::ThreadSafe> Result =
@@ -110,9 +111,9 @@ bool FDWCTransparencyAlphaDirtyTileReplayParityTest::RunTest(const FString&)
         return false;
     }
     TestEqual(TEXT("Alpha replay premultiplied values match full replay"),
-        Result->AlphaTiles[0].Premultiplied, ExpectedTiles[0].Premultiplied);
+              Result->AlphaTiles[0].Premultiplied, ExpectedTiles[0].Premultiplied);
     TestEqual(TEXT("Alpha replay weights match full replay"),
-        Result->AlphaTiles[0].Weight, ExpectedTiles[0].Weight);
+              Result->AlphaTiles[0].Weight, ExpectedTiles[0].Weight);
     return true;
 }
 
@@ -124,7 +125,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCTransparencyRevealColorDirtyTileReplayParityTest::RunTest(const FString&)
 {
     const TSharedRef<FDWCTransparencyAutoBakeResult> AutoResult = BuildReplayTestResult();
-    const FDWCTransparencyRevealColorStroke SurvivingStroke =
+    const FDWCTransparencyRevealColorStroke          SurvivingStroke =
         MakeRevealStroke(FVector2D(0.58, 0.5), FLinearColor(0.1f, 0.8f, 0.2f));
     const FLinearColor BaseRevealColor(0.1f, 0.2f, 0.3f);
 
@@ -132,7 +133,7 @@ bool FDWCTransparencyRevealColorDirtyTileReplayParityTest::RunTest(const FString
     ExpectedStore.Initialize(AutoResult->Resolution);
     TArray<FDWCTransparencyRevealColorTilePayload> ExpectedTiles;
     ExpectedStore.SnapshotTiles(
-        {FIntPoint::ZeroValue},
+        { FIntPoint::ZeroValue },
         MakeArrayView(AutoResult->InnerColorBuffer),
         ExpectedTiles);
     TestTrue(
@@ -142,7 +143,7 @@ bool FDWCTransparencyRevealColorDirtyTileReplayParityTest::RunTest(const FString
             SurvivingStroke,
             SurvivingStroke.Samples,
             BaseRevealColor,
-            {FIntPoint::ZeroValue},
+            { FIntPoint::ZeroValue },
             ExpectedTiles));
 
     FDWCTransparencyDirtyTileReplayJobInput Input;
@@ -150,8 +151,8 @@ bool FDWCTransparencyRevealColorDirtyTileReplayParityTest::RunTest(const FString
     Input.AutoResult = AutoResult;
     Input.MaterialSlotIndex = ReplayTestSlot;
     Input.BaseRevealColor = BaseRevealColor;
-    Input.RevealColorStrokes = {SurvivingStroke};
-    Input.DirtyTileCoordinates = {FIntPoint::ZeroValue};
+    Input.RevealColorStrokes = { SurvivingStroke };
+    Input.DirtyTileCoordinates = { FIntPoint::ZeroValue };
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> Token =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
     const TSharedPtr<FDWCTransparencyDirtyTileReplayJobResult, ESPMode::ThreadSafe> Result =
@@ -163,7 +164,7 @@ bool FDWCTransparencyRevealColorDirtyTileReplayParityTest::RunTest(const FString
         return false;
     }
     TestEqual(TEXT("Reveal-color replay values match full replay"),
-        Result->RevealColorTiles[0].Colors, ExpectedTiles[0].Colors);
+              Result->RevealColorTiles[0].Colors, ExpectedTiles[0].Colors);
     return true;
 }
 

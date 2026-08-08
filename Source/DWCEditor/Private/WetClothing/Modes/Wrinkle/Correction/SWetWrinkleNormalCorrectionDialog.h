@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "DataAssets/WetWrinkleNormalTextureData.h"
@@ -29,37 +31,37 @@ class SWetWrinkleNormalCorrectionDialog : public SCompoundWidget
   private:
     void RebuildPreview();
     bool CreateTransientPreviewTexture(
-        TStrongObjectPtr<UTexture2D>& OutTexture,
+        TStrongObjectPtr<UTexture2D>&        OutTexture,
         const FWetWrinkleTexturePixelBuffer& PixelBuffer,
-        bool bNormalMap) const;
+        bool                                 bNormalMap) const;
     TSharedRef<SWidget> BuildPreviewCell(const FText& Label, const FSlateBrush* Brush) const;
-    FReply HandleCreateClicked();
-    FReply HandleRefreshPreviewClicked();
-    FReply HandleCancelClicked();
-    void SaveLastSettings() const;
-    void CloseWindow() const;
+    FReply              HandleCreateClicked();
+    FReply              HandleRefreshPreviewClicked();
+    FReply              HandleCancelClicked();
+    void                SaveLastSettings() const;
+    void                CloseWindow() const;
 
   private:
-    TWeakPtr<SWindow> ParentWindow;
-    TWeakObjectPtr<UTexture2D> SourceTexture;
-    TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
-    FOnWetWrinkleCorrectedTextureCreated OnCorrectedTextureCreated;
-    bool bUseCorrection = true;
-    bool bHideOriginal = false;
-    FWetWrinkleNormalCorrectionSettings CorrectionSettings;
+    TWeakPtr<SWindow>                     ParentWindow;
+    TWeakObjectPtr<UTexture2D>            SourceTexture;
+    TWeakObjectPtr<UWetClothingAsset>     WetClothingAsset;
+    FOnWetWrinkleCorrectedTextureCreated  OnCorrectedTextureCreated;
+    bool                                  bUseCorrection = true;
+    bool                                  bHideOriginal = false;
+    FWetWrinkleNormalCorrectionSettings   CorrectionSettings;
     FWetWrinkleCoverageExtractionSettings CoverageSettings;
-    FWetWrinkleNormalBuildOutput LastBuildOutput;
-    bool bPreviewValid = false;
+    FWetWrinkleNormalBuildOutput          LastBuildOutput;
+    bool                                  bPreviewValid = false;
 
     TStrongObjectPtr<UTexture2D> SourceDeviationTexture;
     TStrongObjectPtr<UTexture2D> CorrectedNormalPreviewTexture;
     TStrongObjectPtr<UTexture2D> CorrectedDeviationTexture;
     TStrongObjectPtr<UTexture2D> ConvexSeparationTexture;
-    FSlateBrush SourceNormalBrush;
-    FSlateBrush SourceDeviationBrush;
-    FSlateBrush CorrectedNormalBrush;
-    FSlateBrush CorrectedDeviationBrush;
-    FSlateBrush ConvexSeparationBrush;
-    FText StatusText;
-    FSlateColor StatusColor = FSlateColor(FLinearColor(0.72f, 0.72f, 0.72f));
+    FSlateBrush                  SourceNormalBrush;
+    FSlateBrush                  SourceDeviationBrush;
+    FSlateBrush                  CorrectedNormalBrush;
+    FSlateBrush                  CorrectedDeviationBrush;
+    FSlateBrush                  ConvexSeparationBrush;
+    FText                        StatusText;
+    FSlateColor                  StatusColor = FSlateColor(FLinearColor(0.72f, 0.72f, 0.72f));
 };

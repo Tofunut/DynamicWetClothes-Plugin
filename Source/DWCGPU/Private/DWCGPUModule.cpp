@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCGPUBackend.h"
 #include "DWCGPUPreviewSimulator.h"
 #include "GPU/DWCGPUBackend.h"
@@ -11,7 +12,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogDWCGPUModule, Log, All);
 
 class FDWCGPUModule final : public IDWCGPUModule
 {
-public:
+  public:
     virtual void StartupModule() override
     {
         TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("DynamicWetClothes"));
@@ -35,7 +36,6 @@ public:
     {
         return MakeUnique<FDWCGPUPreviewSimulator>();
     }
-
 };
 
 IMPLEMENT_MODULE(FDWCGPUModule, DWCGPU)

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -7,9 +8,9 @@
 /** Result of making logical DWC UV Channel chart boundaries into real mesh seams. */
 struct FDWCDataUVSeamSplitResult
 {
-    bool bSucceeded = false;
-    int32 SplitVertexInstanceCount = 0;
-    int32 AffectedPolygonCount = 0;
+    bool    bSucceeded = false;
+    int32   SplitVertexInstanceCount = 0;
+    int32   AffectedPolygonCount = 0;
     FString Message;
 };
 
@@ -20,9 +21,9 @@ struct FDWCDataUVSeamSplitResult
  */
 class FDWCDataUVSeamSplitter
 {
-public:
+  public:
     static FDWCDataUVSeamSplitResult SplitChartBoundaries(
-        FMeshDescription& MeshDescription,
-        TArray<FDWCDataUVTriangle>& Triangles,
+        FMeshDescription&              MeshDescription,
+        TArray<FDWCDataUVTriangle>&    Triangles,
         const TArray<FDWCDataUVChart>& Charts);
 };

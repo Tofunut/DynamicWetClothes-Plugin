@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "Styling/SlateTypes.h"
 #include "Widgets/SCompoundWidget.h"
@@ -12,13 +14,13 @@ class UTexture2D;
 
 struct FWetWrinkleTexturePaletteItem
 {
-    FText DisplayName;
-    FSoftObjectPath TexturePath;
-    TWeakObjectPtr<UTexture2D> Texture;
+    FText                       DisplayName;
+    FSoftObjectPath             TexturePath;
+    TWeakObjectPtr<UTexture2D>  Texture;
     TSharedPtr<FAssetThumbnail> AssetThumbnail;
-    bool bAssetAvailable = true;
-    bool bRemoved = false;
-    bool bHidden = false;
+    bool                        bAssetAvailable = true;
+    bool                        bRemoved = false;
+    bool                        bHidden = false;
 };
 
 using FWetWrinkleTexturePaletteItemPtr = TSharedPtr<FWetWrinkleTexturePaletteItem>;
@@ -38,25 +40,25 @@ class SWetWrinklePalettePanel : public SCompoundWidget
 
     void Construct(const FArguments& InArgs);
 
-    TArray<FWetWrinkleTexturePaletteItemPtr>& GetAllItems() { return AllItems; }
-    const TArray<FWetWrinkleTexturePaletteItemPtr>& GetAllItems() const { return AllItems; }
-    TArray<FWetWrinkleTexturePaletteItemPtr>& GetVisibleItems() { return VisibleItems; }
-    const TArray<FWetWrinkleTexturePaletteItemPtr>& GetVisibleItems() const { return VisibleItems; }
-    TMap<FSoftObjectPath, FWetWrinkleTexturePaletteItemPtr>& GetItemsByPath() { return ItemsByPath; }
+    TArray<FWetWrinkleTexturePaletteItemPtr>&                      GetAllItems() { return AllItems; }
+    const TArray<FWetWrinkleTexturePaletteItemPtr>&                GetAllItems() const { return AllItems; }
+    TArray<FWetWrinkleTexturePaletteItemPtr>&                      GetVisibleItems() { return VisibleItems; }
+    const TArray<FWetWrinkleTexturePaletteItemPtr>&                GetVisibleItems() const { return VisibleItems; }
+    TMap<FSoftObjectPath, FWetWrinkleTexturePaletteItemPtr>&       GetItemsByPath() { return ItemsByPath; }
     const TMap<FSoftObjectPath, FWetWrinkleTexturePaletteItemPtr>& GetItemsByPath() const { return ItemsByPath; }
-    const FButtonStyle& GetButtonStyle() const { return ButtonStyle; }
+    const FButtonStyle&                                            GetButtonStyle() const { return ButtonStyle; }
 
     void RequestRefresh();
 
   private:
     TSharedRef<ITableRow> GenerateTile(
-        FWetWrinkleTexturePaletteItemPtr Item,
+        FWetWrinkleTexturePaletteItemPtr  Item,
         const TSharedRef<STableViewBase>& OwnerTable) const;
 
-    TArray<FWetWrinkleTexturePaletteItemPtr> AllItems;
-    TArray<FWetWrinkleTexturePaletteItemPtr> VisibleItems;
+    TArray<FWetWrinkleTexturePaletteItemPtr>                AllItems;
+    TArray<FWetWrinkleTexturePaletteItemPtr>                VisibleItems;
     TMap<FSoftObjectPath, FWetWrinkleTexturePaletteItemPtr> ItemsByPath;
     TSharedPtr<STileView<FWetWrinkleTexturePaletteItemPtr>> TileView;
-    FButtonStyle ButtonStyle;
-    FOnGenerateWetWrinklePaletteTile OnGenerateTile;
+    FButtonStyle                                            ButtonStyle;
+    FOnGenerateWetWrinklePaletteTile                        OnGenerateTile;
 };

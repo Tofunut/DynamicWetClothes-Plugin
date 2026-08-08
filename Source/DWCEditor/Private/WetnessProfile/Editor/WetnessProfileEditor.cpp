@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetnessProfileEditor.h"
 
 #include "DataAssets/WetnessProfile.h"
@@ -41,9 +42,9 @@ FWetnessProfileEditor::~FWetnessProfileEditor()
 }
 
 void FWetnessProfileEditor::Initialize(
-    const EToolkitMode::Type Mode,
+    const EToolkitMode::Type        Mode,
     const TSharedPtr<IToolkitHost>& InitToolkitHost,
-    UWetnessProfile* InProfile)
+    UWetnessProfile*                InProfile)
 {
     check(InProfile != nullptr);
 
@@ -94,8 +95,8 @@ TSharedPtr<IDetailsView> FWetnessProfileEditor::CreateChannelDetailsView(const b
     DetailsViewArgs.bHideSelectionTip = true;
     DetailsViewArgs.bAllowSearch = true;
     DetailsViewArgs.ViewIdentifier = bAbsorbedWater
-        ? FName(TEXT("WetnessProfileEditor_AbsorbedDetails"))
-        : FName(TEXT("WetnessProfileEditor_SurfaceDetails"));
+                                         ? FName(TEXT("WetnessProfileEditor_AbsorbedDetails"))
+                                         : FName(TEXT("WetnessProfileEditor_SurfaceDetails"));
 
     const TSharedPtr<IDetailsView> NewDetailsView = PropertyEditorModule.CreateDetailView(DetailsViewArgs);
     NewDetailsView->RegisterInstancedCustomPropertyLayout(
@@ -120,14 +121,14 @@ void FWetnessProfileEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
     FAssetEditorToolkit::RegisterTabSpawners(InTabManager);
 
     InTabManager->RegisterTabSpawner(
-            SettingsTabId,
-            FOnSpawnTab::CreateSP(this, &FWetnessProfileEditor::SpawnSettingsTab))
+                    SettingsTabId,
+                    FOnSpawnTab::CreateSP(this, &FWetnessProfileEditor::SpawnSettingsTab))
         .SetDisplayName(LOCTEXT("SettingsTab", "Water Settings"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef());
 
     InTabManager->RegisterTabSpawner(
-            PreviewTabId,
-            FOnSpawnTab::CreateSP(this, &FWetnessProfileEditor::SpawnPreviewTab))
+                    PreviewTabId,
+                    FOnSpawnTab::CreateSP(this, &FWetnessProfileEditor::SpawnPreviewTab))
         .SetDisplayName(LOCTEXT("PreviewTab", "Preview"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef());
 }
@@ -180,7 +181,7 @@ void FWetnessProfileEditor::SaveAsset_Execute()
 }
 
 void FWetnessProfileEditor::HandleObjectPropertyChanged(
-    UObject* ObjectBeingModified,
+    UObject*               ObjectBeingModified,
     FPropertyChangedEvent& PropertyChangedEvent)
 {
     if (ObjectBeingModified == WetnessProfile.Get())
@@ -200,62 +201,46 @@ TSharedRef<SDockTab> FWetnessProfileEditor::SpawnSettingsTab(const FSpawnTabArgs
 
     return SNew(SDockTab)
         .Label(LOCTEXT("SettingsTabLabel", "Water Settings"))
-        [SNew(SBorder)
-             .Padding(0.0f)
-             .BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
-             .BorderBackgroundColor(FLinearColor(0.018f, 0.018f, 0.018f, 1.0f))
-         [SNew(SVerticalBox)
+            [SNew(SBorder)
+                 .Padding(0.0f)
+                 .BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
+                 .BorderBackgroundColor(FLinearColor(0.018f, 0.018f, 0.018f, 1.0f))
+                     [SNew(SVerticalBox)
 
-          + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(8.0f, 8.0f, 8.0f, 7.0f)
-                    [BuildChannelSelector()]
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(8.0f, 8.0f, 8.0f, 7.0f)
+                                [BuildChannelSelector()]
 
-          + SVerticalBox::Slot()
-                .FillHeight(1.0f)
-                .Padding(8.0f, 0.0f, 8.0f, 8.0f)
-                    [SNew(SBorder)
-                         .Padding(0.0f)
-                         .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-                         .BorderBackgroundColor(FLinearColor(0.028f, 0.028f, 0.028f, 1.0f))
-                     [SAssignNew(ChannelSwitcher, SWidgetSwitcher)
-                          .WidgetIndex(this, &FWetnessProfileEditor::GetActiveChannelIndex)
+                      + SVerticalBox::Slot()
+                            .FillHeight(1.0f)
+                            .Padding(8.0f, 0.0f, 8.0f, 8.0f)
+                                [SNew(SBorder)
+                                     .Padding(0.0f)
+                                     .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                                     .BorderBackgroundColor(FLinearColor(0.028f, 0.028f, 0.028f, 1.0f))
+                                         [SAssignNew(ChannelSwitcher, SWidgetSwitcher)
+                                              .WidgetIndex(this, &FWetnessProfileEditor::GetActiveChannelIndex)
 
-                      + SWidgetSwitcher::Slot()
-                            [SNew(SBox)
-                                 .HAlign(HAlign_Center)
-                                 .VAlign(VAlign_Center)
-                             [SNew(SVerticalBox)
-                              + SVerticalBox::Slot()
-                                    .AutoHeight()
-                                    .HAlign(HAlign_Center)
-                                    .Padding(20.0f, 20.0f, 20.0f, 7.0f)
-                                        [SNew(STextBlock)
-                                             .Text(FText::FromString(TEXT("◇")))
-                                             .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 28))
-                                             .ColorAndOpacity(FSlateColor(FLinearColor(0.40f, 0.45f, 0.52f, 0.42f)))]
-                              + SVerticalBox::Slot()
-                                    .AutoHeight()
-                                    .HAlign(HAlign_Center)
-                                    .Padding(20.0f, 0.0f, 20.0f, 20.0f)
-                                        [SNew(STextBlock)
-                                             .Text(LOCTEXT("SelectWaterTypeEmptyState", "Select a water type to begin."))
-                                             .Font(EmptyStateFont)
-                                             .ColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.74f, 0.78f, 0.62f)))]]]
+                                          + SWidgetSwitcher::Slot()
+                                                [SNew(SBox)
+                                                     .HAlign(HAlign_Center)
+                                                     .VAlign(VAlign_Center)
+                                                         [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(20.0f, 20.0f, 20.0f, 7.0f)[SNew(STextBlock).Text(FText::FromString(TEXT("◇"))).Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 28)).ColorAndOpacity(FSlateColor(FLinearColor(0.40f, 0.45f, 0.52f, 0.42f)))] + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(20.0f, 0.0f, 20.0f, 20.0f)[SNew(STextBlock).Text(LOCTEXT("SelectWaterTypeEmptyState", "Select a water type to begin.")).Font(EmptyStateFont).ColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.74f, 0.78f, 0.62f)))]]]
 
-                      + SWidgetSwitcher::Slot()
-                            [AbsorbedDetailsView.IsValid()
-                                 ? StaticCastSharedRef<SWidget>(AbsorbedDetailsView.ToSharedRef())
-                                 : StaticCastSharedRef<SWidget>(
-                                       SNew(STextBlock)
-                                           .Text(LOCTEXT("MissingAbsorbedDetails", "Absorbed Water details are unavailable.")))]
+                                          + SWidgetSwitcher::Slot()
+                                                [AbsorbedDetailsView.IsValid()
+                                                     ? StaticCastSharedRef<SWidget>(AbsorbedDetailsView.ToSharedRef())
+                                                     : StaticCastSharedRef<SWidget>(
+                                                           SNew(STextBlock)
+                                                               .Text(LOCTEXT("MissingAbsorbedDetails", "Absorbed Water details are unavailable.")))]
 
-                      + SWidgetSwitcher::Slot()
-                            [SurfaceDetailsView.IsValid()
-                                 ? StaticCastSharedRef<SWidget>(SurfaceDetailsView.ToSharedRef())
-                                 : StaticCastSharedRef<SWidget>(
-                                       SNew(STextBlock)
-                                           .Text(LOCTEXT("MissingSurfaceDetails", "Surface Water details are unavailable.")))]]]]];
+                                          + SWidgetSwitcher::Slot()
+                                                [SurfaceDetailsView.IsValid()
+                                                     ? StaticCastSharedRef<SWidget>(SurfaceDetailsView.ToSharedRef())
+                                                     : StaticCastSharedRef<SWidget>(
+                                                           SNew(STextBlock)
+                                                               .Text(LOCTEXT("MissingSurfaceDetails", "Surface Water details are unavailable.")))]]]]];
 }
 
 TSharedRef<SDockTab> FWetnessProfileEditor::SpawnPreviewTab(const FSpawnTabArgs& Args)
@@ -264,12 +249,12 @@ TSharedRef<SDockTab> FWetnessProfileEditor::SpawnPreviewTab(const FSpawnTabArgs&
 
     return SNew(SDockTab)
         .Label(LOCTEXT("PreviewTabLabel", "Preview"))
-        [SAssignNew(PreviewPanel, SWetnessProfileEditorPanel)
-             .WetnessProfile(WetnessProfile.Get())
-             .AbsorbedDetailsView(AbsorbedDetailsView)
-             .SurfaceDetailsView(SurfaceDetailsView)
-             .HasWaterChannelSelection(this, &FWetnessProfileEditor::HasWaterChannelSelection)
-             .IsSurfaceWaterSelected(this, &FWetnessProfileEditor::IsSurfaceWaterSelected)];
+            [SAssignNew(PreviewPanel, SWetnessProfileEditorPanel)
+                 .WetnessProfile(WetnessProfile.Get())
+                 .AbsorbedDetailsView(AbsorbedDetailsView)
+                 .SurfaceDetailsView(SurfaceDetailsView)
+                 .HasWaterChannelSelection(this, &FWetnessProfileEditor::HasWaterChannelSelection)
+                 .IsSurfaceWaterSelected(this, &FWetnessProfileEditor::IsSurfaceWaterSelected)];
 }
 
 TSharedRef<SWidget> FWetnessProfileEditor::BuildChannelSelector()
@@ -278,29 +263,29 @@ TSharedRef<SWidget> FWetnessProfileEditor::BuildChannelSelector()
         .Padding(FMargin(10.0f))
         .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
         .BorderBackgroundColor(FLinearColor(0.038f, 0.042f, 0.050f, 1.0f))
-        [SNew(SHorizontalBox)
+            [SNew(SHorizontalBox)
 
-         + SHorizontalBox::Slot()
-               .FillWidth(1.0f)
-               .Padding(0.0f, 0.0f, 4.0f, 0.0f)
-                   [BuildChannelCard(
-                       EWaterChannel::AbsorbedWater,
-                       LOCTEXT("AbsorbedWaterChannelTitle", "Absorbed Water"),
-                       LOCTEXT("AbsorbedWaterChannelDescription", "Spreading and darkening inside the material"))]
+             + SHorizontalBox::Slot()
+                   .FillWidth(1.0f)
+                   .Padding(0.0f, 0.0f, 4.0f, 0.0f)
+                       [BuildChannelCard(
+                           EWaterChannel::AbsorbedWater,
+                           LOCTEXT("AbsorbedWaterChannelTitle", "Absorbed Water"),
+                           LOCTEXT("AbsorbedWaterChannelDescription", "Spreading and darkening inside the material"))]
 
-         + SHorizontalBox::Slot()
-               .FillWidth(1.0f)
-               .Padding(4.0f, 0.0f, 0.0f, 0.0f)
-                   [BuildChannelCard(
-                       EWaterChannel::SurfaceWater,
-                       LOCTEXT("SurfaceWaterChannelTitle", "Surface Water"),
-                       LOCTEXT("SurfaceWaterChannelDescription", "Visible droplets on the material surface"))]];
+             + SHorizontalBox::Slot()
+                   .FillWidth(1.0f)
+                   .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                       [BuildChannelCard(
+                           EWaterChannel::SurfaceWater,
+                           LOCTEXT("SurfaceWaterChannelTitle", "Surface Water"),
+                           LOCTEXT("SurfaceWaterChannelDescription", "Visible droplets on the material surface"))]];
 }
 
 TSharedRef<SWidget> FWetnessProfileEditor::BuildChannelCard(
     const EWaterChannel Channel,
-    const FText& Title,
-    const FText& Description)
+    const FText&        Title,
+    const FText&        Description)
 {
     const FSlateFontInfo TitleFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 14);
     const FSlateFontInfo DescriptionFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9);
@@ -309,62 +294,48 @@ TSharedRef<SWidget> FWetnessProfileEditor::BuildChannelCard(
         .BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
         .BorderBackgroundColor(this, &FWetnessProfileEditor::GetChannelCardOutlineTint, Channel)
         .Padding(2.0f)
-        [SNew(SBorder)
-             .BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
-             .BorderBackgroundColor(this, &FWetnessProfileEditor::GetChannelCardTint, Channel)
-             .Padding(0.0f)
-         [SNew(SBox)
-              .HeightOverride(66.0f)
-          [SNew(SHorizontalBox)
+            [SNew(SBorder)
+                 .BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
+                 .BorderBackgroundColor(this, &FWetnessProfileEditor::GetChannelCardTint, Channel)
+                 .Padding(0.0f)
+                     [SNew(SBox)
+                          .HeightOverride(66.0f)
+                              [SNew(SHorizontalBox)
 
-           + SHorizontalBox::Slot()
-                 .FillWidth(1.0f)
-                     [SNew(SButton)
-                          .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
-                          .ContentPadding(FMargin(12.0f, 8.0f))
-                          .HAlign(HAlign_Left)
-                          .OnClicked(this, &FWetnessProfileEditor::HandleSelectChannel, Channel)
-                      [SNew(SVerticalBox)
-                       + SVerticalBox::Slot()
-                             .AutoHeight()
-                                 [SNew(STextBlock)
-                                      .Text(Title)
-                                      .Font(TitleFont)
-                                      .ColorAndOpacity(this, &FWetnessProfileEditor::GetChannelTitleTint, Channel)]
-                       + SVerticalBox::Slot()
-                             .AutoHeight()
-                             .Padding(0.0f, 3.0f, 0.0f, 0.0f)
-                                 [SNew(STextBlock)
-                                      .Text(Description)
-                                      .Font(DescriptionFont)
-                                      .ColorAndOpacity(FSlateColor(FLinearColor(0.74f, 0.77f, 0.82f, 0.72f)))
-                                      .AutoWrapText(true)]]]
+                               + SHorizontalBox::Slot()
+                                     .FillWidth(1.0f)
+                                         [SNew(SButton)
+                                              .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+                                              .ContentPadding(FMargin(12.0f, 8.0f))
+                                              .HAlign(HAlign_Left)
+                                              .OnClicked(this, &FWetnessProfileEditor::HandleSelectChannel, Channel)
+                                                  [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(Title).Font(TitleFont).ColorAndOpacity(this, &FWetnessProfileEditor::GetChannelTitleTint, Channel)] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(Description).Font(DescriptionFont).ColorAndOpacity(FSlateColor(FLinearColor(0.74f, 0.77f, 0.82f, 0.72f))).AutoWrapText(true)]]]
 
-           + SHorizontalBox::Slot()
-                 .AutoWidth()
-                 .VAlign(VAlign_Center)
-                 .Padding(2.0f, 0.0f, 4.0f, 0.0f)
-                     [SNew(SButton)
-                          .Visibility(this, &FWetnessProfileEditor::GetChannelEnabledRevertVisibility, Channel)
-                          .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
-                          .ContentPadding(FMargin(4.0f))
-                          .ToolTipText(LOCTEXT("RevertChannelEnabledTooltip", "Revert to the value loaded from the saved asset."))
-                          .OnClicked(this, &FWetnessProfileEditor::HandleRevertChannelEnabled, Channel)
-                      [SNew(SImage)
-                           .Image(FAppStyle::GetBrush(TEXT("PropertyWindow.DiffersFromDefault")))]]
+                               + SHorizontalBox::Slot()
+                                     .AutoWidth()
+                                     .VAlign(VAlign_Center)
+                                     .Padding(2.0f, 0.0f, 4.0f, 0.0f)
+                                         [SNew(SButton)
+                                              .Visibility(this, &FWetnessProfileEditor::GetChannelEnabledRevertVisibility, Channel)
+                                              .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+                                              .ContentPadding(FMargin(4.0f))
+                                              .ToolTipText(LOCTEXT("RevertChannelEnabledTooltip", "Revert to the value loaded from the saved asset."))
+                                              .OnClicked(this, &FWetnessProfileEditor::HandleRevertChannelEnabled, Channel)
+                                                  [SNew(SImage)
+                                                       .Image(FAppStyle::GetBrush(TEXT("PropertyWindow.DiffersFromDefault")))]]
 
-           + SHorizontalBox::Slot()
-                 .AutoWidth()
-                 .VAlign(VAlign_Center)
-                 .Padding(0.0f, 0.0f, 10.0f, 0.0f)
-                     [SNew(SCheckBox)
-                          .IsChecked(this, &FWetnessProfileEditor::GetChannelEnabledState, Channel)
-                          .ToolTipText(LOCTEXT("ToggleWaterTypeEnabledTooltip", "Enable or disable this water type without changing the current editor selection."))
-                          .OnCheckStateChanged(this, &FWetnessProfileEditor::HandleChannelEnabledStateChanged, Channel)
-                      [SNew(STextBlock)
-                           .Text(LOCTEXT("WaterTypeEnabledCheckbox", "Enabled"))
-                           .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))
-                           .ColorAndOpacity(FSlateColor::UseForeground())]]]]];
+                               + SHorizontalBox::Slot()
+                                     .AutoWidth()
+                                     .VAlign(VAlign_Center)
+                                     .Padding(0.0f, 0.0f, 10.0f, 0.0f)
+                                         [SNew(SCheckBox)
+                                              .IsChecked(this, &FWetnessProfileEditor::GetChannelEnabledState, Channel)
+                                              .ToolTipText(LOCTEXT("ToggleWaterTypeEnabledTooltip", "Enable or disable this water type without changing the current editor selection."))
+                                              .OnCheckStateChanged(this, &FWetnessProfileEditor::HandleChannelEnabledStateChanged, Channel)
+                                                  [SNew(STextBlock)
+                                                       .Text(LOCTEXT("WaterTypeEnabledCheckbox", "Enabled"))
+                                                       .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))
+                                                       .ColorAndOpacity(FSlateColor::UseForeground())]]]]];
 }
 
 FReply FWetnessProfileEditor::HandleSelectChannel(const EWaterChannel Channel)
@@ -383,8 +354,8 @@ FReply FWetnessProfileEditor::HandleToggleChannelEnabled(const EWaterChannel Cha
     }
 
     const bool bCurrentValue = Channel == EWaterChannel::AbsorbedWater
-        ? Profile->Parameters.AbsorbedWetness.bEnabled
-        : Profile->Parameters.SurfaceWater.bEnabled;
+                                   ? Profile->Parameters.AbsorbedWetness.bEnabled
+                                   : Profile->Parameters.SurfaceWater.bEnabled;
     const bool bEnabled = !bCurrentValue;
 
     const FScopedTransaction Transaction(
@@ -416,7 +387,7 @@ FReply FWetnessProfileEditor::HandleToggleChannelEnabled(const EWaterChannel Cha
 
 void FWetnessProfileEditor::HandleChannelEnabledStateChanged(
     const ECheckBoxState NewState,
-    const EWaterChannel Channel)
+    const EWaterChannel  Channel)
 {
     const bool bRequestedEnabled = NewState == ECheckBoxState::Checked;
     const bool bCurrentlyEnabled = GetChannelEnabledState(Channel) == ECheckBoxState::Checked;
@@ -436,8 +407,8 @@ FReply FWetnessProfileEditor::HandleRevertChannelEnabled(const EWaterChannel Cha
     }
 
     const bool bSaved = Channel == EWaterChannel::AbsorbedWater
-        ? Profile->GetEditorSavedParametersSnapshot().AbsorbedWetness.bEnabled
-        : Profile->GetEditorSavedParametersSnapshot().SurfaceWater.bEnabled;
+                            ? Profile->GetEditorSavedParametersSnapshot().AbsorbedWetness.bEnabled
+                            : Profile->GetEditorSavedParametersSnapshot().SurfaceWater.bEnabled;
 
     const FScopedTransaction Transaction(LOCTEXT("RevertWaterTypeEnabled", "Revert Water Type Enabled State"));
     Profile->Modify();
@@ -488,8 +459,8 @@ ECheckBoxState FWetnessProfileEditor::GetChannelEnabledState(const EWaterChannel
     }
 
     const bool bEnabled = Channel == EWaterChannel::AbsorbedWater
-        ? Profile->Parameters.AbsorbedWetness.bEnabled
-        : Profile->Parameters.SurfaceWater.bEnabled;
+                              ? Profile->Parameters.AbsorbedWetness.bEnabled
+                              : Profile->Parameters.SurfaceWater.bEnabled;
     return bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 }
 
@@ -504,8 +475,8 @@ EVisibility FWetnessProfileEditor::GetChannelEnabledRevertVisibility(const EWate
 
     const bool bCurrent = GetChannelEnabledState(Channel) == ECheckBoxState::Checked;
     const bool bSaved = Channel == EWaterChannel::AbsorbedWater
-        ? Profile->GetEditorSavedParametersSnapshot().AbsorbedWetness.bEnabled
-        : Profile->GetEditorSavedParametersSnapshot().SurfaceWater.bEnabled;
+                            ? Profile->GetEditorSavedParametersSnapshot().AbsorbedWetness.bEnabled
+                            : Profile->GetEditorSavedParametersSnapshot().SurfaceWater.bEnabled;
     return bCurrent != bSaved ? EVisibility::Visible : EVisibility::Collapsed;
 #else
     return EVisibility::Collapsed;

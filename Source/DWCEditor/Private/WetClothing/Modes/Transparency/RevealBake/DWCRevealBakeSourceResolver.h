@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurface.h"
@@ -18,6 +19,6 @@ class FDWCRevealBakeSourceResolver
 
   private:
     static FString NormalizeTextureSearchText(const FString& InText);
-    static bool ContainsAnyTextureKeyword(const FString& SearchText, std::initializer_list<const TCHAR*> Keywords);
-    static int32 ScoreRevealBaseColorTexture(UTexture* Texture, const FString& ParameterName);
+    static bool    ContainsAnyTextureKeyword(const FString& SearchText, std::initializer_list<const TCHAR*> Keywords);
+    static int32   ScoreRevealBaseColorTexture(UTexture* Texture, const FString& ParameterName);
 };

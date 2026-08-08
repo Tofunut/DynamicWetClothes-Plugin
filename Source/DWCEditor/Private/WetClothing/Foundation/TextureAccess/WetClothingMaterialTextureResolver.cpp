@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Collects and scores texture candidates from materials for preview and Auto Partition workflows.
  */
@@ -129,7 +130,7 @@ namespace
 } // namespace
 
 void FWetClothingMaterialTextureResolver::BuildTextureItems(
-    UMaterialInterface*                          Material,
+    UMaterialInterface*                  Material,
     TArray<TSharedPtr<FWCATextureItem>>& OutItems)
 {
     OutItems.Reset();
@@ -306,10 +307,9 @@ double FWetClothingMaterialTextureResolver::ScoreTexturePreviewSuitability(UText
     return Score;
 }
 
-
 UTexture* FWetClothingMaterialTextureResolver::FindSavedTextureSelection(
     const UWetClothingAsset* WetClothingAsset,
-    int32 MaterialSlotIndex)
+    int32                    MaterialSlotIndex)
 {
     if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
     {
@@ -326,7 +326,7 @@ UTexture* FWetClothingMaterialTextureResolver::FindSavedTextureSelection(
 
 bool FWetClothingMaterialTextureResolver::HasSavedTextureSelection(
     const UWetClothingAsset* WetClothingAsset,
-    int32 MaterialSlotIndex)
+    int32                    MaterialSlotIndex)
 {
     if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
     {
@@ -342,8 +342,8 @@ bool FWetClothingMaterialTextureResolver::HasSavedTextureSelection(
 
 void FWetClothingMaterialTextureResolver::SaveTextureSelection(
     UWetClothingAsset* WetClothingAsset,
-    int32 MaterialSlotIndex,
-    UTexture* Texture)
+    int32              MaterialSlotIndex,
+    UTexture*          Texture)
 {
     if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
     {
@@ -361,7 +361,7 @@ void FWetClothingMaterialTextureResolver::SaveTextureSelection(
 
 UTexture* FWetClothingMaterialTextureResolver::ResolveOrSaveTextureSelection(
     UWetClothingAsset* WetClothingAsset,
-    int32 MaterialSlotIndex)
+    int32              MaterialSlotIndex)
 {
     if (HasSavedTextureSelection(WetClothingAsset, MaterialSlotIndex))
     {
@@ -395,17 +395,17 @@ UTexture* FWetClothingMaterialTextureResolver::ResolveOrSaveTextureSelection(
 }
 
 void FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
-    UWetClothingAsset* WetClothingAsset,
-    int32 MaterialSlotIndex,
+    UWetClothingAsset*                   WetClothingAsset,
+    int32                                MaterialSlotIndex,
     TArray<TSharedPtr<FWCATextureItem>>& OutItems,
-    TSharedPtr<FWCATextureItem>& OutSelectedItem,
-    bool bDefaultToNone)
+    TSharedPtr<FWCATextureItem>&         OutSelectedItem,
+    bool                                 bDefaultToNone)
 {
     OutItems.Reset();
     OutSelectedItem.Reset();
 
     const bool bHasSavedSelection = HasSavedTextureSelection(WetClothingAsset, MaterialSlotIndex);
-    UTexture* SavedTexture = FindSavedTextureSelection(WetClothingAsset, MaterialSlotIndex);
+    UTexture*  SavedTexture = FindSavedTextureSelection(WetClothingAsset, MaterialSlotIndex);
 
     if (WetClothingAsset != nullptr && WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr && MaterialSlotIndex != INDEX_NONE)
     {

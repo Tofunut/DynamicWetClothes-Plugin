@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "SWetWrinkleNormalCorrectionDialog.h"
 
 #include "Core/DWCEditorUtils.h"
@@ -58,192 +59,211 @@ void SWetWrinkleNormalCorrectionDialog::Construct(const FArguments& InArgs)
                     + SSplitter::Slot()
                           .Value(0.30f)
                               [SNew(SBorder)
-                               .Padding(10.0f)
-                                   [SNew(SScrollBox)
+                                   .Padding(10.0f)
+                                       [SNew(SScrollBox)
 
-                                    + SScrollBox::Slot()
-                                          [SNew(SVerticalBox)
+                                        + SScrollBox::Slot()
+                                              [SNew(SVerticalBox)
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                                                     [SNew(STextBlock)
-                                                      .Text(LOCTEXT("CorrectionSettings", "Normal Correction"))
-                                                      .Font(FAppStyle::GetFontStyle("DetailsView.CategoryFontStyle"))]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                                                         [SNew(STextBlock)
+                                                              .Text(LOCTEXT("CorrectionSettings", "Normal Correction"))
+                                                              .Font(FAppStyle::GetFontStyle("DetailsView.CategoryFontStyle"))]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                     [SNew(SCheckBox)
-                                                      .IsChecked_Lambda([this]() { return bUseCorrection ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-                                                      .OnCheckStateChanged_Lambda([this](ECheckBoxState State)
-                                                      {
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                                         [SNew(SCheckBox)
+                                                              .IsChecked_Lambda([this]()
+                                                                                { return bUseCorrection ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+                                                              .OnCheckStateChanged_Lambda([this](ECheckBoxState State)
+                                                                                          {
                                                           bUseCorrection = State == ECheckBoxState::Checked;
-                                                          RebuildPreview();
-                                                      })
-                                                          [SNew(STextBlock).Text(LOCTEXT("UseCorrection", "Use Correction"))]]
+                                                          RebuildPreview(); })
+                                                                  [SNew(STextBlock).Text(LOCTEXT("UseCorrection", "Use Correction"))]]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                                                     [SNew(STextBlock).Text(LOCTEXT("BorderPercent", "Border Percent"))]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                                         [SNew(STextBlock).Text(LOCTEXT("BorderPercent", "Border Percent"))]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                     [SNew(SSpinBox<float>)
-                                                      .MinValue(0.0f)
-                                                      .MaxValue(50.0f)
-                                                      .Value_Lambda([this]() { return CorrectionSettings.BorderPercent; })
-                                                      .OnValueChanged_Lambda([this](float Value) { CorrectionSettings.BorderPercent = Value; })
-                                                      .OnValueCommitted_Lambda([this](float, ETextCommit::Type) { RebuildPreview(); })]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                                         [SNew(SSpinBox<float>)
+                                                              .MinValue(0.0f)
+                                                              .MaxValue(50.0f)
+                                                              .Value_Lambda([this]()
+                                                                            { return CorrectionSettings.BorderPercent; })
+                                                              .OnValueChanged_Lambda([this](float Value)
+                                                                                     { CorrectionSettings.BorderPercent = Value; })
+                                                              .OnValueCommitted_Lambda([this](float, ETextCommit::Type)
+                                                                                       { RebuildPreview(); })]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                                                     [SNew(STextBlock).Text(LOCTEXT("FlatThreshold", "Flat Threshold"))]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                                         [SNew(STextBlock).Text(LOCTEXT("FlatThreshold", "Flat Threshold"))]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                     [SNew(SSpinBox<float>)
-                                                      .MinValue(0.0f)
-                                                      .MaxValue(1.0f)
-                                                      .MinSliderValue(0.0f)
-                                                      .MaxSliderValue(0.2f)
-                                                      .Value_Lambda([this]() { return CorrectionSettings.FlatThreshold; })
-                                                      .OnValueChanged_Lambda([this](float Value) { CorrectionSettings.FlatThreshold = Value; })
-                                                      .OnValueCommitted_Lambda([this](float, ETextCommit::Type) { RebuildPreview(); })]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                                         [SNew(SSpinBox<float>)
+                                                              .MinValue(0.0f)
+                                                              .MaxValue(1.0f)
+                                                              .MinSliderValue(0.0f)
+                                                              .MaxSliderValue(0.2f)
+                                                              .Value_Lambda([this]()
+                                                                            { return CorrectionSettings.FlatThreshold; })
+                                                              .OnValueChanged_Lambda([this](float Value)
+                                                                                     { CorrectionSettings.FlatThreshold = Value; })
+                                                              .OnValueCommitted_Lambda([this](float, ETextCommit::Type)
+                                                                                       { RebuildPreview(); })]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                     [SNew(SCheckBox)
-                                                      .IsChecked_Lambda([this]() { return CorrectionSettings.bFlipGreen ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-                                                      .OnCheckStateChanged_Lambda([this](ECheckBoxState State)
-                                                      {
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                                         [SNew(SCheckBox)
+                                                              .IsChecked_Lambda([this]()
+                                                                                { return CorrectionSettings.bFlipGreen ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+                                                              .OnCheckStateChanged_Lambda([this](ECheckBoxState State)
+                                                                                          {
                                                           CorrectionSettings.bFlipGreen = State == ECheckBoxState::Checked;
-                                                          RebuildPreview();
-                                                      })
-                                                          [SNew(STextBlock).Text(LOCTEXT("FlipGreen", "Flip Green"))]]
+                                                          RebuildPreview(); })
+                                                                  [SNew(STextBlock).Text(LOCTEXT("FlipGreen", "Flip Green"))]]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                                                     [SNew(STextBlock).Text(LOCTEXT("DeviationAmplify", "Deviation Preview Amplify"))]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                                         [SNew(STextBlock).Text(LOCTEXT("DeviationAmplify", "Deviation Preview Amplify"))]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 12.0f)
-                                                     [SNew(SSpinBox<float>)
-                                                      .MinValue(0.0f)
-                                                      .MaxValue(64.0f)
-                                                      .Value_Lambda([this]() { return CorrectionSettings.DeviationPreviewAmplify; })
-                                                      .OnValueChanged_Lambda([this](float Value) { CorrectionSettings.DeviationPreviewAmplify = Value; })
-                                                      .OnValueCommitted_Lambda([this](float, ETextCommit::Type) { RebuildPreview(); })]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 12.0f)
+                                                         [SNew(SSpinBox<float>)
+                                                              .MinValue(0.0f)
+                                                              .MaxValue(64.0f)
+                                                              .Value_Lambda([this]()
+                                                                            { return CorrectionSettings.DeviationPreviewAmplify; })
+                                                              .OnValueChanged_Lambda([this](float Value)
+                                                                                     { CorrectionSettings.DeviationPreviewAmplify = Value; })
+                                                              .OnValueCommitted_Lambda([this](float, ETextCommit::Type)
+                                                                                       { RebuildPreview(); })]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                                                     [SNew(STextBlock)
-                                                      .Text(LOCTEXT("CoveragePreviewSettings", "Convex Separation Preview"))
-                                                      .Font(FAppStyle::GetFontStyle("DetailsView.CategoryFontStyle"))]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                                                         [SNew(STextBlock)
+                                                              .Text(LOCTEXT("CoveragePreviewSettings", "Convex Separation Preview"))
+                                                              .Font(FAppStyle::GetFontStyle("DetailsView.CategoryFontStyle"))]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                                                     [SNew(STextBlock).Text(LOCTEXT("BlurRadius", "Input Blur Radius"))]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                                         [SNew(STextBlock).Text(LOCTEXT("BlurRadius", "Input Blur Radius"))]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                     [SNew(SSpinBox<int32>)
-                                                      .MinValue(0)
-                                                      .MaxValue(8)
-                                                      .Value_Lambda([this]() { return CoverageSettings.InputBlurRadiusPixels; })
-                                                      .OnValueChanged_Lambda([this](int32 Value) { CoverageSettings.InputBlurRadiusPixels = Value; })
-                                                      .OnValueCommitted_Lambda([this](int32, ETextCommit::Type) { RebuildPreview(); })]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                                         [SNew(SSpinBox<int32>)
+                                                              .MinValue(0)
+                                                              .MaxValue(8)
+                                                              .Value_Lambda([this]()
+                                                                            { return CoverageSettings.InputBlurRadiusPixels; })
+                                                              .OnValueChanged_Lambda([this](int32 Value)
+                                                                                     { CoverageSettings.InputBlurRadiusPixels = Value; })
+                                                              .OnValueCommitted_Lambda([this](int32, ETextCommit::Type)
+                                                                                       { RebuildPreview(); })]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                                                     [SNew(STextBlock).Text(LOCTEXT("ConvexityThreshold", "Convexity Threshold"))]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                                         [SNew(STextBlock).Text(LOCTEXT("ConvexityThreshold", "Convexity Threshold"))]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                     [SNew(SSpinBox<float>)
-                                                      .MinValue(0.0f)
-                                                      .MaxValue(1.0f)
-                                                      .Value_Lambda([this]() { return CoverageSettings.ConvexityThreshold; })
-                                                      .OnValueChanged_Lambda([this](float Value) { CoverageSettings.ConvexityThreshold = Value; })
-                                                      .OnValueCommitted_Lambda([this](float, ETextCommit::Type) { RebuildPreview(); })]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                                         [SNew(SSpinBox<float>)
+                                                              .MinValue(0.0f)
+                                                              .MaxValue(1.0f)
+                                                              .Value_Lambda([this]()
+                                                                            { return CoverageSettings.ConvexityThreshold; })
+                                                              .OnValueChanged_Lambda([this](float Value)
+                                                                                     { CoverageSettings.ConvexityThreshold = Value; })
+                                                              .OnValueCommitted_Lambda([this](float, ETextCommit::Type)
+                                                                                       { RebuildPreview(); })]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                                                     [SNew(STextBlock).Text(LOCTEXT("MinimumComponent", "Minimum Component Pixels"))]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                                         [SNew(STextBlock).Text(LOCTEXT("MinimumComponent", "Minimum Component Pixels"))]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                     [SNew(SSpinBox<int32>)
-                                                      .MinValue(1)
-                                                      .MaxValue(1024)
-                                                      .Value_Lambda([this]() { return CoverageSettings.MinimumComponentPixels; })
-                                                      .OnValueChanged_Lambda([this](int32 Value) { CoverageSettings.MinimumComponentPixels = Value; })
-                                                      .OnValueCommitted_Lambda([this](int32, ETextCommit::Type) { RebuildPreview(); })]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                                         [SNew(SSpinBox<int32>)
+                                                              .MinValue(1)
+                                                              .MaxValue(1024)
+                                                              .Value_Lambda([this]()
+                                                                            { return CoverageSettings.MinimumComponentPixels; })
+                                                              .OnValueChanged_Lambda([this](int32 Value)
+                                                                                     { CoverageSettings.MinimumComponentPixels = Value; })
+                                                              .OnValueCommitted_Lambda([this](int32, ETextCommit::Type)
+                                                                                       { RebuildPreview(); })]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                 .Padding(0.0f, 0.0f, 0.0f, 12.0f)
-                                                     [SNew(SCheckBox)
-                                                      .IsChecked_Lambda([this]() { return CoverageSettings.bInvertConvexity ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-                                                      .OnCheckStateChanged_Lambda([this](ECheckBoxState State)
-                                                      {
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                     .Padding(0.0f, 0.0f, 0.0f, 12.0f)
+                                                         [SNew(SCheckBox)
+                                                              .IsChecked_Lambda([this]()
+                                                                                { return CoverageSettings.bInvertConvexity ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+                                                              .OnCheckStateChanged_Lambda([this](ECheckBoxState State)
+                                                                                          {
                                                           CoverageSettings.bInvertConvexity = State == ECheckBoxState::Checked;
-                                                          RebuildPreview();
-                                                      })
-                                                          [SNew(STextBlock).Text(LOCTEXT("InvertConvexity", "Invert Convexity"))]]
+                                                          RebuildPreview(); })
+                                                                  [SNew(STextBlock).Text(LOCTEXT("InvertConvexity", "Invert Convexity"))]]
 
-                                           + SVerticalBox::Slot()
-                                                 .AutoHeight()
-                                                     [SNew(SCheckBox)
-                                                      .IsChecked_Lambda([this]() { return bHideOriginal ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-                                                      .OnCheckStateChanged_Lambda([this](ECheckBoxState State)
-                                                      {
-                                                          bHideOriginal = State == ECheckBoxState::Checked;
-                                                      })
-                                                          [SNew(STextBlock).Text(LOCTEXT("HideOriginal", "Hide Original After Creation"))]]]]]
+                                               + SVerticalBox::Slot()
+                                                     .AutoHeight()
+                                                         [SNew(SCheckBox)
+                                                              .IsChecked_Lambda([this]()
+                                                                                { return bHideOriginal ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+                                                              .OnCheckStateChanged_Lambda([this](ECheckBoxState State)
+                                                                                          { bHideOriginal = State == ECheckBoxState::Checked; })
+                                                                  [SNew(STextBlock).Text(LOCTEXT("HideOriginal", "Hide Original After Creation"))]]]]]
 
                     + SSplitter::Slot()
                           .Value(0.70f)
                               [SNew(SBorder)
-                               .Padding(8.0f)
-                                   [SNew(SUniformGridPanel)
-                                    .SlotPadding(FMargin(5.0f))
+                                   .Padding(8.0f)
+                                       [SNew(SUniformGridPanel)
+                                            .SlotPadding(FMargin(5.0f))
 
-                                    + SUniformGridPanel::Slot(0, 0)
-                                          [BuildPreviewCell(LOCTEXT("SourceNormal", "Source Normal"), &SourceNormalBrush)]
+                                        + SUniformGridPanel::Slot(0, 0)
+                                              [BuildPreviewCell(LOCTEXT("SourceNormal", "Source Normal"), &SourceNormalBrush)]
 
-                                    + SUniformGridPanel::Slot(1, 0)
-                                          [BuildPreviewCell(LOCTEXT("SourceDeviation", "Source Deviation Preview"), &SourceDeviationBrush)]
+                                        + SUniformGridPanel::Slot(1, 0)
+                                              [BuildPreviewCell(LOCTEXT("SourceDeviation", "Source Deviation Preview"), &SourceDeviationBrush)]
 
-                                    + SUniformGridPanel::Slot(0, 1)
-                                          [BuildPreviewCell(LOCTEXT("CorrectedNormal", "Corrected Normal"), &CorrectedNormalBrush)]
+                                        + SUniformGridPanel::Slot(0, 1)
+                                              [BuildPreviewCell(LOCTEXT("CorrectedNormal", "Corrected Normal"), &CorrectedNormalBrush)]
 
-                                    + SUniformGridPanel::Slot(1, 1)
-                                          [BuildPreviewCell(LOCTEXT("CorrectedDeviation", "Corrected Deviation Preview"), &CorrectedDeviationBrush)]
+                                        + SUniformGridPanel::Slot(1, 1)
+                                              [BuildPreviewCell(LOCTEXT("CorrectedDeviation", "Corrected Deviation Preview"), &CorrectedDeviationBrush)]
 
-                                    + SUniformGridPanel::Slot(0, 2)
-                                          [BuildPreviewCell(LOCTEXT("ConvexSeparation", "Convex Separation Preview"), &ConvexSeparationBrush)]]]]
+                                        + SUniformGridPanel::Slot(0, 2)
+                                              [BuildPreviewCell(LOCTEXT("ConvexSeparation", "Convex Separation Preview"), &ConvexSeparationBrush)]]]]
 
          + SVerticalBox::Slot()
                .AutoHeight()
                .Padding(10.0f, 0.0f, 10.0f, 6.0f)
                    [SNew(STextBlock)
-                    .Text_Lambda([this]() { return StatusText; })
-                    .ColorAndOpacity_Lambda([this]() { return StatusColor; })]
+                        .Text_Lambda([this]()
+                                     { return StatusText; })
+                        .ColorAndOpacity_Lambda([this]()
+                                                { return StatusColor; })]
 
          + SVerticalBox::Slot()
                .AutoHeight()
@@ -253,8 +273,8 @@ void SWetWrinkleNormalCorrectionDialog::Construct(const FArguments& InArgs)
                     + SHorizontalBox::Slot()
                           .AutoWidth()
                               [SNew(SButton)
-                               .Text(LOCTEXT("RefreshPreview", "Refresh Preview"))
-                               .OnClicked(this, &SWetWrinkleNormalCorrectionDialog::HandleRefreshPreviewClicked)]
+                                   .Text(LOCTEXT("RefreshPreview", "Refresh Preview"))
+                                   .OnClicked(this, &SWetWrinkleNormalCorrectionDialog::HandleRefreshPreviewClicked)]
 
                     + SHorizontalBox::Slot()
                           .FillWidth(1.0f)
@@ -263,15 +283,16 @@ void SWetWrinkleNormalCorrectionDialog::Construct(const FArguments& InArgs)
                           .AutoWidth()
                           .Padding(0.0f, 0.0f, 6.0f, 0.0f)
                               [SNew(SButton)
-                               .IsEnabled_Lambda([this]() { return bPreviewValid; })
-                               .Text(LOCTEXT("CreateCorrectedNormal", "Create Corrected Normal"))
-                               .OnClicked(this, &SWetWrinkleNormalCorrectionDialog::HandleCreateClicked)]
+                                   .IsEnabled_Lambda([this]()
+                                                     { return bPreviewValid; })
+                                   .Text(LOCTEXT("CreateCorrectedNormal", "Create Corrected Normal"))
+                                   .OnClicked(this, &SWetWrinkleNormalCorrectionDialog::HandleCreateClicked)]
 
                     + SHorizontalBox::Slot()
                           .AutoWidth()
                               [SNew(SButton)
-                               .Text(LOCTEXT("Cancel", "Cancel"))
-                               .OnClicked(this, &SWetWrinkleNormalCorrectionDialog::HandleCancelClicked)]]];
+                                   .Text(LOCTEXT("Cancel", "Cancel"))
+                                   .OnClicked(this, &SWetWrinkleNormalCorrectionDialog::HandleCancelClicked)]]];
 
     RebuildPreview();
 }
@@ -335,9 +356,9 @@ void SWetWrinkleNormalCorrectionDialog::RebuildPreview()
 }
 
 bool SWetWrinkleNormalCorrectionDialog::CreateTransientPreviewTexture(
-    TStrongObjectPtr<UTexture2D>& OutTexture,
+    TStrongObjectPtr<UTexture2D>&        OutTexture,
     const FWetWrinkleTexturePixelBuffer& PixelBuffer,
-    const bool bNormalMap) const
+    const bool                           bNormalMap) const
 {
     OutTexture.Reset();
     if (!PixelBuffer.IsValid())
@@ -360,7 +381,7 @@ bool SWetWrinkleNormalCorrectionDialog::CreateTransientPreviewTexture(
     Texture->NeverStream = true;
 
     FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
-    void* MipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+    void*             MipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
     FMemory::Memcpy(MipData, PixelBuffer.Pixels.GetData(), PixelBuffer.Pixels.Num() * sizeof(FColor));
     Mip.BulkData.Unlock();
     Texture->UpdateResource();
@@ -370,21 +391,7 @@ bool SWetWrinkleNormalCorrectionDialog::CreateTransientPreviewTexture(
 
 TSharedRef<SWidget> SWetWrinkleNormalCorrectionDialog::BuildPreviewCell(const FText& Label, const FSlateBrush* Brush) const
 {
-    return SNew(SVerticalBox)
-        + SVerticalBox::Slot()
-              .AutoHeight()
-              .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                  [SNew(STextBlock).Text(Label)]
-        + SVerticalBox::Slot()
-              .FillHeight(1.0f)
-                  [SNew(SBorder)
-                   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-                   .BorderBackgroundColor(FLinearColor::Black)
-                   .Padding(1.0f)
-                       [SNew(SScaleBox)
-                        .Stretch(EStretch::ScaleToFit)
-                        .StretchDirection(EStretchDirection::Both)
-                            [SNew(SImage).Image(Brush)]]];
+    return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)[SNew(STextBlock).Text(Label)] + SVerticalBox::Slot().FillHeight(1.0f)[SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor::Black).Padding(1.0f)[SNew(SScaleBox).Stretch(EStretch::ScaleToFit).StretchDirection(EStretchDirection::Both)[SNew(SImage).Image(Brush)]]];
 }
 
 FReply SWetWrinkleNormalCorrectionDialog::HandleCreateClicked()
@@ -406,8 +413,8 @@ FReply SWetWrinkleNormalCorrectionDialog::HandleCreateClicked()
         }
     }
 
-    UTexture2D* CorrectedTexture = nullptr;
-    FString Error;
+    UTexture2D*                  CorrectedTexture = nullptr;
+    FString                      Error;
     FWetWrinkleNormalBuildOutput FullResolutionOutput;
     if (!FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
             Source,

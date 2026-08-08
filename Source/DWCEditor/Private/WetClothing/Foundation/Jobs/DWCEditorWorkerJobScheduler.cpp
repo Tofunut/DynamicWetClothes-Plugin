@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
 
 #include "Async/Async.h"
@@ -15,14 +16,22 @@ namespace
     {
         switch (State)
         {
-        case EDWCEditorWorkerJobLifecycleState::PendingAdmission: return TEXT("PendingAdmission");
-        case EDWCEditorWorkerJobLifecycleState::Preparing: return TEXT("Preparing");
-        case EDWCEditorWorkerJobLifecycleState::Ready: return TEXT("Ready");
-        case EDWCEditorWorkerJobLifecycleState::Running: return TEXT("Running");
-        case EDWCEditorWorkerJobLifecycleState::CancelRequested: return TEXT("CancelRequested");
-        case EDWCEditorWorkerJobLifecycleState::Finalizing: return TEXT("Finalizing");
-        case EDWCEditorWorkerJobLifecycleState::Completed: return TEXT("Completed");
-        default: return TEXT("Unknown");
+        case EDWCEditorWorkerJobLifecycleState::PendingAdmission:
+            return TEXT("PendingAdmission");
+        case EDWCEditorWorkerJobLifecycleState::Preparing:
+            return TEXT("Preparing");
+        case EDWCEditorWorkerJobLifecycleState::Ready:
+            return TEXT("Ready");
+        case EDWCEditorWorkerJobLifecycleState::Running:
+            return TEXT("Running");
+        case EDWCEditorWorkerJobLifecycleState::CancelRequested:
+            return TEXT("CancelRequested");
+        case EDWCEditorWorkerJobLifecycleState::Finalizing:
+            return TEXT("Finalizing");
+        case EDWCEditorWorkerJobLifecycleState::Completed:
+            return TEXT("Completed");
+        default:
+            return TEXT("Unknown");
         }
     }
 
@@ -38,63 +47,58 @@ namespace
         Config.WorkerPrivateCPUBytes = FMath::Max<uint64>(TotalMemoryBudgetBytes, 1);
         return Config;
     }
-}
+} // namespace
 
 struct FDWCEditorWorkerJobScheduler::FQueuedJob
 {
-    FDWCEditorWorkerJobDescriptor Descriptor;
-    FDWCEditorWorkerJobTicket Ticket;
+    FDWCEditorWorkerJobDescriptor                                Descriptor;
+    FDWCEditorWorkerJobTicket                                    Ticket;
     TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> CancellationToken =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
-    FPrepare Prepare;
-    FWork Work;
-    FApply Apply;
-    FFinished Finished;
-    FDWCEditorMemoryLease MemoryLease;
-    EDWCEditorAsyncOperationState OperationState = EDWCEditorAsyncOperationState::Pending;
-    EDWCEditorAsyncCancellationState CancellationState = EDWCEditorAsyncCancellationState::None;
+    FPrepare                          Prepare;
+    FWork                             Work;
+    FApply                            Apply;
+    FFinished                         Finished;
+    FDWCEditorMemoryLease             MemoryLease;
+    EDWCEditorAsyncOperationState     OperationState = EDWCEditorAsyncOperationState::Pending;
+    EDWCEditorAsyncCancellationState  CancellationState = EDWCEditorAsyncCancellationState::None;
     EDWCEditorWorkerJobLifecycleState LifecycleState = EDWCEditorWorkerJobLifecycleState::PendingAdmission;
-    FDWCEditorWorkerMemoryEstimate ActualMemoryEstimate;
-    double SubmittedSeconds = 0.0;
-    double PrepareStartedSeconds = 0.0;
-    double PrepareFinishedSeconds = 0.0;
-    double StartedSeconds = 0.0;
-    double CommitStartedSeconds = 0.0;
-    double CommitFinishedSeconds = 0.0;
-    double CancelRequestedSeconds = 0.0;
-    uint64 ResultBytes = 0;
-    bool bFinishedNotified = false;
-    bool bAdmissionDeferred = false;
-    EDWCEditorWorkerJobCompletion Completion = EDWCEditorWorkerJobCompletion::Failed;
-    FString CompletionError;
+    FDWCEditorWorkerMemoryEstimate    ActualMemoryEstimate;
+    double                            SubmittedSeconds = 0.0;
+    double                            PrepareStartedSeconds = 0.0;
+    double                            PrepareFinishedSeconds = 0.0;
+    double                            StartedSeconds = 0.0;
+    double                            CommitStartedSeconds = 0.0;
+    double                            CommitFinishedSeconds = 0.0;
+    double                            CancelRequestedSeconds = 0.0;
+    uint64                            ResultBytes = 0;
+    bool                              bFinishedNotified = false;
+    bool                              bAdmissionDeferred = false;
+    EDWCEditorWorkerJobCompletion     Completion = EDWCEditorWorkerJobCompletion::Failed;
+    FString                           CompletionError;
 };
 
 FDWCEditorWorkerJobScheduler::FDWCEditorWorkerJobScheduler(
-    const int32 InMaxActiveJobs,
+    const int32  InMaxActiveJobs,
     const uint64 InTotalMemoryBudgetBytes,
     const uint64 InPerJobMemoryBudgetBytes,
-    const int32 InMaxQueuedJobs)
+    const int32  InMaxQueuedJobs)
     : FDWCEditorWorkerJobScheduler(
-        MakeShared<FDWCEditorResourceGovernor>(MakeWorkerBudgetConfig(InTotalMemoryBudgetBytes)),
-        InMaxActiveJobs,
-        InTotalMemoryBudgetBytes,
-        InPerJobMemoryBudgetBytes,
-        InMaxQueuedJobs)
+          MakeShared<FDWCEditorResourceGovernor>(MakeWorkerBudgetConfig(InTotalMemoryBudgetBytes)),
+          InMaxActiveJobs,
+          InTotalMemoryBudgetBytes,
+          InPerJobMemoryBudgetBytes,
+          InMaxQueuedJobs)
 {
 }
 
 FDWCEditorWorkerJobScheduler::FDWCEditorWorkerJobScheduler(
     TSharedRef<FDWCEditorResourceGovernor> InResourceGovernor,
-    const int32 InMaxActiveJobs,
-    const uint64 InTotalMemoryBudgetBytes,
-    const uint64 InPerJobMemoryBudgetBytes,
-    const int32 InMaxQueuedJobs)
-    : ResourceGovernor(MoveTemp(InResourceGovernor))
-    , SessionEpoch(FGuid::NewGuid())
-    , MaxActiveJobs(FMath::Max(1, InMaxActiveJobs))
-    , MaxQueuedJobs(FMath::Max(1, InMaxQueuedJobs))
-    , TotalMemoryBudgetBytes(FMath::Max<uint64>(1, InTotalMemoryBudgetBytes))
-    , PerJobMemoryBudgetBytes(FMath::Max<uint64>(1, InPerJobMemoryBudgetBytes))
+    const int32                            InMaxActiveJobs,
+    const uint64                           InTotalMemoryBudgetBytes,
+    const uint64                           InPerJobMemoryBudgetBytes,
+    const int32                            InMaxQueuedJobs)
+    : ResourceGovernor(MoveTemp(InResourceGovernor)), SessionEpoch(FGuid::NewGuid()), MaxActiveJobs(FMath::Max(1, InMaxActiveJobs)), MaxQueuedJobs(FMath::Max(1, InMaxQueuedJobs)), TotalMemoryBudgetBytes(FMath::Max<uint64>(1, InTotalMemoryBudgetBytes)), PerJobMemoryBudgetBytes(FMath::Max<uint64>(1, InPerJobMemoryBudgetBytes))
 {
 }
 
@@ -111,10 +115,10 @@ void FDWCEditorWorkerJobScheduler::SetDomainRevisionProvider(FDomainRevisionProv
 
 FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::Submit(
     const FDWCEditorWorkerJobDescriptor& Descriptor,
-    FWork Work,
-    FApply Apply,
-    FString* OutError,
-    FFinished Finished)
+    FWork                                Work,
+    FApply                               Apply,
+    FString*                             OutError,
+    FFinished                            Finished)
 {
     if (!Work)
     {
@@ -142,10 +146,10 @@ FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::Submit(
 
 FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitTwoPhase(
     const FDWCEditorWorkerJobDescriptor& Descriptor,
-    FPrepare Prepare,
-    FApply Apply,
-    FString* OutError,
-    FFinished Finished)
+    FPrepare                             Prepare,
+    FApply                               Apply,
+    FString*                             OutError,
+    FFinished                            Finished)
 {
     return SubmitInternal(
         Descriptor,
@@ -157,10 +161,10 @@ FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitTwoPhase(
 
 FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitInternal(
     const FDWCEditorWorkerJobDescriptor& Descriptor,
-    FPrepare Prepare,
-    FApply Apply,
-    FString* OutError,
-    FFinished Finished)
+    FPrepare                             Prepare,
+    FApply                               Apply,
+    FString*                             OutError,
+    FFinished                            Finished)
 {
     check(IsInGameThread());
     if (OutError != nullptr)
@@ -169,12 +173,14 @@ FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitInternal(
     }
     if (bShuttingDown)
     {
-        if (OutError != nullptr) *OutError = TEXT("The editor worker scheduler is shutting down.");
+        if (OutError != nullptr)
+            *OutError = TEXT("The editor worker scheduler is shutting down.");
         return {};
     }
     if (!Prepare || !Apply)
     {
-        if (OutError != nullptr) *OutError = TEXT("The editor worker job is missing its prepare or apply callback.");
+        if (OutError != nullptr)
+            *OutError = TEXT("The editor worker job is missing its prepare or apply callback.");
         return {};
     }
 
@@ -182,7 +188,8 @@ FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitInternal(
     if (RequestedBytes > PerJobMemoryBudgetBytes)
     {
         ++BudgetRejectionCount;
-        if (OutError != nullptr) *OutError = BuildBudgetFailureDiagnostic(Descriptor, true);
+        if (OutError != nullptr)
+            *OutError = BuildBudgetFailureDiagnostic(Descriptor, true);
         return {};
     }
 
@@ -203,13 +210,14 @@ FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitInternal(
         return Job->Descriptor.Key == Descriptor.Key;
     };
     const bool bReplacesQueuedLatest = RequestPolicy == EDWCEditorAsyncRequestPolicy::LatestWins &&
-        (PendingAdmissionJobs.ContainsByPredicate(IsQueuedSameKey) ||
-         PreparingJobs.ContainsByPredicate(IsQueuedSameKey) ||
-         ReadyJobs.ContainsByPredicate(IsQueuedSameKey));
+                                       (PendingAdmissionJobs.ContainsByPredicate(IsQueuedSameKey) ||
+                                        PreparingJobs.ContainsByPredicate(IsQueuedSameKey) ||
+                                        ReadyJobs.ContainsByPredicate(IsQueuedSameKey));
     if (GetOutstandingQueueCount() >= MaxQueuedJobs && !bReplacesQueuedLatest)
     {
         ++QueueRejectionCount;
-        if (OutError != nullptr) *OutError = TEXT("The editor worker scheduler queue is full.");
+        if (OutError != nullptr)
+            *OutError = TEXT("The editor worker scheduler queue is full.");
         return {};
     }
 
@@ -269,7 +277,7 @@ void FDWCEditorWorkerJobScheduler::PumpAdmissions()
                 if (A->Descriptor.Priority != B->Descriptor.Priority)
                 {
                     return static_cast<uint8>(A->Descriptor.Priority) >
-                        static_cast<uint8>(B->Descriptor.Priority);
+                           static_cast<uint8>(B->Descriptor.Priority);
                 }
                 return A->Ticket.JobId < B->Ticket.JobId;
             });
@@ -295,8 +303,8 @@ void FDWCEditorWorkerJobScheduler::PumpAdmissions()
                 continue;
             }
             const bool bDomainCurrent = Job->Ticket.Domain == EDWCEditorAuthoringDomain::None ||
-                !DomainRevisionProvider ||
-                DomainRevisionProvider(Job->Ticket.Domain) == Job->Ticket.DomainRevision;
+                                        !DomainRevisionProvider ||
+                                        DomainRevisionProvider(Job->Ticket.Domain) == Job->Ticket.DomainRevision;
             if (!bDomainCurrent)
             {
                 FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Stale, FString());
@@ -320,14 +328,13 @@ void FDWCEditorWorkerJobScheduler::PumpAdmissions()
         {
             break;
         }
-    }
-    while (!bShuttingDown);
+    } while (!bShuttingDown);
 }
 
 bool FDWCEditorWorkerJobScheduler::TryAdmitPendingJob(
     const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
 {
-    const uint64 ReservationBytes = FMath::Max<uint64>(Job->Descriptor.GetReservedBytes(), 1);
+    const uint64                         ReservationBytes = FMath::Max<uint64>(Job->Descriptor.GetReservedBytes(), 1);
     FDWCEditorResourceReservationRequest ReservationRequest;
     ReservationRequest.Pool = EDWCEditorResourcePool::WorkerPrivateCPU;
     ReservationRequest.Bytes = ReservationBytes;
@@ -372,8 +379,8 @@ bool FDWCEditorWorkerJobScheduler::TryAdmitPendingJob(
 
     Job->PrepareStartedSeconds = FPlatformTime::Seconds();
     FPreparedWorkerJob Prepared;
-    FString PrepareError;
-    const bool bPrepared = Job->Prepare(Job->CancellationToken, Prepared, PrepareError);
+    FString            PrepareError;
+    const bool         bPrepared = Job->Prepare(Job->CancellationToken, Prepared, PrepareError);
     Job->PrepareFinishedSeconds = FPlatformTime::Seconds();
     Job->Prepare = nullptr;
 
@@ -427,8 +434,8 @@ bool FDWCEditorWorkerJobScheduler::TryAdmitPendingJob(
     }
 
     Job->ActualMemoryEstimate = Prepared.ActualMemoryEstimate.IsEmpty()
-        ? Job->Descriptor.MemoryEstimate
-        : Prepared.ActualMemoryEstimate;
+                                    ? Job->Descriptor.MemoryEstimate
+                                    : Prepared.ActualMemoryEstimate;
     Job->Work = MoveTemp(Prepared.Work);
     PreparingJobs.RemoveSingle(Job);
     ReadyJobs.Add(Job);
@@ -441,7 +448,7 @@ bool FDWCEditorWorkerJobScheduler::TryAdmitPendingJob(
             if (A->Descriptor.Priority != B->Descriptor.Priority)
             {
                 return static_cast<uint8>(A->Descriptor.Priority) >
-                    static_cast<uint8>(B->Descriptor.Priority);
+                       static_cast<uint8>(B->Descriptor.Priority);
             }
             return A->Ticket.JobId < B->Ticket.JobId;
         });
@@ -584,7 +591,7 @@ FDWCEditorWorkerSchedulerDiagnostics FDWCEditorWorkerJobScheduler::GetDiagnostic
     Diagnostics.MaxWorkerSeconds = MaxWorkerSeconds;
 
     const double Now = FPlatformTime::Seconds();
-    auto AppendJob = [&Diagnostics, Now](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
+    auto         AppendJob = [&Diagnostics, Now](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
     {
         FDWCEditorWorkerJobDiagnostic& Item = Diagnostics.Jobs.AddDefaulted_GetRef();
         Item.Ticket = Job->Ticket;
@@ -595,30 +602,34 @@ FDWCEditorWorkerSchedulerDiagnostics FDWCEditorWorkerJobScheduler::GetDiagnostic
         Item.CancellationState = Job->CancellationState;
         Item.RequestPolicy = Job->Descriptor.GetRequestPolicy();
         Item.MemoryEstimate = Job->ActualMemoryEstimate.IsEmpty()
-            ? Job->Descriptor.MemoryEstimate
-            : Job->ActualMemoryEstimate;
+                                  ? Job->Descriptor.MemoryEstimate
+                                  : Job->ActualMemoryEstimate;
         Item.ReservedBytes = Job->MemoryLease.GetReservedBytes();
         Item.ResultBytes = Job->ResultBytes;
         Item.PrepareSeconds = Job->PrepareFinishedSeconds > 0.0
-            ? Job->PrepareFinishedSeconds - Job->PrepareStartedSeconds
-            : 0.0;
+                                  ? Job->PrepareFinishedSeconds - Job->PrepareStartedSeconds
+                                  : 0.0;
         Item.QueueSeconds = Job->StartedSeconds > 0.0
-            ? Job->StartedSeconds - Job->SubmittedSeconds
-            : Now - Job->SubmittedSeconds;
+                                ? Job->StartedSeconds - Job->SubmittedSeconds
+                                : Now - Job->SubmittedSeconds;
         Item.WorkerSeconds = Job->StartedSeconds > 0.0
-            ? (Job->CommitStartedSeconds > 0.0 ? Job->CommitStartedSeconds : Now) - Job->StartedSeconds
-            : 0.0;
+                                 ? (Job->CommitStartedSeconds > 0.0 ? Job->CommitStartedSeconds : Now) - Job->StartedSeconds
+                                 : 0.0;
         Item.CommitSeconds = Job->CommitFinishedSeconds > 0.0
-            ? Job->CommitFinishedSeconds - Job->CommitStartedSeconds
-            : 0.0;
+                                 ? Job->CommitFinishedSeconds - Job->CommitStartedSeconds
+                                 : 0.0;
         Item.CancellationSeconds = Job->CancelRequestedSeconds > 0.0
-            ? Now - Job->CancelRequestedSeconds
-            : 0.0;
+                                       ? Now - Job->CancelRequestedSeconds
+                                       : 0.0;
     };
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PendingAdmissionJobs) AppendJob(Job);
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PreparingJobs) AppendJob(Job);
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ActiveJobs) AppendJob(Job);
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ReadyJobs) AppendJob(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PendingAdmissionJobs)
+        AppendJob(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PreparingJobs)
+        AppendJob(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ActiveJobs)
+        AppendJob(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ReadyJobs)
+        AppendJob(Job);
     return Diagnostics;
 }
 
@@ -647,7 +658,7 @@ void FDWCEditorWorkerJobScheduler::StartEligibleJobs()
         for (int32 Index = 0; Index < ReadyJobs.Num(); ++Index)
         {
             const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Candidate = ReadyJobs[Index];
-            const bool bSameKeyAlreadyRunning = ActiveJobs.ContainsByPredicate(
+            const bool                                         bSameKeyAlreadyRunning = ActiveJobs.ContainsByPredicate(
                 [&Candidate](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& ActiveJob)
                 {
                     return ActiveJob->Descriptor.Key == Candidate->Descriptor.Key;
@@ -716,7 +727,7 @@ void FDWCEditorWorkerJobScheduler::StartEligibleJobs()
 }
 
 void FDWCEditorWorkerJobScheduler::HandleWorkerFinished(
-    const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
+    const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>&         Job,
     TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> Result)
 {
     check(IsInGameThread());
@@ -727,10 +738,10 @@ void FDWCEditorWorkerJobScheduler::HandleWorkerFinished(
     const FString ResultError = Result.IsValid() ? Result->Error : FString();
 
     const bool bDomainRevisionCurrent = Job->Ticket.Domain == EDWCEditorAuthoringDomain::None ||
-        !DomainRevisionProvider ||
-        DomainRevisionProvider(Job->Ticket.Domain) == Job->Ticket.DomainRevision;
+                                        !DomainRevisionProvider ||
+                                        DomainRevisionProvider(Job->Ticket.Domain) == Job->Ticket.DomainRevision;
     const bool bGenerationCurrent = Job->Descriptor.GetRequestPolicy() != EDWCEditorAsyncRequestPolicy::LatestWins ||
-        IsCurrentGeneration(Job->Ticket);
+                                    IsCurrentGeneration(Job->Ticket);
 
     EDWCEditorWorkerJobCompletion Completion = EDWCEditorWorkerJobCompletion::Failed;
     if (bShuttingDown)
@@ -787,9 +798,9 @@ bool FDWCEditorWorkerJobScheduler::HasOutstandingJobForKey(
         return Job->Descriptor.Key == Key;
     };
     return PendingAdmissionJobs.ContainsByPredicate(ContainsKey) ||
-        PreparingJobs.ContainsByPredicate(ContainsKey) ||
-        ReadyJobs.ContainsByPredicate(ContainsKey) ||
-        ActiveJobs.ContainsByPredicate(ContainsKey);
+           PreparingJobs.ContainsByPredicate(ContainsKey) ||
+           ReadyJobs.ContainsByPredicate(ContainsKey) ||
+           ActiveJobs.ContainsByPredicate(ContainsKey);
 }
 
 bool FDWCEditorWorkerJobScheduler::HasOlderFIFOJob(
@@ -798,13 +809,13 @@ bool FDWCEditorWorkerJobScheduler::HasOlderFIFOJob(
     const auto IsOlderSameKey = [&Job](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Candidate)
     {
         return Candidate != Job &&
-            Candidate->Descriptor.Key == Job->Descriptor.Key &&
-            Candidate->Ticket.JobId < Job->Ticket.JobId;
+               Candidate->Descriptor.Key == Job->Descriptor.Key &&
+               Candidate->Ticket.JobId < Job->Ticket.JobId;
     };
     return PendingAdmissionJobs.ContainsByPredicate(IsOlderSameKey) ||
-        PreparingJobs.ContainsByPredicate(IsOlderSameKey) ||
-        ReadyJobs.ContainsByPredicate(IsOlderSameKey) ||
-        ActiveJobs.ContainsByPredicate(IsOlderSameKey);
+           PreparingJobs.ContainsByPredicate(IsOlderSameKey) ||
+           ReadyJobs.ContainsByPredicate(IsOlderSameKey) ||
+           ActiveJobs.ContainsByPredicate(IsOlderSameKey);
 }
 
 bool FDWCEditorWorkerJobScheduler::HasActiveJobForKey(
@@ -815,8 +826,8 @@ bool FDWCEditorWorkerJobScheduler::HasActiveJobForKey(
         return Job->Descriptor.Key == Key;
     };
     return PreparingJobs.ContainsByPredicate(ContainsKey) ||
-        ReadyJobs.ContainsByPredicate(ContainsKey) ||
-        ActiveJobs.ContainsByPredicate(ContainsKey);
+           ReadyJobs.ContainsByPredicate(ContainsKey) ||
+           ActiveJobs.ContainsByPredicate(ContainsKey);
 }
 
 int32 FDWCEditorWorkerJobScheduler::GetOutstandingQueueCount() const
@@ -827,7 +838,7 @@ int32 FDWCEditorWorkerJobScheduler::GetOutstandingQueueCount() const
 void FDWCEditorWorkerJobScheduler::SupersedeLatestJobs(
     const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Replacement)
 {
-    const FDWCEditorWorkerJobKey Key = Replacement->Descriptor.Key;
+    const FDWCEditorWorkerJobKey                              Key = Replacement->Descriptor.Key;
     const TArray<TSharedRef<FQueuedJob, ESPMode::ThreadSafe>> PendingSnapshot = PendingAdmissionJobs;
     for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PendingSnapshot)
     {
@@ -902,8 +913,8 @@ void FDWCEditorWorkerJobScheduler::CancelJobsByKey(const FDWCEditorWorkerJobKey&
 
 void FDWCEditorWorkerJobScheduler::FinalizeNonRunningJob(
     const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
-    const EDWCEditorWorkerJobCompletion Completion,
-    const FString& Error)
+    const EDWCEditorWorkerJobCompletion                Completion,
+    const FString&                                     Error)
 {
     check(IsInGameThread());
     PendingAdmissionJobs.RemoveSingle(Job);
@@ -920,7 +931,7 @@ void FDWCEditorWorkerJobScheduler::FinalizeNonRunningJob(
 
 void FDWCEditorWorkerJobScheduler::FinalizeDetachedJob(
     const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
-    const FString& Error)
+    const FString&                                     Error)
 {
     check(IsInGameThread());
     RequestJobCancellation(Job);
@@ -944,8 +955,8 @@ void FDWCEditorWorkerJobScheduler::FinalizeDetachedJob(
 
 void FDWCEditorWorkerJobScheduler::NotifyFinished(
     const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
-    const EDWCEditorWorkerJobCompletion Completion,
-    const FString& Error)
+    const EDWCEditorWorkerJobCompletion                Completion,
+    const FString&                                     Error)
 {
     if (Job->bFinishedNotified)
     {
@@ -962,16 +973,16 @@ void FDWCEditorWorkerJobScheduler::NotifyFinished(
 
 bool FDWCEditorWorkerJobScheduler::TransitionJob(
     const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
-    const EDWCEditorAsyncOperationState NewState)
+    const EDWCEditorAsyncOperationState                NewState)
 {
     if (Job->OperationState == NewState)
     {
         return true;
     }
     if (!FDWCEditorAsyncOperationContract::ValidateTransition(
-        Job->OperationState,
-        NewState,
-        *Job->Descriptor.DebugName))
+            Job->OperationState,
+            NewState,
+            *Job->Descriptor.DebugName))
     {
         return false;
     }
@@ -1000,7 +1011,7 @@ void FDWCEditorWorkerJobScheduler::RequestJobCancellation(
 
 void FDWCEditorWorkerJobScheduler::MarkCompleted(
     const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
-    const EDWCEditorWorkerJobCompletion Completion)
+    const EDWCEditorWorkerJobCompletion                Completion)
 {
     if (Job->OperationState == EDWCEditorAsyncOperationState::Completed)
     {
@@ -1018,11 +1029,11 @@ void FDWCEditorWorkerJobScheduler::MarkCompleted(
 
     const double Now = FPlatformTime::Seconds();
     const double QueueSeconds = Job->StartedSeconds > 0.0
-        ? Job->StartedSeconds - Job->SubmittedSeconds
-        : Now - Job->SubmittedSeconds;
+                                    ? Job->StartedSeconds - Job->SubmittedSeconds
+                                    : Now - Job->SubmittedSeconds;
     const double WorkerSeconds = Job->StartedSeconds > 0.0
-        ? (Job->CommitStartedSeconds > 0.0 ? Job->CommitStartedSeconds : Now) - Job->StartedSeconds
-        : 0.0;
+                                     ? (Job->CommitStartedSeconds > 0.0 ? Job->CommitStartedSeconds : Now) - Job->StartedSeconds
+                                     : 0.0;
     ++CompletedJobCount;
     TotalQueueSeconds += FMath::Max(QueueSeconds, 0.0);
     TotalWorkerSeconds += FMath::Max(WorkerSeconds, 0.0);
@@ -1045,11 +1056,11 @@ void FDWCEditorWorkerJobScheduler::MarkCompleted(
 
 FString FDWCEditorWorkerJobScheduler::BuildBudgetFailureDiagnostic(
     const FDWCEditorWorkerJobDescriptor& Descriptor,
-    const bool bPerJobLimit,
-    const FString& GovernorError) const
+    const bool                           bPerJobLimit,
+    const FString&                       GovernorError) const
 {
     TArray<FString> Owners;
-    auto AppendOwner = [&Owners](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
+    auto            AppendOwner = [&Owners](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
     {
         Owners.Add(FString::Printf(
             TEXT("%s [job=%llu, state=%s, slot=%d, reserved=%s]"),
@@ -1059,9 +1070,12 @@ FString FDWCEditorWorkerJobScheduler::BuildBudgetFailureDiagnostic(
             Job->Descriptor.Key.MaterialSlotIndex,
             *FormatMiB(Job->MemoryLease.GetReservedBytes())));
     };
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PreparingJobs) AppendOwner(Job);
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ActiveJobs) AppendOwner(Job);
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ReadyJobs) AppendOwner(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PreparingJobs)
+        AppendOwner(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ActiveJobs)
+        AppendOwner(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ReadyJobs)
+        AppendOwner(Job);
 
     return FString::Printf(
         TEXT("The editor worker job '%s' exceeds the %s memory budget. requested=%s, reserved=%s, totalBudget=%s, perJobBudget=%s. Reservation owners: %s%s%s"),
@@ -1079,13 +1093,16 @@ FString FDWCEditorWorkerJobScheduler::BuildBudgetFailureDiagnostic(
 uint64 FDWCEditorWorkerJobScheduler::CalculateReservedBytes() const
 {
     uint64 ReservedBytes = 0;
-    auto AddReservation = [&ReservedBytes](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
+    auto   AddReservation = [&ReservedBytes](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
     {
         const uint64 JobBytes = Job->MemoryLease.GetReservedBytes();
         ReservedBytes = JobBytes <= MAX_uint64 - ReservedBytes ? ReservedBytes + JobBytes : MAX_uint64;
     };
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PreparingJobs) AddReservation(Job);
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ActiveJobs) AddReservation(Job);
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ReadyJobs) AddReservation(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PreparingJobs)
+        AddReservation(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ActiveJobs)
+        AddReservation(Job);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ReadyJobs)
+        AddReservation(Job);
     return ReservedBytes;
 }

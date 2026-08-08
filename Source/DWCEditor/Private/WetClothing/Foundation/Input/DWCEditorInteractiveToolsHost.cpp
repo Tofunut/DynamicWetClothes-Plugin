@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCEditorInteractiveToolsHost.h"
 
 #include "AssetEditorModeManager.h"
@@ -13,7 +14,7 @@ namespace
 }
 
 FDWCEditorInteractiveToolsHost::FDWCEditorInteractiveToolsHost(
-    FPreviewScene* InPreviewScene,
+    FPreviewScene*               InPreviewScene,
     IDWCEditorSurfaceToolTarget* InTarget)
 {
     ModeManager = MakeShared<FAssetEditorModeManager>();
@@ -49,7 +50,7 @@ bool FDWCEditorInteractiveToolsHost::CancelActiveInteraction()
     }
 
     UModeManagerInteractiveToolsContext* Context = ModeManager->GetInteractiveToolsContext();
-    UDWCEditorSurfaceAuthoringTool* Tool = Cast<UDWCEditorSurfaceAuthoringTool>(
+    UDWCEditorSurfaceAuthoringTool*      Tool = Cast<UDWCEditorSurfaceAuthoringTool>(
         Context->ToolManager->GetActiveTool(EToolSide::Left));
     if (Tool == nullptr || !Tool->IsInteracting())
     {

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleIncrementalPreviewWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -11,7 +12,7 @@ namespace
     bool RectsOverlapOrTouch(const FIntRect& A, const FIntRect& B)
     {
         return A.Min.X <= B.Max.X && A.Max.X >= B.Min.X &&
-            A.Min.Y <= B.Max.Y && A.Max.Y >= B.Min.Y;
+               A.Min.Y <= B.Max.Y && A.Max.Y >= B.Min.Y;
     }
 
     void AddMergedRect(TArray<FIntRect>& Rects, FIntRect Rect)
@@ -40,17 +41,17 @@ namespace
     uint64 RectPixels(const FIntRect& Rect)
     {
         return Rect.IsEmpty()
-            ? 0
-            : static_cast<uint64>(Rect.Width()) * static_cast<uint64>(Rect.Height());
+                   ? 0
+                   : static_cast<uint64>(Rect.Width()) * static_cast<uint64>(Rect.Height());
     }
-}
+} // namespace
 
 bool FWetWrinkleIncrementalPreviewWorker::BuildRegionPlan(
     const TArray<FWetWrinkleIncrementalCommand>& Commands,
-    const FIntPoint WorkingTextureSize,
-    const FIntPoint TextureSize,
-    TArray<FWetWrinkleIncrementalRegionPlan>& OutPlan,
-    const TArray<FIntRect>* AdditionalWorkingRects)
+    const FIntPoint                              WorkingTextureSize,
+    const FIntPoint                              TextureSize,
+    TArray<FWetWrinkleIncrementalRegionPlan>&    OutPlan,
+    const TArray<FIntRect>*                      AdditionalWorkingRects)
 {
     OutPlan.Reset();
     if (Commands.IsEmpty() || WorkingTextureSize.X <= 0 || WorkingTextureSize.Y <= 0 ||
@@ -148,9 +149,9 @@ bool FWetWrinkleIncrementalPreviewWorker::BuildRegionPlan(
 }
 
 FDWCEditorWorkerMemoryEstimate FWetWrinkleIncrementalPreviewWorker::EstimateMemory(
-    const TArray<FWetWrinkleIncrementalCommand>& Commands,
+    const TArray<FWetWrinkleIncrementalCommand>&    Commands,
     const TArray<FWetWrinkleIncrementalRegionPlan>& Plan,
-    const bool bWithCoverage)
+    const bool                                      bWithCoverage)
 {
     FDWCEditorWorkerMemoryEstimate Estimate;
     Estimate.SnapshotBytes = Commands.GetAllocatedSize();
@@ -175,14 +176,14 @@ FDWCEditorWorkerMemoryEstimate FWetWrinkleIncrementalPreviewWorker::EstimateMemo
             return Command.Kind == EWetWrinkleIncrementalCommandKind::Ridge;
         });
     Estimate.ScratchBytes = bHasRidge
-        ? FWetProceduralRidgeRasterizer::GetTransientScratchBytesUpperBound()
-        : 0;
+                                ? FWetProceduralRidgeRasterizer::GetTransientScratchBytesUpperBound()
+                                : 0;
     return Estimate;
 }
 
 TSharedPtr<FWetWrinkleIncrementalPreviewJobResult, ESPMode::ThreadSafe>
 FWetWrinkleIncrementalPreviewWorker::Build(
-    FWetWrinkleIncrementalPreviewJobInput Input,
+    FWetWrinkleIncrementalPreviewJobInput                               Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FWetWrinkleIncrementalPreviewJobResult, ESPMode::ThreadSafe> Result =
@@ -276,7 +277,7 @@ FWetWrinkleIncrementalPreviewWorker::Build(
         Payload.PackedNormalXY = MoveTemp(Snapshot.Region.Surface.PackedNormalXY);
         Payload.Coverage = MoveTemp(Snapshot.Region.Surface.Coverage);
         Result->ResultBytes += Payload.PackedNormalXY.GetAllocatedSize() +
-            Payload.Coverage.GetAllocatedSize() + Payload.EncodedPixels.GetAllocatedSize();
+                               Payload.Coverage.GetAllocatedSize() + Payload.EncodedPixels.GetAllocatedSize();
     }
     return Result;
 }

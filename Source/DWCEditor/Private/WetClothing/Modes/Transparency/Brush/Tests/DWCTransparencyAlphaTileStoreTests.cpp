@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -28,10 +29,10 @@ namespace
 
     bool RasterizeIncrementally(
         const FDWCTransparencyAutoBakeResult& AutoResult,
-        const FDWCTransparencyBrushStroke& Stroke,
-        FDWCTransparencyAlphaTileStore& InOutStore)
+        const FDWCTransparencyBrushStroke&    Stroke,
+        FDWCTransparencyAlphaTileStore&       InOutStore)
     {
-        TArray<FIntRect> SampleRegions;
+        TArray<FIntRect>         SampleRegions;
         FDWCEditorDirtyRegionSet DirtyRegions;
         for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
         {
@@ -72,12 +73,10 @@ namespace
             OutputTileSet.Add(Coordinate);
         }
         Payloads.RemoveAll([&OutputTileSet](const FDWCTransparencyAlphaTilePayload& Payload)
-        {
-            return !OutputTileSet.Contains(Payload.TileCoordinate);
-        });
+                           { return !OutputTileSet.Contains(Payload.TileCoordinate); });
         return InOutStore.Commit(InOutStore.GetRevision(), Payloads);
     }
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyAlphaTileParityTest,
@@ -86,7 +85,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCTransparencyAlphaTileParityTest::RunTest(const FString& Parameters)
 {
-    const FIntPoint Resolution(512, 384);
+    const FIntPoint                      Resolution(512, 384);
     const FDWCTransparencyAutoBakeResult AutoResult = BuildAlphaTestResult(Resolution);
 
     FDWCTransparencyBrushStroke Stroke;
@@ -126,7 +125,7 @@ bool FDWCTransparencyAlphaTileParityTest::RunTest(const FString& Parameters)
     TArray<uint8> DenseWeight;
     FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
         AutoResult,
-        {Stroke, SmoothStroke},
+        { Stroke, SmoothStroke },
         0,
         Stroke.MaterialSlotIndex,
         0,
@@ -162,7 +161,7 @@ bool FDWCTransparencyAlphaTileRevisionTest::RunTest(const FString& Parameters)
     FDWCTransparencyAlphaTileStore Store;
     Store.Initialize(FIntPoint(256, 256));
     TArray<FDWCTransparencyAlphaTilePayload> Payloads;
-    Store.SnapshotTiles({FIntPoint(0, 0)}, Payloads);
+    Store.SnapshotTiles({ FIntPoint(0, 0) }, Payloads);
     const uint64 SnapshotRevision = Store.GetRevision();
     TestTrue(TEXT("A current snapshot is committable"), Store.CanCommit(SnapshotRevision, Payloads));
     TestTrue(TEXT("The current snapshot commits"), Store.Commit(SnapshotRevision, Payloads));

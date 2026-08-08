@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -34,11 +35,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorAuthoringDocumentCommandTest::RunTest(const FString& Parameters)
 {
-    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    UWetClothingAsset*                      Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
     TSharedRef<FDWCEditorAuthoringDocument> Document =
         MakeShared<FDWCEditorAuthoringDocument>(Asset);
 
-    int32 NotificationCount = 0;
+    int32                     NotificationCount = 0;
     FDWCEditorAuthoringChange LastChange;
     Document->OnChanged().AddLambda(
         [&NotificationCount, &LastChange](const FDWCEditorAuthoringChange& Change)
@@ -50,8 +51,8 @@ bool FDWCEditorAuthoringDocumentCommandTest::RunTest(const FString& Parameters)
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Wrinkle;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-        EDWCEditorAuthoringImpact::ElementList |
-        EDWCEditorAuthoringImpact::WrinkleBake;
+                    EDWCEditorAuthoringImpact::ElementList |
+                    EDWCEditorAuthoringImpact::WrinkleBake;
     Change.MaterialSlotIndex = 3;
 
     const FDWCEditorAuthoringResult Result = Document->Edit(
@@ -97,16 +98,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorAuthoringDocumentInteractiveTest::RunTest(const FString& Parameters)
 {
-    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    UWetClothingAsset*                      Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
     TSharedRef<FDWCEditorAuthoringDocument> Document =
         MakeShared<FDWCEditorAuthoringDocument>(Asset);
 
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-        EDWCEditorAuthoringImpact::ElementList |
-        EDWCEditorAuthoringImpact::Preview |
-        EDWCEditorAuthoringImpact::TransparencyFinalBake;
+                    EDWCEditorAuthoringImpact::ElementList |
+                    EDWCEditorAuthoringImpact::Preview |
+                    EDWCEditorAuthoringImpact::TransparencyFinalBake;
     Change.LayerGuid = FGuid::NewGuid();
     Change.ElementGuid = FGuid::NewGuid();
 

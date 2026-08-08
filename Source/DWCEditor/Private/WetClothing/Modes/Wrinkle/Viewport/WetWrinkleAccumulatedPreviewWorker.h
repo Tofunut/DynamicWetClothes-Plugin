@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,17 +11,17 @@ class FDWCEditorCancellationToken;
 
 struct FWetWrinkleAccumulatedPreviewJobInput
 {
-    FIntPoint TextureSize = FIntPoint::ZeroValue;
-    FIntPoint WorkingTextureSize = FIntPoint::ZeroValue;
+    FIntPoint                            TextureSize = FIntPoint::ZeroValue;
+    FIntPoint                            WorkingTextureSize = FIntPoint::ZeroValue;
     TArray<FDWCEditorNormalStampCommand> Patches;
-    TArray<FWetProceduralRidgeStroke> RidgeStrokes;
+    TArray<FWetProceduralRidgeStroke>    RidgeStrokes;
 };
 
 struct FWetWrinkleAccumulatedPreviewJobResult final : FDWCEditorWorkerJobResult
 {
-    FIntPoint TextureSize = FIntPoint::ZeroValue;
-    FIntPoint WorkingTextureSize = FIntPoint::ZeroValue;
-    TArray<FColor> Pixels;
+    FIntPoint                     TextureSize = FIntPoint::ZeroValue;
+    FIntPoint                     WorkingTextureSize = FIntPoint::ZeroValue;
+    TArray<FColor>                Pixels;
     FDWCEditorNormalRasterSurface WorkingSurface;
 };
 
@@ -28,6 +29,6 @@ class FWetWrinkleAccumulatedPreviewWorker
 {
   public:
     static TSharedPtr<FWetWrinkleAccumulatedPreviewJobResult, ESPMode::ThreadSafe> Build(
-        FWetWrinkleAccumulatedPreviewJobInput Input,
+        FWetWrinkleAccumulatedPreviewJobInput                               Input,
         const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken);
 };

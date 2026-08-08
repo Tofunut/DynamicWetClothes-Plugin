@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "Kismet/BlueprintFunctionLibrary.h"
@@ -20,7 +21,6 @@ class DWCEDITOR_API UDWCMaterialSetupEditorLibrary : public UBlueprintFunctionLi
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "DWC|Material Setup")
     static bool BakeRenderProfileDataAndUpdateMaterials(
         UWetClothingAsset* WetClothingAsset,
-        FString& OutReport,
-        bool& bOutHadWarnings);
-
+        FString&           OutReport,
+        bool&              bOutHadWarnings);
 };

@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "IDetailCustomization.h"
 #include "Layout/Visibility.h"
@@ -14,12 +16,12 @@ class UWetClothingAsset;
 
 class FDynamicWetClothesComponentCustomization : public IDetailCustomization
 {
-public:
+  public:
     static TSharedRef<IDetailCustomization> MakeInstance();
     virtual ~FDynamicWetClothesComponentCustomization() override;
     virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override;
 
-private:
+  private:
     enum class EBindingState : uint8
     {
         Ready,
@@ -32,24 +34,24 @@ private:
 
     struct FBindingStatus
     {
-        TWeakObjectPtr<UWetClothingAsset> Asset;
+        TWeakObjectPtr<UWetClothingAsset>      Asset;
         TWeakObjectPtr<USkeletalMeshComponent> MeshComponent;
-        TWeakObjectPtr<USkeletalMesh> CurrentMesh;
-        TWeakObjectPtr<USkeletalMesh> SourceMesh;
-        TWeakObjectPtr<USkeletalMesh> RequiredMesh;
-        EBindingState State = EBindingState::NoMatchingComponent;
+        TWeakObjectPtr<USkeletalMesh>          CurrentMesh;
+        TWeakObjectPtr<USkeletalMesh>          SourceMesh;
+        TWeakObjectPtr<USkeletalMesh>          RequiredMesh;
+        EBindingState                          State = EBindingState::NoMatchingComponent;
     };
 
-    void RebuildBindingStatus();
-    void RequestRefresh();
-    void HandleObjectPropertyChanged(UObject* ChangedObject, FPropertyChangedEvent& PropertyChangedEvent);
-    FText GetBindingWarningText() const;
+    void        RebuildBindingStatus();
+    void        RequestRefresh();
+    void        HandleObjectPropertyChanged(UObject* ChangedObject, FPropertyChangedEvent& PropertyChangedEvent);
+    FText       GetBindingWarningText() const;
     EVisibility GetBindingWarningVisibility() const;
 
-private:
+  private:
     TWeakObjectPtr<UDynamicWetClothesComponent> Component;
-    TWeakPtr<IPropertyUtilities> PropertyUtilities;
-    FBindingStatus CachedBindingStatus;
-    bool bHasBindingStatus = false;
-    FDelegateHandle ObjectPropertyChangedHandle;
+    TWeakPtr<IPropertyUtilities>                PropertyUtilities;
+    FBindingStatus                              CachedBindingStatus;
+    bool                                        bHasBindingStatus = false;
+    FDelegateHandle                             ObjectPropertyChangedHandle;
 };

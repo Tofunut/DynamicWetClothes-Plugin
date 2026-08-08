@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCDataUVSeamSplitter.h"
 
 #include "SkeletalMeshAttributes.h"
@@ -16,11 +17,11 @@ namespace DWCDataUVSeamSplitterPrivate
         Result.bSucceeded = false;
         Result.Message = Message;
     }
-}
+} // namespace DWCDataUVSeamSplitterPrivate
 
 FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
-    FMeshDescription& MeshDescription,
-    TArray<FDWCDataUVTriangle>& Triangles,
+    FMeshDescription&              MeshDescription,
+    TArray<FDWCDataUVTriangle>&    Triangles,
     const TArray<FDWCDataUVChart>& Charts)
 {
     using namespace DWCDataUVSeamSplitterPrivate;
@@ -32,9 +33,9 @@ FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
         return Result;
     }
 
-    TMap<int32, int32> ChartIndexByTriangle;
+    TMap<int32, int32>         ChartIndexByTriangle;
     TMap<int32, TArray<int32>> ChartIndicesByVertexInstance;
-    TMap<int32, int32> TriangleIndexByPolygon;
+    TMap<int32, int32>         TriangleIndexByPolygon;
     for (int32 ChartIndex = 0; ChartIndex < Charts.Num(); ++ChartIndex)
     {
         for (const int32 TriangleIndex : Charts[ChartIndex].TriangleIndices)
@@ -48,10 +49,10 @@ FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
             if (const int32* ExistingChartIndex = ChartIndexByTriangle.Find(TriangleIndex))
             {
                 SetFailure(Result, FString::Printf(
-                    TEXT("Triangle %d belongs to more than one DWC UV Channel chart (%d and %d)."),
-                    TriangleIndex,
-                    *ExistingChartIndex,
-                    ChartIndex));
+                                       TEXT("Triangle %d belongs to more than one DWC UV Channel chart (%d and %d)."),
+                                       TriangleIndex,
+                                       *ExistingChartIndex,
+                                       ChartIndex));
                 return Result;
             }
             ChartIndexByTriangle.Add(TriangleIndex, ChartIndex);
@@ -94,24 +95,24 @@ FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
 
     FSkeletalMeshAttributes Attributes(MeshDescription);
     Attributes.Register(true);
-    auto VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
-    auto VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
-    auto VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
-    auto VertexInstanceColors = Attributes.GetVertexInstanceColors();
-    auto VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
-    const int32 UVChannelCount = VertexInstanceUVs.GetNumChannels();
+    auto                VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
+    auto                VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
+    auto                VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
+    auto                VertexInstanceColors = Attributes.GetVertexInstanceColors();
+    auto                VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+    const int32         UVChannelCount = VertexInstanceUVs.GetNumChannels();
     const TArray<FName> MorphTargetNames = Attributes.GetMorphTargetNames();
 
     for (const TPair<int32, TArray<int32>>& Pair : ChartIndicesByVertexInstance)
     {
-        const int32 OriginalVertexInstanceIndex = Pair.Key;
-        const TArray<int32>& VertexInstanceCharts = Pair.Value;
+        const int32             OriginalVertexInstanceIndex = Pair.Key;
+        const TArray<int32>&    VertexInstanceCharts = Pair.Value;
         const FVertexInstanceID OriginalVertexInstanceID(OriginalVertexInstanceIndex);
 
         for (int32 ChartListIndex = 1; ChartListIndex < VertexInstanceCharts.Num(); ++ChartListIndex)
         {
-            const int32 ChartIndex = VertexInstanceCharts[ChartListIndex];
-            const FVertexID ParentVertexID = MeshDescription.GetVertexInstanceVertex(OriginalVertexInstanceID);
+            const int32             ChartIndex = VertexInstanceCharts[ChartListIndex];
+            const FVertexID         ParentVertexID = MeshDescription.GetVertexInstanceVertex(OriginalVertexInstanceID);
             const FVertexInstanceID SplitVertexInstanceID = MeshDescription.CreateVertexInstance(ParentVertexID);
             VertexInstanceNormals[SplitVertexInstanceID] = VertexInstanceNormals[OriginalVertexInstanceID];
             VertexInstanceTangents[SplitVertexInstanceID] = VertexInstanceTangents[OriginalVertexInstanceID];
@@ -142,13 +143,13 @@ FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
 
     for (const TPair<int32, int32>& Pair : TriangleIndexByPolygon)
     {
-        const FPolygonID PolygonID(Pair.Key);
-        FDWCDataUVTriangle& Triangle = Triangles[Pair.Value];
-        const int32 ChartIndex = ChartIndexByTriangle.FindChecked(Pair.Value);
+        const FPolygonID               PolygonID(Pair.Key);
+        FDWCDataUVTriangle&            Triangle = Triangles[Pair.Value];
+        const int32                    ChartIndex = ChartIndexByTriangle.FindChecked(Pair.Value);
         TMap<int32, FVertexInstanceID> ReplacementByOriginalVertexInstance;
         for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
         {
-            const FVertexInstanceID OriginalVertexInstanceID = Triangle.VertexInstances[CornerIndex];
+            const FVertexInstanceID  OriginalVertexInstanceID = Triangle.VertexInstances[CornerIndex];
             const FVertexInstanceID* ReplacementVertexInstanceID = VertexInstanceByChart.Find(
                 MakeChartVertexInstanceKey(ChartIndex, OriginalVertexInstanceID.GetValue()));
             if (ReplacementVertexInstanceID == nullptr)

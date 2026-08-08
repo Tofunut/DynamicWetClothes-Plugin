@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -24,7 +25,7 @@ void FWCAGeneratedDataInvalidator::InvalidateAsset(UWetClothingAsset& Asset)
 }
 
 void FWCAGeneratedDataInvalidator::InvalidateDataUVInitialization(
-    UWetClothingAsset& Asset,
+    UWetClothingAsset&   Asset,
     const USkeletalMesh* TouchedMesh)
 {
     InvalidateAsset(Asset);

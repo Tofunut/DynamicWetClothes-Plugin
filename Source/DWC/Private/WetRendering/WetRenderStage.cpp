@@ -1,6 +1,7 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
 
 #include "WetRendering/WetRenderStage.h"
+#include "Engine/SkeletalMesh.h"
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 
@@ -65,7 +66,7 @@ namespace
         return Slot != nullptr && Slot->bIsWettableSlot;
     }
 
-}
+} // namespace
 
 uint64 FWetRenderStage::GetAllocatedMemoryBytes() const
 {
@@ -101,7 +102,7 @@ void FWetRenderStage::InitializeWetMaterialInstance(FWetRenderStageArgs& Receive
 
     for (int32 MaterialIdx = 0; MaterialIdx < MaterialCount; ++MaterialIdx)
     {
-        UMaterialInterface* ParentMaterial = Receiver.TargetSkeletalMesh->GetMaterial(MaterialIdx);
+        UMaterialInterface*       ParentMaterial = Receiver.TargetSkeletalMesh->GetMaterial(MaterialIdx);
         UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(
             ParentMaterial,
             Receiver.TargetSkeletalMesh);
@@ -305,8 +306,6 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
                 MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleWetnessMax(), SafeWrinkleWetnessMax);
             }
 
-
-
             bWrinkleNormalMapAssigned[MaterialSlotIndex] = true;
         }
     }
@@ -345,8 +344,6 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
             {
                 MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleWetnessMax(), SafeWrinkleWetnessMax);
             }
-
-
 
             continue;
         }
@@ -410,8 +407,8 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
         return;
     }
 
-    const float SafeWetnessMin = FMath::Clamp(Receiver.TransparencyWetnessMin, 0.0f, 1.0f);
-    const float SafeWetnessMax = FMath::Max(SafeWetnessMin, FMath::Clamp(Receiver.TransparencyWetnessMax, 0.0f, 1.0f));
+    const float  SafeWetnessMin = FMath::Clamp(Receiver.TransparencyWetnessMin, 0.0f, 1.0f);
+    const float  SafeWetnessMax = FMath::Max(SafeWetnessMin, FMath::Clamp(Receiver.TransparencyWetnessMax, 0.0f, 1.0f));
     TArray<bool> bTransparencyMapAssigned;
     bTransparencyMapAssigned.Init(false, Receiver.WetMaterialInstances->Num());
 
@@ -509,8 +506,8 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
 
 FLinearColor FWetRenderStage::MakeWetVertexColor(
     const FWetRenderStageArgs& Receiver,
-    const int32 VertexIndex,
-    const float Wetness) const
+    const int32                VertexIndex,
+    const float                Wetness) const
 {
     if (Receiver.RuntimeData == nullptr || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
     {
@@ -518,9 +515,9 @@ FLinearColor FWetRenderStage::MakeWetVertexColor(
     }
 
     FLinearColor WetPartColor = FLinearColor::White;
-    const int32 WetPartID = Receiver.RuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex)
-        ? Receiver.RuntimeData->VertexWetPartIDs[VertexIndex]
-        : INDEX_NONE;
+    const int32  WetPartID = Receiver.RuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex)
+                                 ? Receiver.RuntimeData->VertexWetPartIDs[VertexIndex]
+                                 : INDEX_NONE;
     if (const FLinearColor* FoundColor = CachedWetPartDebugColorsByID.Find(WetPartID))
     {
         WetPartColor = *FoundColor;
@@ -602,8 +599,8 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
 
             const float SafeVisualSaturationWetness = FMath::Max(Receiver.WetnessSettings->VisualSaturationWetness, KINDA_SMALL_NUMBER);
             const float Wetness = Receiver.bGPUWetnessMode
-                ? 0.0f
-                : FMath::Clamp((*WetnessValues)[VertexIndex] / SafeVisualSaturationWetness, 0.0f, 1.0f);
+                                      ? 0.0f
+                                      : FMath::Clamp((*WetnessValues)[VertexIndex] / SafeVisualSaturationWetness, 0.0f, 1.0f);
 
             CachedWetVertexColors[VertexIndex] = MakeWetVertexColor(Receiver, VertexIndex, Wetness).ToFColor(false);
         }

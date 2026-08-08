@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -11,8 +12,8 @@ class FDWCQualityLODController
     void SetProfile(const UDWCQualityLODProfile* InProfile);
 
     FDWCQualityLODPolicy ResolvePolicy(int32 InQualityLOD) const;
-    void SetLOD(FDWCQualityLODRuntimeState& State, int32 InQualityLOD) const;
-    void RefreshPolicy(FDWCQualityLODRuntimeState& State) const;
+    void                 SetLOD(FDWCQualityLODRuntimeState& State, int32 InQualityLOD) const;
+    void                 RefreshPolicy(FDWCQualityLODRuntimeState& State) const;
 
     bool ShouldRunCPUWetnessRendering(FDWCQualityLODRuntimeState& State, float BaseInterval) const;
     bool ShouldEnableCPUWetnessRendering(const FDWCQualityLODRuntimeState& State) const;
@@ -22,6 +23,6 @@ class FDWCQualityLODController
   private:
     bool ShouldRunInterval(float& Accumulator, float BaseInterval, float TargetInterval) const;
 
-    bool bEnabled = true;
+    bool                         bEnabled = true;
     const UDWCQualityLODProfile* Profile = nullptr;
 };

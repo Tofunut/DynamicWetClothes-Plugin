@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "Types/SlateEnums.h"
 #include "WetnessProfile/Viewport/SWetnessProfileViewport.h"
@@ -14,7 +16,7 @@ struct FAssetData;
 
 class SWetnessProfileEditorPanel : public SCompoundWidget
 {
-public:
+  public:
     SLATE_BEGIN_ARGS(SWetnessProfileEditorPanel) {}
     SLATE_ARGUMENT(UWetnessProfile*, WetnessProfile)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, AbsorbedDetailsView)
@@ -26,9 +28,9 @@ public:
     void Construct(const FArguments& InArgs);
     void RefreshFromProfile();
 
-private:
+  private:
     FReply HandleSaveClicked();
-    void RefreshDetailsViews();
+    void   RefreshDetailsViews();
 
     TSharedRef<SWidget> BuildPreviewToolbar();
     TSharedRef<SWidget> BuildPreviewControlsSection();
@@ -38,104 +40,104 @@ private:
     TSharedRef<SWidget> BuildPreviewViewMenu();
     TSharedRef<SWidget> BuildPreviewSettingsSection();
 
-    FString GetCurrentPreviewMeshObjectPath() const;
-    void HandleCurrentPreviewMeshChanged(const FAssetData& AssetData);
-    FReply HandleUseReferenceMeshClicked();
-    FReply HandleSaveCurrentMeshAsReferenceClicked();
-    FReply HandleUseSphereMeshClicked();
+    FString        GetCurrentPreviewMeshObjectPath() const;
+    void           HandleCurrentPreviewMeshChanged(const FAssetData& AssetData);
+    FReply         HandleUseReferenceMeshClicked();
+    FReply         HandleSaveCurrentMeshAsReferenceClicked();
+    FReply         HandleUseSphereMeshClicked();
     ECheckBoxState GetReferencedMeshSourceState() const;
     ECheckBoxState GetTemporaryMeshSourceState() const;
-    void HandleReferencedMeshSourceChanged(ECheckBoxState NewState);
-    void HandleTemporaryMeshSourceChanged(ECheckBoxState NewState);
-    float GetPreviewCursorScale() const;
-    void HandlePreviewCursorScaleChanged(float InValue);
-    FText GetPreviewCursorScaleText() const;
+    void           HandleReferencedMeshSourceChanged(ECheckBoxState NewState);
+    void           HandleTemporaryMeshSourceChanged(ECheckBoxState NewState);
+    float          GetPreviewCursorScale() const;
+    void           HandlePreviewCursorScaleChanged(float InValue);
+    FText          GetPreviewCursorScaleText() const;
 
     float GetPreviewAbsorbedWaterPercent() const;
-    void HandlePreviewAbsorbedWaterPercentChanged(float InPercent);
+    void  HandlePreviewAbsorbedWaterPercentChanged(float InPercent);
     FText GetPreviewAbsorbedWaterPercentText() const;
     float GetPreviewSurfaceWaterPercent() const;
-    void HandlePreviewSurfaceWaterPercentChanged(float InPercent);
+    void  HandlePreviewSurfaceWaterPercentChanged(float InPercent);
     FText GetPreviewSurfaceWaterPercentText() const;
 
-    float GetPreviewDroplet1DetailSize() const;
-    void HandlePreviewDroplet1DetailSizeChanged(float InValue);
-    FText GetPreviewDroplet1DetailSizeText() const;
-    float GetPreviewDroplet2DetailSize() const;
-    void HandlePreviewDroplet2DetailSizeChanged(float InValue);
-    FText GetPreviewDroplet2DetailSizeText() const;
-    float GetSelectedPreviewDetailSize() const;
-    void HandleSelectedPreviewDetailSizeChanged(float InValue);
-    FText GetSelectedPreviewDetailSizeText() const;
+    float       GetPreviewDroplet1DetailSize() const;
+    void        HandlePreviewDroplet1DetailSizeChanged(float InValue);
+    FText       GetPreviewDroplet1DetailSizeText() const;
+    float       GetPreviewDroplet2DetailSize() const;
+    void        HandlePreviewDroplet2DetailSizeChanged(float InValue);
+    FText       GetPreviewDroplet2DetailSizeText() const;
+    float       GetSelectedPreviewDetailSize() const;
+    void        HandleSelectedPreviewDetailSizeChanged(float InValue);
+    FText       GetSelectedPreviewDetailSizeText() const;
     EVisibility GetSelectedPreviewDetailSizeVisibility() const;
-    bool IsSecondaryDropletSelected() const;
+    bool        IsSecondaryDropletSelected() const;
 
     TSharedRef<SWidget> GeneratePreviewModeWidget(TSharedPtr<SWetnessProfileViewport::EPreviewMode> InMode) const;
-    void HandlePreviewModeChanged(TSharedPtr<SWetnessProfileViewport::EPreviewMode> InMode, ESelectInfo::Type SelectInfo);
-    FText GetPreviewModeText() const;
-    FText GetPreviewModeText(SWetnessProfileViewport::EPreviewMode InMode) const;
+    void                HandlePreviewModeChanged(TSharedPtr<SWetnessProfileViewport::EPreviewMode> InMode, ESelectInfo::Type SelectInfo);
+    FText               GetPreviewModeText() const;
+    FText               GetPreviewModeText(SWetnessProfileViewport::EPreviewMode InMode) const;
 
     TSharedRef<SWidget> GeneratePreviewBehaviorWidget(TSharedPtr<SWetnessProfileViewport::EPreviewBehavior> InBehavior) const;
-    void HandlePreviewBehaviorChanged(TSharedPtr<SWetnessProfileViewport::EPreviewBehavior> InBehavior, ESelectInfo::Type SelectInfo);
-    FText GetPreviewBehaviorText() const;
-    FText GetPreviewBehaviorText(SWetnessProfileViewport::EPreviewBehavior InBehavior) const;
-    EVisibility GetManualControlsVisibility() const;
-    EVisibility GetSimulationControlsVisibility() const;
-    FReply HandlePlayPauseClicked();
-    FReply HandleRestartSimulationClicked();
-    FReply HandleApplySplashClicked();
-    const FSlateBrush* GetPlayPauseBrush() const;
-    FText GetPlayPauseToolTip() const;
-    FText GetSimulationTimeText() const;
-    bool IsSelectedWaterChannelEnabled() const;
-    ECheckBoxState GetAbsorbedLayerCheckState() const;
-    void HandleAbsorbedLayerCheckStateChanged(ECheckBoxState NewState);
-    bool IsAbsorbedLayerToggleEnabled() const;
-    FText GetAbsorbedLayerTooltip() const;
-    ECheckBoxState GetSurfaceLayerCheckState() const;
-    void HandleSurfaceLayerCheckStateChanged(ECheckBoxState NewState);
-    bool IsSurfaceLayerToggleEnabled() const;
-    FText GetSurfaceLayerTooltip() const;
-    ECheckBoxState GetDroplet1CheckState() const;
-    void HandleDroplet1CheckStateChanged(ECheckBoxState NewState);
-    ECheckBoxState GetDroplet2CheckState() const;
-    void HandleDroplet2CheckStateChanged(ECheckBoxState NewState);
-    EVisibility GetSurfaceDetailsVisibility() const;
-    EVisibility GetSecondaryDropletDisplayVisibility() const;
+    void                HandlePreviewBehaviorChanged(TSharedPtr<SWetnessProfileViewport::EPreviewBehavior> InBehavior, ESelectInfo::Type SelectInfo);
+    FText               GetPreviewBehaviorText() const;
+    FText               GetPreviewBehaviorText(SWetnessProfileViewport::EPreviewBehavior InBehavior) const;
+    EVisibility         GetManualControlsVisibility() const;
+    EVisibility         GetSimulationControlsVisibility() const;
+    FReply              HandlePlayPauseClicked();
+    FReply              HandleRestartSimulationClicked();
+    FReply              HandleApplySplashClicked();
+    const FSlateBrush*  GetPlayPauseBrush() const;
+    FText               GetPlayPauseToolTip() const;
+    FText               GetSimulationTimeText() const;
+    bool                IsSelectedWaterChannelEnabled() const;
+    ECheckBoxState      GetAbsorbedLayerCheckState() const;
+    void                HandleAbsorbedLayerCheckStateChanged(ECheckBoxState NewState);
+    bool                IsAbsorbedLayerToggleEnabled() const;
+    FText               GetAbsorbedLayerTooltip() const;
+    ECheckBoxState      GetSurfaceLayerCheckState() const;
+    void                HandleSurfaceLayerCheckStateChanged(ECheckBoxState NewState);
+    bool                IsSurfaceLayerToggleEnabled() const;
+    FText               GetSurfaceLayerTooltip() const;
+    ECheckBoxState      GetDroplet1CheckState() const;
+    void                HandleDroplet1CheckStateChanged(ECheckBoxState NewState);
+    ECheckBoxState      GetDroplet2CheckState() const;
+    void                HandleDroplet2CheckStateChanged(ECheckBoxState NewState);
+    EVisibility         GetSurfaceDetailsVisibility() const;
+    EVisibility         GetSecondaryDropletDisplayVisibility() const;
     TSharedRef<SWidget> GeneratePreviewSpeedWidget(TSharedPtr<float> InSpeed) const;
-    void HandlePreviewSpeedChanged(TSharedPtr<float> InSpeed, ESelectInfo::Type SelectInfo);
-    FText GetPreviewSpeedText() const;
-    ECheckBoxState GetLoopCheckState() const;
-    void HandleLoopCheckStateChanged(ECheckBoxState NewState);
+    void                HandlePreviewSpeedChanged(TSharedPtr<float> InSpeed, ESelectInfo::Type SelectInfo);
+    FText               GetPreviewSpeedText() const;
+    ECheckBoxState      GetLoopCheckState() const;
+    void                HandleLoopCheckStateChanged(ECheckBoxState NewState);
 
     void LoadPersistedPreviewSettings();
     void PersistPreviewDetailSizes();
     void ApplyPreviewSettingsToViewport();
     void ApplyPreviewLayerSettingsToViewport();
 
-private:
+  private:
     TWeakObjectPtr<UWetnessProfile> WetnessProfile;
     // Session-only mesh used by Preview Settings > Temporary Override.
     // Keep this weak because SWetnessProfileEditorPanel is not a UObject/GC owner.
-    TWeakObjectPtr<USkeletalMesh> TemporaryPreviewMesh;
-    TSharedPtr<IDetailsView> AbsorbedDetailsView;
-    TSharedPtr<IDetailsView> SurfaceDetailsView;
-    TAttribute<bool> HasWaterChannelSelectionAttribute;
-    TAttribute<bool> IsSurfaceWaterSelectedAttribute;
-    TSharedPtr<SWetnessProfileViewport> PreviewViewport;
-    TArray<TSharedPtr<SWetnessProfileViewport::EPreviewMode>> PreviewModeItems;
-    TSharedPtr<SWetnessProfileViewport::EPreviewMode> SelectedPreviewModeItem;
+    TWeakObjectPtr<USkeletalMesh>                                 TemporaryPreviewMesh;
+    TSharedPtr<IDetailsView>                                      AbsorbedDetailsView;
+    TSharedPtr<IDetailsView>                                      SurfaceDetailsView;
+    TAttribute<bool>                                              HasWaterChannelSelectionAttribute;
+    TAttribute<bool>                                              IsSurfaceWaterSelectedAttribute;
+    TSharedPtr<SWetnessProfileViewport>                           PreviewViewport;
+    TArray<TSharedPtr<SWetnessProfileViewport::EPreviewMode>>     PreviewModeItems;
+    TSharedPtr<SWetnessProfileViewport::EPreviewMode>             SelectedPreviewModeItem;
     TArray<TSharedPtr<SWetnessProfileViewport::EPreviewBehavior>> PreviewBehaviorItems;
-    TSharedPtr<SWetnessProfileViewport::EPreviewBehavior> SelectedPreviewBehaviorItem;
-    TArray<TSharedPtr<float>> PreviewSpeedItems;
-    TSharedPtr<float> SelectedPreviewSpeedItem;
+    TSharedPtr<SWetnessProfileViewport::EPreviewBehavior>         SelectedPreviewBehaviorItem;
+    TArray<TSharedPtr<float>>                                     PreviewSpeedItems;
+    TSharedPtr<float>                                             SelectedPreviewSpeedItem;
 
-    bool bPreviewAbsorbedLayerEnabled = true;
-    bool bPreviewSurfaceLayerEnabled = true;
-    bool bPreviewDroplet1Enabled = true;
-    bool bPreviewDroplet2Enabled = false;
+    bool  bPreviewAbsorbedLayerEnabled = true;
+    bool  bPreviewSurfaceLayerEnabled = true;
+    bool  bPreviewDroplet1Enabled = true;
+    bool  bPreviewDroplet2Enabled = false;
     float PreviewDroplet1DetailSize = 1.0f;
     float PreviewDroplet2DetailSize = 1.0f;
     float PreviewCursorScale = 1.0f;
-    bool bUseTemporaryPreviewMesh = false;
+    bool  bUseTemporaryPreviewMesh = false;
 };

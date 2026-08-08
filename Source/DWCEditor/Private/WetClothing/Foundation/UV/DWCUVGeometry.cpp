@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/UV/DWCUVGeometry.h"
 
 namespace DWCUVGeometryPrivate
@@ -12,7 +13,7 @@ namespace DWCUVGeometryPrivate
         const FVector2D& Point,
         const FVector2D& EdgeA,
         const FVector2D& EdgeB,
-        const double OrientationSign)
+        const double     OrientationSign)
     {
         return OrientationSign * Cross2D(EdgeB - EdgeA, Point - EdgeA);
     }
@@ -20,8 +21,8 @@ namespace DWCUVGeometryPrivate
     FVector2D IntersectSegmentWithClipEdge(
         const FVector2D& SegmentStart,
         const FVector2D& SegmentEnd,
-        const double StartDistance,
-        const double EndDistance)
+        const double     StartDistance,
+        const double     EndDistance)
     {
         const double Denominator = StartDistance - EndDistance;
         if (FMath::Abs(Denominator) <= 1.0e-12)
@@ -47,30 +48,30 @@ namespace DWCUVGeometryPrivate
         Polygon.Add(A2);
 
         const FVector2D ClipVertices[3] = { B0, B1, B2 };
-        const double ClipSignedDoubleArea = Cross2D(B1 - B0, B2 - B0);
+        const double    ClipSignedDoubleArea = Cross2D(B1 - B0, B2 - B0);
         if (FMath::Abs(ClipSignedDoubleArea) <= 1.0e-12)
         {
             return 0.0;
         }
 
-        const double OrientationSign = ClipSignedDoubleArea >= 0.0 ? 1.0 : -1.0;
+        const double     OrientationSign = ClipSignedDoubleArea >= 0.0 ? 1.0 : -1.0;
         constexpr double InsideTolerance = 1.0e-12;
 
         for (int32 ClipEdgeIndex = 0; ClipEdgeIndex < 3 && !Polygon.IsEmpty(); ++ClipEdgeIndex)
         {
-            const FVector2D EdgeA = ClipVertices[ClipEdgeIndex];
-            const FVector2D EdgeB = ClipVertices[(ClipEdgeIndex + 1) % 3];
+            const FVector2D                              EdgeA = ClipVertices[ClipEdgeIndex];
+            const FVector2D                              EdgeB = ClipVertices[(ClipEdgeIndex + 1) % 3];
             const TArray<FVector2D, TInlineAllocator<8>> InputPolygon = Polygon;
             Polygon.Reset();
 
             FVector2D Previous = InputPolygon.Last();
-            double PreviousDistance = SignedDistanceToEdge(Previous, EdgeA, EdgeB, OrientationSign);
-            bool bPreviousInside = PreviousDistance >= -InsideTolerance;
+            double    PreviousDistance = SignedDistanceToEdge(Previous, EdgeA, EdgeB, OrientationSign);
+            bool      bPreviousInside = PreviousDistance >= -InsideTolerance;
 
             for (const FVector2D& Current : InputPolygon)
             {
                 const double CurrentDistance = SignedDistanceToEdge(Current, EdgeA, EdgeB, OrientationSign);
-                const bool bCurrentInside = CurrentDistance >= -InsideTolerance;
+                const bool   bCurrentInside = CurrentDistance >= -InsideTolerance;
 
                 if (bCurrentInside != bPreviousInside)
                 {
@@ -104,7 +105,7 @@ namespace DWCUVGeometryPrivate
         }
         return FMath::Abs(SignedDoubleArea) * 0.5;
     }
-}
+} // namespace DWCUVGeometryPrivate
 
 double FDWCUVGeometry::ComputeTriangleArea2D(
     const FVector2D& A,

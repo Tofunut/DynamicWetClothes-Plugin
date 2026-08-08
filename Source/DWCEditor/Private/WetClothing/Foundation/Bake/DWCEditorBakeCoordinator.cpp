@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
 
 #include "Algo/Unique.h"
@@ -15,7 +16,7 @@
 namespace
 {
     DEFINE_LOG_CATEGORY_STATIC(LogDWCWrinkleBakeCoordinator, Log, All);
-    constexpr int32 DefaultWrinkleBakeMaxInFlightJobs = 2;
+    constexpr int32  DefaultWrinkleBakeMaxInFlightJobs = 2;
     constexpr uint64 DefaultWrinkleBakeMaxInFlightBytes = 512ull * 1024ull * 1024ull;
 
     TAutoConsoleVariable<int32> CVarDWCWrinkleBakeMaxInFlightJobs(
@@ -44,8 +45,9 @@ namespace
     {
         constexpr uint64 BytesPerMiB = 1024ull * 1024ull;
         return static_cast<uint64>(FMath::Max(
-            CVarDWCWrinkleBakeMaxInFlightMB.GetValueOnGameThread(),
-            1)) * BytesPerMiB;
+                   CVarDWCWrinkleBakeMaxInFlightMB.GetValueOnGameThread(),
+                   1)) *
+               BytesPerMiB;
     }
 
     struct FWrinkleBakeWorkerResult final : FDWCEditorWorkerJobResult
@@ -67,60 +69,64 @@ namespace
     {
         switch (Completion)
         {
-        case EDWCEditorWorkerJobCompletion::Canceled: return TEXT("canceled");
-        case EDWCEditorWorkerJobCompletion::Superseded: return TEXT("superseded by a newer request");
-        case EDWCEditorWorkerJobCompletion::Stale: return TEXT("discarded because the authored data changed");
-        case EDWCEditorWorkerJobCompletion::Failed: return TEXT("worker calculation failed");
-        default: return TEXT("completed");
+        case EDWCEditorWorkerJobCompletion::Canceled:
+            return TEXT("canceled");
+        case EDWCEditorWorkerJobCompletion::Superseded:
+            return TEXT("superseded by a newer request");
+        case EDWCEditorWorkerJobCompletion::Stale:
+            return TEXT("discarded because the authored data changed");
+        case EDWCEditorWorkerJobCompletion::Failed:
+            return TEXT("worker calculation failed");
+        default:
+            return TEXT("completed");
         }
     }
-}
+} // namespace
 
 struct FDWCEditorBakeCoordinator::FWrinkleBatch
 {
-    uint64 BatchId = 0;
-    int32 SubmittedCount = 0;
-    int32 FinishedCount = 0;
-    int32 BakedMapCount = 0;
-    int32 BakedPatchCount = 0;
-    int32 BakedStrokeCount = 0;
-    bool bSaveAfterCommit = false;
-    bool bCanceled = false;
-    bool bFinalized = false;
-    TArray<FString> NormalTextureNames;
-    TArray<FString> MaskTextureNames;
-    TArray<FString> Failures;
-    TArray<FDWCEditorWorkerJobTicket> Tickets;
-    TArray<int32> PendingMaterialSlotIndices;
-    FDWCEditorBakeMemoryBudget MemoryBudget;
-    FWetWrinkleNormalMapBakeSettings Settings;
+    uint64                                      BatchId = 0;
+    int32                                       SubmittedCount = 0;
+    int32                                       FinishedCount = 0;
+    int32                                       BakedMapCount = 0;
+    int32                                       BakedPatchCount = 0;
+    int32                                       BakedStrokeCount = 0;
+    bool                                        bSaveAfterCommit = false;
+    bool                                        bCanceled = false;
+    bool                                        bFinalized = false;
+    TArray<FString>                             NormalTextureNames;
+    TArray<FString>                             MaskTextureNames;
+    TArray<FString>                             Failures;
+    TArray<FDWCEditorWorkerJobTicket>           Tickets;
+    TArray<int32>                               PendingMaterialSlotIndices;
+    FDWCEditorBakeMemoryBudget                  MemoryBudget;
+    FWetWrinkleNormalMapBakeSettings            Settings;
     TUniquePtr<FWetWrinkleNormalMapBakeSession> SnapshotSession;
-    FCompletion Completion;
+    FCompletion                                 Completion;
 };
 
 struct FDWCEditorBakeCoordinator::FTransparencyBatch
 {
-    uint64 BatchId = 0;
-    int32 SubmittedCount = 0;
-    int32 FinishedCount = 0;
-    int32 BakedMapCount = 0;
-    int32 AppliedStrokeCount = 0;
-    int32 AppliedSampleCount = 0;
-    bool bSaveAfterCommit = false;
-    bool bCanceled = false;
-    bool bFinalized = false;
-    TArray<FString> TextureNames;
-    TArray<FString> Warnings;
-    TArray<FString> Failures;
+    uint64                            BatchId = 0;
+    int32                             SubmittedCount = 0;
+    int32                             FinishedCount = 0;
+    int32                             BakedMapCount = 0;
+    int32                             AppliedStrokeCount = 0;
+    int32                             AppliedSampleCount = 0;
+    bool                              bSaveAfterCommit = false;
+    bool                              bCanceled = false;
+    bool                              bFinalized = false;
+    TArray<FString>                   TextureNames;
+    TArray<FString>                   Warnings;
+    TArray<FString>                   Failures;
     TArray<FDWCEditorWorkerJobTicket> Tickets;
-    FCompletion Completion;
+    FCompletion                       Completion;
 };
 
 FDWCEditorBakeCoordinator::FDWCEditorBakeCoordinator(
-    UWetClothingAsset* InAsset,
+    UWetClothingAsset*                                            InAsset,
     TSharedRef<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> InScheduler)
-    : Asset(InAsset)
-    , Scheduler(InScheduler)
+    : Asset(InAsset), Scheduler(InScheduler)
 {
 }
 
@@ -132,9 +138,9 @@ FDWCEditorBakeCoordinator::~FDWCEditorBakeCoordinator()
 
 bool FDWCEditorBakeCoordinator::RequestWrinkleBake(
     TArray<int32> MaterialSlotIndices,
-    const bool bSaveAfterCommit,
-    FCompletion Completion,
-    FString* OutError)
+    const bool    bSaveAfterCommit,
+    FCompletion   Completion,
+    FString*      OutError)
 {
     check(IsInGameThread());
     if (OutError != nullptr)
@@ -144,7 +150,8 @@ bool FDWCEditorBakeCoordinator::RequestWrinkleBake(
     UWetClothingAsset* TargetAsset = Asset.Get();
     if (TargetAsset == nullptr || !Scheduler.IsValid())
     {
-        if (OutError != nullptr) *OutError = TEXT("The bake asset or worker scheduler is unavailable.");
+        if (OutError != nullptr)
+            *OutError = TEXT("The bake asset or worker scheduler is unavailable.");
         return false;
     }
 
@@ -153,7 +160,8 @@ bool FDWCEditorBakeCoordinator::RequestWrinkleBake(
     MaterialSlotIndices.Remove(INDEX_NONE);
     if (MaterialSlotIndices.IsEmpty())
     {
-        if (OutError != nullptr) *OutError = TEXT("No material slots were provided for wrinkle baking.");
+        if (OutError != nullptr)
+            *OutError = TEXT("No material slots were provided for wrinkle baking.");
         return false;
     }
 
@@ -183,8 +191,8 @@ bool FDWCEditorBakeCoordinator::RequestWrinkleBake(
     // that tier even when the user configured a higher general job count.
     const int32 RequestedMaxInFlightJobs = ResolveWrinkleBakeMaxInFlightJobs();
     const int32 ResolutionBoundMaxInFlightJobs = Batch->Settings.Resolution >= 4096
-        ? 1
-        : RequestedMaxInFlightJobs;
+                                                     ? 1
+                                                     : RequestedMaxInFlightJobs;
     Batch->MemoryBudget.Configure(
         ResolutionBoundMaxInFlightJobs,
         ResolveWrinkleBakeMaxInFlightBytes());
@@ -208,7 +216,7 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
     }
 
     TWeakPtr<FDWCEditorBakeCoordinator> WeakThis = AsShared();
-    bool bSubmittedAny = false;
+    bool                                bSubmittedAny = false;
     while (Batch->MemoryBudget.HasJobCapacity() &&
            !Batch->PendingMaterialSlotIndices.IsEmpty())
     {
@@ -266,7 +274,7 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
         Descriptor.MemoryEstimate.SnapshotBytes = Descriptor.EstimatedBytes;
         Descriptor.DebugName = FString::Printf(TEXT("Wrinkle bake slot %d"), MaterialSlotIndex);
 
-        FString SubmitError;
+        FString                         SubmitError;
         const FDWCEditorWorkerJobTicket Ticket = Scheduler->Submit(
             Descriptor,
             [Snapshot](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& Token)
@@ -283,7 +291,7 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
                 const FDWCEditorWorkerJobTicket&,
                 TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
             {
-                const TSharedPtr<FDWCEditorBakeCoordinator> Self = WeakThis.Pin();
+                const TSharedPtr<FDWCEditorBakeCoordinator>                     Self = WeakThis.Pin();
                 const TSharedPtr<FWrinkleBakeWorkerResult, ESPMode::ThreadSafe> Result =
                     StaticCastSharedPtr<FWrinkleBakeWorkerResult>(BaseResult);
                 UWetClothingAsset* CurrentAsset = Self.IsValid() ? Self->Asset.Get() : nullptr;
@@ -293,7 +301,7 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
                 }
 
                 FWetWrinkleNormalMapBakeResult CommitResult;
-                FString CommitError;
+                FString                        CommitError;
                 if (!FWetWrinkleNormalMapBaker::CommitComputedResult(
                         CurrentAsset,
                         *Snapshot,
@@ -320,7 +328,7 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
             [WeakThis, Batch, MaterialSlotIndex, SnapshotBytes](
                 const FDWCEditorWorkerJobTicket&,
                 const EDWCEditorWorkerJobCompletion JobCompletion,
-                const FString& WorkerError)
+                const FString&                      WorkerError)
             {
                 if (const TSharedPtr<FDWCEditorBakeCoordinator> Self = WeakThis.Pin())
                 {
@@ -349,10 +357,10 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
 
 void FDWCEditorBakeCoordinator::HandleWrinkleJobFinished(
     const TSharedRef<FWrinkleBatch>& Batch,
-    const int32 MaterialSlotIndex,
-    const uint64 SnapshotBytes,
-    const uint8 CompletionCode,
-    const FString& WorkerError)
+    const int32                      MaterialSlotIndex,
+    const uint64                     SnapshotBytes,
+    const uint8                      CompletionCode,
+    const FString&                   WorkerError)
 {
     check(IsInGameThread());
     const EDWCEditorWorkerJobCompletion Completion =
@@ -362,11 +370,11 @@ void FDWCEditorBakeCoordinator::HandleWrinkleJobFinished(
     if (Completion != EDWCEditorWorkerJobCompletion::Applied)
     {
         Batch->bCanceled |= Completion == EDWCEditorWorkerJobCompletion::Canceled ||
-            Completion == EDWCEditorWorkerJobCompletion::Superseded ||
-            Completion == EDWCEditorWorkerJobCompletion::Stale;
+                            Completion == EDWCEditorWorkerJobCompletion::Superseded ||
+                            Completion == EDWCEditorWorkerJobCompletion::Stale;
         const FString FailureReason = WorkerError.IsEmpty()
-            ? DescribeCompletion(Completion)
-            : WorkerError;
+                                          ? DescribeCompletion(Completion)
+                                          : WorkerError;
         Batch->Failures.Add(FString::Printf(
             TEXT("Slot %d: %s"),
             MaterialSlotIndex,
@@ -420,7 +428,7 @@ void FDWCEditorBakeCoordinator::FinalizeWrinkleBatch(const TSharedRef<FWrinkleBa
     }
 
     UWetClothingAsset* TargetAsset = Asset.Get();
-    bool bSaved = true;
+    bool               bSaved = true;
     if (TargetAsset != nullptr)
     {
         FWetWrinkleBakeService::RefreshBakeStatusFromCurrentOutputs(
@@ -470,21 +478,24 @@ void FDWCEditorBakeCoordinator::FinalizeWrinkleBatch(const TSharedRef<FWrinkleBa
 
 bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
     TArray<FGuid> LayerGuids,
-    const bool bSaveAfterCommit,
-    FCompletion Completion,
-    FString* OutError)
+    const bool    bSaveAfterCommit,
+    FCompletion   Completion,
+    FString*      OutError)
 {
     check(IsInGameThread());
-    if (OutError != nullptr) OutError->Reset();
+    if (OutError != nullptr)
+        OutError->Reset();
     UWetClothingAsset* TargetAsset = Asset.Get();
     if (TargetAsset == nullptr || !Scheduler.IsValid())
     {
-        if (OutError != nullptr) *OutError = TEXT("The bake asset or worker scheduler is unavailable.");
+        if (OutError != nullptr)
+            *OutError = TEXT("The bake asset or worker scheduler is unavailable.");
         return false;
     }
     if (LayerGuids.IsEmpty())
     {
-        if (OutError != nullptr) *OutError = TEXT("No transparency layers were provided for baking.");
+        if (OutError != nullptr)
+            *OutError = TEXT("No transparency layers were provided for baking.");
         return false;
     }
 
@@ -522,7 +533,7 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
         {
             TSharedRef<FDWCTransparencyAutoBakeResult> AutoResult =
                 MakeShared<FDWCTransparencyAutoBakeResult>();
-            FString GenerateSummary;
+            FString         GenerateSummary;
             TArray<FString> GenerateWarnings;
             if (!FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
                     *TargetAsset,
@@ -584,9 +595,9 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
         TSharedRef<FString, ESPMode::ThreadSafe> FinalSubmitErrorHolder =
             MakeShared<FString, ESPMode::ThreadSafe>();
         TWeakPtr<FDWCEditorBakeCoordinator> WeakThis = AsShared();
-        const int32 MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
-        FString SubmitError;
-        const FDWCEditorWorkerJobTicket Ticket = Scheduler->Submit(
+        const int32                         MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
+        FString                             SubmitError;
+        const FDWCEditorWorkerJobTicket     Ticket = Scheduler->Submit(
             Descriptor,
             [AutoSnapshot](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& Token)
             {
@@ -604,7 +615,7 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
                 const FDWCEditorWorkerJobTicket&,
                 TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
             {
-                const TSharedPtr<FDWCEditorBakeCoordinator> Self = WeakThis.Pin();
+                const TSharedPtr<FDWCEditorBakeCoordinator>                              Self = WeakThis.Pin();
                 const TSharedPtr<FTransparencyAutoBakeWorkerResult, ESPMode::ThreadSafe> Result =
                     StaticCastSharedPtr<FTransparencyAutoBakeWorkerResult>(BaseResult);
                 if (!Self.IsValid() || !Result.IsValid())
@@ -636,7 +647,7 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
             [WeakThis, Batch, bFinalSubmitted, FinalSubmitErrorHolder, MaterialSlotIndex](
                 const FDWCEditorWorkerJobTicket&,
                 const EDWCEditorWorkerJobCompletion JobCompletion,
-                const FString& WorkerError)
+                const FString&                      WorkerError)
             {
                 if (JobCompletion == EDWCEditorWorkerJobCompletion::Applied && *bFinalSubmitted)
                 {
@@ -673,17 +684,19 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
 }
 
 bool FDWCEditorBakeCoordinator::RequestTransparencyFinalBake(
-    const FGuid LayerGuid,
+    const FGuid                                      LayerGuid,
     TSharedRef<const FDWCTransparencyAutoBakeResult> AutoResult,
-    const bool bSaveAfterCommit,
-    FCompletion Completion,
-    FString* OutError)
+    const bool                                       bSaveAfterCommit,
+    FCompletion                                      Completion,
+    FString*                                         OutError)
 {
     check(IsInGameThread());
-    if (OutError != nullptr) OutError->Reset();
+    if (OutError != nullptr)
+        OutError->Reset();
     if (ActiveTransparencyBatch.IsValid())
     {
-        if (OutError != nullptr) *OutError = TEXT("A transparency bake is already in progress.");
+        if (OutError != nullptr)
+            *OutError = TEXT("A transparency bake is already in progress.");
         return false;
     }
     TSharedRef<FTransparencyBatch> Batch = MakeShared<FTransparencyBatch>();
@@ -699,18 +712,19 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyFinalBake(
         {
             ActiveTransparencyBatch.Reset();
         }
-        if (OutError != nullptr) *OutError = SubmitError;
+        if (OutError != nullptr)
+            *OutError = SubmitError;
         return false;
     }
     return true;
 }
 
 bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
-    const TSharedRef<FTransparencyBatch>& Batch,
-    const FGuid LayerGuid,
+    const TSharedRef<FTransparencyBatch>&            Batch,
+    const FGuid                                      LayerGuid,
     TSharedRef<const FDWCTransparencyAutoBakeResult> AutoResult,
-    FString& OutError,
-    const bool bCountAsBatchJob)
+    FString&                                         OutError,
+    const bool                                       bCountAsBatchJob)
 {
     UWetClothingAsset* TargetAsset = Asset.Get();
     if (TargetAsset == nullptr || !Scheduler.IsValid())
@@ -757,8 +771,8 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
         Snapshot->GetMaterialSlotIndex());
 
     TWeakPtr<FDWCEditorBakeCoordinator> WeakThis = AsShared();
-    const int32 MaterialSlotIndex = Snapshot->GetMaterialSlotIndex();
-    const FDWCEditorWorkerJobTicket Ticket = Scheduler->Submit(
+    const int32                         MaterialSlotIndex = Snapshot->GetMaterialSlotIndex();
+    const FDWCEditorWorkerJobTicket     Ticket = Scheduler->Submit(
         Descriptor,
         [Snapshot](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& Token)
         {
@@ -774,7 +788,7 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
             const FDWCEditorWorkerJobTicket&,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
-            const TSharedPtr<FDWCEditorBakeCoordinator> Self = WeakThis.Pin();
+            const TSharedPtr<FDWCEditorBakeCoordinator>                          Self = WeakThis.Pin();
             const TSharedPtr<FTransparencyBakeWorkerResult, ESPMode::ThreadSafe> Result =
                 StaticCastSharedPtr<FTransparencyBakeWorkerResult>(BaseResult);
             UWetClothingAsset* CurrentAsset = Self.IsValid() ? Self->Asset.Get() : nullptr;
@@ -794,7 +808,7 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
                 return;
             }
             FDWCTransparencyEditedMapBakeResult CommitResult;
-            FString CommitError;
+            FString                             CommitError;
             if (!FDWCTransparencyEditedMapBaker::CommitComputedResult(
                     *CurrentAsset,
                     *Snapshot,
@@ -834,7 +848,7 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
         [WeakThis, Batch, MaterialSlotIndex](
             const FDWCEditorWorkerJobTicket&,
             const EDWCEditorWorkerJobCompletion JobCompletion,
-            const FString& WorkerError)
+            const FString&                      WorkerError)
         {
             if (const TSharedPtr<FDWCEditorBakeCoordinator> Self = WeakThis.Pin())
             {
@@ -859,9 +873,9 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
 
 void FDWCEditorBakeCoordinator::HandleTransparencyJobFinished(
     const TSharedRef<FTransparencyBatch>& Batch,
-    const int32 MaterialSlotIndex,
-    const uint8 CompletionCode,
-    const FString& WorkerError)
+    const int32                           MaterialSlotIndex,
+    const uint8                           CompletionCode,
+    const FString&                        WorkerError)
 {
     check(IsInGameThread());
     const EDWCEditorWorkerJobCompletion Completion =
@@ -870,11 +884,11 @@ void FDWCEditorBakeCoordinator::HandleTransparencyJobFinished(
     if (Completion != EDWCEditorWorkerJobCompletion::Applied)
     {
         Batch->bCanceled |= Completion == EDWCEditorWorkerJobCompletion::Canceled ||
-            Completion == EDWCEditorWorkerJobCompletion::Superseded ||
-            Completion == EDWCEditorWorkerJobCompletion::Stale;
+                            Completion == EDWCEditorWorkerJobCompletion::Superseded ||
+                            Completion == EDWCEditorWorkerJobCompletion::Stale;
         const FString FailureReason = WorkerError.IsEmpty()
-            ? DescribeCompletion(Completion)
-            : WorkerError;
+                                          ? DescribeCompletion(Completion)
+                                          : WorkerError;
         Batch->Failures.Add(FString::Printf(
             TEXT("Slot %d: %s"),
             MaterialSlotIndex,
@@ -900,7 +914,7 @@ void FDWCEditorBakeCoordinator::FinalizeTransparencyBatch(
         return;
     }
     UWetClothingAsset* TargetAsset = Asset.Get();
-    bool bSaved = true;
+    bool               bSaved = true;
     if (TargetAsset != nullptr)
     {
         if (Batch->BakedMapCount > 0)
@@ -959,7 +973,7 @@ void FDWCEditorBakeCoordinator::FinalizeTransparencyBatch(
 void FDWCEditorBakeCoordinator::CancelAll()
 {
     check(IsInGameThread());
-    const TSharedPtr<FWrinkleBatch> WrinkleBatch = ActiveWrinkleBatch;
+    const TSharedPtr<FWrinkleBatch>      WrinkleBatch = ActiveWrinkleBatch;
     const TSharedPtr<FTransparencyBatch> TransparencyBatch = ActiveTransparencyBatch;
     if (WrinkleBatch.IsValid())
     {

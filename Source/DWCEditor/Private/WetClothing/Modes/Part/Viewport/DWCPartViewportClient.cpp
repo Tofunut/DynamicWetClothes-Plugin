@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCPartViewportClient.h"
 
 #include "AdvancedPreviewScene.h"
@@ -12,7 +13,7 @@
 #include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
 
 FDWCPartViewportClient::FDWCPartViewportClient(
-    FAdvancedPreviewScene*                       InPreviewScene,
+    FAdvancedPreviewScene*              InPreviewScene,
     const TSharedRef<SDWCPartViewport>& InViewportWidget)
     : FEditorViewportClient(
           nullptr,
@@ -90,13 +91,13 @@ void FDWCPartViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitProxy,
     FVector RayDirection = FVector::ForwardVector;
     View.DeprojectFVector2D(FVector2D(HitX, HitY), RayOrigin, RayDirection);
 
-    const FVector RayEnd = RayOrigin + RayDirection * 1000000.0f;
+    const FVector    RayEnd = RayOrigin + RayDirection * 1000000.0f;
     const FTransform ComponentTransform = MeshComponent->GetComponentTransform();
-    const FVector LocalRayOrigin = ComponentTransform.InverseTransformPosition(RayOrigin);
-    const FVector LocalRayEnd = ComponentTransform.InverseTransformPosition(RayEnd);
-    const FVector LocalRayDirection = LocalRayEnd - LocalRayOrigin;
+    const FVector    LocalRayOrigin = ComponentTransform.InverseTransformPosition(RayOrigin);
+    const FVector    LocalRayEnd = ComponentTransform.InverseTransformPosition(RayEnd);
+    const FVector    LocalRayDirection = LocalRayEnd - LocalRayOrigin;
 
-    int32 PickedUVIslandID = INDEX_NONE;
+    int32  PickedUVIslandID = INDEX_NONE;
     double ClosestDistanceSq = TNumericLimits<double>::Max();
 
     TArray<int32, TInlineAllocator<64>> NodeStack;
@@ -147,8 +148,8 @@ void FDWCPartViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitProxy,
             }
 
             const FPickTriangle& Triangle = PickTriangles[TriangleIndex];
-            FVector LocalIntersectionPoint = FVector::ZeroVector;
-            FVector TriangleNormal = FVector::ZeroVector;
+            FVector              LocalIntersectionPoint = FVector::ZeroVector;
+            FVector              TriangleNormal = FVector::ZeroVector;
             if (!FMath::SegmentTriangleIntersection(
                     LocalRayOrigin,
                     LocalRayEnd,
@@ -169,7 +170,6 @@ void FDWCPartViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitProxy,
             }
         }
     }
-
 
     if (PickedUVIslandID != INDEX_NONE)
     {
@@ -194,7 +194,7 @@ void FDWCPartViewportClient::FocusOnPreviewMesh(const USkeletalMeshComponent* In
         static_cast<float>(Bounds.BoxExtent.Y),
         static_cast<float>(Bounds.BoxExtent.Z));
     Radius = FMath::Max(Radius, static_cast<float>(Bounds.SphereRadius));
-    Radius = FMath::Max(Radius, MinimumFocusRadius);
+    Radius = FMath::Max(Radius, static_cast<float>(MinimumFocusRadius));
 
     float AspectToUse = AspectRatio;
     if (Viewport != nullptr)
@@ -234,7 +234,7 @@ int32 FDWCPartViewportClient::BuildPickBVHNode(
     const int32 FirstTriangle,
     const int32 TriangleCount)
 {
-    const int32 NodeIndex = PickBVHNodes.AddDefaulted();
+    const int32   NodeIndex = PickBVHNodes.AddDefaulted();
     FPickBVHNode& Node = PickBVHNodes[NodeIndex];
     Node.FirstTriangle = FirstTriangle;
     Node.TriangleCount = TriangleCount;
@@ -256,7 +256,7 @@ int32 FDWCPartViewportClient::BuildPickBVHNode(
     }
 
     const FVector Extent = CentroidBounds.GetExtent();
-    int32 SplitAxis = 0;
+    int32         SplitAxis = 0;
     if (Extent.Y > Extent.X && Extent.Y >= Extent.Z)
     {
         SplitAxis = 1;
@@ -335,7 +335,7 @@ void FDWCPartViewportClient::RebuildPickBVH(
 
 void FDWCPartViewportClient::SetPickableIslands(
     const TArray<FWetClothingAssetUVIsland>& InIslands,
-    const uint32 TopologyCacheKey)
+    const uint32                             TopologyCacheKey)
 {
     if (TopologyCacheKey != 0 && ActivePickTopologyCacheKey == TopologyCacheKey)
     {

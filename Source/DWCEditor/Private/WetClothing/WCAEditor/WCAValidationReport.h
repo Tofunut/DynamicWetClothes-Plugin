@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -48,27 +49,27 @@ enum class EWCAValidationFixKind : uint8
 
 struct FWCAValidationIssue
 {
-    FName IssueId;
+    FName                  IssueId;
     EWCAValidationSeverity Severity = EWCAValidationSeverity::Info;
-    EWCAValidationSection Section = EWCAValidationSection::RenderProfileData;
-    EWCAValidationFixKind FixKind = EWCAValidationFixKind::None;
-    FText Title;
-    FText Status;
-    FText Detail;
-    FText RequiredAction;
+    EWCAValidationSection  Section = EWCAValidationSection::RenderProfileData;
+    EWCAValidationFixKind  FixKind = EWCAValidationFixKind::None;
+    FText                  Title;
+    FText                  Status;
+    FText                  Detail;
+    FText                  RequiredAction;
     /** Optional short context such as "Slot 3", "WP_Metal", or a transparency layer name. */
     FText ContextLabel;
-    bool bFailed = false;
+    bool  bFailed = false;
 };
 
 struct FWCAValidationReport
 {
-    TArray<FWCAValidationIssue> Issues;
+    TArray<FWCAValidationIssue>   Issues;
     FDWCTriangleValidationSummary Diagnostics;
 
-    bool HasIssues() const { return !Issues.IsEmpty(); }
-    bool HasManualIssues() const;
-    bool HasAutoResolvableIssues() const;
+    bool    HasIssues() const { return !Issues.IsEmpty(); }
+    bool    HasManualIssues() const;
+    bool    HasAutoResolvableIssues() const;
     FString BuildSummary() const;
     FString BuildManualIssueSummary() const;
 };
@@ -76,4 +77,4 @@ struct FWCAValidationReport
 FWCAValidationReport BuildWCAValidationReport(
     UWetClothingAsset& Asset,
     EWCAValidationMode Mode,
-    bool bRefreshAssetState);
+    bool               bRefreshAssetState);

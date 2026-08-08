@@ -1,4 +1,4 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
 
 #include "RuntimeState/Utils/WetInputStage.h"
 
@@ -56,14 +56,14 @@ namespace
         const FVector& WorldNormal,
         const FVector& Direction,
         const FVector& Normal,
-        const float ExposureMin,
-        const float ExposureMax)
+        const float    ExposureMin,
+        const float    ExposureMax)
     {
         float Exposure = 1.0f;
 
         if (!Direction.IsNearlyZero())
         {
-            const float Facing = FVector::DotProduct(WorldNormal, -Direction.GetSafeNormal());
+            const float Facing = static_cast<float>(FVector::DotProduct(WorldNormal, -Direction.GetSafeNormal()));
             Exposure *= FMath::SmoothStep(
                 FMath::Min(ExposureMin, ExposureMax - KINDA_SMALL_NUMBER),
                 FMath::Max(ExposureMax, ExposureMin + KINDA_SMALL_NUMBER),
@@ -72,7 +72,7 @@ namespace
 
         if (!Normal.IsNearlyZero())
         {
-            Exposure *= FMath::Clamp(FVector::DotProduct(WorldNormal, Normal.GetSafeNormal()), 0.0f, 1.0f);
+            Exposure *= FMath::Clamp(static_cast<float>(FVector::DotProduct(WorldNormal, Normal.GetSafeNormal())), 0.0f, 1.0f);
         }
 
         return Exposure;
@@ -154,8 +154,8 @@ namespace
 
     struct FWaterInputVertexSample
     {
-        int32 VertexIndex = INDEX_NONE;
-        float Influence = 0.0f;
+        int32                            VertexIndex = INDEX_NONE;
+        float                            Influence = 0.0f;
         const FWetnessProfileParameters* Profile = nullptr;
     };
 
@@ -200,9 +200,9 @@ namespace
     }
 
     bool ResolveBoneCandidateContact(
-        FWetInputStageArgs&             Receiver,
-        const FDWCWetContact&           Contact,
-        FResolvedBoneCandidateContact&  OutResolvedContact)
+        FWetInputStageArgs&            Receiver,
+        const FDWCWetContact&          Contact,
+        FResolvedBoneCandidateContact& OutResolvedContact)
     {
         OutResolvedContact = FResolvedBoneCandidateContact();
         OutResolvedContact.Contact = &Contact;
@@ -255,7 +255,7 @@ namespace
         const FVector&                   WorldPosition,
         float&                           OutInfluence)
     {
-        const float DistanceSquared = FVector::DistSquared(WorldPosition, Evaluation.Contact.Location);
+        const float DistanceSquared = static_cast<float>(FVector::DistSquared(WorldPosition, Evaluation.Contact.Location));
         if (DistanceSquared > Evaluation.SafeRadiusSquared)
         {
             return false;
@@ -305,8 +305,8 @@ namespace
             }
         }
 
-        const float BackfaceDepth =
-            FVector::DotProduct(Evaluation.Contact.Location - WorldPosition, Evaluation.SafeNormal);
+        const float BackfaceDepth = static_cast<float>(
+            FVector::DotProduct(Evaluation.Contact.Location - WorldPosition, Evaluation.SafeNormal));
         const float BackfaceDepthTolerance = FMath::Max(
             Receiver.WetnessSettings->WetContactBackfaceDepthTolerance,
             Evaluation.SafeRadius * Receiver.WetnessSettings->WetContactBackfaceDepthRadiusScale);
@@ -315,9 +315,9 @@ namespace
     }
 
     float RouteAbsorbedWater(
-        FWetInputStageArgs& Receiver,
+        FWetInputStageArgs&            Receiver,
         const FWaterInputVertexSample& Sample,
-        const float IncomingAmount)
+        const float                    IncomingAmount)
     {
         if (!Sample.Profile || !Receiver.RuntimeData->SupportsAbsorbedWetness(Sample.VertexIndex))
         {
@@ -340,9 +340,9 @@ namespace
 
     void InitializeWaterSample(
         const FWetInputStageArgs& Receiver,
-        const int32 VertexIndex,
-        const float Influence,
-        FWaterInputVertexSample& OutSample)
+        const int32               VertexIndex,
+        const float               Influence,
+        FWaterInputVertexSample&  OutSample)
     {
         OutSample.VertexIndex = VertexIndex;
         OutSample.Influence = Influence;
@@ -350,12 +350,12 @@ namespace
     }
 
     bool ApplyWaterSamples(
-        FWetInputStageArgs& Receiver,
-        const float InputAmount,
+        FWetInputStageArgs&                    Receiver,
+        const float                            InputAmount,
         const TArray<FWaterInputVertexSample>& Samples,
-        const bool bNormalizePositiveInfluence,
-        bool& bDirty,
-        bool& bQueuedWetness)
+        const bool                             bNormalizePositiveInfluence,
+        bool&                                  bDirty,
+        bool&                                  bQueuedWetness)
     {
         if (Samples.IsEmpty())
         {
@@ -392,7 +392,7 @@ namespace
         for (const FWaterInputVertexSample& Sample : Samples)
         {
             const float IncomingAmount = InputAmount *
-                (bNormalizePositiveInfluence ? Sample.Influence / TotalInfluence : Sample.Influence);
+                                         (bNormalizePositiveInfluence ? Sample.Influence / TotalInfluence : Sample.Influence);
             if (RouteAbsorbedWater(Receiver, Sample, IncomingAmount) > 0.0f)
             {
                 bQueuedWetness = true;
@@ -418,7 +418,7 @@ namespace
         const FWetContactEvaluationData Evaluation(Contact);
 
         TArray<FWaterInputVertexSample> Samples;
-        auto ApplyVertex = [&](const int32 VertexIndex)
+        auto                            ApplyVertex = [&](const int32 VertexIndex)
         {
             if (!Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(VertexIndex) ||
                 !Receiver.RuntimeData ||
@@ -442,7 +442,8 @@ namespace
             if (PreparedData.bHasNormals && Receiver.MeshSampler->CachedSkinnedNormals.IsValidIndex(VertexIndex))
             {
                 WorldNormal = PreparedData.ComponentTransform.TransformVectorNoScale(
-                    FVector(Receiver.MeshSampler->CachedSkinnedNormals[VertexIndex])).GetSafeNormal();
+                                                                 FVector(Receiver.MeshSampler->CachedSkinnedNormals[VertexIndex]))
+                                  .GetSafeNormal();
                 WorldNormalPtr = &WorldNormal;
             }
 
@@ -599,8 +600,8 @@ float FWetInputStage::CalculateAreaExposure(
 
 bool FWetInputStage::CanApplyWetAreaToVertex(
     const FWetInputStageArgs& Args,
-    const FDWCWetAreaData& AreaData,
-    const int32 VertexIndex)
+    const FDWCWetAreaData&    AreaData,
+    const int32               VertexIndex)
 {
     if (!Args.SimulationState ||
         !Args.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
@@ -620,14 +621,14 @@ bool FWetInputStage::CanApplyWetAreaToVertex(
 }
 
 float FWetInputStage::CalculateWetAreaRawExposure(
-    const FWetInputStageArgs& Args,
+    const FWetInputStageArgs&         Args,
     const FSkeletalMeshLODRenderData& LODData,
-    const FTransform& ComponentTransform,
-    const FVector& SafeDirection,
-    const FVector& SafeNormal,
-    const bool bWantsNormalExposure,
-    const bool bHasSkinnedNormals,
-    const int32 VertexIndex)
+    const FTransform&                 ComponentTransform,
+    const FVector&                    SafeDirection,
+    const FVector&                    SafeNormal,
+    const bool                        bWantsNormalExposure,
+    const bool                        bHasSkinnedNormals,
+    const int32                       VertexIndex)
 {
     if (!bWantsNormalExposure)
     {
@@ -666,7 +667,7 @@ float FWetInputStage::CalculateWetAreaRawExposure(
 
 int32 FWetInputStage::SelectWetAreaCandidateIndex(
     const TArray<FWetAreaCandidate>& Candidates,
-    FRandomStream& RandomStream)
+    FRandomStream&                   RandomStream)
 {
     float TotalPickWeight = 0.0f;
     for (const FWetAreaCandidate& Candidate : Candidates)
@@ -679,7 +680,7 @@ int32 FWetInputStage::SelectWetAreaCandidateIndex(
         return Candidates.IsEmpty() ? INDEX_NONE : RandomStream.RandRange(0, Candidates.Num() - 1);
     }
 
-    float PickValue = RandomStream.FRandRange(0.0f, TotalPickWeight);
+    float PickValue = static_cast<float>(RandomStream.FRandRange(0.0f, TotalPickWeight));
     for (int32 CandidateIndex = 0; CandidateIndex < Candidates.Num(); ++CandidateIndex)
     {
         PickValue -= Candidates[CandidateIndex].PickWeight;
@@ -705,8 +706,8 @@ void FWetInputStage::ApplyWetAll(FWetInputStageArgs& Receiver, float Amount)
         return;
     }
 
-    bool bDirty = false;
-    bool bQueuedWetness = false;
+    bool                            bDirty = false;
+    bool                            bQueuedWetness = false;
     TArray<FWaterInputVertexSample> Samples;
     Samples.Reserve(Receiver.SimulationState->AbsorbedWetnessPerVertex.Num());
 
@@ -760,20 +761,20 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
         FWetRuntimeDataBuilder::EnsureWetnessBufferSize(Receiver, Receiver.MeshSampler->CachedSkinnedPositions.Num());
     }
 
-    bool             bDirty = false;
-    bool             bQueuedWetness = false;
+    bool                            bDirty = false;
+    bool                            bQueuedWetness = false;
     TArray<FWaterInputVertexSample> Samples;
     Samples.Reserve(Receiver.MeshSampler->CachedSkinnedPositions.Num());
     const FTransform ComponentTransform = Receiver.TargetSkeletalMesh->GetComponentTransform();
     const int32      VertexCount = Receiver.MeshSampler->CachedSkinnedPositions.Num();
 
-    constexpr int32 ChunkVertexCount = 512;
-    const int32 ChunkCount = FMath::DivideAndRoundUp(VertexCount, ChunkVertexCount);
+    constexpr int32                      ChunkVertexCount = 512;
+    const int32                          ChunkCount = FMath::DivideAndRoundUp(VertexCount, ChunkVertexCount);
     TArray<TArray<FWetSurfaceVertexHit>> ChunkHits;
     ChunkHits.SetNum(ChunkCount);
 
     ParallelFor(ChunkCount, [&Receiver, &WaterSurfaceData, EffectiveAmount, ComponentTransform, &ChunkHits, VertexCount](const int32 ChunkIndex)
-    {
+                {
         const int32 BeginVertexIndex = ChunkIndex * ChunkVertexCount;
         const int32 EndVertexIndex = FMath::Min(BeginVertexIndex + ChunkVertexCount, VertexCount);
         TArray<FWetSurfaceVertexHit>& LocalHits = ChunkHits[ChunkIndex];
@@ -805,8 +806,7 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
             }
 
             LocalHits.Add({VertexIndex, EffectiveAmount});
-        }
-    });
+        } });
 
     for (const TArray<FWetSurfaceVertexHit>& LocalHits : ChunkHits)
     {
@@ -836,7 +836,7 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
     }
 
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    constexpr int32             RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     if (!FWetRuntimeDataBuilder::GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) || !LODData)
     {
         return false;
@@ -877,8 +877,8 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
         RandomStream.GenerateNewSeed();
     }
 
-    bool bDirty = false;
-    bool bQueuedWetness = false;
+    bool                            bDirty = false;
+    bool                            bQueuedWetness = false;
     TArray<FWaterInputVertexSample> Samples;
     Samples.Reserve(SamplesToProcess);
 
@@ -968,10 +968,9 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
                                            ? FMath::Clamp(Receiver.WetnessSettings->AreaExposureMinInfluence, 0.0f, 1.0f)
                                            : 0.05f;
             const float EffectiveExposure = FMath::Clamp(RawExposure, MinInfluence, 1.0f);
-            Candidates.Add({
-                VertexIndex,
-                EffectiveExposure,
-                FMath::Pow(EffectiveExposure, WetAreaNormalExposurePickPower)});
+            Candidates.Add({ VertexIndex,
+                             EffectiveExposure,
+                             FMath::Pow(EffectiveExposure, WetAreaNormalExposurePickPower) });
         }
 
         const int32 PickCount = FMath::Min(SamplesToProcess, Candidates.Num());
@@ -1017,7 +1016,7 @@ bool FWetInputStage::ApplyWetContact(
     if (!ResolvedContact.bUseFullVertexFallback)
     {
         FSkeletalMeshLODRenderData*    LODData = nullptr;
-        constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+        constexpr int32                RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
         const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(RuntimeLODIndex);
         if (SkinWeightBuffer &&
             FWetRuntimeDataBuilder::GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) &&
@@ -1101,7 +1100,7 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
     if (bAllContactsUseCache)
     {
         FSkeletalMeshLODRenderData*    LODData = nullptr;
-        constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+        constexpr int32                RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
         const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(RuntimeLODIndex);
         if (SkinWeightBuffer &&
             FWetRuntimeDataBuilder::GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) &&
@@ -1211,8 +1210,8 @@ bool FWetInputStage::QueryWaterSurfaceData(const FDWCWaterSurfaceData& WaterSurf
 
     const FVector BoundsMin = WaterSurfaceData.Bounds.Min;
     const FVector BoundsMax = WaterSurfaceData.Bounds.Max;
-    const float   BoundsSizeX = BoundsMax.X - BoundsMin.X;
-    const float   BoundsSizeY = BoundsMax.Y - BoundsMin.Y;
+    const float   BoundsSizeX = static_cast<float>(BoundsMax.X - BoundsMin.X);
+    const float   BoundsSizeY = static_cast<float>(BoundsMax.Y - BoundsMin.Y);
 
     if (BoundsSizeX <= KINDA_SMALL_NUMBER ||
         BoundsSizeY <= KINDA_SMALL_NUMBER)
@@ -1220,8 +1219,8 @@ bool FWetInputStage::QueryWaterSurfaceData(const FDWCWaterSurfaceData& WaterSurf
         return false;
     }
 
-    const float NormalizedX = FMath::Clamp((WorldPosition.X - BoundsMin.X) / BoundsSizeX, 0.0f, 1.0f);
-    const float NormalizedY = FMath::Clamp((WorldPosition.Y - BoundsMin.Y) / BoundsSizeY, 0.0f, 1.0f);
+    const float NormalizedX = FMath::Clamp(static_cast<float>((WorldPosition.X - BoundsMin.X) / BoundsSizeX), 0.0f, 1.0f);
+    const float NormalizedY = FMath::Clamp(static_cast<float>((WorldPosition.Y - BoundsMin.Y) / BoundsSizeY), 0.0f, 1.0f);
 
     const float GridX = NormalizedX * static_cast<float>(WaterSurfaceData.SizeX - 1);
     const float GridY = NormalizedY * static_cast<float>(WaterSurfaceData.SizeY - 1);

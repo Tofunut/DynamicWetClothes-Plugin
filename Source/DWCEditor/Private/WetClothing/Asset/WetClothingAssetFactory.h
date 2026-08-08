@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "Factories/Factory.h"
@@ -14,7 +15,7 @@ class DWCEDITOR_API UWetClothingAssetCreationSettings : public UObject
 {
     GENERATED_BODY()
 
-public:
+  public:
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Source Skeletal Mesh"))
     TObjectPtr<USkeletalMesh> SourceSkeletalMesh = nullptr;
 
@@ -79,7 +80,7 @@ class DWCEDITOR_API UWetClothingAssetSetupSettingsObject : public UObject
 {
     GENERATED_BODY()
 
-public:
+  public:
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Original UV Channel", ClampMin = "0", ClampMax = "7"))
     int32 OriginalUVChannelIndex = 0;
 
@@ -152,20 +153,20 @@ class DWCEDITOR_API UWetClothingAssetFactory : public UFactory
 {
     GENERATED_BODY()
 
-public:
+  public:
     UWetClothingAssetFactory();
 
-    virtual bool ConfigureProperties() override;
+    virtual bool     ConfigureProperties() override;
     virtual UObject* FactoryCreateNew(
-        UClass* Class,
-        UObject* InParent,
-        FName Name,
-        EObjectFlags Flags,
-        UObject* Context,
+        UClass*           Class,
+        UObject*          InParent,
+        FName             Name,
+        EObjectFlags      Flags,
+        UObject*          Context,
         FFeedbackContext* Warn) override;
     virtual bool ShouldShowInNewMenu() const override;
 
-private:
+  private:
     UPROPERTY(Transient)
     TObjectPtr<UWetClothingAssetCreationSettings> PendingCreationSettings = nullptr;
 

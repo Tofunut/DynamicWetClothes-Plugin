@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -22,7 +23,7 @@ class FDWCEditorResourceGovernorState;
 
 class FDWCEditorMemoryLease
 {
-public:
+  public:
     FDWCEditorMemoryLease() = default;
     ~FDWCEditorMemoryLease();
 
@@ -32,28 +33,28 @@ public:
     FDWCEditorMemoryLease(FDWCEditorMemoryLease&& Other) noexcept;
     FDWCEditorMemoryLease& operator=(FDWCEditorMemoryLease&& Other) noexcept;
 
-    bool IsValid() const;
-    uint64 GetReservationId() const { return ReservationId; }
-    uint64 GetReservedBytes() const;
+    bool                   IsValid() const;
+    uint64                 GetReservationId() const { return ReservationId; }
+    uint64                 GetReservedBytes() const;
     EDWCEditorResourcePool GetPool() const;
 
     bool TryGrow(uint64 AdditionalBytes, FString* OutError = nullptr);
     void Reset();
 
-private:
+  private:
     friend class FDWCEditorResourceGovernor;
 
     FDWCEditorMemoryLease(
         TSharedPtr<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe> InState,
-        uint64 InReservationId);
+        uint64                                                           InReservationId);
 
     TSharedPtr<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe> State;
-    uint64 ReservationId = 0;
+    uint64                                                           ReservationId = 0;
 };
 
 class FDWCEditorResourceGovernor
 {
-public:
+  public:
     explicit FDWCEditorResourceGovernor(
         const FDWCEditorResourceBudgetConfig& InConfig = FDWCEditorResourceBudgetConfig());
 
@@ -62,15 +63,15 @@ public:
 
     FDWCEditorMemoryLease TryAcquire(
         const FDWCEditorResourceReservationRequest& Request,
-        FString* OutError = nullptr);
+        FString*                                    OutError = nullptr);
     FDWCEditorMemoryLease TryAcquireForAdmission(
         const FDWCEditorResourceReservationRequest& Request,
-        EDWCEditorResourceAdmissionResult& OutResult,
-        FString* OutError = nullptr);
+        EDWCEditorResourceAdmissionResult&          OutResult,
+        FString*                                    OutError = nullptr);
 
     FDWCEditorResourceGovernorDiagnostics GetDiagnostics() const;
-    void ResetDiagnosticCounters();
+    void                                  ResetDiagnosticCounters();
 
-private:
+  private:
     TSharedRef<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe> State;
 };

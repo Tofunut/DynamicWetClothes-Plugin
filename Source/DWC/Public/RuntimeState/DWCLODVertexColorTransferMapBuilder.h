@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -18,17 +19,17 @@ struct FDWCLODVertexColorTransferGeometryView
 
 struct FDWCLODVertexColorTransferTargetGeometryView
 {
-    int32 LODIndex = INDEX_NONE;
+    int32                                  LODIndex = INDEX_NONE;
     FDWCLODVertexColorTransferGeometryView Geometry;
 };
 
 struct FDWCLODVertexColorTransferMapBuildResult
 {
-    int32 LODIndex = INDEX_NONE;
+    int32         LODIndex = INDEX_NONE;
     TArray<int32> TargetToSourceVertex;
 };
 
 bool BuildDWCLODVertexColorTransferMaps(
-    const FDWCLODVertexColorTransferGeometryView& SourceGeometry,
+    const FDWCLODVertexColorTransferGeometryView&                 SourceGeometry,
     TConstArrayView<FDWCLODVertexColorTransferTargetGeometryView> TargetGeometries,
-    TArray<FDWCLODVertexColorTransferMapBuildResult>& OutResults);
+    TArray<FDWCLODVertexColorTransferMapBuildResult>&             OutResults);

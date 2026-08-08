@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Groups UV Islands into automatic partition clusters using sampled texture colors.
  */
@@ -404,10 +405,10 @@ namespace
             const double MinV = FMath::Min3(A.Y, B.Y, C.Y);
             const double MaxV = FMath::Max3(A.Y, B.Y, C.Y);
 
-            const int32 MinX = FMath::Clamp(FMath::FloorToInt(MinU * TextureData.Width), 0, TextureData.Width - 1);
-            const int32 MaxX = FMath::Clamp(FMath::FloorToInt(MaxU * TextureData.Width), 0, TextureData.Width - 1);
-            const int32 MinY = FMath::Clamp(FMath::FloorToInt(MinV * TextureData.Height), 0, TextureData.Height - 1);
-            const int32 MaxY = FMath::Clamp(FMath::FloorToInt(MaxV * TextureData.Height), 0, TextureData.Height - 1);
+            const int32 MinX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(MinU * TextureData.Width), 0, TextureData.Width - 1));
+            const int32 MaxX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(MaxU * TextureData.Width), 0, TextureData.Width - 1));
+            const int32 MinY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(MinV * TextureData.Height), 0, TextureData.Height - 1));
+            const int32 MaxY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(MaxV * TextureData.Height), 0, TextureData.Height - 1));
 
             double TriangleSampleWeight = 0.0;
             for (int32 PixelY = MinY; PixelY <= MaxY; ++PixelY)
@@ -434,8 +435,8 @@ namespace
             if (TriangleSampleWeight <= 0.0)
             {
                 const FVector2D    TriangleCenter = (A + B + C) / 3.0f;
-                const int32        FallbackX = FMath::Clamp(FMath::FloorToInt(TriangleCenter.X * TextureData.Width), 0, TextureData.Width - 1);
-                const int32        FallbackY = FMath::Clamp(FMath::FloorToInt(TriangleCenter.Y * TextureData.Height), 0, TextureData.Height - 1);
+                const int32        FallbackX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(TriangleCenter.X * TextureData.Width), 0, TextureData.Width - 1));
+                const int32        FallbackY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(TriangleCenter.Y * TextureData.Height), 0, TextureData.Height - 1));
                 const FLinearColor SampleColor = TextureData.GetLinearColor(FallbackX, FallbackY);
                 WeightedColorSum += SampleColor;
                 Samples.Add(SampleColor);

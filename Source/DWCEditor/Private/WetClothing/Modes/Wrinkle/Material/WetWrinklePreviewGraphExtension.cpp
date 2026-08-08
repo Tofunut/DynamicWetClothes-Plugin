@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Wrinkle/Material/WetWrinklePreviewGraphExtension.h"
 
 #include "Engine/Texture.h"
@@ -34,9 +35,9 @@ namespace
 
     bool Connect(
         const FDWCMaterialGraphPin& From,
-        UMaterialExpression* To,
-        const TCHAR* ToInput,
-        FString& OutErrorMessage)
+        UMaterialExpression*        To,
+        const TCHAR*                ToInput,
+        FString&                    OutErrorMessage)
     {
         if (!From.IsValid() || To == nullptr ||
             !UMaterialEditingLibrary::ConnectMaterialExpressions(
@@ -54,7 +55,7 @@ namespace
     }
 
     UMaterialExpressionScalarParameter* CreateScalarParameter(
-        UMaterial* Material,
+        UMaterial*  Material,
         const FName ParameterName,
         const float DefaultValue,
         const int32 NodeY)
@@ -75,10 +76,10 @@ namespace
     }
 
     UMaterialExpressionVectorParameter* CreateVectorParameter(
-        UMaterial* Material,
-        const FName ParameterName,
+        UMaterial*          Material,
+        const FName         ParameterName,
         const FLinearColor& DefaultValue,
-        const int32 NodeY)
+        const int32         NodeY)
     {
         UMaterialExpressionVectorParameter* Parameter =
             Cast<UMaterialExpressionVectorParameter>(
@@ -96,7 +97,7 @@ namespace
     }
 
     UMaterialExpressionTextureObjectParameter* CreateNormalParameter(
-        UMaterial* Material,
+        UMaterial*  Material,
         const FName ParameterName,
         const int32 NodeY)
     {
@@ -228,12 +229,12 @@ return CombinedTS;
         Custom->RebuildOutputs();
         return Custom;
     }
-}
+} // namespace
 
 bool FWetWrinklePreviewGraphExtension::ExtendGraph(
-    UMaterial* Material,
+    UMaterial*                         Material,
     const FDWCSurfaceGraphBuildResult& SurfaceGraph,
-    FString& OutErrorMessage)
+    FString&                           OutErrorMessage)
 {
     OutErrorMessage.Reset();
     if (Material == nullptr || !SurfaceGraph.Outputs.Normal.IsValid() ||
@@ -243,8 +244,8 @@ bool FWetWrinklePreviewGraphExtension::ExtendGraph(
         return false;
     }
 
-    UMaterialExpressionScalarParameter* PreviewWetness = FindPreviewWetnessParameter(Material);
-    UMaterialExpressionCustom* Blend = CreatePreviewBlend(Material);
+    UMaterialExpressionScalarParameter*        PreviewWetness = FindPreviewWetnessParameter(Material);
+    UMaterialExpressionCustom*                 Blend = CreatePreviewBlend(Material);
     UMaterialExpressionTextureObjectParameter* AccumulatedNormal = CreateNormalParameter(
         Material, WetWrinklePreviewMaterialParameters::AccumulatedNormal, 1350);
     UMaterialExpressionScalarParameter* AccumulatedEnabled = CreateScalarParameter(

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -19,4 +20,4 @@ namespace WetWrinklePreviewMaterialParameters
     inline const FName HoverScale(TEXT("DWC_WrinklePreview_HoverScale"));
     inline const FName HoverStrength(TEXT("DWC_WrinklePreview_HoverStrength"));
     inline const FName HoverFalloff(TEXT("DWC_WrinklePreview_HoverFalloff"));
-}
+} // namespace WetWrinklePreviewMaterialParameters

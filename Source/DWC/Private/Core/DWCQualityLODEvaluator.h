@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,6 +11,6 @@ class FDWCQualityLODEvaluator
     void NormalizeScreenSizeThresholds(TArray<FDWCQualityLODScreenSizeThreshold>& Thresholds) const;
     bool ResolveLODFromScreenSize(
         const TArray<FDWCQualityLODScreenSizeThreshold>& Thresholds,
-        float ScreenSize,
-        int32& OutLODLevel) const;
+        float                                            ScreenSize,
+        int32&                                           OutLODLevel) const;
 };

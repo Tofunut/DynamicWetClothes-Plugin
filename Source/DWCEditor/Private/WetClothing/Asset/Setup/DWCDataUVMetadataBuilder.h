@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,13 +11,13 @@ class UWetClothingAsset;
 /** Builds the small persistent metadata describing one generated DWC UV Channel LOD payload. */
 class FDWCDataUVMetadataBuilder
 {
-public:
+  public:
     static bool BuildLOD(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh* Mesh,
-        int32 LODIndex,
-        int32 DataUVChannelIndex,
-        FDWCDataUVLODMetadata& OutMetadata,
-        FString* OutErrorMessage = nullptr,
-        const TSet<int32>* GeneratedMaterialSlotIndices = nullptr);
+        const USkeletalMesh*     Mesh,
+        int32                    LODIndex,
+        int32                    DataUVChannelIndex,
+        FDWCDataUVLODMetadata&   OutMetadata,
+        FString*                 OutErrorMessage = nullptr,
+        const TSet<int32>*       GeneratedMaterialSlotIndices = nullptr);
 };

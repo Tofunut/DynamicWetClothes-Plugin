@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Implements rectangle, ellipse, and lasso intersection tests used by the UV Island selection tools.
  */

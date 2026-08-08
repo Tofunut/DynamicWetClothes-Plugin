@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSourceResolver.h"
 
 #include "Materials/MaterialInterface.h"
@@ -15,7 +16,7 @@ FString FDWCRevealBakeSourceResolver::NormalizeTextureSearchText(const FString& 
 }
 
 bool FDWCRevealBakeSourceResolver::ContainsAnyTextureKeyword(
-    const FString& SearchText,
+    const FString&                      SearchText,
     std::initializer_list<const TCHAR*> Keywords)
 {
     for (const TCHAR* Keyword : Keywords)

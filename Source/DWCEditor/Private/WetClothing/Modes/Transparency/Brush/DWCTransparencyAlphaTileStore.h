@@ -1,16 +1,17 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
 
 struct FDWCTransparencyAlphaTilePayload
 {
-    FIntPoint TileCoordinate = FIntPoint::ZeroValue;
-    FIntRect Rect;
+    FIntPoint     TileCoordinate = FIntPoint::ZeroValue;
+    FIntRect      Rect;
     TArray<uint8> Premultiplied;
     TArray<uint8> Weight;
 
-    bool IsValidFor(const FIntPoint& Resolution, int32 TileSize) const;
+    bool   IsValidFor(const FIntPoint& Resolution, int32 TileSize) const;
     uint64 GetAllocatedBytes() const;
 };
 
@@ -26,31 +27,31 @@ class FDWCTransparencyAlphaTileStore final
     void Initialize(const FIntPoint& InResolution);
     void Reset();
 
-    bool IsValid() const { return Resolution.X > 0 && Resolution.Y > 0; }
+    bool             IsValid() const { return Resolution.X > 0 && Resolution.Y > 0; }
     const FIntPoint& GetResolution() const { return Resolution; }
-    uint64 GetRevision() const { return Revision; }
-    int32 GetTileCount() const { return Tiles.Num(); }
-    uint64 GetAllocatedBytes() const;
+    uint64           GetRevision() const { return Revision; }
+    int32            GetTileCount() const { return Tiles.Num(); }
+    uint64           GetAllocatedBytes() const;
 
     uint8 GetPremultiplied(int32 PixelIndex) const;
     uint8 GetWeight(int32 PixelIndex) const;
-    void SetPixel(int32 X, int32 Y, uint8 Premultiplied, uint8 Weight);
+    void  SetPixel(int32 X, int32 Y, uint8 Premultiplied, uint8 Weight);
 
     FIntRect GetTileRect(const FIntPoint& TileCoordinate) const;
-    void GatherTileCoordinates(
-        TConstArrayView<FIntRect> Regions,
-        bool bIncludeOnePixelHalo,
-        bool bWrap,
-        TArray<FIntPoint>& OutTileCoordinates) const;
+    void     GatherTileCoordinates(
+            TConstArrayView<FIntRect> Regions,
+            bool                      bIncludeOnePixelHalo,
+            bool                      bWrap,
+            TArray<FIntPoint>&        OutTileCoordinates) const;
     void SnapshotTiles(
-        const TArray<FIntPoint>& TileCoordinates,
+        const TArray<FIntPoint>&                  TileCoordinates,
         TArray<FDWCTransparencyAlphaTilePayload>& OutTiles) const;
 
     bool CanCommit(
-        uint64 ExpectedRevision,
+        uint64                                          ExpectedRevision,
         const TArray<FDWCTransparencyAlphaTilePayload>& Payloads) const;
     bool Commit(
-        uint64 ExpectedRevision,
+        uint64                                          ExpectedRevision,
         const TArray<FDWCTransparencyAlphaTilePayload>& Payloads);
 
     void BuildFromDense(
@@ -68,10 +69,10 @@ class FDWCTransparencyAlphaTileStore final
     };
 
     const FTile* FindTileForPixel(int32 X, int32 Y, int32& OutLocalIndex) const;
-    FTile& FindOrAddTile(const FIntPoint& TileCoordinate);
-    bool IsTileAllZero(const FTile& Tile) const;
+    FTile&       FindOrAddTile(const FIntPoint& TileCoordinate);
+    bool         IsTileAllZero(const FTile& Tile) const;
 
-    FIntPoint Resolution = FIntPoint::ZeroValue;
+    FIntPoint              Resolution = FIntPoint::ZeroValue;
     TMap<FIntPoint, FTile> Tiles;
-    uint64 Revision = 0;
+    uint64                 Revision = 0;
 };

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -8,29 +9,29 @@ class USkeletalMesh;
 
 struct FDWCRevealBakeSurfaceTriangle
 {
-    int32 TriangleIndex = INDEX_NONE;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    int32 UVIslandID = INDEX_NONE;
-    int32 VertexIndices[3] = { INDEX_NONE, INDEX_NONE, INDEX_NONE };
-    FVector Positions[3];
-    FVector Normals[3];
+    int32     TriangleIndex = INDEX_NONE;
+    int32     MaterialSlotIndex = INDEX_NONE;
+    int32     UVIslandID = INDEX_NONE;
+    int32     VertexIndices[3] = { INDEX_NONE, INDEX_NONE, INDEX_NONE };
+    FVector   Positions[3];
+    FVector   Normals[3];
     FVector2D UVs[3];
-    FBox Bounds = FBox(ForceInit);
+    FBox      Bounds = FBox(ForceInit);
 };
 
 struct FDWCRevealBakeSurface
 {
-    FName LayerId;
-    int32 LayerOrder = 0;
-    int32 LODIndex = 0;
-    int32 UVChannelIndex = 0;
-    TObjectPtr<USkeletalMesh> SkeletalMesh = nullptr;
-    bool bCanBeRevealSource = true;
-    bool bCanBeWetOuterLayer = true;
-    bool bBlocksReveal = false;
-    float MaxRevealDistance = 5.0f;
+    FName                                 LayerId;
+    int32                                 LayerOrder = 0;
+    int32                                 LODIndex = 0;
+    int32                                 UVChannelIndex = 0;
+    TObjectPtr<USkeletalMesh>             SkeletalMesh = nullptr;
+    bool                                  bCanBeRevealSource = true;
+    bool                                  bCanBeWetOuterLayer = true;
+    bool                                  bBlocksReveal = false;
+    float                                 MaxRevealDistance = 5.0f;
     TArray<FDWCRevealBakeSurfaceTriangle> Triangles;
-    FBox Bounds = FBox(ForceInit);
+    FBox                                  Bounds = FBox(ForceInit);
 
     void Reset();
 };
@@ -42,7 +43,7 @@ class FDWCRevealBakeSurfaceBuilder
         const FDWCBakeResolvedLayer& ResolvedLayer,
         int32                        LODIndex,
         int32                        UVChannelIndex,
-        FDWCRevealBakeSurface&             OutSurface,
+        FDWCRevealBakeSurface&       OutSurface,
         FString*                     OutErrorMessage = nullptr);
 
   private:

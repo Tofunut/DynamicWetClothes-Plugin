@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * UV island view-data cache. Entries are transient and must never be treated as persistent topology.
  */
@@ -14,33 +15,33 @@ struct FWetClothingAssetUVTriangle;
 
 class FWCAUVIslandViewCache
 {
-public:
+  public:
     static bool GetMaterialSlotUVIslands(
-        const USkeletalMesh* SkeletalMesh,
-        int32 LODIndex,
-        int32 UVChannelIndex,
-        int32 MaterialSlotIndex,
+        const USkeletalMesh*                           SkeletalMesh,
+        int32                                          LODIndex,
+        int32                                          UVChannelIndex,
+        int32                                          MaterialSlotIndex,
         TArray<TSharedPtr<FWetClothingAssetUVIsland>>& OutIslands,
-        FString* OutErrorMessage = nullptr);
+        FString*                                       OutErrorMessage = nullptr);
 
     /** Uses current persistent WCA topology when valid, then falls back to direct analysis. */
     static bool GetMaterialSlotUVIslands(
-        const UWetClothingAsset* WetClothingAsset,
-        int32 UVChannelIndex,
-        int32 MaterialSlotIndex,
+        const UWetClothingAsset*                       WetClothingAsset,
+        int32                                          UVChannelIndex,
+        int32                                          MaterialSlotIndex,
         TArray<TSharedPtr<FWetClothingAssetUVIsland>>& OutIslands,
-        FString* OutErrorMessage = nullptr);
+        FString*                                       OutErrorMessage = nullptr);
 
     static bool BuildMaterialSlotPreviewTriangles(
-        const USkeletalMesh* SkeletalMesh,
-        int32 MaterialSlotIndex,
+        const USkeletalMesh*                 SkeletalMesh,
+        int32                                MaterialSlotIndex,
         TArray<FWetClothingAssetUVTriangle>& OutTriangles);
 
     static bool BuildMaterialSlotPreviewTriangles(
-        const USkeletalMesh* SkeletalMesh,
-        int32 LODIndex,
-        int32 UVChannelIndex,
-        int32 MaterialSlotIndex,
+        const USkeletalMesh*                 SkeletalMesh,
+        int32                                LODIndex,
+        int32                                UVChannelIndex,
+        int32                                MaterialSlotIndex,
         TArray<FWetClothingAssetUVTriangle>& OutTriangles);
 
     /**
@@ -48,19 +49,18 @@ public:
      * Keeps a slot visible even when its UVs are missing or degenerate.
      */
     static bool BuildMaterialSlotGeometryPreviewTriangles(
-        const USkeletalMesh* SkeletalMesh,
-        int32 LODIndex,
-        int32 PreferredUVChannelIndex,
-        int32 MaterialSlotIndex,
+        const USkeletalMesh*                 SkeletalMesh,
+        int32                                LODIndex,
+        int32                                PreferredUVChannelIndex,
+        int32                                MaterialSlotIndex,
         TArray<FWetClothingAssetUVTriangle>& OutTriangles);
 
     static bool BuildMaterialSlotPreviewTriangles(
-        const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
+        const UWetClothingAsset*             WetClothingAsset,
+        int32                                MaterialSlotIndex,
         TArray<FWetClothingAssetUVTriangle>& OutTriangles);
 
     static void InvalidateAll();
     static void InvalidateMesh(const USkeletalMesh* SkeletalMesh);
     static void InvalidateAsset(const UWetClothingAsset* WetClothingAsset);
-
 };

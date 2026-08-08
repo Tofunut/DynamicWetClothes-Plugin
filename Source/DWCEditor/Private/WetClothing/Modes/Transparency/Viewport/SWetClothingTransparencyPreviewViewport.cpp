@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/Viewport/SWetClothingTransparencyPreviewViewport.h"
 #include "AdvancedPreviewScene.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -51,12 +52,12 @@ namespace
     // Keep normal 4K brush sizes interactive through region raster/upload.
     // Bigger strokes compose once at interaction end instead of snapshotting
     // the complete preview for every pointer sample.
-    constexpr int32 TransparencyPreviewAsyncComposeThresholdPixels = 512 * 1024;
+    constexpr int32      TransparencyPreviewAsyncComposeThresholdPixels = 512 * 1024;
     FDWCEditorTextureKey MakeTransparencyTextureKey(
-        const UWetClothingAsset* Asset,
+        const UWetClothingAsset*       Asset,
         const EDWCEditorTexturePurpose Purpose,
-        const int32 MaterialSlotIndex,
-        const FGuid& LayerGuid)
+        const int32                    MaterialSlotIndex,
+        const FGuid&                   LayerGuid)
     {
         FDWCEditorTextureKey Key;
         Key.Owner = FObjectKey(Asset);
@@ -67,7 +68,7 @@ namespace
     }
 
     FDWCEditorTextureDescriptor MakeTransparencyDescriptor(
-        const FIntPoint& Size,
+        const FIntPoint&     Size,
         const TextureAddress Address)
     {
         FDWCEditorTextureDescriptor Descriptor;
@@ -85,7 +86,7 @@ namespace
     }
 
     FDWCEditorTextureDescriptor MakeTransparencyMaskDescriptor(
-        const FIntPoint& Size,
+        const FIntPoint&     Size,
         const TextureAddress Address)
     {
         FDWCEditorTextureDescriptor Descriptor;
@@ -103,7 +104,7 @@ namespace
     }
 
     uint64 GetTransparencyStrokeSnapshotBytes(
-        const TArray<FDWCTransparencyBrushStroke>& Strokes,
+        const TArray<FDWCTransparencyBrushStroke>&       Strokes,
         const TArray<FDWCTransparencyRevealColorStroke>& RevealColorStrokes)
     {
         uint64 Bytes = Strokes.GetAllocatedSize() + RevealColorStrokes.GetAllocatedSize();
@@ -120,17 +121,17 @@ namespace
     }
 
     FDWCEditorWorkerMemoryEstimate EstimateTransparencyVisualizationMemory(
-        const FDWCTransparencyAutoBakeResult& AutoResult,
-        const FDWCTransparencyRevealColorTileStore& RevealColorTileStore,
-        const FDWCTransparencyAlphaTileStore& ManualAlphaTileStore,
-        const TArray<uint8>& OuterEdgeFeatherBuffer,
-        const TArray<FDWCTransparencyBrushStroke>& EditableStrokes,
+        const FDWCTransparencyAutoBakeResult&            AutoResult,
+        const FDWCTransparencyRevealColorTileStore&      RevealColorTileStore,
+        const FDWCTransparencyAlphaTileStore&            ManualAlphaTileStore,
+        const TArray<uint8>&                             OuterEdgeFeatherBuffer,
+        const TArray<FDWCTransparencyBrushStroke>&       EditableStrokes,
         const TArray<FDWCTransparencyRevealColorStroke>& RevealColorStrokes,
-        const bool bRebuildManualOverrides,
-        const bool bRebuildRevealColor)
+        const bool                                       bRebuildManualOverrides,
+        const bool                                       bRebuildRevealColor)
     {
         FDWCEditorWorkerMemoryEstimate Estimate;
-        const uint64 PixelCount =
+        const uint64                   PixelCount =
             static_cast<uint64>(FMath::Max(AutoResult.Resolution.X, 0)) *
             static_cast<uint64>(FMath::Max(AutoResult.Resolution.Y, 0));
         Estimate.ResidentSharedBytes = AutoResult.GetAllocatedBytes();
@@ -170,31 +171,29 @@ namespace
         const FDWCTransparencyPaintSettings& B)
     {
         return A.Mode == B.Mode &&
-            A.RevealColorMode == B.RevealColorMode &&
-            FMath::IsNearlyEqual(A.RadiusUV, B.RadiusUV) &&
-            FMath::IsNearlyEqual(A.Strength, B.Strength) &&
-            FMath::IsNearlyEqual(A.Falloff, B.Falloff) &&
-            FMath::IsNearlyEqual(A.Spacing, B.Spacing) &&
-            FMath::IsNearlyEqual(A.TargetAlpha, B.TargetAlpha) &&
-            A.bEnabled == B.bEnabled &&
-            A.bRevealColorPaint == B.bRevealColorPaint &&
-            A.RevealColor.Equals(B.RevealColor);
+               A.RevealColorMode == B.RevealColorMode &&
+               FMath::IsNearlyEqual(A.RadiusUV, B.RadiusUV) &&
+               FMath::IsNearlyEqual(A.Strength, B.Strength) &&
+               FMath::IsNearlyEqual(A.Falloff, B.Falloff) &&
+               FMath::IsNearlyEqual(A.Spacing, B.Spacing) &&
+               FMath::IsNearlyEqual(A.TargetAlpha, B.TargetAlpha) &&
+               A.bEnabled == B.bEnabled &&
+               A.bRevealColorPaint == B.bRevealColorPaint &&
+               A.RevealColor.Equals(B.RevealColor);
     }
 
     class FDWCTransparencyPreviewViewportClient : public FEditorViewportClient
     {
       public:
         FDWCTransparencyPreviewViewportClient(
-            FAdvancedPreviewScene* InPreviewScene,
+            FAdvancedPreviewScene*                                     InPreviewScene,
             const TSharedRef<SWetClothingTransparencyPreviewViewport>& InViewport,
-            FDWCEditorInteractiveToolsHost* InInputToolsHost)
+            FDWCEditorInteractiveToolsHost*                            InInputToolsHost)
             : FEditorViewportClient(
                   InInputToolsHost != nullptr ? InInputToolsHost->GetModeTools() : nullptr,
                   InPreviewScene,
-                  StaticCastSharedRef<SEditorViewport>(InViewport))
-            , PreviewScene(InPreviewScene)
-            , ViewportWidget(InViewport)
-            , InputToolsHost(InInputToolsHost)
+                  StaticCastSharedRef<SEditorViewport>(InViewport)),
+              PreviewScene(InPreviewScene), ViewportWidget(InViewport), InputToolsHost(InInputToolsHost)
         {
             SetViewMode(VMI_Lit);
             SetRealtime(true);
@@ -243,12 +242,12 @@ namespace
             }
 
             const FBoxSphereBounds Bounds = MeshComponent->CalcBounds(MeshComponent->GetComponentTransform());
-            float Radius = FMath::Max3(
+            float                  Radius = FMath::Max3(
                 static_cast<float>(Bounds.BoxExtent.X),
                 static_cast<float>(Bounds.BoxExtent.Y),
                 static_cast<float>(Bounds.BoxExtent.Z));
             Radius = FMath::Max(Radius, static_cast<float>(Bounds.SphereRadius));
-            Radius = FMath::Max(Radius, MinimumFocusRadius);
+            Radius = FMath::Max(Radius, static_cast<float>(MinimumFocusRadius));
 
             float AspectToUse = AspectRatio;
             if (Viewport != nullptr)
@@ -273,9 +272,9 @@ namespace
         }
 
       private:
-        FAdvancedPreviewScene* PreviewScene = nullptr;
+        FAdvancedPreviewScene*                            PreviewScene = nullptr;
         TWeakPtr<SWetClothingTransparencyPreviewViewport> ViewportWidget;
-        FDWCEditorInteractiveToolsHost* InputToolsHost = nullptr;
+        FDWCEditorInteractiveToolsHost*                   InputToolsHost = nullptr;
     };
 
     FVector AnyPerpendicular(const FVector& Normal)
@@ -288,7 +287,7 @@ namespace
         return Result.IsNearlyZero() ? FVector::ForwardVector : Result;
     }
 
-}
+} // namespace
 
 void SWetClothingTransparencyPreviewViewport::Construct(const FArguments& InArgs)
 {
@@ -358,8 +357,8 @@ void SWetClothingTransparencyPreviewViewport::AddReferencedObjects(FReferenceCol
 UTexture2D* SWetClothingTransparencyPreviewViewport::GetTransparencyPreviewTexture() const
 {
     return TransparencyPreviewHandle.IsValid()
-        ? TransparencyPreviewHandle->GetTexture()
-        : nullptr;
+               ? TransparencyPreviewHandle->GetTexture()
+               : nullptr;
 }
 
 UTexture2D* SWetClothingTransparencyPreviewViewport::GetWrinkleCoverageTexture() const
@@ -373,15 +372,15 @@ UTexture2D* SWetClothingTransparencyPreviewViewport::GetWrinkleCoverageTexture()
 UTexture2D* SWetClothingTransparencyPreviewViewport::GetHoverBaselineTexture() const
 {
     return HoverBaselinePreviewHandle.IsValid()
-        ? HoverBaselinePreviewHandle->GetTexture()
-        : nullptr;
+               ? HoverBaselinePreviewHandle->GetTexture()
+               : nullptr;
 }
 
 UTexture2D* SWetClothingTransparencyPreviewViewport::GetHoverIslandMaskTexture() const
 {
     return HoverIslandMaskPreviewHandle.IsValid()
-        ? HoverIslandMaskPreviewHandle->GetTexture()
-        : nullptr;
+               ? HoverIslandMaskPreviewHandle->GetTexture()
+               : nullptr;
 }
 
 bool SWetClothingTransparencyPreviewViewport::EnsureHoverBaselineTexture()
@@ -408,8 +407,8 @@ bool SWetClothingTransparencyPreviewViewport::EnsureHoverBaselineTexture()
         BaselinePixels[PixelIndex].A = AutoBakePreviewResult->AutoAlphaBuffer[PixelIndex];
     }
     const TextureAddress Address = SelectedUVAddressMode == EDWCTransparencyUVAddressMode::Wrap
-        ? TA_Wrap
-        : TA_Clamp;
+                                       ? TA_Wrap
+                                       : TA_Clamp;
     HoverBaselinePreviewHandle = TextureWorkspace->TransferBGRA8AndAcquireLease(
         MakeTransparencyTextureKey(
             WetClothingAsset.Get(),
@@ -451,8 +450,8 @@ bool SWetClothingTransparencyPreviewViewport::EnsureHoverIslandMaskTexture(const
                 UVIslandID))
         {
             IslandMask[PixelIndex] = OuterEdgeFeatherBuffer.IsValidIndex(PixelIndex)
-                ? OuterEdgeFeatherBuffer[PixelIndex]
-                : 255;
+                                         ? OuterEdgeFeatherBuffer[PixelIndex]
+                                         : 255;
         }
     }
 
@@ -462,8 +461,8 @@ bool SWetClothingTransparencyPreviewViewport::EnsureHoverIslandMaskTexture(const
         HoverIslandMaskPreviewHandle.Reset();
     }
     const TextureAddress Address = SelectedUVAddressMode == EDWCTransparencyUVAddressMode::Wrap
-        ? TA_Wrap
-        : TA_Clamp;
+                                       ? TA_Wrap
+                                       : TA_Clamp;
     HoverIslandMaskPreviewHandle = TextureWorkspace->TransferG8AndAcquireLease(
         MakeTransparencyTextureKey(
             WetClothingAsset.Get(),
@@ -543,10 +542,10 @@ void SWetClothingTransparencyPreviewViewport::SetPreviewMode(const EWetClothingT
     // Painting relies on the single target mesh's Data UV hit cache. Do not
     // allow a restored Full Blueprint preview mode to silently disable the
     // active Stage 2/3 input tool.
-    const bool bHasActivePaintTarget = bTransparencyPaintingEnabled || bRevealColorPaintingEnabled;
+    const bool                                bHasActivePaintTarget = bTransparencyPaintingEnabled || bRevealColorPaintingEnabled;
     const EWetClothingTransparencyPreviewMode EffectiveMode = bHasActivePaintTarget
-        ? EWetClothingTransparencyPreviewMode::TargetMeshOnly
-        : NewMode;
+                                                                  ? EWetClothingTransparencyPreviewMode::TargetMeshOnly
+                                                                  : NewMode;
     if (PreviewMode == EffectiveMode)
     {
         return;
@@ -578,7 +577,7 @@ void SWetClothingTransparencyPreviewViewport::SuspendPreview(const EDWCEditorPre
     }
     const bool bHadPendingAlphaWork = PendingAlphaIncrementalTicket.IsValid() || !PendingAlphaCommands.IsEmpty();
     const bool bHadPendingRevealWork = PendingRevealColorIncrementalTicket.IsValid() ||
-        !PendingRevealColorCommands.IsEmpty();
+                                       !PendingRevealColorCommands.IsEmpty();
     bool bCanceledAuthoringInteraction = false;
     if (const TSharedPtr<FDWCTransparencyAuthoringController> Controller = AuthoringController.Pin())
     {
@@ -687,20 +686,20 @@ void SWetClothingTransparencyPreviewViewport::SetWetnessPreviewPercent(const flo
 }
 
 void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
-    const FGuid& InLayerGuid,
-    int32 InMaterialSlotIndex,
-    int32 InUVChannelIndex,
+    const FGuid&                  InLayerGuid,
+    int32                         InMaterialSlotIndex,
+    int32                         InUVChannelIndex,
     EDWCTransparencyUVAddressMode InAddressMode,
-    EDWCTransparencyPaintTarget InPaintTarget)
+    EDWCTransparencyPaintTarget   InPaintTarget)
 {
     const int32 PreviousMaterialSlotIndex = SelectedMaterialSlotIndex;
-    const bool bMaterialSlotChanged = SelectedMaterialSlotIndex != InMaterialSlotIndex;
-    const bool bUVChannelChanged = SelectedUVChannelIndex != InUVChannelIndex;
-    const bool bLayerChanged = SelectedLayerGuid != InLayerGuid;
-    const bool bAddressModeChanged = SelectedUVAddressMode != InAddressMode;
-    const bool bNewAlphaPaintingEnabled = InPaintTarget == EDWCTransparencyPaintTarget::FinalAlpha;
-    const bool bNewRevealColorPaintingEnabled = InPaintTarget == EDWCTransparencyPaintTarget::RevealColor;
-    const bool bPaintTargetChanged =
+    const bool  bMaterialSlotChanged = SelectedMaterialSlotIndex != InMaterialSlotIndex;
+    const bool  bUVChannelChanged = SelectedUVChannelIndex != InUVChannelIndex;
+    const bool  bLayerChanged = SelectedLayerGuid != InLayerGuid;
+    const bool  bAddressModeChanged = SelectedUVAddressMode != InAddressMode;
+    const bool  bNewAlphaPaintingEnabled = InPaintTarget == EDWCTransparencyPaintTarget::FinalAlpha;
+    const bool  bNewRevealColorPaintingEnabled = InPaintTarget == EDWCTransparencyPaintTarget::RevealColor;
+    const bool  bPaintTargetChanged =
         bTransparencyPaintingEnabled != bNewAlphaPaintingEnabled ||
         bRevealColorPaintingEnabled != bNewRevealColorPaintingEnabled;
     const bool bTopologyChanged = bMaterialSlotChanged || bUVChannelChanged;
@@ -823,7 +822,7 @@ void SWetClothingTransparencyPreviewViewport::ApplyTransparencyPreviewSettings(
     const float NewSuppressionStrength = FMath::Clamp(InSettings.WrinkleSuppressionStrength, 0.0f, 5.0f);
     const float NewMaskThreshold = FMath::Clamp(InSettings.WrinkleMaskThreshold, 0.0f, 1.0f);
     const float NewMaskSoftness = FMath::Clamp(InSettings.WrinkleMaskSoftness, 0.0f, 1.0f);
-    const bool bSettingsChanged =
+    const bool  bSettingsChanged =
         !FMath::IsNearlyEqual(TransparencyPreviewStrength, NewTransparencyStrength) ||
         !FMath::IsNearlyEqual(WrinkleSuppressionStrength, NewSuppressionStrength) ||
         !FMath::IsNearlyEqual(WrinkleMaskThreshold, NewMaskThreshold) ||
@@ -989,8 +988,8 @@ void SWetClothingTransparencyPreviewViewport::SetAutoBakePreviewResult(
             [this](const FDWCTransparencyRevealColorStroke& Stroke)
             {
                 return Stroke.bEnabled &&
-                    Stroke.MaterialSlotIndex == SelectedMaterialSlotIndex &&
-                    !Stroke.Samples.IsEmpty();
+                       Stroke.MaterialSlotIndex == SelectedMaterialSlotIndex &&
+                       !Stroke.Samples.IsEmpty();
             });
     }
     if (bRevealColorRequiresWorkerRebuild)
@@ -1195,7 +1194,7 @@ bool SWetClothingTransparencyPreviewViewport::IsAuthoringInteractionActive() con
 }
 
 void SWetClothingTransparencyPreviewViewport::HandlePreviewSessionMaterialReady(
-    const int32 MaterialSlotIndex,
+    const int32               MaterialSlotIndex,
     UMaterialInstanceDynamic* PreviewMID)
 {
     if (PreviewMID == nullptr)
@@ -1254,7 +1253,7 @@ void SWetClothingTransparencyPreviewViewport::BuildTargetMeshPreview()
     ApplyRevealColorPaintTargetVisibility();
 
     const FBoxSphereBounds Bounds = TargetMeshPreviewComponent->CalcBounds(FTransform::Identity);
-    PreviewScene->SetFloorOffset(-Bounds.Origin.Z + Bounds.BoxExtent.Z);
+    PreviewScene->SetFloorOffset(static_cast<float>(-Bounds.Origin.Z + Bounds.BoxExtent.Z));
 }
 
 void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
@@ -1309,7 +1308,7 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
     if (USkeletalMeshComponent* FocusMesh = FindFocusMeshComponent())
     {
         const FBoxSphereBounds Bounds = FocusMesh->CalcBounds(FocusMesh->GetComponentTransform());
-        PreviewScene->SetFloorOffset(-Bounds.Origin.Z + Bounds.BoxExtent.Z);
+        PreviewScene->SetFloorOffset(static_cast<float>(-Bounds.Origin.Z + Bounds.BoxExtent.Z));
     }
 }
 
@@ -1371,8 +1370,8 @@ void SWetClothingTransparencyPreviewViewport::ApplyPreviewMaterials(USkeletalMes
         }
 
         UMaterialInterface* MaterialToApply = SlotState.SourceMaterial.Get();
-        const bool bUsePreviewMaterial = SlotState.bPreviewReady &&
-            PreviewMaterialSlotIndices.Contains(SlotState.MaterialSlotIndex);
+        const bool          bUsePreviewMaterial = SlotState.bPreviewReady &&
+                                         PreviewMaterialSlotIndices.Contains(SlotState.MaterialSlotIndex);
         if (bUsePreviewMaterial)
         {
             const FDWCEditorPreviewSessionSlot* PreviewSlot =
@@ -1406,11 +1405,11 @@ void SWetClothingTransparencyPreviewViewport::ApplyRevealColorPaintTargetVisibil
         return;
     }
 
-    const USkeletalMesh* SkeletalMesh = TargetMeshPreviewComponent->GetSkeletalMeshAsset();
+    const USkeletalMesh*           SkeletalMesh = TargetMeshPreviewComponent->GetSkeletalMeshAsset();
     const FSkeletalMeshRenderData* RenderData = SkeletalMesh != nullptr
-        ? SkeletalMesh->GetResourceForRendering()
-        : nullptr;
-    constexpr int32 PreviewLODIndex = 0;
+                                                    ? SkeletalMesh->GetResourceForRendering()
+                                                    : nullptr;
+    constexpr int32                PreviewLODIndex = 0;
     if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(PreviewLODIndex))
     {
         return;
@@ -1424,8 +1423,8 @@ void SWetClothingTransparencyPreviewViewport::ApplyRevealColorPaintTargetVisibil
     for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); ++SectionIndex)
     {
         const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
-        const bool bShowSection = !bShowOnlyTargetPart ||
-            Section.MaterialIndex == SelectedMaterialSlotIndex;
+        const bool                    bShowSection = !bShowOnlyTargetPart ||
+                                  Section.MaterialIndex == SelectedMaterialSlotIndex;
         TargetMeshPreviewComponent->ShowMaterialSection(
             Section.MaterialIndex,
             SectionIndex,
@@ -1492,13 +1491,13 @@ void SWetClothingTransparencyPreviewViewport::UpdateMaterialHoverLayer()
     const bool bRevealTarget = bRevealColorPaintingEnabled && PaintSettings.bRevealColorPaint;
     const bool bAlphaTarget = bTransparencyPaintingEnabled && !PaintSettings.bRevealColorPaint;
     const bool bVisualizationSupported = bRevealTarget
-        ? VisualizationMode == EDWCTransparencyVisualizationMode::InnerColor
-        : (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
-           VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
+                                             ? VisualizationMode == EDWCTransparencyVisualizationMode::InnerColor
+                                             : (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
+                                                VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
     const bool bResultMatchesSelection = AutoBakePreviewResult.IsValid() &&
-        AutoBakePreviewResult->LayerGuid == SelectedLayerGuid &&
-        AutoBakePreviewResult->MaterialSlotIndex == SelectedMaterialSlotIndex &&
-        AutoBakePreviewResult->UVChannelIndex == SelectedUVChannelIndex;
+                                         AutoBakePreviewResult->LayerGuid == SelectedLayerGuid &&
+                                         AutoBakePreviewResult->MaterialSlotIndex == SelectedMaterialSlotIndex &&
+                                         AutoBakePreviewResult->UVChannelIndex == SelectedUVChannelIndex;
     if (bPreviewSuspended || !PreviewOrchestrator || !PaintSettings.bEnabled ||
         (!bRevealTarget && !bAlphaTarget) || !bVisualizationSupported ||
         IsAuthoringInteractionActive() || !CurrentSurfaceHit.bHit ||
@@ -1510,7 +1509,7 @@ void SWetClothingTransparencyPreviewViewport::UpdateMaterialHoverLayer()
         return;
     }
 
-    const bool bWrap = SelectedUVAddressMode == EDWCTransparencyUVAddressMode::Wrap;
+    const bool  bWrap = SelectedUVAddressMode == EDWCTransparencyUVAddressMode::Wrap;
     const int32 Width = AutoBakePreviewResult->Resolution.X;
     const int32 Height = AutoBakePreviewResult->Resolution.Y;
     if (Width <= 0 || Height <= 0)
@@ -1532,7 +1531,7 @@ void SWetClothingTransparencyPreviewViewport::UpdateMaterialHoverLayer()
     EDWCTransparencyMaterialHoverOperation Operation =
         EDWCTransparencyMaterialHoverOperation::PaintOrApply;
     float TargetAlpha = PaintSettings.TargetAlpha;
-    bool bNeedsBaseline = false;
+    bool  bNeedsBaseline = false;
     if (bRevealTarget)
     {
         switch (PaintSettings.RevealColorMode)
@@ -1591,8 +1590,8 @@ void SWetClothingTransparencyPreviewViewport::UpdateMaterialHoverLayer()
     HoverLayer.MaterialSlotIndex = SelectedMaterialSlotIndex;
     HoverLayer.AuthoringRevision = PreviewContentRevision;
     HoverLayer.ResourceRevision = TransparencyPreviewHandle.IsValid()
-        ? TransparencyPreviewHandle->GetContentRevision()
-        : 0;
+                                      ? TransparencyPreviewHandle->GetContentRevision()
+                                      : 0;
     HoverLayer.AddVector(
         DWCTransparencyPreviewMaterialParameters::HoverState0(),
         FLinearColor(
@@ -1616,8 +1615,8 @@ void SWetClothingTransparencyPreviewViewport::UpdateMaterialHoverLayer()
     HoverLayer.AddScalar(
         DWCTransparencyPreviewMaterialParameters::HoverTarget(),
         static_cast<float>(bRevealTarget
-            ? EDWCTransparencyMaterialHoverTarget::RevealColor
-            : EDWCTransparencyMaterialHoverTarget::TransparencyAlpha));
+                               ? EDWCTransparencyMaterialHoverTarget::RevealColor
+                               : EDWCTransparencyMaterialHoverTarget::TransparencyAlpha));
     HoverLayer.AddScalar(
         DWCTransparencyPreviewMaterialParameters::HoverWrap(),
         bWrap ? 1.0f : 0.0f);
@@ -1653,14 +1652,14 @@ void SWetClothingTransparencyPreviewViewport::UpdateMaterialHoverLayer()
 FDWCEditorPreviewLayer SWetClothingTransparencyPreviewViewport::BuildTransparencyPreviewLayer()
 {
     const FWetClothingTransparencyLayerData* LayerData = GetSelectedLayer();
-    const bool bResultMatchesSelection = AutoBakePreviewResult.IsValid() &&
-        AutoBakePreviewResult->LayerGuid == SelectedLayerGuid &&
-        AutoBakePreviewResult->MaterialSlotIndex == SelectedMaterialSlotIndex &&
-        AutoBakePreviewResult->UVChannelIndex == SelectedUVChannelIndex;
+    const bool                               bResultMatchesSelection = AutoBakePreviewResult.IsValid() &&
+                                         AutoBakePreviewResult->LayerGuid == SelectedLayerGuid &&
+                                         AutoBakePreviewResult->MaterialSlotIndex == SelectedMaterialSlotIndex &&
+                                         AutoBakePreviewResult->UVChannelIndex == SelectedUVChannelIndex;
 
     UTexture2D* PreviewTransparencyMap = bResultMatchesSelection
-        ? GetTransparencyPreviewTexture()
-        : nullptr;
+                                             ? GetTransparencyPreviewTexture()
+                                             : nullptr;
     if (PreviewTransparencyMap == nullptr && LayerData != nullptr)
     {
         if (const FWetClothingBakedTransparencyMap* BakedMap = LayerData->BakedMaps.FindByPredicate(
@@ -1675,12 +1674,12 @@ FDWCEditorPreviewLayer SWetClothingTransparencyPreviewViewport::BuildTransparenc
     }
     const bool bUseMaterialDrivenPresentation = CanUseMaterialDrivenPreviewPresentation();
     const bool bUsesMaterialDrivenAlpha = bUseMaterialDrivenPresentation &&
-        (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
-            VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
+                                          (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
+                                           VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
     UTexture2D* WrinkleCoverageTexture = GetWrinkleCoverageTexture();
-    const bool bUseCoverage = WrinkleCoverageTexture != nullptr &&
-        (bUsesMaterialDrivenAlpha ||
-            VisualizationMode == EDWCTransparencyVisualizationMode::WrinkleSeparation);
+    const bool  bUseCoverage = WrinkleCoverageTexture != nullptr &&
+                              (bUsesMaterialDrivenAlpha ||
+                               VisualizationMode == EDWCTransparencyVisualizationMode::WrinkleSeparation);
 
     FDWCEditorPreviewLayer Layer;
     Layer.Kind = EDWCEditorPreviewLayerKind::LiveTransparency;
@@ -1736,37 +1735,38 @@ FWetClothingTransparencyLayerData* SWetClothingTransparencyPreviewViewport::GetS
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     return Asset != nullptr ? Asset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
-        [this](const FWetClothingTransparencyLayerData& Layer)
-        {
-            return Layer.LayerGuid == SelectedLayerGuid;
-        }) : nullptr;
+                                  [this](const FWetClothingTransparencyLayerData& Layer)
+                                  {
+                                      return Layer.LayerGuid == SelectedLayerGuid;
+                                  })
+                            : nullptr;
 }
 
 bool SWetClothingTransparencyPreviewViewport::CanPaint() const
 {
     const bool bCanRevealPaint = bRevealColorPaintingEnabled && PaintSettings.bRevealColorPaint &&
-        SelectedMaterialSlotIndex != INDEX_NONE;
+                                 SelectedMaterialSlotIndex != INDEX_NONE;
     const bool bCanAlphaPaint = bTransparencyPaintingEnabled && !PaintSettings.bRevealColorPaint;
     const bool bSupportsCurrentVisualization = bCanRevealPaint
-        ? (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
-           VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha ||
-           VisualizationMode == EDWCTransparencyVisualizationMode::InnerColor)
-        : (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
-           VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
+                                                   ? (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
+                                                      VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha ||
+                                                      VisualizationMode == EDWCTransparencyVisualizationMode::InnerColor)
+                                                   : (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
+                                                      VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
     return !bPreviewSuspended && (bCanRevealPaint || bCanAlphaPaint) && PaintSettings.bEnabled &&
-        PreviewMode == EWetClothingTransparencyPreviewMode::TargetMeshOnly &&
-        AutoBakePreviewResult.IsValid() &&
-        SelectedMaterialSlotIndex != INDEX_NONE && SelectedUVChannelIndex >= 0 &&
-        bSupportsCurrentVisualization;
+           PreviewMode == EWetClothingTransparencyPreviewMode::TargetMeshOnly &&
+           AutoBakePreviewResult.IsValid() &&
+           SelectedMaterialSlotIndex != INDEX_NONE && SelectedUVChannelIndex >= 0 &&
+           bSupportsCurrentVisualization;
 }
 
 bool SWetClothingTransparencyPreviewViewport::CanShowBrushCursor() const
 {
     const bool bHasActivePaintTarget = bTransparencyPaintingEnabled || bRevealColorPaintingEnabled;
     return !bPreviewSuspended && bHasActivePaintTarget &&
-        PreviewMode == EWetClothingTransparencyPreviewMode::TargetMeshOnly &&
-        TargetMeshPreviewComponent != nullptr && SpatialLease.IsValid() && SpatialHandle.IsValid() &&
-        SelectedMaterialSlotIndex != INDEX_NONE && SelectedUVChannelIndex >= 0;
+           PreviewMode == EWetClothingTransparencyPreviewMode::TargetMeshOnly &&
+           TargetMeshPreviewComponent != nullptr && SpatialLease.IsValid() && SpatialHandle.IsValid() &&
+           SelectedMaterialSlotIndex != INDEX_NONE && SelectedUVChannelIndex >= 0;
 }
 
 void SWetClothingTransparencyPreviewViewport::RebuildHitTriangles()
@@ -1796,8 +1796,8 @@ void SWetClothingTransparencyPreviewViewport::RebuildHitTriangles()
 }
 
 bool SWetClothingTransparencyPreviewViewport::TraceSurface(
-    const FVector& RayOrigin,
-    const FVector& RayDirection,
+    const FVector&              RayOrigin,
+    const FVector&              RayDirection,
     FDWCTransparencySurfaceHit& OutHit) const
 {
     if (!SpatialQueryService.IsValid() || !SpatialLease.IsValid() || !SpatialHandle.IsValid())
@@ -1815,7 +1815,7 @@ bool SWetClothingTransparencyPreviewViewport::TraceSurface(
 
 bool SWetClothingTransparencyPreviewViewport::HitTestSurface(
     const FRay& WorldRay,
-    double& OutHitDepth) const
+    double&     OutHitDepth) const
 {
     FDWCTransparencySurfaceHit Hit;
     if (!TraceSurface(WorldRay.Origin, WorldRay.Direction, Hit))
@@ -1828,7 +1828,7 @@ bool SWetClothingTransparencyPreviewViewport::HitTestSurface(
 
 bool SWetClothingTransparencyPreviewViewport::CanBeginSurfaceInteraction(
     const FRay& WorldRay,
-    double& OutHitDepth)
+    double&     OutHitDepth)
 {
     if (!CanPaint())
     {
@@ -1919,36 +1919,34 @@ void SWetClothingTransparencyPreviewViewport::EnsureBrushCursor()
         return;
     }
 
-    constexpr float HalfWidth = 0.03f;
-    TArray<FVector> Vertices;
-    TArray<int32> Indices;
-    TArray<FVector> Normals;
-    TArray<FVector2D> UVs;
-    TArray<FLinearColor> Colors;
+    constexpr float          HalfWidth = 0.03f;
+    TArray<FVector>          Vertices;
+    TArray<int32>            Indices;
+    TArray<FVector>          Normals;
+    TArray<FVector2D>        UVs;
+    TArray<FLinearColor>     Colors;
     TArray<FProcMeshTangent> Tangents;
-    const FLinearColor MarkerColor(0.08f, 0.72f, 0.95f, 1.0f);
-    const auto AddDoubleSidedRibbon = [&Vertices, &Indices, &Normals, &UVs, &Colors, &Tangents, MarkerColor](
-                                           const FVector& A,
-                                           const FVector& B,
-                                           const FVector& C,
-                                           const FVector& D,
-                                           const FVector& Normal)
+    const FLinearColor       MarkerColor(0.08f, 0.72f, 0.95f, 1.0f);
+    const auto               AddDoubleSidedRibbon = [&Vertices, &Indices, &Normals, &UVs, &Colors, &Tangents, MarkerColor](
+                                          const FVector& A,
+                                          const FVector& B,
+                                          const FVector& C,
+                                          const FVector& D,
+                                          const FVector& Normal)
     {
         const int32 BaseIndex = Vertices.Num();
-        Vertices.Append({A, B, C, D});
-        Normals.Append({Normal, Normal, Normal, Normal});
-        UVs.Append({FVector2D::ZeroVector, FVector2D(1.0f, 0.0f), FVector2D(1.0f, 1.0f), FVector2D(0.0f, 1.0f)});
-        Colors.Append({MarkerColor, MarkerColor, MarkerColor, MarkerColor});
-        Tangents.Append({
-            FProcMeshTangent(FVector::ForwardVector, false),
-            FProcMeshTangent(FVector::ForwardVector, false),
-            FProcMeshTangent(FVector::ForwardVector, false),
-            FProcMeshTangent(FVector::ForwardVector, false)});
-        Indices.Append({
-            BaseIndex, BaseIndex + 1, BaseIndex + 2,
-            BaseIndex, BaseIndex + 2, BaseIndex + 3,
-            BaseIndex + 2, BaseIndex + 1, BaseIndex,
-            BaseIndex + 3, BaseIndex + 2, BaseIndex});
+        Vertices.Append({ A, B, C, D });
+        Normals.Append({ Normal, Normal, Normal, Normal });
+        UVs.Append({ FVector2D::ZeroVector, FVector2D(1.0f, 0.0f), FVector2D(1.0f, 1.0f), FVector2D(0.0f, 1.0f) });
+        Colors.Append({ MarkerColor, MarkerColor, MarkerColor, MarkerColor });
+        Tangents.Append({ FProcMeshTangent(FVector::ForwardVector, false),
+                          FProcMeshTangent(FVector::ForwardVector, false),
+                          FProcMeshTangent(FVector::ForwardVector, false),
+                          FProcMeshTangent(FVector::ForwardVector, false) });
+        Indices.Append({ BaseIndex, BaseIndex + 1, BaseIndex + 2,
+                         BaseIndex, BaseIndex + 2, BaseIndex + 3,
+                         BaseIndex + 2, BaseIndex + 1, BaseIndex,
+                         BaseIndex + 3, BaseIndex + 2, BaseIndex });
     };
     // A cross-shaped vertical pin stays readable from every camera angle while
     // leaving the painted surface unobscured. Local +Z is aligned to hit normal.
@@ -2023,7 +2021,6 @@ void SWetClothingTransparencyPreviewViewport::HandleSurfaceHitFromClient(const F
     RefreshBrushCursor();
 }
 
-
 void SWetClothingTransparencyPreviewViewport::ApplyAuthoringBrushSample(
     const FDWCTransparencyBrushStroke& Stroke,
     const FDWCTransparencyBrushSample& Sample)
@@ -2045,7 +2042,7 @@ void SWetClothingTransparencyPreviewViewport::ApplyAuthoringBrushSample(
 
 void SWetClothingTransparencyPreviewViewport::ApplyAuthoringRevealColorSample(
     const FDWCTransparencyRevealColorStroke& Stroke,
-    const FDWCTransparencyBrushSample& Sample)
+    const FDWCTransparencyBrushSample&       Sample)
 {
     if (AutoBakePreviewResult.IsValid())
     {
@@ -2090,7 +2087,7 @@ void SWetClothingTransparencyPreviewViewport::CommitAuthoringPreviewUpdate(
         bManualOverridesRequireWorkerRebuild = AlphaPreviewRecovery.RequiresFullRebuild();
     }
     bAuthoringWorkerRebuildRequested = RevealColorPreviewRecovery.RequiresFullRebuild() ||
-        AlphaPreviewRecovery.RequiresFullRebuild();
+                                       AlphaPreviewRecovery.RequiresFullRebuild();
     if (bAuthoringWorkerRebuildRequested)
     {
         ++InteractivePaintAuthoritativeReplayCount;
@@ -2200,14 +2197,14 @@ void SWetClothingTransparencyPreviewViewport::ReplayRevealColorStrokeHistory(
 
 void SWetClothingTransparencyPreviewViewport::CancelDirtyTileReplay(
     const EDWCTransparencyDirtyReplayTarget Target,
-    const bool bRequireFullRebuild)
+    const bool                              bRequireFullRebuild)
 {
     const EDWCEditorWorkerJobKind Kind = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-        ? EDWCEditorWorkerJobKind::TransparencyAlphaDirtyReplay
-        : EDWCEditorWorkerJobKind::TransparencyRevealColorDirtyReplay;
+                                             ? EDWCEditorWorkerJobKind::TransparencyAlphaDirtyReplay
+                                             : EDWCEditorWorkerJobKind::TransparencyRevealColorDirtyReplay;
     if (WorkerJobScheduler.IsValid())
     {
-        WorkerJobScheduler->Cancel({Kind, SelectedMaterialSlotIndex, SelectedLayerGuid});
+        WorkerJobScheduler->Cancel({ Kind, SelectedMaterialSlotIndex, SelectedLayerGuid });
     }
     if (Target == EDWCTransparencyDirtyReplayTarget::Alpha)
     {
@@ -2244,26 +2241,26 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
         return;
     }
 
-    TArray<FIntRect>& PendingRegions = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-        ? PendingAlphaReplayRegions
-        : PendingRevealColorReplayRegions;
+    TArray<FIntRect>&          PendingRegions = Target == EDWCTransparencyDirtyReplayTarget::Alpha
+                                                    ? PendingAlphaReplayRegions
+                                                    : PendingRevealColorReplayRegions;
     FDWCEditorWorkerJobTicket& PendingTicket = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-        ? PendingAlphaReplayTicket
-        : PendingRevealColorReplayTicket;
-    uint64& ReplayEpoch = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-        ? AlphaReplayEpoch
-        : RevealColorReplayEpoch;
+                                                   ? PendingAlphaReplayTicket
+                                                   : PendingRevealColorReplayTicket;
+    uint64&                    ReplayEpoch = Target == EDWCTransparencyDirtyReplayTarget::Alpha
+                                                 ? AlphaReplayEpoch
+                                                 : RevealColorReplayEpoch;
     if (PendingRegions.IsEmpty())
     {
         return;
     }
 
     const EDWCEditorWorkerJobKind Kind = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-        ? EDWCEditorWorkerJobKind::TransparencyAlphaDirtyReplay
-        : EDWCEditorWorkerJobKind::TransparencyRevealColorDirtyReplay;
+                                             ? EDWCEditorWorkerJobKind::TransparencyAlphaDirtyReplay
+                                             : EDWCEditorWorkerJobKind::TransparencyRevealColorDirtyReplay;
     if (PendingTicket.IsValid())
     {
-        WorkerJobScheduler->Cancel({Kind, SelectedMaterialSlotIndex, SelectedLayerGuid});
+        WorkerJobScheduler->Cancel({ Kind, SelectedMaterialSlotIndex, SelectedLayerGuid });
         PendingTicket = {};
         ++ReplayEpoch;
     }
@@ -2303,9 +2300,9 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
     }
 
     InvalidatePreviewContent();
-    const int32 ExpectedSlot = SelectedMaterialSlotIndex;
-    const FGuid ExpectedLayer = SelectedLayerGuid;
-    const uint64 ExpectedEpoch = ReplayEpoch;
+    const int32            ExpectedSlot = SelectedMaterialSlotIndex;
+    const FGuid            ExpectedLayer = SelectedLayerGuid;
+    const uint64           ExpectedEpoch = ReplayEpoch;
     const TArray<FIntRect> RequestRegions = PendingRegions;
 
     FDWCEditorWorkerJobDescriptor Descriptor;
@@ -2315,7 +2312,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
     Descriptor.Priority = EDWCEditorWorkerJobPriority::Interactive;
     Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::LatestWins;
     const uint64 TilePixels = static_cast<uint64>(DirtyTiles.Num()) *
-        FDWCTransparencyAlphaTileStore::TileSize * FDWCTransparencyAlphaTileStore::TileSize;
+                              FDWCTransparencyAlphaTileStore::TileSize * FDWCTransparencyAlphaTileStore::TileSize;
     Descriptor.MemoryEstimate.WorkingBytes = TilePixels * sizeof(FColor);
     Descriptor.MemoryEstimate.OutputBytes = TilePixels * sizeof(FColor) * 2ull;
     Descriptor.EstimatedBytes = Descriptor.MemoryEstimate.GetTotalBytes();
@@ -2325,24 +2322,24 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
         ExpectedSlot,
         DirtyTiles.Num());
 
-    const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewConsumerToken              CommitToken = PreviewCommitLifetime.CaptureToken();
     TWeakPtr<SWetClothingTransparencyPreviewViewport> WeakThis = SharedThis(this);
-    FString SubmitError;
+    FString                                           SubmitError;
     PendingTicket = WorkerJobScheduler->SubmitTwoPhase(
         Descriptor,
         [WeakThis, Target, ExpectedSlot, ExpectedLayer, ExpectedEpoch,
          DirtyTiles = MoveTemp(DirtyTiles)](
             const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken,
-            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
-            FString& OutPrepareError) mutable
+            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob&                   OutPrepared,
+            FString&                                                            OutPrepareError) mutable
         {
             const TSharedPtr<SWetClothingTransparencyPreviewViewport> Viewport = WeakThis.Pin();
             if (!Viewport.IsValid() || CancellationToken->IsCanceled() || Viewport->bPreviewSuspended ||
                 Viewport->SelectedMaterialSlotIndex != ExpectedSlot ||
                 Viewport->SelectedLayerGuid != ExpectedLayer ||
                 (Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                    ? Viewport->AlphaReplayEpoch != ExpectedEpoch
-                    : Viewport->RevealColorReplayEpoch != ExpectedEpoch))
+                     ? Viewport->AlphaReplayEpoch != ExpectedEpoch
+                     : Viewport->RevealColorReplayEpoch != ExpectedEpoch))
             {
                 OutPrepareError = TEXT("The transparency dirty replay source changed before admission.");
                 return false;
@@ -2394,17 +2391,17 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
             OutPrepared.ActualMemoryEstimate = FDWCTransparencyDirtyTileReplayWorker::EstimateMemory(Input);
             OutPrepared.ActualEstimatedBytes = OutPrepared.ActualMemoryEstimate.GetTotalBytes();
             OutPrepared.Work = [Input = MoveTemp(Input)](
-                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
+                                   const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
             {
                 return FDWCTransparencyDirtyTileReplayWorker::Build(MoveTemp(Input), WorkerToken);
             };
             return true;
         },
         [WeakThis, Target, ExpectedSlot, ExpectedLayer, ExpectedEpoch, CommitToken, RequestRegions](
-            const FDWCEditorWorkerJobTicket& CompletedTicket,
+            const FDWCEditorWorkerJobTicket&                           CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
-            const TSharedPtr<SWetClothingTransparencyPreviewViewport> Viewport = WeakThis.Pin();
+            const TSharedPtr<SWetClothingTransparencyPreviewViewport>                       Viewport = WeakThis.Pin();
             const TSharedPtr<FDWCTransparencyDirtyTileReplayJobResult, ESPMode::ThreadSafe> Result =
                 StaticCastSharedPtr<FDWCTransparencyDirtyTileReplayJobResult>(BaseResult);
             if (!Viewport.IsValid() || !Result.IsValid() || !Result->bSucceeded ||
@@ -2413,11 +2410,11 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
                 return;
             }
             FDWCEditorWorkerJobTicket& CurrentTicket = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                ? Viewport->PendingAlphaReplayTicket
-                : Viewport->PendingRevealColorReplayTicket;
-            const uint64 CurrentEpoch = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                ? Viewport->AlphaReplayEpoch
-                : Viewport->RevealColorReplayEpoch;
+                                                           ? Viewport->PendingAlphaReplayTicket
+                                                           : Viewport->PendingRevealColorReplayTicket;
+            const uint64               CurrentEpoch = Target == EDWCTransparencyDirtyReplayTarget::Alpha
+                                                          ? Viewport->AlphaReplayEpoch
+                                                          : Viewport->RevealColorReplayEpoch;
             if (CurrentEpoch != ExpectedEpoch || CurrentTicket.JobId != CompletedTicket.JobId ||
                 CurrentTicket.Generation != CompletedTicket.Generation)
             {
@@ -2431,15 +2428,15 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
             CommitContext.IsCurrent = [Viewport, Target, ExpectedSlot, ExpectedLayer, ExpectedEpoch, CompletedTicket]()
             {
                 const FDWCEditorWorkerJobTicket& Ticket = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                    ? Viewport->PendingAlphaReplayTicket
-                    : Viewport->PendingRevealColorReplayTicket;
+                                                              ? Viewport->PendingAlphaReplayTicket
+                                                              : Viewport->PendingRevealColorReplayTicket;
                 return !Viewport->bPreviewSuspended &&
-                    Viewport->SelectedMaterialSlotIndex == ExpectedSlot &&
-                    Viewport->SelectedLayerGuid == ExpectedLayer &&
-                    (Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                        ? Viewport->AlphaReplayEpoch == ExpectedEpoch
-                        : Viewport->RevealColorReplayEpoch == ExpectedEpoch) &&
-                    Ticket.JobId == CompletedTicket.JobId && Ticket.Generation == CompletedTicket.Generation;
+                       Viewport->SelectedMaterialSlotIndex == ExpectedSlot &&
+                       Viewport->SelectedLayerGuid == ExpectedLayer &&
+                       (Target == EDWCTransparencyDirtyReplayTarget::Alpha
+                            ? Viewport->AlphaReplayEpoch == ExpectedEpoch
+                            : Viewport->RevealColorReplayEpoch == ExpectedEpoch) &&
+                       Ticket.JobId == CompletedTicket.JobId && Ticket.Generation == CompletedTicket.Generation;
             };
 
             bool bStoreCanCommit = false;
@@ -2457,25 +2454,25 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
             }
 
             FDWCEditorPreviewRegionCommitOutcome Outcome;
-            const EDWCEditorPreviewCommitResult CommitResult = bStoreCanCommit
-                ? Viewport->PreviewCommitCoordinator->CommitBGRA8Regions(
-                    CommitContext,
-                    Viewport->TransparencyPreviewHandle,
-                    Result->PreviewTarget,
-                    Result->PreviewRegions,
-                    Outcome,
-                    EDWCEditorTextureUploadPriority::Interactive)
-                : EDWCEditorPreviewCommitResult::DataRevisionMismatch;
-            bool bStoreCommitted = false;
+            const EDWCEditorPreviewCommitResult  CommitResult = bStoreCanCommit
+                                                                    ? Viewport->PreviewCommitCoordinator->CommitBGRA8Regions(
+                                                                         CommitContext,
+                                                                         Viewport->TransparencyPreviewHandle,
+                                                                         Result->PreviewTarget,
+                                                                         Result->PreviewRegions,
+                                                                         Outcome,
+                                                                         EDWCEditorTextureUploadPriority::Interactive)
+                                                                    : EDWCEditorPreviewCommitResult::DataRevisionMismatch;
+            bool                                 bStoreCommitted = false;
             if (CommitResult == EDWCEditorPreviewCommitResult::Applied)
             {
                 bStoreCommitted = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                    ? Viewport->ManualAlphaTileStore.Commit(
-                        Result->ExpectedStoreRevision, Result->AlphaTiles)
-                    : Viewport->RevealColorTileStore.Commit(
-                        Result->ExpectedStoreRevision,
-                        Result->RevealColorTiles,
-                        MakeArrayView(Viewport->AutoBakePreviewResult->InnerColorBuffer));
+                                      ? Viewport->ManualAlphaTileStore.Commit(
+                                            Result->ExpectedStoreRevision, Result->AlphaTiles)
+                                      : Viewport->RevealColorTileStore.Commit(
+                                            Result->ExpectedStoreRevision,
+                                            Result->RevealColorTiles,
+                                            MakeArrayView(Viewport->AutoBakePreviewResult->InnerColorBuffer));
             }
             CurrentTicket = {};
             if (!bStoreCommitted)
@@ -2486,8 +2483,8 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
             }
 
             TArray<FIntRect>& Regions = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                ? Viewport->PendingAlphaReplayRegions
-                : Viewport->PendingRevealColorReplayRegions;
+                                            ? Viewport->PendingAlphaReplayRegions
+                                            : Viewport->PendingRevealColorReplayRegions;
             for (const FIntRect& Region : RequestRegions)
             {
                 Regions.Remove(Region);
@@ -2508,7 +2505,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
         },
         &SubmitError,
         [WeakThis, Target, ExpectedEpoch](
-            const FDWCEditorWorkerJobTicket& FinishedTicket,
+            const FDWCEditorWorkerJobTicket&    FinishedTicket,
             const EDWCEditorWorkerJobCompletion Completion,
             const FString&)
         {
@@ -2522,11 +2519,11 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
                 return;
             }
             FDWCEditorWorkerJobTicket& CurrentTicket = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                ? Viewport->PendingAlphaReplayTicket
-                : Viewport->PendingRevealColorReplayTicket;
-            const uint64 CurrentEpoch = Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                ? Viewport->AlphaReplayEpoch
-                : Viewport->RevealColorReplayEpoch;
+                                                           ? Viewport->PendingAlphaReplayTicket
+                                                           : Viewport->PendingRevealColorReplayTicket;
+            const uint64               CurrentEpoch = Target == EDWCTransparencyDirtyReplayTarget::Alpha
+                                                          ? Viewport->AlphaReplayEpoch
+                                                          : Viewport->RevealColorReplayEpoch;
             if (CurrentEpoch != ExpectedEpoch ||
                 CurrentTicket.JobId != FinishedTicket.JobId ||
                 CurrentTicket.Generation != FinishedTicket.Generation)
@@ -2549,7 +2546,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
 
 void SWetClothingTransparencyPreviewViewport::QueueRevealColorIncrementalSample(
     const FDWCTransparencyRevealColorStroke& Stroke,
-    const FDWCTransparencyBrushSample& Sample)
+    const FDWCTransparencyBrushSample&       Sample)
 {
     if (bPreviewSuspended || !AutoBakePreviewResult.IsValid() ||
         !RevealColorTileStore.IsValid() ||
@@ -2607,7 +2604,7 @@ void SWetClothingTransparencyPreviewViewport::QueueAlphaIncrementalSample(
 }
 
 bool SWetClothingTransparencyPreviewViewport::BuildAlphaComposeTileSnapshots(
-    const TArray<FIntPoint>& TileCoordinates,
+    const TArray<FIntPoint>&                          TileCoordinates,
     TArray<FDWCTransparencyAlphaComposeTileSnapshot>& OutTiles) const
 {
     OutTiles.Reset(TileCoordinates.Num());
@@ -2666,7 +2663,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
     }
 
     const FGuid StrokeGuid = PendingAlphaCommands[0].Stroke.StrokeGuid;
-    int32 BatchCount = 0;
+    int32       BatchCount = 0;
     while (BatchCount < PendingAlphaCommands.Num() &&
            PendingAlphaCommands[BatchCount].Stroke.StrokeGuid == StrokeGuid)
     {
@@ -2677,7 +2674,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
         return;
     }
 
-    TArray<FIntRect> OutputRegions;
+    TArray<FIntRect>         OutputRegions;
     FDWCEditorDirtyRegionSet RegionSet;
     for (int32 Index = 0; Index < BatchCount; ++Index)
     {
@@ -2702,7 +2699,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
         return;
     }
 
-    const bool bSmooth = PendingAlphaCommands[0].Stroke.BrushMode == EDWCTransparencyBrushMode::Smooth;
+    const bool        bSmooth = PendingAlphaCommands[0].Stroke.BrushMode == EDWCTransparencyBrushMode::Smooth;
     TArray<FIntPoint> SnapshotTileCoordinates;
     ManualAlphaTileStore.GatherTileCoordinates(
         OutputRegions,
@@ -2710,11 +2707,11 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
         PendingAlphaCommands[0].Stroke.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap,
         SnapshotTileCoordinates);
 
-    const int32 ExpectedSlot = SelectedMaterialSlotIndex;
-    const FGuid ExpectedLayer = SelectedLayerGuid;
-    const uint64 ExpectedEpoch = AlphaIncrementalEpoch;
-    const uint64 FirstSequence = PendingAlphaCommands[0].Sequence;
-    const uint64 LastSequence = PendingAlphaCommands[BatchCount - 1].Sequence;
+    const int32                       ExpectedSlot = SelectedMaterialSlotIndex;
+    const FGuid                       ExpectedLayer = SelectedLayerGuid;
+    const uint64                      ExpectedEpoch = AlphaIncrementalEpoch;
+    const uint64                      FirstSequence = PendingAlphaCommands[0].Sequence;
+    const uint64                      LastSequence = PendingAlphaCommands[BatchCount - 1].Sequence;
     const FDWCTransparencyBrushStroke StrokeDescriptor = PendingAlphaCommands[0].Stroke;
 
     FDWCEditorWorkerJobDescriptor Descriptor;
@@ -2738,18 +2735,18 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
         FirstSequence,
         LastSequence);
 
-    const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewConsumerToken              CommitToken = PreviewCommitLifetime.CaptureToken();
     TWeakPtr<SWetClothingTransparencyPreviewViewport> WeakThis = SharedThis(this);
-    FString SubmitError;
-    const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitTwoPhase(
+    FString                                           SubmitError;
+    const FDWCEditorWorkerJobTicket                   Ticket = WorkerJobScheduler->SubmitTwoPhase(
         Descriptor,
         [WeakThis, ExpectedSlot, ExpectedLayer, ExpectedEpoch, BatchCount,
          FirstSequence, LastSequence, StrokeDescriptor,
          OutputTileCoordinates = MoveTemp(OutputTileCoordinates),
          SnapshotTileCoordinates = MoveTemp(SnapshotTileCoordinates)](
             const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken,
-            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
-            FString& OutPrepareError) mutable
+            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob&                   OutPrepared,
+            FString&                                                            OutPrepareError) mutable
         {
             const TSharedPtr<SWetClothingTransparencyPreviewViewport> Viewport = WeakThis.Pin();
             if (!Viewport.IsValid() || CancellationToken->IsCanceled() || Viewport->bPreviewSuspended ||
@@ -2799,7 +2796,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
                 Input.OutputTileCoordinates.Num());
             OutPrepared.ActualEstimatedBytes = OutPrepared.ActualMemoryEstimate.GetTotalBytes();
             OutPrepared.Work = [Input = MoveTemp(Input)](
-                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
+                                   const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
             {
                 return FDWCTransparencyAlphaIncrementalWorker::Build(MoveTemp(Input), WorkerToken);
             };
@@ -2807,10 +2804,10 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
         },
         [WeakThis, ExpectedSlot, ExpectedLayer, ExpectedEpoch, BatchCount,
          FirstSequence, LastSequence, CommitToken](
-            const FDWCEditorWorkerJobTicket& CompletedTicket,
+            const FDWCEditorWorkerJobTicket&                           CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
-            const TSharedPtr<SWetClothingTransparencyPreviewViewport> Viewport = WeakThis.Pin();
+            const TSharedPtr<SWetClothingTransparencyPreviewViewport>                        Viewport = WeakThis.Pin();
             const TSharedPtr<FDWCTransparencyAlphaIncrementalJobResult, ESPMode::ThreadSafe> Result =
                 StaticCastSharedPtr<FDWCTransparencyAlphaIncrementalJobResult>(BaseResult);
             if (!Viewport.IsValid() || !Result.IsValid() || !Viewport->PreviewCommitCoordinator.IsValid())
@@ -2818,7 +2815,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
                 return;
             }
             const bool bOwnsTicket = Viewport->PendingAlphaIncrementalTicket.JobId == CompletedTicket.JobId &&
-                Viewport->PendingAlphaIncrementalTicket.Generation == CompletedTicket.Generation;
+                                     Viewport->PendingAlphaIncrementalTicket.Generation == CompletedTicket.Generation;
             if (!bOwnsTicket)
             {
                 return;
@@ -2834,18 +2831,18 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
                                        FirstSequence, LastSequence, CompletedTicket]()
             {
                 return !Viewport->bPreviewSuspended &&
-                    Viewport->AlphaIncrementalEpoch == ExpectedEpoch &&
-                    Viewport->SelectedMaterialSlotIndex == ExpectedSlot &&
-                    Viewport->SelectedLayerGuid == ExpectedLayer &&
-                    Viewport->PendingAlphaIncrementalTicket.JobId == CompletedTicket.JobId &&
-                    Viewport->PendingAlphaIncrementalTicket.Generation == CompletedTicket.Generation &&
-                    Viewport->PendingAlphaCommands.Num() >= 1 &&
-                    Viewport->PendingAlphaCommands[0].Sequence == FirstSequence &&
-                    Viewport->PendingAlphaCommands.ContainsByPredicate(
-                        [LastSequence](const FPendingAlphaCommand& Command)
-                        {
-                            return Command.Sequence == LastSequence;
-                        });
+                       Viewport->AlphaIncrementalEpoch == ExpectedEpoch &&
+                       Viewport->SelectedMaterialSlotIndex == ExpectedSlot &&
+                       Viewport->SelectedLayerGuid == ExpectedLayer &&
+                       Viewport->PendingAlphaIncrementalTicket.JobId == CompletedTicket.JobId &&
+                       Viewport->PendingAlphaIncrementalTicket.Generation == CompletedTicket.Generation &&
+                       Viewport->PendingAlphaCommands.Num() >= 1 &&
+                       Viewport->PendingAlphaCommands[0].Sequence == FirstSequence &&
+                       Viewport->PendingAlphaCommands.ContainsByPredicate(
+                           [LastSequence](const FPendingAlphaCommand& Command)
+                           {
+                               return Command.Sequence == LastSequence;
+                           });
             };
 
             if (!Result->bHasChanges)
@@ -2870,7 +2867,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
             }
 
             FDWCEditorPreviewRegionCommitOutcome Outcome;
-            EDWCEditorPreviewCommitResult CommitResult = EDWCEditorPreviewCommitResult::InvalidPayload;
+            EDWCEditorPreviewCommitResult        CommitResult = EDWCEditorPreviewCommitResult::InvalidPayload;
             if (Viewport->ManualAlphaTileStore.CanCommit(
                     Result->ExpectedAlphaRevision,
                     Result->AlphaTiles))
@@ -2916,9 +2913,9 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
         },
         &SubmitError,
         [WeakThis, ExpectedEpoch](
-            const FDWCEditorWorkerJobTicket& CompletedTicket,
+            const FDWCEditorWorkerJobTicket&    CompletedTicket,
             const EDWCEditorWorkerJobCompletion Completion,
-            const FString& Error)
+            const FString&                      Error)
         {
             if (Completion == EDWCEditorWorkerJobCompletion::Applied)
             {
@@ -2934,7 +2931,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
             if (Completion == EDWCEditorWorkerJobCompletion::Failed && !Error.IsEmpty())
             {
                 UE_LOG(LogWetTransparencyPreviewViewport, Warning,
-                    TEXT("Transparency alpha incremental worker failed: %s"), *Error);
+                                         TEXT("Transparency alpha incremental worker failed: %s"), *Error);
             }
             Viewport->PendingAlphaIncrementalTicket = {};
             Viewport->CancelAlphaIncrementalWork(true);
@@ -2949,9 +2946,9 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
     if (!Ticket.IsValid())
     {
         UE_LOG(LogWetTransparencyPreviewViewport, Warning,
-            TEXT("Transparency alpha incremental job was not submitted for slot %d: %s"),
-            ExpectedSlot,
-            SubmitError.IsEmpty() ? TEXT("unknown scheduler failure") : *SubmitError);
+               TEXT("Transparency alpha incremental job was not submitted for slot %d: %s"),
+               ExpectedSlot,
+               SubmitError.IsEmpty() ? TEXT("unknown scheduler failure") : *SubmitError);
         CancelAlphaIncrementalWork(true);
     }
 }
@@ -2976,7 +2973,7 @@ void SWetClothingTransparencyPreviewViewport::CancelAlphaIncrementalWork(const b
 }
 
 bool SWetClothingTransparencyPreviewViewport::BuildRevealColorComposeTileSnapshots(
-    const TArray<FIntPoint>& TileCoordinates,
+    const TArray<FIntPoint>&                                TileCoordinates,
     TArray<FDWCTransparencyRevealColorComposeTileSnapshot>& OutTiles) const
 {
     OutTiles.Reset(TileCoordinates.Num());
@@ -3035,7 +3032,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
     }
 
     const FGuid StrokeGuid = PendingRevealColorCommands[0].Stroke.StrokeGuid;
-    int32 BatchCount = 0;
+    int32       BatchCount = 0;
     while (BatchCount < PendingRevealColorCommands.Num() &&
            PendingRevealColorCommands[BatchCount].Stroke.StrokeGuid == StrokeGuid)
     {
@@ -3060,7 +3057,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
             RegionSet.Add(Region, AutoBakePreviewResult->Resolution, false);
         }
     }
-    const auto& OutputRegions = RegionSet.GetRegions();
+    const auto&       OutputRegions = RegionSet.GetRegions();
     TArray<FIntPoint> OutputTileCoordinates;
     RevealColorTileStore.GatherTileCoordinates(OutputRegions, false, false, OutputTileCoordinates);
     if (OutputTileCoordinates.IsEmpty())
@@ -3071,7 +3068,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
     }
 
     const bool bSmooth = PendingRevealColorCommands[0].Stroke.BrushMode ==
-        EDWCTransparencyRevealColorBrushMode::Smooth;
+                         EDWCTransparencyRevealColorBrushMode::Smooth;
     TArray<FIntPoint> SnapshotTileCoordinates;
     RevealColorTileStore.GatherTileCoordinates(
         OutputRegions,
@@ -3079,11 +3076,11 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
         PendingRevealColorCommands[0].Stroke.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap,
         SnapshotTileCoordinates);
 
-    const int32 ExpectedSlot = SelectedMaterialSlotIndex;
-    const FGuid ExpectedLayer = SelectedLayerGuid;
-    const uint64 ExpectedEpoch = RevealColorIncrementalEpoch;
-    const uint64 FirstSequence = PendingRevealColorCommands[0].Sequence;
-    const uint64 LastSequence = PendingRevealColorCommands[BatchCount - 1].Sequence;
+    const int32                             ExpectedSlot = SelectedMaterialSlotIndex;
+    const FGuid                             ExpectedLayer = SelectedLayerGuid;
+    const uint64                            ExpectedEpoch = RevealColorIncrementalEpoch;
+    const uint64                            FirstSequence = PendingRevealColorCommands[0].Sequence;
+    const uint64                            LastSequence = PendingRevealColorCommands[BatchCount - 1].Sequence;
     const FDWCTransparencyRevealColorStroke StrokeDescriptor = PendingRevealColorCommands[0].Stroke;
 
     FDWCEditorWorkerJobDescriptor Descriptor;
@@ -3109,18 +3106,18 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
         FirstSequence,
         LastSequence);
 
-    const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewConsumerToken              CommitToken = PreviewCommitLifetime.CaptureToken();
     TWeakPtr<SWetClothingTransparencyPreviewViewport> WeakThis = SharedThis(this);
-    FString SubmitError;
-    const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitTwoPhase(
+    FString                                           SubmitError;
+    const FDWCEditorWorkerJobTicket                   Ticket = WorkerJobScheduler->SubmitTwoPhase(
         Descriptor,
         [WeakThis, ExpectedSlot, ExpectedLayer, ExpectedEpoch, BatchCount,
          FirstSequence, LastSequence, StrokeDescriptor,
          OutputTileCoordinates = MoveTemp(OutputTileCoordinates),
          SnapshotTileCoordinates = MoveTemp(SnapshotTileCoordinates)](
             const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken,
-            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
-            FString& OutPrepareError) mutable
+            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob&                   OutPrepared,
+            FString&                                                            OutPrepareError) mutable
         {
             const TSharedPtr<SWetClothingTransparencyPreviewViewport> Viewport = WeakThis.Pin();
             if (!Viewport.IsValid() || CancellationToken->IsCanceled() || Viewport->bPreviewSuspended ||
@@ -3183,7 +3180,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
                 Input.OutputTileCoordinates.Num());
             OutPrepared.ActualEstimatedBytes = OutPrepared.ActualMemoryEstimate.GetTotalBytes();
             OutPrepared.Work = [Input = MoveTemp(Input)](
-                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
+                                   const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
             {
                 return FDWCTransparencyRevealColorIncrementalWorker::Build(MoveTemp(Input), WorkerToken);
             };
@@ -3191,10 +3188,10 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
         },
         [WeakThis, ExpectedSlot, ExpectedLayer, ExpectedEpoch, BatchCount,
          FirstSequence, LastSequence, CommitToken](
-            const FDWCEditorWorkerJobTicket& CompletedTicket,
+            const FDWCEditorWorkerJobTicket&                           CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
-            const TSharedPtr<SWetClothingTransparencyPreviewViewport> Viewport = WeakThis.Pin();
+            const TSharedPtr<SWetClothingTransparencyPreviewViewport>                              Viewport = WeakThis.Pin();
             const TSharedPtr<FDWCTransparencyRevealColorIncrementalJobResult, ESPMode::ThreadSafe> Result =
                 StaticCastSharedPtr<FDWCTransparencyRevealColorIncrementalJobResult>(BaseResult);
             if (!Viewport.IsValid() || !Result.IsValid() || !Viewport->PreviewCommitCoordinator.IsValid())
@@ -3202,7 +3199,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
                 return;
             }
             const bool bOwnsTicket = Viewport->PendingRevealColorIncrementalTicket.JobId == CompletedTicket.JobId &&
-                Viewport->PendingRevealColorIncrementalTicket.Generation == CompletedTicket.Generation;
+                                     Viewport->PendingRevealColorIncrementalTicket.Generation == CompletedTicket.Generation;
             if (!bOwnsTicket)
             {
                 return;
@@ -3218,18 +3215,18 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
                                        FirstSequence, LastSequence, CompletedTicket]()
             {
                 return !Viewport->bPreviewSuspended &&
-                    Viewport->RevealColorIncrementalEpoch == ExpectedEpoch &&
-                    Viewport->SelectedMaterialSlotIndex == ExpectedSlot &&
-                    Viewport->SelectedLayerGuid == ExpectedLayer &&
-                    Viewport->PendingRevealColorIncrementalTicket.JobId == CompletedTicket.JobId &&
-                    Viewport->PendingRevealColorIncrementalTicket.Generation == CompletedTicket.Generation &&
-                    Viewport->PendingRevealColorCommands.Num() >= 1 &&
-                    Viewport->PendingRevealColorCommands[0].Sequence == FirstSequence &&
-                    Viewport->PendingRevealColorCommands.ContainsByPredicate(
-                        [LastSequence](const FPendingRevealColorCommand& Command)
-                        {
-                            return Command.Sequence == LastSequence;
-                        });
+                       Viewport->RevealColorIncrementalEpoch == ExpectedEpoch &&
+                       Viewport->SelectedMaterialSlotIndex == ExpectedSlot &&
+                       Viewport->SelectedLayerGuid == ExpectedLayer &&
+                       Viewport->PendingRevealColorIncrementalTicket.JobId == CompletedTicket.JobId &&
+                       Viewport->PendingRevealColorIncrementalTicket.Generation == CompletedTicket.Generation &&
+                       Viewport->PendingRevealColorCommands.Num() >= 1 &&
+                       Viewport->PendingRevealColorCommands[0].Sequence == FirstSequence &&
+                       Viewport->PendingRevealColorCommands.ContainsByPredicate(
+                           [LastSequence](const FPendingRevealColorCommand& Command)
+                           {
+                               return Command.Sequence == LastSequence;
+                           });
             };
 
             if (!Result->bHasChanges)
@@ -3256,7 +3253,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
             }
 
             FDWCEditorPreviewRegionCommitOutcome Outcome;
-            EDWCEditorPreviewCommitResult CommitResult = EDWCEditorPreviewCommitResult::InvalidPayload;
+            EDWCEditorPreviewCommitResult        CommitResult = EDWCEditorPreviewCommitResult::InvalidPayload;
             if (Viewport->AutoBakePreviewResult.IsValid() &&
                 Viewport->RevealColorTileStore.CanCommit(
                     Result->ExpectedRevealRevision,
@@ -3310,9 +3307,9 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
         },
         &SubmitError,
         [WeakThis, ExpectedEpoch](
-            const FDWCEditorWorkerJobTicket& CompletedTicket,
+            const FDWCEditorWorkerJobTicket&    CompletedTicket,
             const EDWCEditorWorkerJobCompletion Completion,
-            const FString& Error)
+            const FString&                      Error)
         {
             if (Completion == EDWCEditorWorkerJobCompletion::Applied)
             {
@@ -3328,7 +3325,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
             if (Completion == EDWCEditorWorkerJobCompletion::Failed && !Error.IsEmpty())
             {
                 UE_LOG(LogWetTransparencyPreviewViewport, Warning,
-                    TEXT("Transparency reveal-color incremental worker failed: %s"), *Error);
+                                         TEXT("Transparency reveal-color incremental worker failed: %s"), *Error);
             }
             Viewport->PendingRevealColorIncrementalTicket = {};
             Viewport->CancelRevealColorIncrementalWork(true);
@@ -3343,9 +3340,9 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
     if (!Ticket.IsValid())
     {
         UE_LOG(LogWetTransparencyPreviewViewport, Warning,
-            TEXT("Transparency reveal-color incremental job was not submitted for slot %d: %s"),
-            ExpectedSlot,
-            SubmitError.IsEmpty() ? TEXT("unknown scheduler failure") : *SubmitError);
+               TEXT("Transparency reveal-color incremental job was not submitted for slot %d: %s"),
+               ExpectedSlot,
+               SubmitError.IsEmpty() ? TEXT("unknown scheduler failure") : *SubmitError);
         CancelRevealColorIncrementalWork(true);
     }
 }
@@ -3385,7 +3382,6 @@ void SWetClothingTransparencyPreviewViewport::RebuildManualOverridesFromStrokes(
         EDWCEditorPreviewInvalidationReason::AuthoredDataChanged);
 }
 
-
 void SWetClothingTransparencyPreviewViewport::RefreshManualPreviewFromStrokes()
 {
     // Cancellation and external edits discard all provisional tile state,
@@ -3419,14 +3415,14 @@ void SWetClothingTransparencyPreviewViewport::RefreshManualPreviewFromStrokes()
 bool SWetClothingTransparencyPreviewViewport::CanUseMaterialDrivenPreviewPresentation() const
 {
     return AutoBakePreviewResult.IsValid() &&
-        !AutoBakePreviewResult->bIsFinalBakedBaseline &&
-        GetTransparencyPreviewTexture() != nullptr;
+           !AutoBakePreviewResult->bIsFinalBakedBaseline &&
+           GetTransparencyPreviewTexture() != nullptr;
 }
 
 bool SWetClothingTransparencyPreviewViewport::UsesFinalAlphaPreview() const
 {
     return VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
-        VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha;
+           VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha;
 }
 
 void SWetClothingTransparencyPreviewViewport::RefreshDeferredFinalPreviewBuffers()
@@ -3455,9 +3451,9 @@ bool SWetClothingTransparencyPreviewViewport::RebuildOuterEdgeFeatherBuffer()
         return false;
     }
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const float FeatherPixels = Asset != nullptr
-        ? Asset->Authored.TransparencyData.TransparencyEdgeFeatherPixels
-        : 0.0f;
+    const float              FeatherPixels = Asset != nullptr
+                                                 ? Asset->Authored.TransparencyData.TransparencyEdgeFeatherPixels
+                                                 : 0.0f;
     return FDWCTransparencyComposite::BuildCoverageEdgeFeatherBuffer(
         AutoBakePreviewResult->Resolution,
         AutoBakePreviewResult->OuterCoverageBuffer,
@@ -3479,7 +3475,7 @@ void SWetClothingTransparencyPreviewViewport::InvalidatePreviewContent(
 void SWetClothingTransparencyPreviewViewport::RetryPreviewTextureRebuildIfNeeded()
 {
     const double CurrentTime = FPlatformTime::Seconds();
-    const bool bCanStartRequiredRebuild =
+    const bool   bCanStartRequiredRebuild =
         PreviewTextureRecovery.GetState() == EDWCEditorPreviewRecoveryState::FullRebuildRequired;
     if (PendingPreviewTicket.IsValid() || bPreviewSuspended ||
         (!bCanStartRequiredRebuild && !PreviewTextureRecovery.IsRetryDue(CurrentTime)))
@@ -3519,7 +3515,7 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
         return false;
     }
 
-    const uint64 SnapshotContentRevision = PreviewContentRevision;
+    const uint64                         SnapshotContentRevision = PreviewContentRevision;
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
     if (PendingPreviewTicket.IsValid() && PendingPreviewContentRevision == SnapshotContentRevision)
     {
@@ -3536,10 +3532,10 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
     {
         return TransparencyPreviewHandle.IsValid();
     }
-    const bool bRebuildManualOverrides = bManualOverridesRequireWorkerRebuild;
-    const bool bRebuildRevealColor = bRevealColorRequiresWorkerRebuild;
+    const bool                                             bRebuildManualOverrides = bManualOverridesRequireWorkerRebuild;
+    const bool                                             bRebuildRevealColor = bRevealColorRequiresWorkerRebuild;
     const TSharedPtr<const FDWCTransparencyAutoBakeResult> AdmissionAutoResult = AutoBakePreviewResult;
-    const FWetClothingTransparencyLayerData* AdmissionLayer =
+    const FWetClothingTransparencyLayerData*               AdmissionLayer =
         (bRebuildManualOverrides || bRebuildRevealColor) ? GetSelectedLayer() : nullptr;
     if ((bRebuildManualOverrides || bRebuildRevealColor) && AdmissionLayer == nullptr)
     {
@@ -3550,7 +3546,7 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
     }
 
     const FIntPoint Resolution = AdmissionAutoResult->Resolution;
-    const int32 PixelCount = Resolution.X * Resolution.Y;
+    const int32     PixelCount = Resolution.X * Resolution.Y;
     if (PixelCount <= 0)
     {
         PreviewTextureRecovery.MarkFailure(
@@ -3567,8 +3563,8 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
     Descriptor.DomainRevision = WorkerJobScheduler->GetCurrentDomainRevision(Descriptor.Domain);
     Descriptor.Priority = EDWCEditorWorkerJobPriority::Interactive;
     Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::LatestWins;
-    static const FDWCTransparencyRevealColorTileStore EmptyRevealColorTileStore;
-    static const TArray<FDWCTransparencyBrushStroke> EmptyStrokes;
+    static const FDWCTransparencyRevealColorTileStore      EmptyRevealColorTileStore;
+    static const TArray<FDWCTransparencyBrushStroke>       EmptyStrokes;
     static const TArray<FDWCTransparencyRevealColorStroke> EmptyRevealColorStrokes;
     Descriptor.MemoryEstimate = EstimateTransparencyVisualizationMemory(
         *AdmissionAutoResult,
@@ -3584,14 +3580,14 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
         TEXT("Transparency visualization slot %d"),
         Descriptor.Key.MaterialSlotIndex);
 
-    const FGuid ExpectedLayerGuid = Descriptor.Key.LayerGuid;
-    const int32 ExpectedSlotIndex = Descriptor.Key.MaterialSlotIndex;
-    const int32 ExpectedUVChannelIndex = SelectedUVChannelIndex;
-    const EDWCTransparencyVisualizationMode ExpectedVisualizationMode = VisualizationMode;
-    const EDWCTransparencyUVAddressMode AddressMode = SelectedUVAddressMode;
+    const FGuid                                       ExpectedLayerGuid = Descriptor.Key.LayerGuid;
+    const int32                                       ExpectedSlotIndex = Descriptor.Key.MaterialSlotIndex;
+    const int32                                       ExpectedUVChannelIndex = SelectedUVChannelIndex;
+    const EDWCTransparencyVisualizationMode           ExpectedVisualizationMode = VisualizationMode;
+    const EDWCTransparencyUVAddressMode               AddressMode = SelectedUVAddressMode;
     TWeakPtr<SWetClothingTransparencyPreviewViewport> WeakThis = SharedThis(this);
-    FString SubmitError;
-    const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitTwoPhase(
+    FString                                           SubmitError;
+    const FDWCEditorWorkerJobTicket                   Ticket = WorkerJobScheduler->SubmitTwoPhase(
         Descriptor,
         [WeakThis,
          ExpectedLayerGuid,
@@ -3603,8 +3599,8 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
          bRebuildManualOverrides,
          bRebuildRevealColor](
             const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken,
-            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
-            FString& OutPrepareError)
+            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob&                   OutPrepared,
+            FString&                                                            OutPrepareError)
         {
             const TSharedPtr<SWetClothingTransparencyPreviewViewport> Viewport = WeakThis.Pin();
             if (!Viewport.IsValid() || CancellationToken->IsCanceled())
@@ -3675,7 +3671,7 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
                 bRebuildRevealColor);
             OutPrepared.ActualEstimatedBytes = OutPrepared.ActualMemoryEstimate.GetTotalBytes();
             OutPrepared.Work = [Input = MoveTemp(Input)](
-                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerCancellationToken) mutable
+                                   const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerCancellationToken) mutable
             {
                 return FDWCTransparencyVisualizationWorker::Build(
                     MoveTemp(Input),
@@ -3684,10 +3680,10 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
             return true;
         },
         [WeakThis, ExpectedLayerGuid, ExpectedSlotIndex, AddressMode, SnapshotContentRevision, CommitToken](
-            const FDWCEditorWorkerJobTicket& Ticket,
+            const FDWCEditorWorkerJobTicket&                           Ticket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
-            const TSharedPtr<SWetClothingTransparencyPreviewViewport> Viewport = WeakThis.Pin();
+            const TSharedPtr<SWetClothingTransparencyPreviewViewport>                     Viewport = WeakThis.Pin();
             const TSharedPtr<FDWCTransparencyVisualizationJobResult, ESPMode::ThreadSafe> Result =
                 StaticCastSharedPtr<FDWCTransparencyVisualizationJobResult>(BaseResult);
             if (!Viewport.IsValid() || !Result.IsValid() || !Viewport->PreviewCommitCoordinator.IsValid())
@@ -3695,8 +3691,8 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
                 return;
             }
 
-            const FIntPoint ResultResolution = Result->Resolution;
-            const TextureAddress Address = AddressMode == EDWCTransparencyUVAddressMode::Wrap ? TA_Wrap : TA_Clamp;
+            const FIntPoint                ResultResolution = Result->Resolution;
+            const TextureAddress           Address = AddressMode == EDWCTransparencyUVAddressMode::Wrap ? TA_Wrap : TA_Clamp;
             FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
             CommitContext.ProducerSessionEpoch = Ticket.SessionEpoch;
@@ -3706,26 +3702,26 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
             CommitContext.IsCurrent = [Viewport, ExpectedLayerGuid, ExpectedSlotIndex, SnapshotContentRevision, Ticket]()
             {
                 return !Viewport->bPreviewSuspended && Viewport->AutoBakePreviewResult.IsValid() &&
-                    Viewport->AutoBakePreviewResult->LayerGuid == ExpectedLayerGuid &&
-                    Viewport->AutoBakePreviewResult->MaterialSlotIndex == ExpectedSlotIndex &&
-                    Viewport->PendingPreviewTicket.JobId == Ticket.JobId &&
-                    Viewport->PendingPreviewTicket.Generation == Ticket.Generation &&
-                    Viewport->PreviewContentRevision == SnapshotContentRevision;
+                       Viewport->AutoBakePreviewResult->LayerGuid == ExpectedLayerGuid &&
+                       Viewport->AutoBakePreviewResult->MaterialSlotIndex == ExpectedSlotIndex &&
+                       Viewport->PendingPreviewTicket.JobId == Ticket.JobId &&
+                       Viewport->PendingPreviewTicket.Generation == Ticket.Generation &&
+                       Viewport->PreviewContentRevision == SnapshotContentRevision;
             };
 
-            FDWCEditorTextureLease NewLease;
+            FDWCEditorTextureLease              NewLease;
             const EDWCEditorPreviewCommitResult CommitResult =
                 Viewport->PreviewCommitCoordinator->CommitBGRA8(
-                CommitContext,
-                MakeTransparencyTextureKey(
-                    Viewport->WetClothingAsset.Get(),
-                    EDWCEditorTexturePurpose::TransparencyVisualization,
-                    ExpectedSlotIndex,
-                    ExpectedLayerGuid),
-                MakeTransparencyDescriptor(ResultResolution, Address),
-                MoveTemp(Result->Pixels),
-                NewLease,
-                EDWCEditorTextureUploadPriority::Interactive);
+                    CommitContext,
+                    MakeTransparencyTextureKey(
+                        Viewport->WetClothingAsset.Get(),
+                        EDWCEditorTexturePurpose::TransparencyVisualization,
+                        ExpectedSlotIndex,
+                        ExpectedLayerGuid),
+                    MakeTransparencyDescriptor(ResultResolution, Address),
+                    MoveTemp(Result->Pixels),
+                    NewLease,
+                    EDWCEditorTextureUploadPriority::Interactive);
 
             const bool bOwnsPendingTicket =
                 Viewport->PendingPreviewTicket.JobId == Ticket.JobId &&
@@ -3786,9 +3782,9 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
         },
         &SubmitError,
         [WeakThis](
-            const FDWCEditorWorkerJobTicket& Ticket,
+            const FDWCEditorWorkerJobTicket&    Ticket,
             const EDWCEditorWorkerJobCompletion Completion,
-            const FString& Error)
+            const FString&                      Error)
         {
             if (Completion == EDWCEditorWorkerJobCompletion::Applied)
             {
@@ -3923,59 +3919,50 @@ void SWetClothingTransparencyPreviewViewport::CollectDiagnosticMemoryStats(
     {
         SpatialQueryService->AppendDiagnosticMemoryBucket(OutBuckets);
     }
-
 }
 
 void SWetClothingTransparencyPreviewViewport::CollectDiagnosticOperationStats(
     TArray<FDWCEditorPreviewOperationCounter>& OutCounters) const
 {
-    OutCounters.Add({TEXT("Transparency preview refreshes"), PreviewRefreshCount, 0});
-    OutCounters.Add({TEXT("Transparency preview clears"), PreviewClearCount, 0});
-    OutCounters.Add({TEXT("Transparency spatial-cache acquisitions"), HitTrianglePrepareCount, 0});
-    OutCounters.Add({TEXT("Transparency full texture rebuilds"), PreviewTextureRebuildCount, 0});
-    OutCounters.Add({TEXT("Transparency outer-edge feather rebuilds"), OuterEdgeFeatherRebuildCount, 0});
-    OutCounters.Add({TEXT("Transparency hover parameter updates"), HoverParameterUpdateCount, 0});
-    OutCounters.Add({TEXT("Transparency hover baseline builds"), HoverBaselineBuildCount, 0});
-    OutCounters.Add({TEXT("Transparency hover island-mask builds"), HoverIslandMaskBuildCount, 0});
-    OutCounters.Add({
-        TEXT("Transparency authoritative stroke replays"),
-        InteractivePaintAuthoritativeReplayCount,
-        0});
-    OutCounters.Add({TEXT("Transparency alpha incremental commits"), AlphaIncrementalCommitCount, 0});
-    OutCounters.Add({
-        TEXT("Transparency alpha incremental tiles"),
-        AlphaIncrementalCommittedTileCount,
-        AlphaIncrementalCommittedBytes});
-    OutCounters.Add({TEXT("Transparency alpha full-rebuild fallbacks"), AlphaIncrementalFallbackCount, 0});
-    OutCounters.Add({TEXT("Transparency reveal-color incremental commits"), RevealColorIncrementalCommitCount, 0});
-    OutCounters.Add({
-        TEXT("Transparency reveal-color incremental tiles"),
-        RevealColorIncrementalCommittedTileCount,
-        RevealColorIncrementalCommittedBytes});
-    OutCounters.Add({
-        TEXT("Transparency reveal-color full-rebuild fallbacks"),
-        RevealColorIncrementalFallbackCount,
-        0});
+    OutCounters.Add({ TEXT("Transparency preview refreshes"), PreviewRefreshCount, 0 });
+    OutCounters.Add({ TEXT("Transparency preview clears"), PreviewClearCount, 0 });
+    OutCounters.Add({ TEXT("Transparency spatial-cache acquisitions"), HitTrianglePrepareCount, 0 });
+    OutCounters.Add({ TEXT("Transparency full texture rebuilds"), PreviewTextureRebuildCount, 0 });
+    OutCounters.Add({ TEXT("Transparency outer-edge feather rebuilds"), OuterEdgeFeatherRebuildCount, 0 });
+    OutCounters.Add({ TEXT("Transparency hover parameter updates"), HoverParameterUpdateCount, 0 });
+    OutCounters.Add({ TEXT("Transparency hover baseline builds"), HoverBaselineBuildCount, 0 });
+    OutCounters.Add({ TEXT("Transparency hover island-mask builds"), HoverIslandMaskBuildCount, 0 });
+    OutCounters.Add({ TEXT("Transparency authoritative stroke replays"),
+                      InteractivePaintAuthoritativeReplayCount,
+                      0 });
+    OutCounters.Add({ TEXT("Transparency alpha incremental commits"), AlphaIncrementalCommitCount, 0 });
+    OutCounters.Add({ TEXT("Transparency alpha incremental tiles"),
+                      AlphaIncrementalCommittedTileCount,
+                      AlphaIncrementalCommittedBytes });
+    OutCounters.Add({ TEXT("Transparency alpha full-rebuild fallbacks"), AlphaIncrementalFallbackCount, 0 });
+    OutCounters.Add({ TEXT("Transparency reveal-color incremental commits"), RevealColorIncrementalCommitCount, 0 });
+    OutCounters.Add({ TEXT("Transparency reveal-color incremental tiles"),
+                      RevealColorIncrementalCommittedTileCount,
+                      RevealColorIncrementalCommittedBytes });
+    OutCounters.Add({ TEXT("Transparency reveal-color full-rebuild fallbacks"),
+                      RevealColorIncrementalFallbackCount,
+                      0 });
     const FDWCEditorPreviewRecoveryDiagnostics& PreviewRecoveryDiagnostics =
         PreviewTextureRecovery.GetDiagnostics();
-    OutCounters.Add({
-        TEXT("Transparency preview recovery retries"),
-        PreviewRecoveryDiagnostics.RetryCount,
-        0});
-    OutCounters.Add({
-        TEXT("Transparency preview stale result drops"),
-        PreviewRecoveryDiagnostics.StaleDropCount,
-        0});
-    OutCounters.Add({
-        TEXT("Transparency preview degraded transitions"),
-        PreviewRecoveryDiagnostics.DegradedCount,
-        0});
+    OutCounters.Add({ TEXT("Transparency preview recovery retries"),
+                      PreviewRecoveryDiagnostics.RetryCount,
+                      0 });
+    OutCounters.Add({ TEXT("Transparency preview stale result drops"),
+                      PreviewRecoveryDiagnostics.StaleDropCount,
+                      0 });
+    OutCounters.Add({ TEXT("Transparency preview degraded transitions"),
+                      PreviewRecoveryDiagnostics.DegradedCount,
+                      0 });
     if (LiveStrokeLayer && LiveStrokeLayer->IsActive())
     {
-        OutCounters.Add({
-            TEXT("Transparency live stroke samples"),
-            static_cast<uint64>(LiveStrokeLayer->GetSampleCount()),
-            static_cast<uint64>(LiveStrokeLayer->GetTileCount())});
+        OutCounters.Add({ TEXT("Transparency live stroke samples"),
+                          static_cast<uint64>(LiveStrokeLayer->GetSampleCount()),
+                          static_cast<uint64>(LiveStrokeLayer->GetTileCount()) });
     }
     if (TextureWorkspace.IsValid())
     {

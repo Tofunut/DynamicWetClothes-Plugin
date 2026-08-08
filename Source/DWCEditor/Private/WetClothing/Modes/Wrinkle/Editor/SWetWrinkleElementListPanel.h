@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -8,9 +9,9 @@
 
 struct FWetWrinkleElementListItem
 {
-    FGuid StrokeGuid;
+    FGuid                  StrokeGuid;
     EWetWrinkleElementType ElementType = EWetWrinkleElementType::Patch;
-    int32 SourceIndex = INDEX_NONE;
+    int32                  SourceIndex = INDEX_NONE;
 };
 
 using FWetWrinkleElementListItemPtr = TSharedPtr<FWetWrinkleElementListItem>;
@@ -40,19 +41,19 @@ class SWetWrinkleElementListPanel : public SCompoundWidget
 
     void SetItems(
         TArray<FWetWrinkleElementListItemPtr>&& InItems,
-        const FGuid& SelectedGuid,
-        EWetWrinkleElementType SelectedType);
+        const FGuid&                            SelectedGuid,
+        EWetWrinkleElementType                  SelectedType);
     void RequestRefresh();
 
   private:
     TSharedRef<ITableRow> GenerateRow(
-        FWetWrinkleElementListItemPtr Item,
+        FWetWrinkleElementListItemPtr     Item,
         const TSharedRef<STableViewBase>& OwnerTable) const;
     void HandleSelectionChanged(FWetWrinkleElementListItemPtr Item, ESelectInfo::Type SelectInfo) const;
 
-    TArray<FWetWrinkleElementListItemPtr> Items;
+    TArray<FWetWrinkleElementListItemPtr>                Items;
     TSharedPtr<SListView<FWetWrinkleElementListItemPtr>> ListView;
-    FOnGenerateWetWrinkleElementRow OnGenerateRow;
-    FOnWetWrinkleElementSelectionChanged OnSelectionChanged;
-    bool bSynchronizingSelection = false;
+    FOnGenerateWetWrinkleElementRow                      OnGenerateRow;
+    FOnWetWrinkleElementSelectionChanged                 OnSelectionChanged;
+    bool                                                 bSynchronizingSelection = false;
 };

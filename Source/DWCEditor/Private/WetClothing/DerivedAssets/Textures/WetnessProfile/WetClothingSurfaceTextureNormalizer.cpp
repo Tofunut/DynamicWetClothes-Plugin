@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -16,8 +17,8 @@ namespace
 {
     FString MakePreparedSourceKey(
         const UTexture2D& SourceTexture,
-        const TCHAR* TextureRole,
-        const bool bNormalMap)
+        const TCHAR*      TextureRole,
+        const bool        bNormalMap)
     {
 #if WITH_EDITORONLY_DATA
         return FString::Printf(
@@ -44,8 +45,8 @@ namespace
 
     FString MakePreparedTextureObjectPath(
         const UTexture2D& SourceTexture,
-        const TCHAR* TextureRole,
-        const bool bNormalMap)
+        const TCHAR*      TextureRole,
+        const bool        bNormalMap)
     {
         return DWCSurfaceTextureSharedAsset::MakeNormalizedTextureObjectPath(
             MakePreparedSourceKey(SourceTexture, TextureRole, bNormalMap),
@@ -81,10 +82,10 @@ namespace
     }
 
     bool ValidatePreparedTexture(
-        UTexture2D* Texture,
+        UTexture2D*  Texture,
         const TCHAR* TextureRole,
-        const bool bNormalMap,
-        FString& OutErrorMessage)
+        const bool   bNormalMap,
+        FString&     OutErrorMessage)
     {
         if (Texture == nullptr)
         {
@@ -111,8 +112,8 @@ namespace
         }
 
         const TextureCompressionSettings ExpectedCompression = bNormalMap
-            ? TC_Normalmap
-            : TC_Masks;
+                                                                   ? TC_Normalmap
+                                                                   : TC_Masks;
         if (Texture->CompressionSettings != ExpectedCompression)
         {
             OutErrorMessage = FString::Printf(
@@ -148,23 +149,23 @@ namespace
 
     UTexture2D* LoadOrCreateDefaultSurfaceTexture(
         const bool bNormalMap,
-        FString& OutErrorMessage)
+        FString&   OutErrorMessage)
     {
 #if WITH_EDITORONLY_DATA
-        const TCHAR* AssetName = bNormalMap
-            ? TEXT("T_DWC_DefaultSurfaceNormal")
-            : TEXT("T_DWC_DefaultSurfaceMask");
+        const TCHAR*  AssetName = bNormalMap
+                                      ? TEXT("T_DWC_DefaultSurfaceNormal")
+                                      : TEXT("T_DWC_DefaultSurfaceMask");
         const FString PackageName = FString(DWCSurfaceTextureSharedAsset::GetSharedFolder()) / AssetName;
         const FString ObjectPath = FString::Printf(TEXT("%s.%s"), *PackageName, AssetName);
 
         UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *ObjectPath);
-        const bool bCreated = Texture == nullptr;
+        const bool  bCreated = Texture == nullptr;
         if (bCreated)
         {
             UPackage* Package = CreatePackage(*PackageName);
             Texture = Package != nullptr
-                ? NewObject<UTexture2D>(Package, AssetName, RF_Public | RF_Standalone | RF_Transactional)
-                : nullptr;
+                          ? NewObject<UTexture2D>(Package, AssetName, RF_Public | RF_Standalone | RF_Transactional)
+                          : nullptr;
             if (Texture == nullptr)
             {
                 OutErrorMessage = FString::Printf(
@@ -246,10 +247,10 @@ namespace
     }
 
     UTexture2D* CreateOrLoadAutoResizedTexture(
-        UTexture2D& SourceTexture,
+        UTexture2D&  SourceTexture,
         const TCHAR* TextureRole,
-        const bool bNormalMap,
-        FString& OutErrorMessage)
+        const bool   bNormalMap,
+        FString&     OutErrorMessage)
     {
 #if WITH_EDITORONLY_DATA
         const FString PreparedSourceKey = MakePreparedSourceKey(
@@ -306,7 +307,7 @@ namespace
         }
 
         UTexture2D* Texture = FindObject<UTexture2D>(Package, *ObjectName);
-        const bool bCreated = Texture == nullptr;
+        const bool  bCreated = Texture == nullptr;
         if (bCreated)
         {
             Texture = DuplicateObject<UTexture2D>(&SourceTexture, Package, FName(*ObjectName));
@@ -375,7 +376,7 @@ namespace
         return nullptr;
 #endif
     }
-}
+} // namespace
 
 UTexture2D* FWetClothingSurfaceTextureNormalizer::GetOrCreateNeutralNormalTexture(
     UWetClothingAsset& /*WetClothingAsset*/,
@@ -385,11 +386,11 @@ UTexture2D* FWetClothingSurfaceTextureNormalizer::GetOrCreateNeutralNormalTextur
 }
 
 bool FWetClothingSurfaceTextureNormalizer::ValidateTexture(
-    UTexture2D* SourceTexture,
+    UTexture2D*  SourceTexture,
     const TCHAR* TextureRole,
-    const bool bNormalMap,
-    const bool bAllowSourceConversion,
-    FString& OutErrorMessage)
+    const bool   bNormalMap,
+    const bool   bAllowSourceConversion,
+    FString&     OutErrorMessage)
 {
     if (SourceTexture == nullptr)
     {
@@ -413,8 +414,8 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateTexture(
     }
 
     const TextureCompressionSettings ExpectedCompression = bNormalMap
-        ? TC_Normalmap
-        : TC_Masks;
+                                                               ? TC_Normalmap
+                                                               : TC_Masks;
     if (SourceTexture->CompressionSettings != ExpectedCompression &&
         !bAllowSourceConversion)
     {
@@ -469,7 +470,7 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateTexture(
 
 bool FWetClothingSurfaceTextureNormalizer::ValidateProfileTextures(
     const FWetnessProfileParameters& SourceParameters,
-    FString& OutErrorMessage)
+    FString&                         OutErrorMessage)
 {
     const FSurfaceWaterProfileParameters& Surface = SourceParameters.SurfaceWater;
     if (!ValidateTexture(
@@ -513,12 +514,12 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateProfileTextures(
 }
 
 bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
-    UTexture2D* SourceTexture,
+    UTexture2D*  SourceTexture,
     const TCHAR* TextureRole,
-    const bool bNormalMap,
-    const bool bAllowSourceConversion,
+    const bool   bNormalMap,
+    const bool   bAllowSourceConversion,
     UTexture2D*& OutNormalizedTexture,
-    FString& OutErrorMessage)
+    FString&     OutErrorMessage)
 {
     OutNormalizedTexture = nullptr;
     if (!ValidateTexture(
@@ -538,8 +539,8 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
     }
 
     const TextureCompressionSettings ExpectedCompression = bNormalMap
-        ? TC_Normalmap
-        : TC_Masks;
+                                                               ? TC_Normalmap
+                                                               : TC_Masks;
     if (IsDirectlyUsableAtTargetResolution(*SourceTexture) &&
         SourceTexture->CompressionSettings == ExpectedCompression &&
         !SourceTexture->SRGB)
@@ -559,8 +560,8 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
 
 bool FWetClothingSurfaceTextureNormalizer::PrepareProfileTextures(
     const FWetnessProfileParameters& SourceParameters,
-    FWetClothingLocalRenderProfile& InOutLocalProfile,
-    FString& OutErrorMessage)
+    FWetClothingLocalRenderProfile&  InOutLocalProfile,
+    FString&                         OutErrorMessage)
 {
     const FSurfaceWaterProfileParameters& Surface = SourceParameters.SurfaceWater;
     InOutLocalProfile.SetSourceDropletNormal(Surface.DropletNormalTexture.Get());
@@ -619,10 +620,10 @@ bool FWetClothingSurfaceTextureNormalizer::PrepareProfileTextures(
 }
 
 bool FWetClothingSurfaceTextureNormalizer::NormalizeProfileTextures(
-    UWetClothingAsset& WetClothingAsset,
+    UWetClothingAsset&               WetClothingAsset,
     const FWetnessProfileParameters& SourceParameters,
-    FWetClothingLocalRenderProfile& InOutLocalProfile,
-    FString& OutErrorMessage)
+    FWetClothingLocalRenderProfile&  InOutLocalProfile,
+    FString&                         OutErrorMessage)
 {
     (void)WetClothingAsset;
     return PrepareProfileTextures(SourceParameters, InOutLocalProfile, OutErrorMessage);
@@ -631,8 +632,8 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeProfileTextures(
 bool FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
     const UTexture2D* PreparedTexture,
     const UTexture2D* SourceTexture,
-    const TCHAR* TextureRole,
-    const bool bNormalMap)
+    const TCHAR*      TextureRole,
+    const bool        bNormalMap)
 {
     if (SourceTexture == nullptr)
     {
@@ -644,8 +645,8 @@ bool FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
     FinishTextureCompilation(const_cast<UTexture2D*>(SourceTexture));
 
     const TextureCompressionSettings ExpectedCompression = bNormalMap
-        ? TC_Normalmap
-        : TC_Masks;
+                                                               ? TC_Normalmap
+                                                               : TC_Masks;
     if (IsDirectlyUsableAtTargetResolution(*SourceTexture) &&
         SourceTexture->CompressionSettings == ExpectedCompression &&
         !SourceTexture->SRGB)
@@ -655,9 +656,9 @@ bool FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
 
     if (PreparedTexture == nullptr ||
         PreparedTexture->GetPathName() != MakePreparedTextureObjectPath(
-            *SourceTexture,
-            TextureRole,
-            bNormalMap))
+                                              *SourceTexture,
+                                              TextureRole,
+                                              bNormalMap))
     {
         return false;
     }

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/DWCOriginalUVRuntimeTopology.h"
 
 #if WITH_EDITOR
@@ -9,13 +10,13 @@
 #include "Utility/DWCError.h"
 
 bool FDWCOriginalUVRuntimeTopologyAdapter::ReadMaterialSlotTriangles(
-    const USkeletalMesh* SkeletalMesh,
-    const FSkeletalMeshLODRenderData& LODData,
-    const TArray<uint32>& IndexBuffer,
-    const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex,
+    const USkeletalMesh*                 SkeletalMesh,
+    const FSkeletalMeshLODRenderData&    LODData,
+    const TArray<uint32>&                IndexBuffer,
+    const int32                          UVChannelIndex,
+    const int32                          MaterialSlotIndex,
     TArray<FDWCRuntimeTopologyTriangle>& OutTriangles,
-    FString* OutErrorMessage)
+    FString*                             OutErrorMessage)
 {
     OutTriangles.Reset();
 
@@ -47,8 +48,7 @@ bool FDWCOriginalUVRuntimeTopologyAdapter::ReadMaterialSlotTriangles(
 
         for (int32 TriangleIndex = FirstIndex; TriangleIndex + 2 < LastIndex; TriangleIndex += 3)
         {
-            const uint32 Indices[3] =
-            {
+            const uint32 Indices[3] = {
                 IndexBuffer[TriangleIndex],
                 IndexBuffer[TriangleIndex + 1],
                 IndexBuffer[TriangleIndex + 2]
@@ -74,10 +74,10 @@ bool FDWCOriginalUVRuntimeTopologyAdapter::ReadMaterialSlotTriangles(
 
 bool FDWCOriginalUVRuntimeTopologyAdapter::BuildIslands(
     const TArray<FDWCRuntimeTopologyTriangle>& RawTriangles,
-    const FDWCEditorUVTopologyData& Topology,
-    const int32 MaterialSlotIndex,
-    TArray<FDWCRuntimeOriginalUVIsland>& OutIslands,
-    FString* OutErrorMessage)
+    const FDWCEditorUVTopologyData&            Topology,
+    const int32                                MaterialSlotIndex,
+    TArray<FDWCRuntimeOriginalUVIsland>&       OutIslands,
+    FString*                                   OutErrorMessage)
 {
     OutIslands.Reset();
 
@@ -112,9 +112,7 @@ bool FDWCOriginalUVRuntimeTopologyAdapter::BuildIslands(
     }
 
     OutIslands.RemoveAll([](const FDWCRuntimeOriginalUVIsland& Island)
-    {
-        return Island.VertexIndices.IsEmpty();
-    });
+                         { return Island.VertexIndices.IsEmpty(); });
 
     if (OutIslands.IsEmpty() && !RawTriangles.IsEmpty())
     {

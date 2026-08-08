@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "Core/DWCGeneratedAssetPaths.h"
 
@@ -651,7 +652,7 @@ namespace
         if (Property == MP_BaseColor)
         {
             UMaterialExpressionConstant3Vector* Fallback = Cast<UMaterialExpressionConstant3Vector>(
-                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), NodePosition.X, NodePosition.Y));
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), static_cast<int32>(NodePosition.X), static_cast<int32>(NodePosition.Y)));
             if (Fallback != nullptr)
             {
                 Fallback->Constant = FLinearColor::White;
@@ -663,7 +664,7 @@ namespace
         if (Property == MP_Normal)
         {
             UMaterialExpressionConstant3Vector* Fallback = Cast<UMaterialExpressionConstant3Vector>(
-                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), NodePosition.X, NodePosition.Y));
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), static_cast<int32>(NodePosition.X), static_cast<int32>(NodePosition.Y)));
             if (Fallback != nullptr)
             {
                 Fallback->Constant = FLinearColor(0.0f, 0.0f, 1.0f);
@@ -673,7 +674,7 @@ namespace
         }
 
         UMaterialExpressionConstant* Fallback = Cast<UMaterialExpressionConstant>(
-            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant::StaticClass(), NodePosition.X, NodePosition.Y));
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant::StaticClass(), static_cast<int32>(NodePosition.X), static_cast<int32>(NodePosition.Y)));
         if (Fallback != nullptr)
         {
             Fallback->R = Property == MP_Metallic ? 0.0f : 0.5f;
@@ -724,13 +725,13 @@ namespace
     }
 
     UMaterialExpressionCustom* CreateCustomExpression(
-        UMaterial* Material,
-        const TCHAR* Description,
-        const TCHAR* Code,
+        UMaterial*                      Material,
+        const TCHAR*                    Description,
+        const TCHAR*                    Code,
         const ECustomMaterialOutputType OutputType,
-        const TArray<FName>& InputNames,
-        const int32 NodePosX,
-        const int32 NodePosY)
+        const TArray<FName>&            InputNames,
+        const int32                     NodePosX,
+        const int32                     NodePosY)
     {
         UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(
             UMaterialEditingLibrary::CreateMaterialExpression(
@@ -930,8 +931,8 @@ namespace
 
     void AppendMissingGpuRuntimeMaterialParameters(
         UMaterialInterface* MaterialInterface,
-        const bool       bRequireSurfaceWater,
-        TArray<FString>& OutMissingParameters)
+        const bool          bRequireSurfaceWater,
+        TArray<FString>&    OutMissingParameters)
     {
         if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::WetnessMap()))
         {
@@ -1577,7 +1578,7 @@ namespace
                 { TEXT("BaseMetallic") },
                 1120,
                 180);
-        UMaterialExpressionVertexColor* VertexColor = FindOrCreateVertexColor(Material, -2600, -520);
+        UMaterialExpressionVertexColor*              VertexColor = FindOrCreateVertexColor(Material, -2600, -520);
         UMaterialExpressionTextureSampleParameter2D* WetnessMap =
             FindOrCreateGPUWetnessMapParameter(Material, -1900, 820);
         UMaterialExpressionScalarParameter* UseGPUBackend = FindOrCreateScalarParameter(
@@ -1619,7 +1620,7 @@ namespace
         }
 
         UMaterialExpressionMaterialFunctionCall* Evaluate = SurfaceGraph.EvaluateExpression;
-        UMaterialExpressionTextureCoordinate* DWCDataUV = SurfaceGraph.DWCDataUVExpression;
+        UMaterialExpressionTextureCoordinate*    DWCDataUV = SurfaceGraph.DWCDataUVExpression;
 
         EnsureUnifiedDwcGraphComments(Material);
         bool bConnected = true;
@@ -1863,7 +1864,7 @@ return LitBaseColor;
         GeneratedParent->GetAllStaticSwitchParameterInfo(ParameterInfos, ParameterIds);
 
         const FName SurfaceWaterParameterName = DWCWetMaterialParameters::UseSurfaceWater();
-        int32 ParameterIndex = INDEX_NONE;
+        int32       ParameterIndex = INDEX_NONE;
         for (int32 Index = 0; Index < ParameterInfos.Num(); ++Index)
         {
             if (ParameterInfos[Index].Name == SurfaceWaterParameterName &&
@@ -1885,7 +1886,7 @@ return LitBaseColor;
         }
 
         FStaticParameterSet StaticParameters = Instance->GetStaticParameters();
-        const FName LegacyProfileSwitches[] = {
+        const FName         LegacyProfileSwitches[] = {
             DwcUseGpuBackendParameterName,
             DWCWetMaterialParameters::UseDropletNormal()
         };
@@ -2068,7 +2069,7 @@ FWCAMaterialGenerator::FOptions FWCAMaterialGenerator::MakeOptionsForAsset(
                 if (Profile != nullptr && Profile->HasSourceProfile())
                 {
                     const FSoftObjectPath SourceProfilePath = Profile->GetSourceProfilePath();
-                    UObject* SourceObject = SourceProfilePath.ResolveObject();
+                    UObject*              SourceObject = SourceProfilePath.ResolveObject();
                     if (SourceObject == nullptr)
                     {
                         SourceObject = SourceProfilePath.TryLoad();
@@ -2080,7 +2081,7 @@ FWCAMaterialGenerator::FOptions FWCAMaterialGenerator::MakeOptionsForAsset(
                     }
                 }
 
-                const bool                            bProfileUsesSurfaceWater = Parameters.SupportsSurfaceWater();
+                const bool bProfileUsesSurfaceWater = Parameters.SupportsSurfaceWater();
                 Options.bUseSurfaceWater |= bProfileUsesSurfaceWater;
             }
         }
@@ -2241,7 +2242,7 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateTransientUni
                                                               : 0;
     }
 
-    TArray<FString> FunctionFailures;
+    TArray<FString>             FunctionFailures;
     UMaterialFunctionInterface* EvaluateFunction = nullptr;
     if (!ValidateDwcMaterialFunctionSet(FunctionFailures, &EvaluateFunction))
     {
@@ -2431,8 +2432,8 @@ bool FWCAMaterialGenerator::IsMaterialConfiguredForDwc(
 
 UMaterialInterface* FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
     const UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex,
-    UMaterialInterface* CandidateMaterial)
+    const int32              MaterialSlotIndex,
+    UMaterialInterface*      CandidateMaterial)
 {
     if (WetClothingAsset == nullptr)
     {
@@ -2480,7 +2481,7 @@ UMaterialInterface* FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
          WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
     {
         UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
-        UMaterial* GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
+        UMaterial*          GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
         UMaterialInterface* GeneratedMaterialInstance = MaterialOverride.GeneratedMaterialInstance.Get();
         if (SourceMaterial != nullptr &&
             (CandidateMaterial == SourceMaterial ||
@@ -2497,8 +2498,8 @@ UMaterialInterface* FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
 
 FString FWCAMaterialGenerator::BuildGeneratedMaterialSignature(
     const UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex,
-    UMaterialInterface* SourceMaterial)
+    const int32              MaterialSlotIndex,
+    UMaterialInterface*      SourceMaterial)
 {
     if (WetClothingAsset == nullptr || SourceMaterial == nullptr || MaterialSlotIndex == INDEX_NONE)
     {
@@ -2536,8 +2537,8 @@ FString FWCAMaterialGenerator::BuildGeneratedMaterialSignature(
 
 bool FWCAMaterialGenerator::IsGeneratedMaterialOverrideCurrent(
     const UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex,
-    FString* OutReason)
+    const int32              MaterialSlotIndex,
+    FString*                 OutReason)
 {
     auto SetReason = [OutReason](const FString& Reason)
     {

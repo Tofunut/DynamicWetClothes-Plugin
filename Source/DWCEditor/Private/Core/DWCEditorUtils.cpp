@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCEditorUtils.h"
 
 #include "FileHelpers.h"
@@ -16,7 +17,7 @@
 
 namespace
 {
-    FOnDWCEditorAssetSaved GDWCEditorAssetSaved;
+    FOnDWCEditorAssetSaved               GDWCEditorAssetSaved;
     FOnDWCEditorAssetSaveAttemptFinished GDWCEditorAssetSaveAttemptFinished;
 
     void ShowDWCEditorNotification(const FText& Message, const SNotificationItem::ECompletionState CompletionState)
@@ -34,7 +35,7 @@ namespace
     bool HasRuntimeDataIssueForSave(const UWetClothingAsset& WetClothingAsset)
     {
         const FDWCWetClothingAssetSetupSettings& Setup = WetClothingAsset.GetSetupSettings();
-        const FDWCAssetBakeState& BakeState = WetClothingAsset.GetBakeState();
+        const FDWCAssetBakeState&                BakeState = WetClothingAsset.GetBakeState();
         return WetClothingAsset.HasAnyWettableMaterialSlot() &&
                ((Setup.bBuildCPUVertexSimulationData &&
                  (!DWCBuildStatus::IsUsable(BakeState.CPURuntimeData) ||
@@ -43,7 +44,7 @@ namespace
                  (!DWCBuildStatus::IsUsable(BakeState.GPURuntimeData) ||
                   WetClothingAsset.IsBakeOutputSavePending(DWCBakeOutput::GPURuntimeData))));
     }
-}
+} // namespace
 
 FOnDWCEditorAssetSaved& DWCEditorUtils::OnAssetSaved()
 {
@@ -77,8 +78,8 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
                     WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(false);
                     ShowDWCEditorNotification(
                         FText::FromString(RuntimePreparationError.IsEmpty()
-                            ? TEXT("Failed to prepare DWC precomputed simulation data for save.")
-                            : RuntimePreparationError),
+                                              ? TEXT("Failed to prepare DWC precomputed simulation data for save.")
+                                              : RuntimePreparationError),
                         SNotificationItem::CS_Fail);
                     GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, false);
                     return false;
@@ -89,8 +90,8 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
                 WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(false);
                 ShowDWCEditorNotification(
                     FText::FromString(RuntimePreparationError.IsEmpty()
-                        ? TEXT("DWC runtime data cannot be prepared for save.")
-                        : RuntimePreparationError),
+                                          ? TEXT("DWC runtime data cannot be prepared for save.")
+                                          : RuntimePreparationError),
                     SNotificationItem::CS_Fail);
                 GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, false);
                 return false;
@@ -181,7 +182,6 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
 #if WITH_EDITORONLY_DATA
         AddDirtyGeneratedPackage(WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction.Get());
 #endif
-
     }
     if (SaveSlowTask.IsValid())
     {

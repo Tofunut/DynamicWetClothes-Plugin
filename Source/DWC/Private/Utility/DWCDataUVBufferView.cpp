@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Utility/DWCDataUVBufferView.h"
 
 #include "Engine/SkeletalMesh.h"
@@ -7,9 +8,9 @@
 
 bool FDWCDataUVBufferView::Initialize(
     const USkeletalMesh* SkeletalMesh,
-    const int32 LODIndex,
-    const int32 UVChannelIndex,
-    FString* OutErrorMessage)
+    const int32          LODIndex,
+    const int32          UVChannelIndex,
+    FString*             OutErrorMessage)
 {
     Reset();
 
@@ -35,8 +36,8 @@ bool FDWCDataUVBufferView::Initialize(
     }
 
     const FSkeletalMeshLODRenderData& ResolvedLODData = RenderData->LODRenderData[LODIndex];
-    const FStaticMeshVertexBuffer& ResolvedVertexBuffer = ResolvedLODData.StaticVertexBuffers.StaticMeshVertexBuffer;
-    const int32 NumTexCoords = static_cast<int32>(ResolvedVertexBuffer.GetNumTexCoords());
+    const FStaticMeshVertexBuffer&    ResolvedVertexBuffer = ResolvedLODData.StaticVertexBuffers.StaticMeshVertexBuffer;
+    const int32                       NumTexCoords = static_cast<int32>(ResolvedVertexBuffer.GetNumTexCoords());
     if (UVChannelIndex < 0 || UVChannelIndex >= NumTexCoords)
     {
         SetError(FString::Printf(

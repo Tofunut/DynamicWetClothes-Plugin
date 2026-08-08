@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "MaterialEditingLibrary.h"
@@ -89,13 +90,10 @@ namespace
     {
       public:
         FWaitForTransparencyHoverMaterialReady(
-            FAutomationTestBase* InTest,
+            FAutomationTestBase*                       InTest,
             TSharedRef<FDWCEditorPreviewMaterialCache> InCache,
-            UMaterialInterface* InSourceMaterial)
-            : Test(InTest)
-            , Cache(MoveTemp(InCache))
-            , SourceMaterial(InSourceMaterial)
-            , DeadlineSeconds(FPlatformTime::Seconds() + 60.0)
+            UMaterialInterface*                        InSourceMaterial)
+            : Test(InTest), Cache(MoveTemp(InCache)), SourceMaterial(InSourceMaterial), DeadlineSeconds(FPlatformTime::Seconds() + 60.0)
         {
         }
 
@@ -133,12 +131,12 @@ namespace
         }
 
       private:
-        FAutomationTestBase* Test = nullptr;
+        FAutomationTestBase*                       Test = nullptr;
         TSharedRef<FDWCEditorPreviewMaterialCache> Cache;
-        TObjectPtr<UMaterialInterface> SourceMaterial = nullptr;
-        double DeadlineSeconds = 0.0;
+        TObjectPtr<UMaterialInterface>             SourceMaterial = nullptr;
+        double                                     DeadlineSeconds = 0.0;
     };
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyPreviewMaterialHoverGraphTest,
@@ -171,7 +169,7 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
     PreviewWetness->DefaultValue = 1.0f;
 
     FDWCSurfaceGraphBuildResult SurfaceGraph;
-    SurfaceGraph.Outputs.BaseColor = {BaseColor, FString()};
+    SurfaceGraph.Outputs.BaseColor = { BaseColor, FString() };
     SurfaceGraph.DWCDataUVExpression = DataUV;
 
     FString ErrorMessage;
@@ -181,37 +179,37 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
     TestTrue(TEXT("The hover graph reports no construction error"), ErrorMessage.IsEmpty());
 
     TestTrue(TEXT("Hover state 0 is exposed as a vector parameter"),
-        HasVectorParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverState0()));
+             HasVectorParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverState0()));
     TestTrue(TEXT("Hover state 1 is exposed as a vector parameter"),
-        HasVectorParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverState1()));
+             HasVectorParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverState1()));
     TestTrue(TEXT("Hover color is exposed as a vector parameter"),
-        HasVectorParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverColor()));
+             HasVectorParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverColor()));
     TestTrue(TEXT("Hover target is exposed as a scalar parameter"),
-        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverTarget()));
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverTarget()));
     TestTrue(TEXT("Hover wrapping is exposed as a scalar parameter"),
-        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverWrap()));
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverWrap()));
     TestTrue(TEXT("Hover texel size is exposed as a vector parameter"),
-        HasVectorParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverTexelSize()));
+             HasVectorParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverTexelSize()));
     TestTrue(TEXT("Hover visualization mode is exposed as a scalar parameter"),
-        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverVisualizationMode()));
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverVisualizationMode()));
     TestTrue(TEXT("Hover baseline is exposed as a texture parameter"),
-        HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverBaselineMap()));
+             HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverBaselineMap()));
     TestTrue(TEXT("Hover baseline use is exposed as a scalar parameter"),
-        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseHoverBaselineMap()));
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseHoverBaselineMap()));
     TestTrue(TEXT("Hover edge feather is exposed as a texture parameter"),
-        HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap()));
+             HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap()));
     TestTrue(TEXT("Hover edge feather use is exposed as a scalar parameter"),
-        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap()));
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap()));
     TestTrue(TEXT("Wrinkle coverage is exposed as a texture parameter"),
-        HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleCoverageMap()));
+             HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleCoverageMap()));
     TestTrue(TEXT("Wrinkle coverage use is exposed as a scalar parameter"),
-        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseWrinkleCoverageMap()));
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseWrinkleCoverageMap()));
     TestTrue(TEXT("Wrinkle threshold is exposed as a scalar parameter"),
-        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleMaskThreshold()));
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleMaskThreshold()));
     TestTrue(TEXT("Wrinkle softness is exposed as a scalar parameter"),
-        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleMaskSoftness()));
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleMaskSoftness()));
     TestTrue(TEXT("Transparency visualization mode is exposed as a scalar parameter"),
-        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::VisualizationMode()));
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::VisualizationMode()));
 
     const UMaterialExpressionCustom* HoverBlend = nullptr;
     for (UMaterialExpression* Expression : Material->GetExpressions())
@@ -227,29 +225,29 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
     if (HoverBlend != nullptr)
     {
         TestTrue(TEXT("Disabled hover has an explicit fast path"),
-            HoverBlend->Code.Contains(TEXT("HoverState1.x > 0.0")));
+                 HoverBlend->Code.Contains(TEXT("HoverState1.x > 0.0")));
         TestTrue(TEXT("Reveal and alpha hover use separate targets"),
-            HoverBlend->Code.Contains(TEXT("HoverTarget < 1.5")));
+                 HoverBlend->Code.Contains(TEXT("HoverTarget < 1.5")));
         TestTrue(TEXT("Smooth hover samples only inside the active branch"),
-            HoverBlend->Code.Contains(TEXT("SelectedHoverOperation == 3")));
+                 HoverBlend->Code.Contains(TEXT("SelectedHoverOperation == 3")));
         TestTrue(TEXT("Hover is clipped to the active UV island"),
-            HoverBlend->Code.Contains(TEXT("HoverIslandEligibility")));
+                 HoverBlend->Code.Contains(TEXT("HoverIslandEligibility")));
         TestTrue(TEXT("Auto-alpha hover updates its grayscale visualization"),
-            HoverBlend->Code.Contains(TEXT("TransparencySample.rgb = TransparencySample.aaa")));
+                 HoverBlend->Code.Contains(TEXT("TransparencySample.rgb = TransparencySample.aaa")));
         TestTrue(TEXT("Wrinkle coverage is sampled directly by the preview material"),
-            HoverBlend->Code.Contains(TEXT("WrinkleCoverageMapTex")));
+                 HoverBlend->Code.Contains(TEXT("WrinkleCoverageMapTex")));
         TestTrue(TEXT("Wrinkle threshold and softness are evaluated by the preview material"),
-            HoverBlend->Code.Contains(TEXT("smoothstep(SafeThreshold, TransitionEnd, Coverage)")));
+                 HoverBlend->Code.Contains(TEXT("smoothstep(SafeThreshold, TransitionEnd, Coverage)")));
         TestTrue(TEXT("Wrinkle suppression is applied to final alpha in the preview material"),
-            HoverBlend->Code.Contains(TEXT("(1.0 - SuppressionWeight)")));
+                 HoverBlend->Code.Contains(TEXT("(1.0 - SuppressionWeight)")));
     }
 
     TestEqual(TEXT("The material hover target enum has a stable disabled value"),
-        static_cast<uint8>(EDWCTransparencyMaterialHoverTarget::None), static_cast<uint8>(0));
+              static_cast<uint8>(EDWCTransparencyMaterialHoverTarget::None), static_cast<uint8>(0));
     TestEqual(TEXT("The material hover operation enum has a stable smooth value"),
-        static_cast<uint8>(EDWCTransparencyMaterialHoverOperation::Smooth), static_cast<uint8>(3));
+              static_cast<uint8>(EDWCTransparencyMaterialHoverOperation::Smooth), static_cast<uint8>(3));
     TestTrue(TEXT("The feature schema invalidates pre-material-suppression cached graphs"),
-        FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 5);
+             FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 5);
     return true;
 }
 
@@ -271,10 +269,10 @@ bool FDWCTransparencyPreviewMaterialHoverCompileTest::RunTest(const FString&)
     }
 
     TSharedRef<FDWCEditorPreviewMaterialCache> Cache = MakeShared<FDWCEditorPreviewMaterialCache>();
-    const FDWCEditorPreviewMaterialResult Initial = Cache->GetOrCreate(
+    const FDWCEditorPreviewMaterialResult      Initial = Cache->GetOrCreate(
         MakeTransparencyHoverMaterialRequest(SourceMaterial));
     const bool bEnteredCompileLifecycle = Initial.State == EDWCEditorPreviewMaterialState::Compiling ||
-        Initial.State == EDWCEditorPreviewMaterialState::Ready;
+                                          Initial.State == EDWCEditorPreviewMaterialState::Ready;
     TestTrue(TEXT("The hover graph enters the material compile lifecycle"), bEnteredCompileLifecycle);
     if (!bEnteredCompileLifecycle)
     {

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -37,19 +38,19 @@ ENUM_CLASS_FLAGS(EDWCEditorAuthoringImpact);
 
 struct FDWCEditorAuthoringChange
 {
-    EDWCEditorAuthoringDomain Domain = EDWCEditorAuthoringDomain::None;
+    EDWCEditorAuthoringDomain      Domain = EDWCEditorAuthoringDomain::None;
     EDWCEditorAuthoringChangePhase Phase = EDWCEditorAuthoringChangePhase::Committed;
-    EDWCEditorAuthoringImpact Impact = EDWCEditorAuthoringImpact::None;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    FGuid LayerGuid;
-    FGuid ElementGuid;
-    uint64 Revision = 0;
+    EDWCEditorAuthoringImpact      Impact = EDWCEditorAuthoringImpact::None;
+    int32                          MaterialSlotIndex = INDEX_NONE;
+    FGuid                          LayerGuid;
+    FGuid                          ElementGuid;
+    uint64                         Revision = 0;
 };
 
 struct FDWCEditorAuthoringResult
 {
-    bool bChanged = false;
-    FString Error;
+    bool                      bChanged = false;
+    FString                   Error;
     FDWCEditorAuthoringChange Change;
 
     explicit operator bool() const

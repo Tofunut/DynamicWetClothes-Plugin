@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/Utils/DWCLodCoordinator.h"
 
 #include "Components/DynamicWetClothesComponent.h"
@@ -34,7 +35,7 @@ void FDWCLodCoordinator::NormalizeScreenSizeThresholds(
 }
 
 void FDWCLodCoordinator::ConfigureQualityLOD(
-    const bool bEnabled,
+    const bool                   bEnabled,
     const UDWCQualityLODProfile* Profile)
 {
     if (!QualityLODController.IsValid())
@@ -48,7 +49,7 @@ void FDWCLodCoordinator::ConfigureQualityLOD(
 
 void FDWCLodCoordinator::SetReceiverQualityLOD(
     FDWCWetMeshReceiverRuntime& Receiver,
-    const int32 InQualityLOD) const
+    const int32                 InQualityLOD) const
 {
     if (QualityLODController.IsValid())
     {
@@ -67,7 +68,7 @@ void FDWCLodCoordinator::RefreshReceiverQualityLODPolicy(
 
 bool FDWCLodCoordinator::ShouldRunCPUWetnessRendering(
     FDWCQualityLODRuntimeState& State,
-    const float BaseInterval)
+    const float                 BaseInterval)
 {
     return !QualityLODController.IsValid() ||
            QualityLODController->ShouldRunCPUWetnessRendering(State, BaseInterval);
@@ -101,20 +102,20 @@ bool FDWCLodCoordinator::HasAnyRenderLODSettings(
 }
 
 bool FDWCLodCoordinator::CalculateRenderLODScreenSize(
-    UWorld* World,
+    UWorld*                                               World,
     const TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>& Receivers,
-    float& OutScreenSize,
-    FBoxSphereBounds& OutBounds,
-    bool& bOutInViewFrustum) const
+    float&                                                OutScreenSize,
+    FBoxSphereBounds&                                     OutBounds,
+    bool&                                                 bOutInViewFrustum) const
 {
     OutScreenSize = 0.0f;
     OutBounds = FBoxSphereBounds();
     bOutInViewFrustum = false;
 
     UGameViewportClient* GameViewport = World != nullptr ? World->GetGameViewport() : nullptr;
-    UGameInstance* GameInstance = World != nullptr ? World->GetGameInstance() : nullptr;
-    FSceneViewport* SceneViewport = GameViewport != nullptr ? GameViewport->GetGameViewport() : nullptr;
-    ULocalPlayer* LocalPlayer = GameInstance != nullptr ? GameInstance->GetFirstGamePlayer() : nullptr;
+    UGameInstance*       GameInstance = World != nullptr ? World->GetGameInstance() : nullptr;
+    FSceneViewport*      SceneViewport = GameViewport != nullptr ? GameViewport->GetGameViewport() : nullptr;
+    ULocalPlayer*        LocalPlayer = GameInstance != nullptr ? GameInstance->GetFirstGamePlayer() : nullptr;
     if (SceneViewport == nullptr || LocalPlayer == nullptr)
     {
         return false;
@@ -158,7 +159,7 @@ bool FDWCLodCoordinator::CalculateRenderLODScreenSize(
     OutScreenSize = FMath::Clamp(
         ComputeBoundsScreenSize(
             FVector4(OutBounds.Origin, 1.0f),
-            OutBounds.SphereRadius,
+            static_cast<float>(OutBounds.SphereRadius),
             FVector4(ProjectionData.ViewOrigin, 1.0f),
             ProjectionData.ProjectionMatrix),
         0.0f,
@@ -168,25 +169,25 @@ bool FDWCLodCoordinator::CalculateRenderLODScreenSize(
 
 bool FDWCLodCoordinator::FindRenderLODLevel(
     const TArray<FDWCQualityLODScreenSizeThreshold>& Thresholds,
-    const float ScreenSize,
-    int32& OutLODLevel) const
+    const float                                      ScreenSize,
+    int32&                                           OutLODLevel) const
 {
     return QualityLODEvaluator.IsValid() &&
            QualityLODEvaluator->ResolveLODFromScreenSize(Thresholds, ScreenSize, OutLODLevel);
 }
 
 bool FDWCLodCoordinator::UpdateRenderLOD(
-    UWorld* World,
-    const UObject* OwnerForLogs,
+    UWorld*                                               World,
+    const UObject*                                        OwnerForLogs,
     const TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>& Receivers,
-    const TArray<FDWCQualityLODScreenSizeThreshold>& Thresholds,
-    int32& OutLODLevel)
+    const TArray<FDWCQualityLODScreenSizeThreshold>&      Thresholds,
+    int32&                                                OutLODLevel)
 {
     OutLODLevel = INDEX_NONE;
 
-    float ScreenSize = 0.0f;
+    float            ScreenSize = 0.0f;
     FBoxSphereBounds MergedBounds;
-    bool bInViewFrustum = false;
+    bool             bInViewFrustum = false;
     if (!CalculateRenderLODScreenSize(World, Receivers, ScreenSize, MergedBounds, bInViewFrustum))
     {
         return false;

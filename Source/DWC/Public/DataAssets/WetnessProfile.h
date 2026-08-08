@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -34,7 +35,7 @@ struct DWC_API FResolvedAbsorbedWaterSimulationParameters
 
     bool Equals(
         const FResolvedAbsorbedWaterSimulationParameters& Other,
-        const float Tolerance = KINDA_SMALL_NUMBER) const
+        const float                                       Tolerance = KINDA_SMALL_NUMBER) const
     {
         return FMath::IsNearlyEqual(AbsorptionMultiplier, Other.AbsorptionMultiplier, Tolerance) &&
                FMath::IsNearlyEqual(SpreadRatePerSecond, Other.SpreadRatePerSecond, Tolerance) &&
@@ -138,51 +139,51 @@ struct DWC_API FSurfaceWaterProfileParameters
     TObjectPtr<UTexture2D> DropletFlowMaskTexture = nullptr;
 
     /** Roughness reached by fully visible Droplet1 water. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Roughness"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Water Roughness"))
     float SurfaceWaterTargetRoughness = 0.02f;
 
     /** Normal-map strength for Droplet1. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta=(ClampMin="0.0", ClampMax="3.0", DisplayName="Water Normal Strength"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta = (ClampMin = "0.0", ClampMax = "3.0", DisplayName = "Water Normal Strength"))
     float SurfaceWaterNormalStrength = 3.0f;
 
     /** Strength of the Surface Water roughness blend toward Wet Surface Roughness. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Roughness Blend"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Roughness Blend"))
     float SurfaceWaterRoughnessBlend = 0.85f;
 
     /** Overall Surface Water rendering strength after droplet coverage is resolved. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Total Strength"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Total Strength"))
     float SurfaceWaterTotalStrength = 0.5f;
 
     /** How strongly Droplet1 modifies the underlying Base Color. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Color Blend"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Color Blend"))
     float SurfaceWaterColorBlend = 1.0f;
 
     /** Specular reached by fully visible surface water. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Specular"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Water Specular"))
     float SurfaceWaterSpecular = 0.5f;
 
     /** Roughness reached by fully visible Droplet2 water. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Roughness"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Water Roughness"))
     float DropletFlowTargetRoughness = 0.02f;
 
     /** Strength of the Droplet2 roughness blend toward Water Roughness. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Roughness Blend"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Roughness Blend"))
     float DropletFlowRoughnessBlend = 0.85f;
 
     /** Overall Droplet2 rendering strength after coverage is resolved. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Total Strength"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Total Strength"))
     float DropletFlowTotalStrength = 0.5f;
 
     /** How strongly Droplet2 modifies the underlying Base Color. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Color Blend"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Color Blend"))
     float DropletFlowColorBlend = 1.0f;
 
     /** Normal-map strength for Droplet2. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta=(ClampMin="0.0", ClampMax="3.0", DisplayName="Water Normal Strength"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta = (ClampMin = "0.0", ClampMax = "3.0", DisplayName = "Water Normal Strength"))
     float DropletFlowNormalStrength = 3.0f;
 
     /** Specular reached by fully visible Droplet2 water. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Specular"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Water Specular"))
     float DropletFlowSpecular = 0.5f;
 
     /** Optional profile override. Null disables the Droplet normal contribution. */
@@ -209,7 +210,6 @@ struct DWC_API FSurfaceWaterProfileParameters
         const float RemainingFraction = FMath::Max(1.0f - DryPercentPerSecond * 0.01f, KINDA_SMALL_NUMBER);
         return -FMath::Loge(RemainingFraction);
     }
-
 };
 
 USTRUCT(BlueprintType)
@@ -335,22 +335,22 @@ class DWC_API UWetnessProfile : public UDataAsset
         bEditorHasSavedParametersSnapshot = true;
     }
 
-    bool HasEditorSavedParametersSnapshot() const { return bEditorHasSavedParametersSnapshot; }
+    bool                             HasEditorSavedParametersSnapshot() const { return bEditorHasSavedParametersSnapshot; }
     const FWetnessProfileParameters& GetEditorSavedParametersSnapshot() const
     {
         return EditorSavedParametersSnapshot;
     }
 
-    bool HasPreparedSurfaceTextures() const { return bHasPreparedSurfaceTextures; }
+    bool        HasPreparedSurfaceTextures() const { return bHasPreparedSurfaceTextures; }
     UTexture2D* GetPreparedDropletNormalTexture() const { return PreparedDropletNormalTexture; }
     UTexture2D* GetPreparedDropletMaskTexture() const { return PreparedDropletMaskTexture; }
     UTexture2D* GetPreparedDroplet2NormalTexture() const { return PreparedDroplet2NormalTexture; }
     UTexture2D* GetPreparedDroplet2MaskTexture() const { return PreparedDroplet2MaskTexture; }
-    void SetPreparedSurfaceTextures(
-        UTexture2D* DropletNormal,
-        UTexture2D* DropletMask,
-        UTexture2D* Droplet2Normal,
-        UTexture2D* Droplet2Mask)
+    void        SetPreparedSurfaceTextures(
+               UTexture2D* DropletNormal,
+               UTexture2D* DropletMask,
+               UTexture2D* Droplet2Normal,
+               UTexture2D* Droplet2Mask)
     {
         PreparedDropletNormalTexture = DropletNormal;
         PreparedDropletMaskTexture = DropletMask;

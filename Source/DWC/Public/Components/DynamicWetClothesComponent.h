@@ -1,7 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
 
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "WetInputSystem/WetContactTypes.h"
@@ -41,32 +42,31 @@ struct FPropertyChangedEvent;
 struct FDWCWetMeshReceiverRuntime
 {
     // Receiver identity and source UObject references.
-    FName ReceiverId = NAME_None;
+    FName                                  ReceiverId = NAME_None;
     TWeakObjectPtr<USkeletalMeshComponent> MeshComponent;
-    TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
+    TWeakObjectPtr<UWetClothingAsset>      WetClothingAsset;
 
     // Shared immutable runtime data.
     // The TSharedPtr itself is small; the pointed-to payload can be large and
     // must be counted once per unique payload, not once per receiver.
     TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe> SharedRuntimeData;
-    TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> SkinningStaticData;
+    TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>  SkinningStaticData;
 
     // Per-receiver simulation and rendering state.
     // These are the main CPU-memory consumers.
     TUniquePtr<FAbsorbedWetnessSimulationState> SimulationState;
-    TUniquePtr<FWetClothingMeshSampler> MeshSampler;
-    TUniquePtr<FWetRenderStage> RenderStage;
-
+    TUniquePtr<FWetClothingMeshSampler>         MeshSampler;
+    TUniquePtr<FWetRenderStage>                 RenderStage;
 
     // Per-receiver GPU simulation backend and GPU-only surface stamp RNG.
     TUniquePtr<IDWCGPUBackend> GPUBackend;
-    FRandomStream GPUSurfaceWaterRandomStream = FRandomStream(0x445743);
+    FRandomStream              GPUSurfaceWaterRandomStream = FRandomStream(0x445743);
 
     // LOD vertex-color transfer data.
     // Static LOD data and transfer maps can be shared by multiple receivers,
     // so global memory accounting must deduplicate the pointed-to objects.
     TMap<int32, TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>> LODVertexStaticDataByLOD;
-    TMap<int32, TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>> LODVertexColorTransferMapsByLOD;
+    TMap<int32, TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>>           LODVertexColorTransferMapsByLOD;
 
     // Per-receiver LOD vertex-color cache.
     // The shared pointer provides lifetime and task hand-off safety; the color
@@ -74,8 +74,8 @@ struct FDWCWetMeshReceiverRuntime
     TMap<int32, TSharedPtr<const TArray<FColor>, ESPMode::ThreadSafe>> LODVertexColorCachesByLOD;
 
     // Per-receiver transient LOD work state.
-    TArray<int32> PendingLODVertexColorDirtySourceVertices;
-    int32 LODVertexColorTransferGeneration = 0;
+    TArray<int32>              PendingLODVertexColorDirtySourceVertices;
+    int32                      LODVertexColorTransferGeneration = 0;
     FDWCQualityLODRuntimeState QualityLODState;
 
     // Per-receiver render invalidation state.
@@ -126,15 +126,15 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool GetWetnessWorldBounds(FBox& OutBounds) const;
     UFUNCTION(BlueprintPure, Category = "Wetness|GPU")
     int32 GetDWCReceiverGPUId(FName ReceiverId = NAME_None) const;
-    void GetDWCReceiverGPUIds(TArray<int32>& OutReceiverGPUIds) const;
+    void  GetDWCReceiverGPUIds(TArray<int32>& OutReceiverGPUIds) const;
     // User-facing debug API.
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void SetWetPartDebugColorsEnabled(bool bEnabled);
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void SetSurfaceWaterDebugColorsEnabled(bool bEnabled);
     // Internal DWC quality-LOD support. Not exposed through the public UI or Blueprint API.
-    void SetDWCQualityLOD(int32 InQualityLOD);
-    bool SetReceiverDWCQualityLOD(FName ReceiverId, int32 InQualityLOD);
+    void  SetDWCQualityLOD(int32 InQualityLOD);
+    bool  SetReceiverDWCQualityLOD(FName ReceiverId, int32 InQualityLOD);
     int32 GetDWCQualityLOD() const
     {
         return CurrentQualityLOD;
@@ -142,8 +142,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     // Runtime state and asynchronous task callbacks.
     int32 GetWetSurfaceSampleResolution() const;
-    void CommitCpuSkinningTaskResult(FDWCSkinningTaskResult&& Result);
-    void CommitLODVertexColorTransferResult(FDWCLODVertexColorTransferResult&& Result);
+    void  CommitCpuSkinningTaskResult(FDWCSkinningTaskResult&& Result);
+    void  CommitLODVertexColorTransferResult(FDWCLODVertexColorTransferResult&& Result);
 
     EDWCSimulationMode GetActiveSimulationMode() const
     {
@@ -160,8 +160,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
 #if WITH_EDITOR
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-    void HandleExternalMaterialPropertyChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent);
-    void RebindMaterialsAfterExternalChange(USkeletalMeshComponent* MeshComponent);
+    void         HandleExternalMaterialPropertyChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent);
+    void         RebindMaterialsAfterExternalChange(USkeletalMeshComponent* MeshComponent);
 #endif
 
   protected:
@@ -173,43 +173,43 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     friend class UDWCStatsSubsystem;
 
     // Runtime initialization and receiver management.
-    bool                     InitializeWetRuntime();
-    void                     StartWetnessTimers();
+    bool InitializeWetRuntime();
+    void StartWetnessTimers();
 
     // Stage argument construction.
     FWetMeshReceiverInitializerContext MakeWetMeshReceiverInitializerContext();
-    FWetApplicationStageContext MakeWetApplicationStageContext();
-    FWetRuntimeDataBuildArgs MakeRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime& Receiver);
-    FWetSimulationStageArgs  MakeWetSimulationStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
-    FWetRenderStageArgs      MakeWetRenderStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
+    FWetApplicationStageContext        MakeWetApplicationStageContext();
+    FWetRuntimeDataBuildArgs           MakeRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime& Receiver);
+    FWetSimulationStageArgs            MakeWetSimulationStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
+    FWetRenderStageArgs                MakeWetRenderStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
 
     // Per-frame simulation and rendering updates.
-    void                     UpdateWetness();
-    void                     UpdateWetRendering();
-    bool                     FlushPendingWetContacts();
-    bool                     ShouldUpdateCPUWetnessRendering(FDWCWetMeshReceiverRuntime& Receiver) const;
-    bool                     ShouldEnableCPUWetnessRendering(const FDWCWetMeshReceiverRuntime& Receiver) const;
+    void UpdateWetness();
+    void UpdateWetRendering();
+    bool FlushPendingWetContacts();
+    bool ShouldUpdateCPUWetnessRendering(FDWCWetMeshReceiverRuntime& Receiver) const;
+    bool ShouldEnableCPUWetnessRendering(const FDWCWetMeshReceiverRuntime& Receiver) const;
 
     // Wetness input render invalidation.
-    void                     RequestWetRenderingUpdate();
-    void                     RequestWetRenderingUpdate(FDWCWetMeshReceiverRuntime& Receiver);
+    void RequestWetRenderingUpdate();
+    void RequestWetRenderingUpdate(FDWCWetMeshReceiverRuntime& Receiver);
 
     // GPU and material rendering state.
-    bool                     InitializeGPUBackend(FDWCWetMeshReceiverRuntime& Receiver);
-    void                     ApplyGeneratedWetMaterialOverrides();
-    void                     ApplyQualityLODMaterialParameters(FDWCWetMeshReceiverRuntime& Receiver);
-    void                     MarkCPUWetnessRenderingDirty(FDWCWetMeshReceiverRuntime& Receiver);
+    bool InitializeGPUBackend(FDWCWetMeshReceiverRuntime& Receiver);
+    void ApplyGeneratedWetMaterialOverrides();
+    void ApplyQualityLODMaterialParameters(FDWCWetMeshReceiverRuntime& Receiver);
+    void MarkCPUWetnessRenderingDirty(FDWCWetMeshReceiverRuntime& Receiver);
     // Internal quality-LOD implementation. Not exposed through the public API.
-    void                     RefreshResolvedQualityLODPolicies();
-    void                     UpdateRenderLOD();
+    void RefreshResolvedQualityLODPolicies();
+    void UpdateRenderLOD();
 
     // Asynchronous skinning and LOD transfer tasks.
-    bool                     RequestCpuSkinningTask(FDWCWetMeshReceiverRuntime& Receiver, bool bComputePositions, bool bComputeNormals);
-    void                     RequestContinuousCpuSkinningTasks();
-    bool                     HasPendingCpuSkinningTasks() const;
-    bool                     RequestLODVertexColorTransferTask(FDWCWetMeshReceiverRuntime& Receiver);
-    bool                     HasPendingLODVertexColorTransferTasks() const;
-    void                     FlushAsyncTaskQueueGameThread();
+    bool RequestCpuSkinningTask(FDWCWetMeshReceiverRuntime& Receiver, bool bComputePositions, bool bComputeNormals);
+    void RequestContinuousCpuSkinningTasks();
+    bool HasPendingCpuSkinningTasks() const;
+    bool RequestLODVertexColorTransferTask(FDWCWetMeshReceiverRuntime& Receiver);
+    bool HasPendingLODVertexColorTransferTasks() const;
+    void FlushAsyncTaskQueueGameThread();
 
   public:
     // Input asset and simulation mode.
@@ -241,18 +241,18 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     TObjectPtr<UDWCQualityLODProfile> QualityLODProfile = nullptr;
 
     TArray<FDWCQualityLODScreenSizeThreshold> QualityLODScreenSizeThresholds;
-    float RenderLODEvaluationInterval = 0.1f;
+    float                                     RenderLODEvaluationInterval = 0.1f;
 
     // Legacy component-level appearance overrides are intentionally not exposed.
     // Rendering appearance is authored by WCA/Wetness Profile data. These defaults preserve
     // the existing runtime behavior without duplicating authoring controls on the component.
     FLinearColor FallbackUnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
-    float WetUnderColorBlendStrength = 0.3f;
-    float WrinkleStrength = 1.0f;
-    float WrinkleWetnessMin = 0.25f;
-    float WrinkleWetnessMax = 1.0f;
-    float TransparencyWetnessMin = 0.0f;
-    float TransparencyWetnessMax = 1.0f;
+    float        WetUnderColorBlendStrength = 0.3f;
+    float        WrinkleStrength = 1.0f;
+    float        WrinkleWetnessMin = 0.25f;
+    float        WrinkleWetnessMax = 1.0f;
+    float        TransparencyWetnessMin = 0.0f;
+    float        TransparencyWetnessMax = 1.0f;
 
     /**
      * Keeps the normal material while dry and displays each Wet Part's configured color while wet.
@@ -277,18 +277,18 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool bSimulationModeLocked = false;
 
     // Receiver collection and shared coordinators.
-    TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
-    TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;
-    TUniquePtr<FDWCLodCoordinator> LODCoordinator;
+    TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>    Receivers;
+    TUniquePtr<FDWCTaskQueue>                         AsyncTaskQueue;
+    TUniquePtr<FDWCLodCoordinator>                    LODCoordinator;
     TUniquePtr<FDWCLODVertexColorTransferCoordinator> LODVertexColorTransferCoordinator;
 
     // Timers and pending frame work.
-    FTimerHandle           WetnessSimulationTimer;
-    FTimerHandle           WetnessRenderTimer;
-    FTimerHandle           RenderLODEvaluationTimer;
+    FTimerHandle WetnessSimulationTimer;
+    FTimerHandle WetnessRenderTimer;
+    FTimerHandle RenderLODEvaluationTimer;
 #if WITH_EDITOR
-    FDelegateHandle        ExternalMaterialPropertyChangedHandle;
-    bool                   bRebindingExternalMaterials = false;
+    FDelegateHandle ExternalMaterialPropertyChangedHandle;
+    bool            bRebindingExternalMaterials = false;
 #endif
     TArray<FDWCWetContact> PendingWetContacts;
     bool                   bPendingWetContactsApplyMaterial = false;

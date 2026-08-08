@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeProjection.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -12,17 +13,17 @@ FVector FDWCRevealBakeTexelSampler::InterpolateVector(const FVector& Barycentric
 
 FIntRect FDWCRevealBakeTexelSampler::MakePixelBoundsFromUVTriangle(
     const FDWCRevealBakeSurfaceTriangle& Triangle,
-    const FIntPoint&               Resolution)
+    const FIntPoint&                     Resolution)
 {
     FBox2D UVBounds(ForceInit);
     UVBounds += Triangle.UVs[0];
     UVBounds += Triangle.UVs[1];
     UVBounds += Triangle.UVs[2];
 
-    const int32 MinX = FMath::Clamp(FMath::FloorToInt(UVBounds.Min.X * Resolution.X), 0, Resolution.X - 1);
-    const int32 MaxX = FMath::Clamp(FMath::CeilToInt(UVBounds.Max.X * Resolution.X), 0, Resolution.X - 1);
-    const int32 MinY = FMath::Clamp(FMath::FloorToInt(UVBounds.Min.Y * Resolution.Y), 0, Resolution.Y - 1);
-    const int32 MaxY = FMath::Clamp(FMath::CeilToInt(UVBounds.Max.Y * Resolution.Y), 0, Resolution.Y - 1);
+    const int32 MinX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(UVBounds.Min.X * Resolution.X), 0, Resolution.X - 1));
+    const int32 MaxX = IntCastChecked<int32>(FMath::Clamp(FMath::CeilToInt(UVBounds.Max.X * Resolution.X), 0, Resolution.X - 1));
+    const int32 MinY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(UVBounds.Min.Y * Resolution.Y), 0, Resolution.Y - 1));
+    const int32 MaxY = IntCastChecked<int32>(FMath::Clamp(FMath::CeilToInt(UVBounds.Max.Y * Resolution.Y), 0, Resolution.Y - 1));
 
     return FIntRect(MinX, MinY, MaxX + 1, MaxY + 1);
 }
@@ -73,8 +74,8 @@ bool FDWCRevealBakeRayProjector::IntersectRayAabb(
         }
 
         const double InverseDirection = 1.0 / Direction;
-        double AxisMinDistance = (BoundsMin - Origin) * InverseDirection;
-        double AxisMaxDistance = (BoundsMax - Origin) * InverseDirection;
+        double       AxisMinDistance = (BoundsMin - Origin) * InverseDirection;
+        double       AxisMaxDistance = (BoundsMax - Origin) * InverseDirection;
         if (AxisMinDistance > AxisMaxDistance)
         {
             Swap(AxisMinDistance, AxisMaxDistance);
@@ -141,9 +142,9 @@ bool FDWCRevealBakeRayProjector::FBakeProjectionBvh::Build(
 }
 
 void FDWCRevealBakeRayProjector::FBakeProjectionBvh::ForEachRayCandidate(
-    const FVector& RayOrigin,
-    const FVector& RayDirection,
-    const float    MaxDistance,
+    const FVector&                                        RayOrigin,
+    const FVector&                                        RayDirection,
+    const float                                           MaxDistance,
     TFunctionRef<void(const FBakeProjectionTriangleRef&)> VisitTriangle) const
 {
     if (Nodes.Num() == 0)
@@ -198,7 +199,7 @@ void FDWCRevealBakeRayProjector::FBakeProjectionBvh::ForEachRayCandidate(
 
 int32 FDWCRevealBakeRayProjector::FBakeProjectionBvh::BuildNode(TArray<int32>& TriangleRefIndices)
 {
-    const int32 NodeIndex = Nodes.AddDefaulted();
+    const int32             NodeIndex = Nodes.AddDefaulted();
     FBakeProjectionBvhNode& Node = Nodes[NodeIndex];
     Node.Bounds = CalculateBounds(TriangleRefIndices);
 
@@ -217,7 +218,7 @@ int32 FDWCRevealBakeRayProjector::FBakeProjectionBvh::BuildNode(TArray<int32>& T
             return TriangleRefs[LeftIndex].Center[SplitAxis] < TriangleRefs[RightIndex].Center[SplitAxis];
         });
 
-    const int32 SplitIndex = TriangleRefIndices.Num() / 2;
+    const int32   SplitIndex = TriangleRefIndices.Num() / 2;
     TArray<int32> LeftTriangleRefIndices;
     TArray<int32> RightTriangleRefIndices;
     LeftTriangleRefIndices.Append(TriangleRefIndices.GetData(), SplitIndex);
@@ -344,7 +345,7 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
                 if (ExistingTriangleIndex != INDEX_NONE)
                 {
                     const FDWCRevealBakeSurfaceTriangle& ExistingTriangle = OuterSurface.Triangles[ExistingTriangleIndex];
-                    bool bSharesVertex = false;
+                    bool                                 bSharesVertex = false;
                     for (int32 ExistingCorner = 0; ExistingCorner < 3 && !bSharesVertex; ++ExistingCorner)
                     {
                         for (int32 NewCorner = 0; NewCorner < 3; ++NewCorner)
@@ -387,9 +388,9 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
 }
 
 bool FDWCRevealBakeTexelSampler::ComputeBarycentricInUV(
-    const FVector2D&               UV,
+    const FVector2D&                     UV,
     const FDWCRevealBakeSurfaceTriangle& Triangle,
-    FVector&                       OutBarycentric)
+    FVector&                             OutBarycentric)
 {
     const FVector2D A = Triangle.UVs[0];
     const FVector2D B = Triangle.UVs[1];
@@ -427,13 +428,13 @@ void FDWCRevealBakeTexelSampler::SetError(FString* OutErrorMessage, const TCHAR*
 }
 
 bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
-    const FDWCRevealBakeSurface&               OuterSurface,
-    const TArray<FDWCRevealBakeSurface>&       SourceSurfaces,
-    const TArray<FDWCRevealBakeTexelSample>&   Samples,
-    const FDWCRevealBakeRayProjectionSettings& Settings,
+    const FDWCRevealBakeSurface&                    OuterSurface,
+    const TArray<FDWCRevealBakeSurface>&            SourceSurfaces,
+    const TArray<FDWCRevealBakeTexelSample>&        Samples,
+    const FDWCRevealBakeRayProjectionSettings&      Settings,
     TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
-    FString*                             OutErrorMessage,
-    const FDWCEditorCancellationToken*   CancellationToken)
+    FString*                                        OutErrorMessage,
+    const FDWCEditorCancellationToken*              CancellationToken)
 {
     if (Samples.Num() == 0)
     {
@@ -476,8 +477,8 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
 
         FCandidateHit BestRevealCandidate;
         FCandidateHit BestBlockerCandidate;
-        bool bHasRevealCandidate = false;
-        bool bHasBlockerCandidate = false;
+        bool          bHasRevealCandidate = false;
+        bool          bHasBlockerCandidate = false;
 
         const auto IsPreferredCandidate =
             [&Settings](const FCandidateHit& Candidate, const FCandidateHit& Current)
@@ -503,7 +504,7 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
                     return;
                 }
 
-                float Distance = 0.0f;
+                float   Distance = 0.0f;
                 FVector Barycentric;
                 if (!IntersectRayTriangle(
                         RayOrigin,
@@ -583,33 +584,33 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
 }
 
 bool FDWCRevealBakeRayProjector::IntersectRayTriangle(
-    const FVector&                 RayOrigin,
-    const FVector&                 RayDirection,
+    const FVector&                       RayOrigin,
+    const FVector&                       RayDirection,
     const FDWCRevealBakeSurfaceTriangle& Triangle,
-    const float                    MaxDistance,
-    float&                         OutDistance,
-    FVector&                       OutBarycentric)
+    const float                          MaxDistance,
+    float&                               OutDistance,
+    FVector&                             OutBarycentric)
 {
     const FVector Edge1 = Triangle.Positions[1] - Triangle.Positions[0];
     const FVector Edge2 = Triangle.Positions[2] - Triangle.Positions[0];
     const FVector P = FVector::CrossProduct(RayDirection, Edge2);
-    const double Determinant = FVector::DotProduct(Edge1, P);
+    const double  Determinant = FVector::DotProduct(Edge1, P);
 
     if (FMath::Abs(Determinant) < RayIntersectionEpsilon)
     {
         return false;
     }
 
-    const double InverseDeterminant = 1.0 / Determinant;
+    const double  InverseDeterminant = 1.0 / Determinant;
     const FVector T = RayOrigin - Triangle.Positions[0];
-    const double U = FVector::DotProduct(T, P) * InverseDeterminant;
+    const double  U = FVector::DotProduct(T, P) * InverseDeterminant;
     if (U < 0.0 || U > 1.0)
     {
         return false;
     }
 
     const FVector Q = FVector::CrossProduct(T, Edge1);
-    const double V = FVector::DotProduct(RayDirection, Q) * InverseDeterminant;
+    const double  V = FVector::DotProduct(RayDirection, Q) * InverseDeterminant;
     if (V < 0.0 || U + V > 1.0)
     {
         return false;
@@ -628,8 +629,8 @@ bool FDWCRevealBakeRayProjector::IntersectRayTriangle(
 
 FDWCRevealBakeRayHit FDWCRevealBakeRayProjector::MakeRayHit(
     const FDWCRevealBakeTexelSample& Sample,
-    const FCandidateHit&       Candidate,
-    const float                MaxRevealDistance)
+    const FCandidateHit&             Candidate,
+    const float                      MaxRevealDistance)
 {
     FDWCRevealBakeRayHit Hit;
     Hit.bHit = true;

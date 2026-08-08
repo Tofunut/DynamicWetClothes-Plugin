@@ -1,4 +1,4 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
 
 #include "Components/DynamicWetClothesComponent.h"
 
@@ -57,9 +57,9 @@ namespace
     }
 
     bool ShouldApplyGeneratedWetMaterialOverride(
-        UMaterialInterface* CurrentMaterial,
+        UMaterialInterface*                             CurrentMaterial,
         const FWetClothingGeneratedWetMaterialOverride& MaterialOverride,
-        const UMaterialInterface* WetMaterial)
+        const UMaterialInterface*                       WetMaterial)
     {
         if (CurrentMaterial == nullptr || CurrentMaterial == WetMaterial)
         {
@@ -67,8 +67,8 @@ namespace
         }
 
         const UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
-        const UMaterial* CurrentBaseMaterial = CurrentMaterial->GetMaterial();
-        const UMaterial* SourceBaseMaterial = SourceMaterial != nullptr ? SourceMaterial->GetMaterial() : nullptr;
+        const UMaterial*          CurrentBaseMaterial = CurrentMaterial->GetMaterial();
+        const UMaterial*          SourceBaseMaterial = SourceMaterial != nullptr ? SourceMaterial->GetMaterial() : nullptr;
         if (CurrentBaseMaterial != nullptr &&
             SourceBaseMaterial != nullptr &&
             CurrentBaseMaterial == SourceBaseMaterial)
@@ -84,7 +84,7 @@ namespace
     int32 MakeDWCReceiverGPUId(const FName ReceiverId)
     {
         const uint32 Hash = GetTypeHash(ReceiverId);
-        const int32 PositiveHash = static_cast<int32>(Hash & 0x7fffffffu);
+        const int32  PositiveHash = static_cast<int32>(Hash & 0x7fffffffu);
         return PositiveHash != 0 ? PositiveHash : 1;
     }
 
@@ -249,9 +249,7 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
     }
 
     Receivers.RemoveAll([](const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver)
-    {
-        return !Receiver.IsValid();
-    });
+                        { return !Receiver.IsValid(); });
 
     if (Receivers.IsEmpty())
     {
@@ -272,9 +270,7 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
         }
 
         Receivers.RemoveAll([](const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver)
-        {
-            return !Receiver.IsValid();
-        });
+                            { return !Receiver.IsValid(); });
 
         if (Receivers.IsEmpty())
         {
@@ -536,7 +532,7 @@ bool UDynamicWetClothesComponent::InitializeGPUBackend(FDWCWetMeshReceiverRuntim
     ShutdownGPUBackend(Receiver);
 
     USkeletalMeshComponent* Mesh = Receiver.MeshComponent.Get();
-    UWetClothingAsset* Asset = Receiver.WetClothingAsset.Get();
+    UWetClothingAsset*      Asset = Receiver.WetClothingAsset.Get();
     if (Mesh == nullptr || Asset == nullptr)
     {
         return false;
@@ -594,7 +590,7 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
             continue;
         }
 
-        USkeletalMeshComponent* OverrideTargetMesh = Receiver->MeshComponent.Get();
+        USkeletalMeshComponent*  OverrideTargetMesh = Receiver->MeshComponent.Get();
         const UWetClothingAsset* ReceiverWetClothingAsset = Receiver->WetClothingAsset.Get();
         if (OverrideTargetMesh == nullptr || ReceiverWetClothingAsset == nullptr)
         {
@@ -922,7 +918,6 @@ void UDynamicWetClothesComponent::RefreshResolvedQualityLODPolicies()
     }
 }
 
-
 bool UDynamicWetClothesComponent::ShouldUpdateCPUWetnessRendering(FDWCWetMeshReceiverRuntime& Receiver) const
 {
     if (!Receiver.RenderStage.IsValid() || !Receiver.SimulationState.IsValid())
@@ -1124,10 +1119,10 @@ void UDynamicWetClothesComponent::UpdateWetness()
         }
 
         FWetSimulationStageArgs SimulationArgs = MakeWetSimulationStageArgs(*Receiver);
-        const int32 DirtyVertexCountBeforeUpdate = Receiver->SimulationState.IsValid()
-            ? Receiver->SimulationState->DirtyWetVertexIndices.Num()
-            : 0;
-        const bool bChanged = FWetSimulationStage::UpdateWetness(SimulationArgs);
+        const int32             DirtyVertexCountBeforeUpdate = Receiver->SimulationState.IsValid()
+                                                                   ? Receiver->SimulationState->DirtyWetVertexIndices.Num()
+                                                                   : 0;
+        const bool              bChanged = FWetSimulationStage::UpdateWetness(SimulationArgs);
         FDWCWorkloadStats::RecordWetnessSimulationUpdate(bChanged);
         if (Receiver->SimulationState.IsValid())
         {
@@ -1209,7 +1204,6 @@ void UDynamicWetClothesComponent::UpdateWetRendering()
     bWetRenderDirty = false;
 }
 
-
 void UDynamicWetClothesComponent::SetWetPartDebugColorsEnabled(const bool bEnabled)
 {
     if (bShowWetPartDebugColors == bEnabled)
@@ -1279,9 +1273,9 @@ void UDynamicWetClothesComponent::HandleExternalMaterialPropertyChanged(
     {
         UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
         UMaterialInterface* GeneratedMaterialInstance = MaterialOverride.GeneratedMaterialInstance.Get();
-        UMaterial* SourceBaseMaterial = SourceMaterial != nullptr ? SourceMaterial->GetMaterial() : nullptr;
-        UMaterial* GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
-        UMaterial* GeneratedInstanceBaseMaterial =
+        UMaterial*          SourceBaseMaterial = SourceMaterial != nullptr ? SourceMaterial->GetMaterial() : nullptr;
+        UMaterial*          GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
+        UMaterial*          GeneratedInstanceBaseMaterial =
             GeneratedMaterialInstance != nullptr ? GeneratedMaterialInstance->GetMaterial() : nullptr;
 
         if (Object == SourceMaterial ||
@@ -1364,7 +1358,7 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
     }
 
     const FName PropertyName = PropertyChangedEvent.GetPropertyName();
-    const bool bRequiresRuntimeRebuild =
+    const bool  bRequiresRuntimeRebuild =
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SimulationMode);
     const bool bRequiresMaterialRefresh =

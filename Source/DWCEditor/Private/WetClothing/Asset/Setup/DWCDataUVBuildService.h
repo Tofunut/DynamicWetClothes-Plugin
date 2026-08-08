@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -18,11 +19,10 @@ enum class EDWCDataUVBuildState : uint8
 
 struct FDWCDataUVLODWarning
 {
-    int32 LODIndex = INDEX_NONE;
+    int32   LODIndex = INDEX_NONE;
     FString Summary;
     FString TechnicalDetails;
 };
-
 
 struct FDWCDataUVBuildOptions
 {
@@ -59,43 +59,43 @@ struct FDWCDataUVBuildOptions
 struct FDWCDataUVBuildResult
 {
     /** Explicit lifecycle state. bSucceeded is retained as a compatibility/result-payload flag. */
-    EDWCDataUVBuildState BuildState = EDWCDataUVBuildState::Failed;
-    bool bSucceeded = false;
-    USkeletalMesh* PreparedMesh = nullptr;
-    int32 DataUVChannelIndex = INDEX_NONE;
-    int32 WettableMaterialSlotCount = 0;
-    TArray<int32> TargetLODIndices;
-    TArray<int32> GeneratedLODIndices;
-    TArray<FDWCDataUVLODWarning> LODWarnings;
-    int32 OriginalUVIslandCount = 0;
-    bool bGeneratedWithWarnings = false;
-    EDWCDataUVResultSeverity ResultSeverity = EDWCDataUVResultSeverity::Ready;
-    int32 ExcludedTriangleCount = 0;
-    int32 Degenerate3DTriangleCount = 0;
-    int32 DegenerateSourceUVTriangleCount = 0;
-    int32 InvalidSourceUVTriangleCount = 0;
-    int32 PackedDegenerateTriangleCount = 0;
-    int32 ExcludedVisibleTriangleCount = 0;
-    double ExcludedVisible3DSurfaceArea = 0.0;
-    double ExcludedVisible3DSurfaceRatio = 0.0;
-    double LargestConnectedExcluded3DSurfaceArea = 0.0;
-    double LargestConnectedExcluded3DSurfaceRatio = 0.0;
-    int32 SplitOriginalUVIslandCount = 0;
-    int32 SelfOverlapPairCount = 0;
-    int32 BudgetFallbackIslandCount = 0;
+    EDWCDataUVBuildState          BuildState = EDWCDataUVBuildState::Failed;
+    bool                          bSucceeded = false;
+    USkeletalMesh*                PreparedMesh = nullptr;
+    int32                         DataUVChannelIndex = INDEX_NONE;
+    int32                         WettableMaterialSlotCount = 0;
+    TArray<int32>                 TargetLODIndices;
+    TArray<int32>                 GeneratedLODIndices;
+    TArray<FDWCDataUVLODWarning>  LODWarnings;
+    int32                         OriginalUVIslandCount = 0;
+    bool                          bGeneratedWithWarnings = false;
+    EDWCDataUVResultSeverity      ResultSeverity = EDWCDataUVResultSeverity::Ready;
+    int32                         ExcludedTriangleCount = 0;
+    int32                         Degenerate3DTriangleCount = 0;
+    int32                         DegenerateSourceUVTriangleCount = 0;
+    int32                         InvalidSourceUVTriangleCount = 0;
+    int32                         PackedDegenerateTriangleCount = 0;
+    int32                         ExcludedVisibleTriangleCount = 0;
+    double                        ExcludedVisible3DSurfaceArea = 0.0;
+    double                        ExcludedVisible3DSurfaceRatio = 0.0;
+    double                        LargestConnectedExcluded3DSurfaceArea = 0.0;
+    double                        LargestConnectedExcluded3DSurfaceRatio = 0.0;
+    int32                         SplitOriginalUVIslandCount = 0;
+    int32                         SelfOverlapPairCount = 0;
+    int32                         BudgetFallbackIslandCount = 0;
     TArray<FDWCDataUVSlotWarning> SlotWarnings;
-    TSet<int32> GeneratedMaterialSlotIndices;
-    TSet<int32> FailedMaterialSlotIndices;
-    TSet<int32> SkippedMaterialSlotIndices;
+    TSet<int32>                   GeneratedMaterialSlotIndices;
+    TSet<int32>                   FailedMaterialSlotIndices;
+    TSet<int32>                   SkippedMaterialSlotIndices;
     /** Build was analyzed but not committed until the listed slots are explicitly accepted. */
-    bool bRequiresUserConfirmation = false;
-    TSet<int32> ConfirmationRequiredMaterialSlotIndices;
+    bool                            bRequiresUserConfirmation = false;
+    TSet<int32>                     ConfirmationRequiredMaterialSlotIndices;
     TArray<FDWCDataUVSlotLODResult> SlotLODResults;
-    int32 FailureLODIndex = INDEX_NONE;
-    FDWCDataUVValidationFailure ValidationFailure;
-    int32 ChartBoundarySplitVertexInstanceCount = 0;
-    FString TimingSummary;
-    FString Message;
+    int32                           FailureLODIndex = INDEX_NONE;
+    FDWCDataUVValidationFailure     ValidationFailure;
+    int32                           ChartBoundarySplitVertexInstanceCount = 0;
+    FString                         TimingSummary;
+    FString                         Message;
 
     bool IsReady() const { return BuildState == EDWCDataUVBuildState::Ready; }
     bool NeedsConfirmation() const { return BuildState == EDWCDataUVBuildState::RequiresConfirmation; }
@@ -114,18 +114,18 @@ struct FDWCDataUVBuildResult
 
 class FDWCDataUVBuildService
 {
-public:
+  public:
     /** Creates or rebuilds per-slot packed layouts; successful slots commit even when another slot fails. */
     static FDWCDataUVBuildResult Generate(
-        UWetClothingAsset& Asset,
-        bool bForceNewAsset = false,
-        bool bAllowOverwriteExistingDataUVChannel = false,
-        bool bUsePreferredDataUVChannel = false,
+        UWetClothingAsset&            Asset,
+        bool                          bForceNewAsset = false,
+        bool                          bAllowOverwriteExistingDataUVChannel = false,
+        bool                          bUsePreferredDataUVChannel = false,
         const FDWCDataUVBuildOptions* Options = nullptr);
 
     /** Copies the sealed DWC UV Channel values to another channel without rebuilding charts or island topology. */
     static FDWCDataUVBuildResult RelocateChannel(
         UWetClothingAsset& Asset,
-        int32 DestinationUVChannelIndex,
-        bool bAllowOverwriteExistingDataUVChannel = false);
+        int32              DestinationUVChannelIndex,
+        bool               bAllowOverwriteExistingDataUVChannel = false);
 };

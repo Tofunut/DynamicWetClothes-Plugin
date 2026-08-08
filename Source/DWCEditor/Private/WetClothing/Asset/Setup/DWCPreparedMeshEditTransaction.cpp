@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCPreparedMeshEditTransaction.h"
 
 #include "Engine/SkeletalMesh.h"
@@ -26,12 +27,13 @@ bool FDWCPreparedMeshEditTransaction::CaptureEditableLOD(const int32 LODIndex, F
 
     if (Mesh == nullptr)
     {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("The Prepared Mesh is unavailable.");
+        if (OutErrorMessage)
+            *OutErrorMessage = TEXT("The Prepared Mesh is unavailable.");
         return false;
     }
 
     FMeshDescription* MeshDescription = Mesh->GetMeshDescription(LODIndex);
-    const bool bHadMeshDescriptionBeforeCapture = MeshDescription != nullptr;
+    const bool        bHadMeshDescriptionBeforeCapture = MeshDescription != nullptr;
     if (MeshDescription == nullptr)
     {
         const FSkeletalMeshModel* ImportedModel = Mesh->GetImportedModel();
@@ -65,7 +67,8 @@ bool FDWCPreparedMeshEditTransaction::CaptureEditableLOD(const int32 LODIndex, F
                 return Existing.LODIndex == LODIndex;
             }))
     {
-        if (OutErrorMessage) OutErrorMessage->Reset();
+        if (OutErrorMessage)
+            OutErrorMessage->Reset();
         return true;
     }
 
@@ -73,7 +76,8 @@ bool FDWCPreparedMeshEditTransaction::CaptureEditableLOD(const int32 LODIndex, F
     Backup.LODIndex = LODIndex;
     Backup.MeshDescription = *MeshDescription;
     Backup.bHadMeshDescriptionBeforeCapture = bHadMeshDescriptionBeforeCapture;
-    if (OutErrorMessage) OutErrorMessage->Reset();
+    if (OutErrorMessage)
+        OutErrorMessage->Reset();
     return true;
 }
 

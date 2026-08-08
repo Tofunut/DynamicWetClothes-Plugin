@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,7 +13,7 @@ class UMaterialFunctionInterface;
 struct FDWCMaterialGraphPin
 {
     UMaterialExpression* Expression = nullptr;
-    FString OutputName;
+    FString              OutputName;
 
     bool IsValid() const { return Expression != nullptr; }
 };
@@ -54,8 +55,8 @@ struct FDWCSurfaceGraphOutputs
 struct FDWCSurfaceGraphBuildRequest
 {
     UMaterial* Material = nullptr;
-    int32 DWCDataUVChannelIndex = INDEX_NONE;
-    int32 SurfaceWaterNormalUVChannelIndex = 0;
+    int32      DWCDataUVChannelIndex = INDEX_NONE;
+    int32      SurfaceWaterNormalUVChannelIndex = 0;
 
     // The caller owns backend selection. Runtime passes the CPU/GPU switch;
     // editor preview will pass its scalar preview wetness parameter.
@@ -68,14 +69,14 @@ struct FDWCSurfaceGraphBuildRequest
 
 struct FDWCSurfaceGraphBuildResult
 {
-    bool bSucceeded = false;
+    bool            bSucceeded = false;
     TArray<FString> FailureReasons;
 
-    FDWCBaseSurfaceGraphInputs BaseInputs;
-    FDWCSurfaceGraphOutputs Outputs;
+    FDWCBaseSurfaceGraphInputs               BaseInputs;
+    FDWCSurfaceGraphOutputs                  Outputs;
     UMaterialExpressionMaterialFunctionCall* EvaluateExpression = nullptr;
-    UMaterialExpressionTextureCoordinate* DWCDataUVExpression = nullptr;
-    UMaterialExpressionTextureCoordinate* SurfaceWaterNormalUVExpression = nullptr;
+    UMaterialExpressionTextureCoordinate*    DWCDataUVExpression = nullptr;
+    UMaterialExpressionTextureCoordinate*    SurfaceWaterNormalUVExpression = nullptr;
 };
 
 /** Builds the backend-independent DWC surface evaluation graph in an editor material. */
@@ -83,7 +84,7 @@ class FDWCSurfaceGraphBuilder
 {
   public:
     static bool ValidateDependencies(
-        TArray<FString>& OutFailureReasons,
+        TArray<FString>&             OutFailureReasons,
         UMaterialFunctionInterface** OutEvaluateFunction = nullptr);
 
     static FDWCSurfaceGraphBuildResult Build(const FDWCSurfaceGraphBuildRequest& Request);

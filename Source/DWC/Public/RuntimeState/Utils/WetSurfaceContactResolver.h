@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -35,14 +36,14 @@ struct DWC_API FDWCResolvedSurfaceContact
 
 struct DWC_API FWetSurfaceContactResolverArgs
 {
-    UObject* OwnerForLogs = nullptr;
-    USkeletalMeshComponent* TargetSkeletalMesh = nullptr;
-    const FWetClothingSettings* WetnessSettings = nullptr;
-    const UWetClothingAsset* WetClothingAsset = nullptr;
+    UObject*                       OwnerForLogs = nullptr;
+    USkeletalMeshComponent*        TargetSkeletalMesh = nullptr;
+    const FWetClothingSettings*    WetnessSettings = nullptr;
+    const UWetClothingAsset*       WetClothingAsset = nullptr;
     const FWetClothingRuntimeData* RuntimeData = nullptr;
-    FWetClothingMeshSampler* MeshSampler = nullptr;
-    int32 LODIndex = 0;
-    int32 MaxNearestSeedVertices = 12;
+    FWetClothingMeshSampler*       MeshSampler = nullptr;
+    int32                          LODIndex = 0;
+    int32                          MaxNearestSeedVertices = 12;
 };
 
 /**
@@ -51,27 +52,27 @@ struct DWC_API FWetSurfaceContactResolverArgs
  */
 class DWC_API FWetSurfaceContactResolver
 {
-public:
+  public:
     FWetSurfaceContactResolver() = delete;
 
     static bool ResolveContact(
-        FWetSurfaceContactResolverArgs& Args,
-        const FDWCWetContact& Contact,
+        FWetSurfaceContactResolverArgs&     Args,
+        const FDWCWetContact&               Contact,
         TArray<FDWCResolvedSurfaceContact>& OutContacts);
 
     static bool ResolveContacts(
-        FWetSurfaceContactResolverArgs& Args,
-        const TArray<FDWCWetContact>& Contacts,
+        FWetSurfaceContactResolverArgs&     Args,
+        const TArray<FDWCWetContact>&       Contacts,
         TArray<FDWCResolvedSurfaceContact>& OutContacts);
 
     static bool ResolveWetArea(
-        FWetSurfaceContactResolverArgs& Args,
-        const FDWCWetAreaData& AreaData,
+        FWetSurfaceContactResolverArgs&     Args,
+        const FDWCWetAreaData&              AreaData,
         TArray<FDWCResolvedSurfaceContact>& OutContacts);
 
     static bool ResolveWaterSurface(
-        FWetSurfaceContactResolverArgs& Args,
-        const FDWCWaterSurfaceData& WaterSurfaceData,
-        float Amount,
+        FWetSurfaceContactResolverArgs&     Args,
+        const FDWCWaterSurfaceData&         WaterSurfaceData,
+        float                               Amount,
         TArray<FDWCResolvedSurfaceContact>& OutContacts);
 };

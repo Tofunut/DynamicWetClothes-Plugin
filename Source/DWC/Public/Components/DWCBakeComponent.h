@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -24,9 +25,9 @@ class DWC_API UDWCBakeComponent : public UActorComponent
     TArray<FDWCBakeLayer> Layers;
 
   private:
-    bool ResolveLayer(const FDWCBakeLayer& Layer, FDWCBakeResolvedLayer& OutResolvedLayer) const;
+    bool                    ResolveLayer(const FDWCBakeLayer& Layer, FDWCBakeResolvedLayer& OutResolvedLayer) const;
     USkeletalMeshComponent* ResolveLayerComponent(const FDWCBakeLayer& Layer) const;
-    FTransform MakeBakeTransform(const USceneComponent& SceneComponent) const;
-    FDWCBakeSourceContext MakeSourceContext() const;
-    FString MakeBuildSignature(const TArray<FDWCBakeResolvedLayer>& ResolvedLayers) const;
+    FTransform              MakeBakeTransform(const USceneComponent& SceneComponent) const;
+    FDWCBakeSourceContext   MakeSourceContext() const;
+    FString                 MakeBuildSignature(const TArray<FDWCBakeResolvedLayer>& ResolvedLayers) const;
 };

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "SWetClothingPartEditorPanel.h"
 #include "Utility/DWCLog.h"
 
@@ -168,7 +169,7 @@ namespace SWetClothingPartEditorPanelLocal
 
     const FDWCDataUVSlotWarning* FindDataUVSlotDiagnostic(
         const FDWCDataUVLODMetadata& Metadata,
-        const int32 MaterialSlotIndex)
+        const int32                  MaterialSlotIndex)
     {
         return Metadata.SlotWarnings.FindByPredicate(
             [MaterialSlotIndex](const FDWCDataUVSlotWarning& Diagnostic)
@@ -200,8 +201,8 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
     WetClothingAsset = InArgs._WetClothingAsset;
     DetailsView = InArgs._DetailsView;
 
-    const FSlateFontInfo SectionHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 13);
-    const FSlateFontInfo HintTextFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10);
+    const FSlateFontInfo               SectionHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 13);
+    const FSlateFontInfo               HintTextFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10);
     static const FSlateRoundedBoxBrush DataUVActionBarBrush(
         FLinearColor(0.015f, 0.055f, 0.10f, 0.96f),
         6.0f,
@@ -214,12 +215,12 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
     MaterialThumbnailPool = MakeShared<FAssetThumbnailPool>(32);
     TSharedPtr<SScrollBar> MaterialSlotListScrollBar =
         SNew(SScrollBar)
-        .Orientation(Orient_Vertical)
-        .Thickness(FVector2D(
-            SWetClothingPartEditorPanelLocal::MaterialSlotListScrollbarThickness,
-            SWetClothingPartEditorPanelLocal::MaterialSlotListScrollbarThickness))
-        .Padding(FMargin(0.0f))
-        .AlwaysShowScrollbar(true);
+            .Orientation(Orient_Vertical)
+            .Thickness(FVector2D(
+                SWetClothingPartEditorPanelLocal::MaterialSlotListScrollbarThickness,
+                SWetClothingPartEditorPanelLocal::MaterialSlotListScrollbarThickness))
+            .Padding(FMargin(0.0f))
+            .AlwaysShowScrollbar(true);
 
     UVSelectionToolItems.Reset();
     auto AddSelectionToolItem = [this](EWCAUVSelectionTool Tool, const FText& Label, const FText& Tooltip, const FName IconBrushName)
@@ -271,18 +272,15 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
             .Type(ESlateCheckBoxType::ToggleButton)
             .ToolTipText(ToolItem->Tooltip)
             .IsChecked_Lambda([this, ToolItem]()
-            {
-                return ToolItem.IsValid() && ToolItem->Tool == CurrentUVSelectionTool
-                           ? ECheckBoxState::Checked
-                           : ECheckBoxState::Unchecked;
-            })
+                              { return ToolItem.IsValid() && ToolItem->Tool == CurrentUVSelectionTool
+                                           ? ECheckBoxState::Checked
+                                           : ECheckBoxState::Unchecked; })
             .OnCheckStateChanged_Lambda([this, ToolItem](ECheckBoxState)
-            {
+                                        {
                 if (ToolItem.IsValid())
                 {
                     SetCurrentUVSelectionTool(ToolItem->Tool);
-                }
-            })
+                } })
                 [SNew(SBox)
                      .WidthOverride(28.0f)
                      .HeightOverride(24.0f)
@@ -306,11 +304,9 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
     {
         return SNew(SBorder)
             .BorderImage_Lambda([this]() -> const FSlateBrush*
-            {
-                return IsDataUVOperationEnabled()
-                           ? &DataUVActionBarBrush
-                           : FStyleDefaults::GetNoBrush();
-            })
+                                { return IsDataUVOperationEnabled()
+                                             ? &DataUVActionBarBrush
+                                             : FStyleDefaults::GetNoBrush(); })
             // Match the UV Islands assignment controls: keep the action anchored in the
             // section header, then add selection feedback without moving the button.
             .Padding(FMargin(6.0f, 3.0f))
@@ -365,11 +361,9 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
     {
         return SNew(SBorder)
             .BorderImage_Lambda([this]() -> const FSlateBrush*
-            {
-                return SelectedUVIslandIDs.Num() > 0
-                           ? &DataUVActionBarBrush
-                           : FStyleDefaults::GetNoBrush();
-            })
+                                { return SelectedUVIslandIDs.Num() > 0
+                                             ? &DataUVActionBarBrush
+                                             : FStyleDefaults::GetNoBrush(); })
             // Keep the assignment controls anchored in the UV Islands header.
             // Selection feedback is added inside the same row without moving them.
             .Padding(FMargin(6.0f, 3.0f))
@@ -459,189 +453,254 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                .Padding(10.0f, 0.0f, 10.0f, 10.0f)
                    [SNew(SSplitter)
 
-         // Column 1: Target Mesh / UV Channel / Material Slots / Wet Part Map.
-         + SSplitter::Slot()
-               .Value(0.30f)
-                   [SNew(SBorder)
-                        .Padding(10.0f)
-                            [SNew(SVerticalBox)
+                    // Column 1: Target Mesh / UV Channel / Material Slots / Wet Part Map.
+                    + SSplitter::Slot()
+                          .Value(0.30f)
+                              [SNew(SBorder)
+                                   .Padding(10.0f)
+                                       [SNew(SVerticalBox)
 
-                             + SVerticalBox::Slot()
-                                   .FillHeight(1.0f)
+                                        + SVerticalBox::Slot()
+                                              .FillHeight(1.0f)
+                                                  [SNew(SSplitter)
+                                                       .Orientation(Orient_Vertical)
+
+                                                   + SSplitter::Slot()
+                                                         .Value(0.52f)
+                                                             [SNew(SVerticalBox)
+
+                                                              + SVerticalBox::Slot()
+                                                                    .AutoHeight()
+                                                                    .Padding(0.0f, 14.0f, 0.0f, 4.0f)
+                                                                        [SNew(SHorizontalBox)
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .FillWidth(1.0f)
+                                                                               .VAlign(VAlign_Center)
+                                                                                   [SNew(SVerticalBox)
+
+                                                                                    + SVerticalBox::Slot()
+                                                                                          .AutoHeight()
+                                                                                              [SNew(STextBlock)
+                                                                                                   .Text(LOCTEXT("MaterialSlotsLabel", "Material Slots"))
+                                                                                                   .Font(SectionHeadingFont)]
+
+                                                                                    + SVerticalBox::Slot()
+                                                                                          .AutoHeight()
+                                                                                          .Padding(0.0f, 2.0f, 0.0f, 0.0f)
+                                                                                              [SNew(STextBlock)
+                                                                                                   .Text(LOCTEXT("MaterialSlotsDataUVSelectionHint", "Select one or more slots to build DWC UV."))
+                                                                                                   .Font(HintTextFont)
+                                                                                                   .ColorAndOpacity(FSlateColor::UseSubduedForeground())]]
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .AutoWidth()
+                                                                               .VAlign(VAlign_Center)
+                                                                                   [BuildDataUVActionBar()]]
+
+                                                              + SVerticalBox::Slot()
+                                                                    .AutoHeight()
+                                                                    .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                                                                        [SNew(SSeparator)
+                                                                             .Orientation(Orient_Horizontal)]
+
+                                                              + SVerticalBox::Slot()
+                                                                    .AutoHeight()
+                                                                    .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                                                        [SNew(SHorizontalBox)
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .FillWidth(1.0f)
+                                                                                   [SNew(SBorder)
+                                                                                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header")))
+                                                                                        .Padding(FMargin(4.0f, 3.0f))
+                                                                                            [SNew(SHorizontalBox)
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .AutoWidth()
+                                                                                                   .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                                                                                                       [SNew(SBox)
+                                                                                                            .WidthOverride(FWCAEditorWidgets::MaterialSlotSlotColumnWidth)
+                                                                                                            .HAlign(HAlign_Center)
+                                                                                                            .VAlign(VAlign_Center)
+                                                                                                                [SNew(STextBlock)
+                                                                                                                     .Text(LOCTEXT("SlotColumnHeader", "Slot"))
+                                                                                                                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .FillWidth(1.0f)
+                                                                                                   .VAlign(VAlign_Center)
+                                                                                                   .Padding(2.0f, 0.0f, 10.0f, 0.0f)
+                                                                                                       [SNew(SBox)
+                                                                                                            .MinDesiredWidth(FWCAEditorWidgets::MaterialSlotNameColumnWidth)
+                                                                                                            .VAlign(VAlign_Center)
+                                                                                                                [SNew(STextBlock)
+                                                                                                                     .Text(LOCTEXT("NameColumnHeader", "Name"))
+                                                                                                                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .AutoWidth()
+                                                                                                   .Padding(0.0f, 0.0f, 10.0f, 0.0f)
+                                                                                                       [SNew(SBox)
+                                                                                                            .WidthOverride(FWCAEditorWidgets::MaterialSlotThumbnailColumnWidth)
+                                                                                                            .HAlign(HAlign_Left)
+                                                                                                            .VAlign(VAlign_Center)
+                                                                                                                [SNew(STextBlock)
+                                                                                                                     .Text(LOCTEXT("ThumbnailColumnHeader", "Thumbnail"))
+                                                                                                                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .AutoWidth()
+                                                                                                   .Padding(0.0f, 2.0f, 12.0f, 2.0f)
+                                                                                                       [SNew(SBox)
+                                                                                                            .WidthOverride(1.0f)
+                                                                                                                [SNew(SBorder)
+                                                                                                                     .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+                                                                                                                     .BorderBackgroundColor(FLinearColor(1.0f, 1.0f, 1.0f, 0.12f))
+                                                                                                                     .Padding(0.0f)]]
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .AutoWidth()
+                                                                                                       [SNew(SBox)
+                                                                                                            .WidthOverride(FWCAEditorWidgets::MaterialSlotDataUVColumnWidth)
+                                                                                                            .HAlign(HAlign_Center)
+                                                                                                            .VAlign(VAlign_Center)
+                                                                                                                [SNew(STextBlock)
+                                                                                                                     .Text(LOCTEXT("DataUVColumnHeader", "DWC UV"))
+                                                                                                                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .AutoWidth()
+                                                                                                       [SNew(SBox)
+                                                                                                            .WidthOverride(FWCAEditorWidgets::MaterialSlotWettableColumnWidth)
+                                                                                                            .HAlign(HAlign_Center)
+                                                                                                            .VAlign(VAlign_Center)
+                                                                                                                [SNew(STextBlock)
+                                                                                                                     .Text(LOCTEXT("WettableColumnHeader", "Wettable"))
+                                                                                                                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]]]
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .AutoWidth()
+                                                                                   [SNew(SBorder)
+                                                                                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header")))
+                                                                                        .Padding(0.0f)
+                                                                                            [SNew(SBox)
+                                                                                                 .WidthOverride(SWetClothingPartEditorPanelLocal::MaterialSlotListScrollbarThickness)]]]
+
+                                                              + SVerticalBox::Slot()
+                                                                    .FillHeight(1.0f)
+                                                                        [SNew(SHorizontalBox)
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .FillWidth(1.0f)
+                                                                                   [SAssignNew(MaterialSlotListView, SListView<FMaterialSlotItemPtr>)
+                                                                                        .ListItemsSource(&MaterialSlotItems)
+                                                                                        .OnGenerateRow(this, &SWetClothingPartEditorPanel::GenerateMaterialSlotRow)
+                                                                                        .OnSelectionChanged(this, &SWetClothingPartEditorPanel::HandleMaterialSlotSelectionChanged)
+                                                                                        .OnMouseButtonDoubleClick(this, &SWetClothingPartEditorPanel::HandleMaterialSlotDoubleClicked)
+                                                                                        .ExternalScrollbar(MaterialSlotListScrollBar)
+                                                                                        .SelectionMode(ESelectionMode::Multi)]
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .AutoWidth()
+                                                                                   [MaterialSlotListScrollBar.ToSharedRef()]]]
+
+                                                   + SSplitter::Slot()
+                                                         .Value(0.48f)
+                                                             [SNew(SVerticalBox)
+
+                                                              + SVerticalBox::Slot()
+                                                                    .AutoHeight()
+                                                                    .Padding(0.0f, 24.0f, 0.0f, 4.0f)
+                                                                        [SNew(SHorizontalBox)
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .FillWidth(1.0f)
+                                                                               .VAlign(VAlign_Center)
+                                                                                   [SNew(STextBlock)
+                                                                                        .Text(this, &SWetClothingPartEditorPanel::GetWetPartSectionText)
+                                                                                        .Font(SectionHeadingFont)]
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .AutoWidth()
+                                                                               .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                                                                                   [SNew(SButton)
+                                                                                        .Text(LOCTEXT("AddWetPartButton", "+ Add Part"))
+                                                                                        .IsEnabled(this, &SWetClothingPartEditorPanel::IsSelectedMaterialSlotPartEditingReady)
+                                                                                        .OnClicked(this, &SWetClothingPartEditorPanel::HandleAddWetPartClicked)]
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .AutoWidth()
+                                                                               .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                                                                                   [SNew(SButton)
+                                                                                        .Text(LOCTEXT("RemoveWetPartButton", "Remove"))
+                                                                                        .IsEnabled(this, &SWetClothingPartEditorPanel::IsWetPartRemoveEnabled)
+                                                                                        .OnClicked(this, &SWetClothingPartEditorPanel::HandleRemoveWetPartClicked)]]
+
+                                                              + SVerticalBox::Slot()
+                                                                    .AutoHeight()
+                                                                    .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                                                                        [SNew(SSeparator)
+                                                                             .Orientation(Orient_Horizontal)]
+
+                                                              + SVerticalBox::Slot()
+                                                                    .AutoHeight()
+                                                                    .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                                                                        [SNew(STextBlock)
+                                                                             .AutoWrapText(false)
+                                                                             .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+                                                                             .Text(this, &SWetClothingPartEditorPanel::GetSelectedWetPartText)
+                                                                             .Visibility(this, &SWetClothingPartEditorPanel::GetSelectedWetPartTextVisibility)]
+
+                                                              + SVerticalBox::Slot()
+                                                                    .FillHeight(1.0f)
+                                                                        [SNew(SOverlay)
+
+                                                                         + SOverlay::Slot()
+                                                                               [SAssignNew(WetPartListView, SListView<FWetPartEntryPtr>)
+                                                                                    .ListItemsSource(&CurrentWetPartItems)
+                                                                                    .OnGenerateRow(this, &SWetClothingPartEditorPanel::GenerateWetPartRow)
+                                                                                    .OnSelectionChanged(this, &SWetClothingPartEditorPanel::HandleWetPartSelectionChanged)
+                                                                                    .OnMouseButtonDoubleClick(this, &SWetClothingPartEditorPanel::HandleWetPartItemDoubleClicked)
+                                                                                    .SelectionMode(ESelectionMode::Single)]
+
+                                                                         + SOverlay::Slot()
+                                                                               .HAlign(HAlign_Center)
+                                                                               .VAlign(VAlign_Center)
+                                                                               .Padding(8.0f)
+                                                                                   [SNew(SBox)
+                                                                                        .MaxDesiredWidth(360.0f)
+                                                                                            [SNew(STextBlock)
+                                                                                                 .AutoWrapText(false)
+                                                                                                 .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+                                                                                                 .Justification(ETextJustify::Center)
+                                                                                                 .Text(this, &SWetClothingPartEditorPanel::GetWetnessProfileLibraryStatusText)
+                                                                                                 .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                                                                                                 .Visibility(this, &SWetClothingPartEditorPanel::GetWetnessProfileLibraryStatusVisibility)]]]]]]]
+
+                    // Column 2: UV View, with UV Islands directly underneath.
+                    + SSplitter::Slot()
+                          .Value(0.35f)
+                              [SNew(SBorder)
+                                   .Padding(8.0f)
                                        [SNew(SSplitter)
                                             .Orientation(Orient_Vertical)
 
                                         + SSplitter::Slot()
-                                              .Value(0.52f)
+                                              .Value(0.58f)
                                                   [SNew(SVerticalBox)
 
                                                    + SVerticalBox::Slot()
                                                          .AutoHeight()
-                                                         .Padding(0.0f, 14.0f, 0.0f, 4.0f)
-                                                             [SNew(SHorizontalBox)
-
-                                                              + SHorizontalBox::Slot()
-                                                                    .FillWidth(1.0f)
-                                                                    .VAlign(VAlign_Center)
-                                                                        [SNew(SVerticalBox)
-
-                                                                         + SVerticalBox::Slot()
-                                                                               .AutoHeight()
-                                                                                   [SNew(STextBlock)
-                                                                                        .Text(LOCTEXT("MaterialSlotsLabel", "Material Slots"))
-                                                                                        .Font(SectionHeadingFont)]
-
-                                                                         + SVerticalBox::Slot()
-                                                                               .AutoHeight()
-                                                                               .Padding(0.0f, 2.0f, 0.0f, 0.0f)
-                                                                                   [SNew(STextBlock)
-                                                                                        .Text(LOCTEXT("MaterialSlotsDataUVSelectionHint", "Select one or more slots to build DWC UV."))
-                                                                                        .Font(HintTextFont)
-                                                                                        .ColorAndOpacity(FSlateColor::UseSubduedForeground())]]
-
-                                                              + SHorizontalBox::Slot()
-                                                                    .AutoWidth()
-                                                                    .VAlign(VAlign_Center)
-                                                                        [BuildDataUVActionBar()]]
-
-                                                   + SVerticalBox::Slot()
-                                                         .AutoHeight()
-                                                         .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                                                             [SNew(SSeparator)
-                                                                  .Orientation(Orient_Horizontal)]
-
-                                                   + SVerticalBox::Slot()
-                                                         .AutoHeight()
-                                                         .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                                                             [SNew(SHorizontalBox)
-
-                                                              + SHorizontalBox::Slot()
-                                                                    .FillWidth(1.0f)
-                                                                        [SNew(SBorder)
-                                                                             .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header")))
-                                                                             .Padding(FMargin(4.0f, 3.0f))
-                                                                                 [SNew(SHorizontalBox)
-
-                                                                       + SHorizontalBox::Slot()
-                                                                             .AutoWidth()
-                                                                             .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                                                                                 [SNew(SBox)
-                                                                                      .WidthOverride(FWCAEditorWidgets::MaterialSlotSlotColumnWidth)
-                                                                                      .HAlign(HAlign_Center)
-                                                                                      .VAlign(VAlign_Center)
-                                                                                          [SNew(STextBlock)
-                                                                                               .Text(LOCTEXT("SlotColumnHeader", "Slot"))
-                                                                                               .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
-
-                                                                       + SHorizontalBox::Slot()
-                                                                             .FillWidth(1.0f)
-                                                                             .VAlign(VAlign_Center)
-                                                                             .Padding(2.0f, 0.0f, 10.0f, 0.0f)
-                                                                                 [SNew(SBox)
-                                                                                      .MinDesiredWidth(FWCAEditorWidgets::MaterialSlotNameColumnWidth)
-                                                                                      .VAlign(VAlign_Center)
-                                                                                          [SNew(STextBlock)
-                                                                                               .Text(LOCTEXT("NameColumnHeader", "Name"))
-                                                                                               .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
-
-                                                                       + SHorizontalBox::Slot()
-                                                                             .AutoWidth()
-                                                                             .Padding(0.0f, 0.0f, 10.0f, 0.0f)
-                                                                                 [SNew(SBox)
-                                                                                      .WidthOverride(FWCAEditorWidgets::MaterialSlotThumbnailColumnWidth)
-                                                                                      .HAlign(HAlign_Left)
-                                                                                      .VAlign(VAlign_Center)
-                                                                                          [SNew(STextBlock)
-                                                                                               .Text(LOCTEXT("ThumbnailColumnHeader", "Thumbnail"))
-                                                                                               .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
-
-                                                                       + SHorizontalBox::Slot()
-                                                                             .AutoWidth()
-                                                                             .Padding(0.0f, 2.0f, 12.0f, 2.0f)
-                                                                                 [SNew(SBox)
-                                                                                      .WidthOverride(1.0f)
-                                                                                          [SNew(SBorder)
-                                                                                               .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
-                                                                                               .BorderBackgroundColor(FLinearColor(1.0f, 1.0f, 1.0f, 0.12f))
-                                                                                               .Padding(0.0f)]]
-
-                                                                       + SHorizontalBox::Slot()
-                                                                             .AutoWidth()
-                                                                                 [SNew(SBox)
-                                                                                      .WidthOverride(FWCAEditorWidgets::MaterialSlotDataUVColumnWidth)
-                                                                                      .HAlign(HAlign_Center)
-                                                                                      .VAlign(VAlign_Center)
-                                                                                          [SNew(STextBlock)
-                                                                                               .Text(LOCTEXT("DataUVColumnHeader", "DWC UV"))
-                                                                                               .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
-
-                                                                       + SHorizontalBox::Slot()
-                                                                             .AutoWidth()
-                                                                                 [SNew(SBox)
-                                                                                      .WidthOverride(FWCAEditorWidgets::MaterialSlotWettableColumnWidth)
-                                                                                      .HAlign(HAlign_Center)
-                                                                                      .VAlign(VAlign_Center)
-                                                                                          [SNew(STextBlock)
-                                                                                               .Text(LOCTEXT("WettableColumnHeader", "Wettable"))
-                                                                                               .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]]]
-
-                                                              + SHorizontalBox::Slot()
-                                                                    .AutoWidth()
-                                                                        [SNew(SBorder)
-                                                                             .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header")))
-                                                                             .Padding(0.0f)
-                                                                                 [SNew(SBox)
-                                                                                      .WidthOverride(SWetClothingPartEditorPanelLocal::MaterialSlotListScrollbarThickness)]]]
-
-                                                   + SVerticalBox::Slot()
-                                                         .FillHeight(1.0f)
-                                                             [SNew(SHorizontalBox)
-
-                                                              + SHorizontalBox::Slot()
-                                                                    .FillWidth(1.0f)
-                                                                        [SAssignNew(MaterialSlotListView, SListView<FMaterialSlotItemPtr>)
-                                                                            .ListItemsSource(&MaterialSlotItems)
-                                                                            .OnGenerateRow(this, &SWetClothingPartEditorPanel::GenerateMaterialSlotRow)
-                                                                            .OnSelectionChanged(this, &SWetClothingPartEditorPanel::HandleMaterialSlotSelectionChanged)
-                                                                            .OnMouseButtonDoubleClick(this, &SWetClothingPartEditorPanel::HandleMaterialSlotDoubleClicked)
-                                                                            .ExternalScrollbar(MaterialSlotListScrollBar)
-                                                                            .SelectionMode(ESelectionMode::Multi)]
-
-                                                              + SHorizontalBox::Slot()
-                                                                    .AutoWidth()
-                                                                        [MaterialSlotListScrollBar.ToSharedRef()]]]
-
-                                        + SSplitter::Slot()
-                                              .Value(0.48f)
-                                                  [SNew(SVerticalBox)
-
-                                                   + SVerticalBox::Slot()
-                                                         .AutoHeight()
-                                                         .Padding(0.0f, 24.0f, 0.0f, 4.0f)
+                                                         .Padding(0.0f, 8.0f, 0.0f, 5.0f)
                                                              [SNew(SHorizontalBox)
 
                                                               + SHorizontalBox::Slot()
                                                                     .FillWidth(1.0f)
                                                                     .VAlign(VAlign_Center)
                                                                         [SNew(STextBlock)
-                                                                             .Text(this, &SWetClothingPartEditorPanel::GetWetPartSectionText)
-                                                                             .Font(SectionHeadingFont)]
-
-                                                              + SHorizontalBox::Slot()
-                                                                    .AutoWidth()
-                                                                    .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                                                                        [SNew(SButton)
-                                                                             .Text(LOCTEXT("AddWetPartButton", "+ Add Part"))
-                                                                             .IsEnabled(this, &SWetClothingPartEditorPanel::IsSelectedMaterialSlotPartEditingReady)
-                                                                             .OnClicked(this, &SWetClothingPartEditorPanel::HandleAddWetPartClicked)]
-
-                                                              + SHorizontalBox::Slot()
-                                                                    .AutoWidth()
-                                                                    .Padding(4.0f, 0.0f, 0.0f, 0.0f)
-                                                                        [SNew(SButton)
-                                                                             .Text(LOCTEXT("RemoveWetPartButton", "Remove"))
-                                                                             .IsEnabled(this, &SWetClothingPartEditorPanel::IsWetPartRemoveEnabled)
-                                                                             .OnClicked(this, &SWetClothingPartEditorPanel::HandleRemoveWetPartClicked)]]
+                                                                             .Text(LOCTEXT("UVViewLabel", "UV View"))
+                                                                             .Font(SectionHeadingFont)]]
 
                                                    + SVerticalBox::Slot()
                                                          .AutoHeight()
@@ -652,262 +711,196 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                                    + SVerticalBox::Slot()
                                                          .AutoHeight()
                                                          .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                                                             [SNew(STextBlock)
-                                                                  .AutoWrapText(false)
-                                                                  .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-                                                                  .Text(this, &SWetClothingPartEditorPanel::GetSelectedWetPartText)
-                                                                  .Visibility(this, &SWetClothingPartEditorPanel::GetSelectedWetPartTextVisibility)]
+                                                             [SNew(SBox)
+                                                                  .Visibility(this, &SWetClothingPartEditorPanel::GetUVEditorContentVisibility)
+                                                                      [FWCAEditorWidgets::BuildUVViewTextureAndViewRow(
+                                                                          SAssignNew(TextureSelectionContainer, SBox),
+                                                                          FWCAEditorWidgets::BuildUVViewOptionsButton(
+                                                                              TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetUVViewBackgroundTextureOpacity)),
+                                                                              [this](float NewValue)
+                                                                              {
+                                                                                  HandleUVViewBackgroundTextureOpacityChanged(NewValue);
+                                                                              },
+                                                                              TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetUVViewIslandLineOpacity)),
+                                                                              [this](float NewValue)
+                                                                              {
+                                                                                  HandleUVViewIslandLineOpacityChanged(NewValue);
+                                                                              },
+                                                                              TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetUVViewIslandLineThicknessScale)),
+                                                                              [this](float NewValue)
+                                                                              {
+                                                                                  HandleUVViewIslandLineThicknessScaleChanged(NewValue);
+                                                                              }))]]
 
                                                    + SVerticalBox::Slot()
                                                          .FillHeight(1.0f)
                                                              [SNew(SOverlay)
 
                                                               + SOverlay::Slot()
-                                                                    [SAssignNew(WetPartListView, SListView<FWetPartEntryPtr>)
-                                                                         .ListItemsSource(&CurrentWetPartItems)
-                                                                         .OnGenerateRow(this, &SWetClothingPartEditorPanel::GenerateWetPartRow)
-                                                                         .OnSelectionChanged(this, &SWetClothingPartEditorPanel::HandleWetPartSelectionChanged)
-                                                                         .OnMouseButtonDoubleClick(this, &SWetClothingPartEditorPanel::HandleWetPartItemDoubleClicked)
-                                                                         .SelectionMode(ESelectionMode::Single)]
+                                                                    .HAlign(HAlign_Fill)
+                                                                    .VAlign(VAlign_Fill)
+                                                                        [SNew(SVerticalBox)
+                                                                             .Visibility(this, &SWetClothingPartEditorPanel::GetUVEditorContentVisibility)
+
+                                                                         + SVerticalBox::Slot()
+                                                                               .AutoHeight()
+                                                                                   [SNew(SBorder)
+                                                                                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header")))
+                                                                                        .Padding(FMargin(2.0f, 2.0f, 2.0f, 2.0f))
+                                                                                            [SNew(SHorizontalBox)
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .AutoWidth()
+                                                                                                       [SelectionToolButtonRow]
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .AutoWidth()
+                                                                                                   .VAlign(VAlign_Center)
+                                                                                                   .Padding(10.0f, 3.0f, 10.0f, 3.0f)
+                                                                                                       [SNew(SBox)
+                                                                                                            .WidthOverride(1.0f)
+                                                                                                                [SNew(SBorder)
+                                                                                                                     .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+                                                                                                                     .BorderBackgroundColor(FLinearColor(1.0f, 1.0f, 1.0f, 0.12f))
+                                                                                                                     .Padding(0.0f)]]
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .AutoWidth()
+                                                                                                   .VAlign(VAlign_Center)
+                                                                                                       [SNew(SWetPartAutoPartitionControls)
+                                                                                                            .IsAutoPartitionEnabled(this, &SWetClothingPartEditorPanel::IsAutoPartitionEnabled)
+                                                                                                            .OnAutoPartitionClicked(this, &SWetClothingPartEditorPanel::HandleAutoPartitionClicked)]
+
+                                                                                             + SHorizontalBox::Slot()
+                                                                                                   .FillWidth(1.0f)]]
+
+                                                                         + SVerticalBox::Slot()
+                                                                               .FillHeight(1.0f)
+                                                                                   [SAssignNew(UVView, SWCAUVView)
+                                                                                        .OnIslandSelectionChanged(this, &SWetClothingPartEditorPanel::HandleUVIslandSelectionChangedFromUVView)]]
 
                                                               + SOverlay::Slot()
                                                                     .HAlign(HAlign_Center)
                                                                     .VAlign(VAlign_Center)
-                                                                    .Padding(8.0f)
-                                                                        [SNew(SBox)
-                                                                             .MaxDesiredWidth(360.0f)
-                                                                                 [SNew(STextBlock)
-                                                                                      .AutoWrapText(false)
-                                                                  .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-                                                                                      .Justification(ETextJustify::Center)
-                                                                                      .Text(this, &SWetClothingPartEditorPanel::GetWetnessProfileLibraryStatusText)
-                                                                                      .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                                                                                      .Visibility(this, &SWetClothingPartEditorPanel::GetWetnessProfileLibraryStatusVisibility)]]]]]]]
+                                                                    .Padding(18.0f)
+                                                                        [SNew(STextBlock)
+                                                                             .AutoWrapText(false)
+                                                                             .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+                                                                             .Justification(ETextJustify::Center)
+                                                                             .Text(this, &SWetClothingPartEditorPanel::GetUVStatusText)
+                                                                             .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                                                                             .Visibility(this, &SWetClothingPartEditorPanel::GetUVStatusOverlayVisibility)]]]
 
-         // Column 2: UV View, with UV Islands directly underneath.
-         + SSplitter::Slot()
-               .Value(0.35f)
-                   [SNew(SBorder)
-                        .Padding(8.0f)
-                            [SNew(SSplitter)
-                                 .Orientation(Orient_Vertical)
+                                        + SSplitter::Slot()
+                                              .Value(0.42f)
+                                                  [SNew(SVerticalBox)
 
-                             + SSplitter::Slot()
-                                   .Value(0.58f)
-                                       [SNew(SVerticalBox)
+                                                   + SVerticalBox::Slot()
+                                                         .AutoHeight()
+                                                         .Padding(0.0f, 8.0f, 0.0f, 6.0f)
+                                                             [SNew(SHorizontalBox)
 
-                                        + SVerticalBox::Slot()
-                                              .AutoHeight()
-                                              .Padding(0.0f, 8.0f, 0.0f, 5.0f)
-                                                  [SNew(SHorizontalBox)
+                                                              + SHorizontalBox::Slot()
+                                                                    .AutoWidth()
+                                                                    .VAlign(VAlign_Center)
+                                                                        [SNew(STextBlock)
+                                                                             .Text(LOCTEXT("UVIslandLabel", "UV Islands"))
+                                                                             .Font(SectionHeadingFont)]
 
-                                                   + SHorizontalBox::Slot()
-                                                         .FillWidth(1.0f)
-                                                         .VAlign(VAlign_Center)
-                                                             [SNew(STextBlock)
-                                                                  .Text(LOCTEXT("UVViewLabel", "UV View"))
-                                                                  .Font(SectionHeadingFont)]]
+                                                              + SHorizontalBox::Slot()
+                                                                    .AutoWidth()
+                                                                    .Padding(6.0f, 1.0f, 0.0f, 0.0f)
+                                                                    .VAlign(VAlign_Center)
+                                                                        [SNew(STextBlock)
+                                                                             .Text(this, &SWetClothingPartEditorPanel::GetUVIslandCountText)
+                                                                             .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
 
-                                        + SVerticalBox::Slot()
-                                              .AutoHeight()
-                                              .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                                                  [SNew(SSeparator)
-                                                       .Orientation(Orient_Horizontal)]
+                                                              + SHorizontalBox::Slot()
+                                                                    .FillWidth(1.0f)
 
-                                        + SVerticalBox::Slot()
-                                              .AutoHeight()
-                                              .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                                                  [SNew(SBox)
-                                                       .Visibility(this, &SWetClothingPartEditorPanel::GetUVEditorContentVisibility)
-                                                           [FWCAEditorWidgets::BuildUVViewTextureAndViewRow(
-                                                               SAssignNew(TextureSelectionContainer, SBox),
-                                                               FWCAEditorWidgets::BuildUVViewOptionsButton(
-                                                          TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetUVViewBackgroundTextureOpacity)),
-                                                          [this](float NewValue)
-                                                          {
-                                                              HandleUVViewBackgroundTextureOpacityChanged(NewValue);
-                                                          },
-                                                          TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetUVViewIslandLineOpacity)),
-                                                          [this](float NewValue)
-                                                          {
-                                                              HandleUVViewIslandLineOpacityChanged(NewValue);
-                                                          },
-                                                          TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetUVViewIslandLineThicknessScale)),
-                                                          [this](float NewValue)
-                                                                   {
-                                                                       HandleUVViewIslandLineThicknessScaleChanged(NewValue);
-                                                                   }))]]
+                                                              + SHorizontalBox::Slot()
+                                                                    .AutoWidth()
+                                                                    .VAlign(VAlign_Center)
+                                                                        [BuildUVIslandAssignmentBar()]]
 
-                                        + SVerticalBox::Slot()
-                                              .FillHeight(1.0f)
-                                                  [SNew(SOverlay)
+                                                   + SVerticalBox::Slot()
+                                                         .AutoHeight()
+                                                         .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                                             [SNew(SBorder)
+                                                                  .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header")))
+                                                                  .Padding(FMargin(SWetClothingPartEditorPanelLocal::UVIslandListHorizontalPadding, 4.0f))
+                                                                      [SNew(SHorizontalBox)
 
-                                                   + SOverlay::Slot()
-                                                         .HAlign(HAlign_Fill)
-                                                         .VAlign(VAlign_Fill)
-                                                             [SNew(SVerticalBox)
-                                                                  .Visibility(this, &SWetClothingPartEditorPanel::GetUVEditorContentVisibility)
+                                                                       + SHorizontalBox::Slot()
+                                                                             .AutoWidth()
+                                                                             .VAlign(VAlign_Center)
+                                                                                 [SNew(SBox)
+                                                                                      .WidthOverride(SWetClothingPartEditorPanelLocal::UVIslandIDColumnWidth)
+                                                                                          [SNew(STextBlock)
+                                                                                               .Text(LOCTEXT("UVIslandColumnID", "Island ID"))
+                                                                                               .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
 
-                                                              + SVerticalBox::Slot()
-                                                                    .AutoHeight()
-                                                                        [SNew(SBorder)
-                                                                             .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header")))
-                                                                             .Padding(FMargin(2.0f, 2.0f, 2.0f, 2.0f))
-                                                                                 [SNew(SHorizontalBox)
+                                                                       + SHorizontalBox::Slot()
+                                                                             .AutoWidth()
+                                                                             .VAlign(VAlign_Center)
+                                                                                 [SNew(SBox)
+                                                                                      .WidthOverride(SWetClothingPartEditorPanelLocal::UVIslandPartIDColumnWidth)
+                                                                                          [SNew(STextBlock)
+                                                                                               .Text(LOCTEXT("UVIslandColumnPartID", "Part"))
+                                                                                               .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
 
-                                                                                  + SHorizontalBox::Slot()
-                                                                                        .AutoWidth()
-                                                                                            [SelectionToolButtonRow]
+                                                                       + SHorizontalBox::Slot()
+                                                                             .AutoWidth()
+                                                                             .VAlign(VAlign_Center)
+                                                                             .HAlign(HAlign_Right)
+                                                                                 [SNew(SBox)
+                                                                                      .WidthOverride(SWetClothingPartEditorPanelLocal::UVIslandTriangleCountColumnWidth)
+                                                                                      .HAlign(HAlign_Right)
+                                                                                          [SNew(STextBlock)
+                                                                                               .Text(LOCTEXT("UVIslandColumnTriangles", "Triangle Count"))
+                                                                                               .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]]]
 
-                                                                                  + SHorizontalBox::Slot()
-                                                                                        .AutoWidth()
-                                                                                        .VAlign(VAlign_Center)
-                                                                                        .Padding(10.0f, 3.0f, 10.0f, 3.0f)
-                                                                                            [SNew(SBox)
-                                                                                                 .WidthOverride(1.0f)
-                                                                                                     [SNew(SBorder)
-                                                                                                          .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
-                                                                                                          .BorderBackgroundColor(FLinearColor(1.0f, 1.0f, 1.0f, 0.12f))
-                                                                                                          .Padding(0.0f)]]
+                                                   + SVerticalBox::Slot()
+                                                         .FillHeight(1.0f)
+                                                             [SNew(SOverlay)
 
-                                                                                  + SHorizontalBox::Slot()
-                                                                                        .AutoWidth()
-                                                                                        .VAlign(VAlign_Center)
-                                                                                            [SNew(SWetPartAutoPartitionControls)
-                                                                                                 .IsAutoPartitionEnabled(this, &SWetClothingPartEditorPanel::IsAutoPartitionEnabled)
-                                                                                                 .OnAutoPartitionClicked(this, &SWetClothingPartEditorPanel::HandleAutoPartitionClicked)]
+                                                              + SOverlay::Slot()
+                                                                    [SAssignNew(UVIslandListView, SListView<FUVIslandItemPtr>)
+                                                                         .ListItemsSource(&UVIslandItems)
+                                                                         .OnGenerateRow(this, &SWetClothingPartEditorPanel::GenerateUVIslandRow)
+                                                                         .OnSelectionChanged(this, &SWetClothingPartEditorPanel::HandleUVIslandSelectionChanged)
+                                                                         .SelectionMode(ESelectionMode::Multi)]
 
-                                                                                  + SHorizontalBox::Slot()
-                                                                                        .FillWidth(1.0f)]]
+                                                              + SOverlay::Slot()
+                                                                    .HAlign(HAlign_Center)
+                                                                    .VAlign(VAlign_Center)
+                                                                    .Padding(18.0f)
+                                                                        [SNew(STextBlock)
+                                                                             .AutoWrapText(false)
+                                                                             .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+                                                                             .Justification(ETextJustify::Center)
+                                                                             .Text(this, &SWetClothingPartEditorPanel::GetSelectedUVIslandText)
+                                                                             .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                                                                             .Visibility(this, &SWetClothingPartEditorPanel::GetUVIslandStatusOverlayVisibility)]]]]]
 
-                                                              + SVerticalBox::Slot()
-                                                                    .FillHeight(1.0f)
-                                                                        [SAssignNew(UVView, SWCAUVView)
-                                                                             .OnIslandSelectionChanged(this, &SWetClothingPartEditorPanel::HandleUVIslandSelectionChangedFromUVView)]]
+                    // Column 3: Preview.
+                    + SSplitter::Slot()
+                          .Value(0.35f)
+                              [FWCAEditorWidgets::BuildPreviewSection(
+                                  SNew(SOverlay)
 
-                                                   + SOverlay::Slot()
-                                                         .HAlign(HAlign_Center)
-                                                         .VAlign(VAlign_Center)
-                                                         .Padding(18.0f)
-                                                             [SNew(STextBlock)
-                                                                  .AutoWrapText(false)
-                                                                  .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-                                                                  .Justification(ETextJustify::Center)
-                                                                  .Text(this, &SWetClothingPartEditorPanel::GetUVStatusText)
-                                                                  .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                                                                  .Visibility(this, &SWetClothingPartEditorPanel::GetUVStatusOverlayVisibility)]]]
+                                      + SOverlay::Slot()
+                                            [SAssignNew(PreviewViewport, SDWCPartViewport)
+                                                 .WetClothingAsset(WetClothingAsset.Get())
+                                                 .SurfaceWaterTilingPreview(false)
+                                                 .OnIslandPicked(this, &SWetClothingPartEditorPanel::HandleUVIslandPickedFromPreview)]
 
-                             + SSplitter::Slot()
-                                   .Value(0.42f)
-                                       [SNew(SVerticalBox)
-
-                                        + SVerticalBox::Slot()
-                                              .AutoHeight()
-                                              .Padding(0.0f, 8.0f, 0.0f, 6.0f)
-                                                  [SNew(SHorizontalBox)
-
-                                                   + SHorizontalBox::Slot()
-                                                         .AutoWidth()
-                                                         .VAlign(VAlign_Center)
-                                                             [SNew(STextBlock)
-                                                                  .Text(LOCTEXT("UVIslandLabel", "UV Islands"))
-                                                                  .Font(SectionHeadingFont)]
-
-                                                   + SHorizontalBox::Slot()
-                                                         .AutoWidth()
-                                                         .Padding(6.0f, 1.0f, 0.0f, 0.0f)
-                                                         .VAlign(VAlign_Center)
-                                                             [SNew(STextBlock)
-                                                                  .Text(this, &SWetClothingPartEditorPanel::GetUVIslandCountText)
-                                                                  .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
-
-                                                   + SHorizontalBox::Slot()
-                                                         .FillWidth(1.0f)
-
-                                                   + SHorizontalBox::Slot()
-                                                         .AutoWidth()
-                                                         .VAlign(VAlign_Center)
-                                                             [BuildUVIslandAssignmentBar()]]
-
-                                        + SVerticalBox::Slot()
-                                              .AutoHeight()
-                                              .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                                                  [SNew(SBorder)
-                                                       .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header")))
-                                                       .Padding(FMargin(SWetClothingPartEditorPanelLocal::UVIslandListHorizontalPadding, 4.0f))
-                                                           [SNew(SHorizontalBox)
-
-                                                            + SHorizontalBox::Slot()
-                                                                  .AutoWidth()
-                                                                  .VAlign(VAlign_Center)
-                                                                      [SNew(SBox)
-                                                                           .WidthOverride(SWetClothingPartEditorPanelLocal::UVIslandIDColumnWidth)
-                                                                               [SNew(STextBlock)
-                                                                                    .Text(LOCTEXT("UVIslandColumnID", "Island ID"))
-                                                                                    .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
-
-                                                            + SHorizontalBox::Slot()
-                                                                  .AutoWidth()
-                                                                  .VAlign(VAlign_Center)
-                                                                      [SNew(SBox)
-                                                                           .WidthOverride(SWetClothingPartEditorPanelLocal::UVIslandPartIDColumnWidth)
-                                                                               [SNew(STextBlock)
-                                                                                    .Text(LOCTEXT("UVIslandColumnPartID", "Part"))
-                                                                                    .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
-
-                                                            + SHorizontalBox::Slot()
-                                                                  .AutoWidth()
-                                                                  .VAlign(VAlign_Center)
-                                                                  .HAlign(HAlign_Right)
-                                                                      [SNew(SBox)
-                                                                           .WidthOverride(SWetClothingPartEditorPanelLocal::UVIslandTriangleCountColumnWidth)
-                                                                           .HAlign(HAlign_Right)
-                                                                               [SNew(STextBlock)
-                                                                                    .Text(LOCTEXT("UVIslandColumnTriangles", "Triangle Count"))
-                                                                                    .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]]]
-
-                                        + SVerticalBox::Slot()
-                                              .FillHeight(1.0f)
-                                                  [SNew(SOverlay)
-
-                                                   + SOverlay::Slot()
-                                                         [SAssignNew(UVIslandListView, SListView<FUVIslandItemPtr>)
-                                                              .ListItemsSource(&UVIslandItems)
-                                                              .OnGenerateRow(this, &SWetClothingPartEditorPanel::GenerateUVIslandRow)
-                                                              .OnSelectionChanged(this, &SWetClothingPartEditorPanel::HandleUVIslandSelectionChanged)
-                                                              .SelectionMode(ESelectionMode::Multi)]
-
-                                                   + SOverlay::Slot()
-                                                         .HAlign(HAlign_Center)
-                                                         .VAlign(VAlign_Center)
-                                                         .Padding(18.0f)
-                                                             [SNew(STextBlock)
-                                                                  .AutoWrapText(false)
-                                                                  .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-                                                                  .Justification(ETextJustify::Center)
-                                                                  .Text(this, &SWetClothingPartEditorPanel::GetSelectedUVIslandText)
-                                                                  .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                                                                  .Visibility(this, &SWetClothingPartEditorPanel::GetUVIslandStatusOverlayVisibility)]
-                                                  ]]]]
-
-         // Column 3: Preview.
-         + SSplitter::Slot()
-               .Value(0.35f)
-                   [FWCAEditorWidgets::BuildPreviewSection(
-                       SNew(SOverlay)
-
-                       + SOverlay::Slot()
-                             [SAssignNew(PreviewViewport, SDWCPartViewport)
-                                  .WetClothingAsset(WetClothingAsset.Get())
-                                  .SurfaceWaterTilingPreview(false)
-                                  .OnIslandPicked(this, &SWetClothingPartEditorPanel::HandleUVIslandPickedFromPreview)]
-
-                       + SOverlay::Slot()
-                             .HAlign(HAlign_Left)
-                             .VAlign(VAlign_Top)
-                             .Padding(FMargin(14.0f, 42.0f, 14.0f, 14.0f))
-                                 [BuildPartPreviewControlsPanel()],
-                       FOnWetClothingPreviewFocusClicked::CreateSP(this, &SWetClothingPartEditorPanel::HandleFocusPreviewClicked))]]];
+                                      + SOverlay::Slot()
+                                            .HAlign(HAlign_Left)
+                                            .VAlign(VAlign_Top)
+                                            .Padding(FMargin(14.0f, 42.0f, 14.0f, 14.0f))
+                                                [BuildPartPreviewControlsPanel()],
+                                  FOnWetClothingPreviewFocusClicked::CreateSP(this, &SWetClothingPartEditorPanel::HandleFocusPreviewClicked))]]];
 
     RefreshFromAsset();
 }
@@ -1086,8 +1079,8 @@ void SWetClothingPartEditorPanel::RefreshOriginalUVChannel()
 
 void SWetClothingPartEditorPanel::RefreshUVIslandList()
 {
-    const int32       PreviousPrimaryUVIslandID = SelectedUVIslandID;
-    const TSet<int32> PreviousSelectedUVIslandIDs = SelectedUVIslandIDs;
+    const int32                    PreviousPrimaryUVIslandID = SelectedUVIslandID;
+    const TSet<int32>              PreviousSelectedUVIslandIDs = SelectedUVIslandIDs;
     const TArray<FUVIslandItemPtr> PreviousUVIslandItems = UVIslandItems;
 
     UVIslandItems.Reset();
@@ -1116,8 +1109,8 @@ void SWetClothingPartEditorPanel::RefreshUVIslandList()
     else
     {
         const int32 UVChannelIndex = GetOriginalUVChannelIndex();
-        FString ErrorMessage;
-        const bool bBuiltIslands = FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
+        FString     ErrorMessage;
+        const bool  bBuiltIslands = FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
             WetClothingAssetPtr,
             UVChannelIndex,
             SelectedMaterialSlotIndex,
@@ -1435,7 +1428,7 @@ void SWetClothingPartEditorPanel::RefreshWetPartAssignmentViews()
     TMap<int32, FLinearColor> PreviewIslandColors;
     TSet<int32>               HiddenIslandIDs;
 
-    const FWetClothingWetPartEntry* DefaultEntry = nullptr;
+    const FWetClothingWetPartEntry*              DefaultEntry = nullptr;
     TMap<int32, const FWetClothingWetPartEntry*> ExplicitEntryByIslandID;
 
     if (const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
@@ -1553,7 +1546,7 @@ bool SWetClothingPartEditorPanel::HasValidOriginalUVChannel() const
     }
 
     const USkeletalMesh* PreparedMesh = Asset->GetRuntimeSkeletalMesh();
-    const int32 UVChannelIndex = Asset->GetOriginalUVChannelIndex();
+    const int32          UVChannelIndex = Asset->GetOriginalUVChannelIndex();
     return PreparedMesh != nullptr &&
            UVChannelIndex >= 0 &&
            UVChannelIndex < FWetClothingAssetMeshAnalyzer::GetNumUVChannels(PreparedMesh, 0);
@@ -1895,7 +1888,6 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotStatusTooltip(const int32 Mate
             "Failed\nThe current DWC UV is not usable for editing.\nClick to view details.");
     }
 
-
     return LOCTEXT(
         "DataUVNotGeneratedTooltip",
         "DWC UV has not been built for this material slot.");
@@ -1909,7 +1901,7 @@ bool SWetClothingPartEditorPanel::ShouldShowMaterialSlotStatusInfo(const int32 M
     }
 
     return IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex) ||
-        FailedDataUVSlotIndices.Contains(MaterialSlotIndex);
+           FailedDataUVSlotIndices.Contains(MaterialSlotIndex);
 }
 
 const FSlateBrush* SWetClothingPartEditorPanel::GetMaterialSlotStatusInfoBrush(const int32 MaterialSlotIndex) const
@@ -2000,8 +1992,8 @@ FSlateColor SWetClothingPartEditorPanel::GetMaterialSlotRowBackgroundColor(const
     // selected rows use Unreal's standard inactive-selection tint so they stay
     // recognizable as batch-build targets without competing with the primary row.
     return MaterialSlotIndex == SelectedMaterialSlotIndex
-        ? FSlateColor(FStyleColors::Select)
-        : FSlateColor(FStyleColors::SelectInactive);
+               ? FSlateColor(FStyleColors::Select)
+               : FSlateColor(FStyleColors::SelectInactive);
 }
 
 FSlateColor SWetClothingPartEditorPanel::GetMaterialSlotRowAccentColor(const int32 MaterialSlotIndex) const
@@ -2114,7 +2106,7 @@ bool SWetClothingPartEditorPanel::IsMaterialSlotPartMapComplete(const int32 Mate
         return false;
     }
 
-    const FWetClothingEditableWetPartData& EditableData = Asset->Authored.PartData.EditableWetPartData;
+    const FWetClothingEditableWetPartData&  EditableData = Asset->Authored.PartData.EditableWetPartData;
     const FWetClothingAuthoredMaterialSlot* SlotData = EditableData.FindMaterialSlot(MaterialSlotIndex);
     if (SlotData == nullptr)
     {
@@ -2194,10 +2186,10 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotPartMapWarningText(const int32
         Reasons.Add(LOCTEXT("PartMapWarningDataUVNotReady", "DWC UV Channel is not ready"));
     }
 
-    const FWetClothingEditableWetPartData& EditableData = Asset->Authored.PartData.EditableWetPartData;
+    const FWetClothingEditableWetPartData&  EditableData = Asset->Authored.PartData.EditableWetPartData;
     const FWetClothingAuthoredMaterialSlot* SlotData = EditableData.FindMaterialSlot(MaterialSlotIndex);
 
-    int32 MissingProfilePartCount = 0;
+    int32       MissingProfilePartCount = 0;
     TSet<int32> AssignedRealPartIslandIDs;
     if (SlotData != nullptr)
     {
@@ -2258,7 +2250,7 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotPartMapWarningText(const int32
 
     if (Reasons.IsEmpty())
     {
-            return LOCTEXT("PartMapWarningIncomplete", "Part Map setup is incomplete.");
+        return LOCTEXT("PartMapWarningIncomplete", "Part Map setup is incomplete.");
     }
 
     TArray<FString> ReasonStrings;
@@ -2274,7 +2266,7 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotPartMapWarningText(const int32
 
 TSet<int32> SWetClothingPartEditorPanel::CollectExistingDataUVSlotIndices() const
 {
-    TSet<int32> Result;
+    TSet<int32>              Result;
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || !Asset->HasLockedDataUVLayout())
     {
@@ -2335,7 +2327,7 @@ TSet<int32> SWetClothingPartEditorPanel::CollectSelectableDataUVOperationSlotInd
 
 TSet<int32> SWetClothingPartEditorPanel::CollectSelectedGenerateDataUVSlotIndices() const
 {
-    TSet<int32> Result;
+    TSet<int32>       Result;
     const TSet<int32> SelectableSlots = CollectSelectableDataUVOperationSlotIndices();
     for (const int32 MaterialSlotIndex : SelectedDataUVOperationSlotIndices)
     {
@@ -2382,13 +2374,13 @@ bool SWetClothingPartEditorPanel::IsDataUVOperationSelectable(const int32 Materi
 ECheckBoxState SWetClothingPartEditorPanel::GetDataUVOperationCheckState(const int32 MaterialSlotIndex) const
 {
     return SelectedDataUVOperationSlotIndices.Contains(MaterialSlotIndex)
-        ? ECheckBoxState::Checked
-        : ECheckBoxState::Unchecked;
+               ? ECheckBoxState::Checked
+               : ECheckBoxState::Unchecked;
 }
 
 void SWetClothingPartEditorPanel::HandleDataUVOperationCheckStateChanged(
     const ECheckBoxState NewState,
-    const int32 MaterialSlotIndex)
+    const int32          MaterialSlotIndex)
 {
     if (!IsDataUVOperationSelectable(MaterialSlotIndex))
     {
@@ -2433,8 +2425,8 @@ ECheckBoxState SWetClothingPartEditorPanel::GetAllDataUVOperationCheckState() co
         return ECheckBoxState::Unchecked;
     }
     return SelectedCount == SelectableSlots.Num()
-        ? ECheckBoxState::Checked
-        : ECheckBoxState::Undetermined;
+               ? ECheckBoxState::Checked
+               : ECheckBoxState::Undetermined;
 }
 
 void SWetClothingPartEditorPanel::HandleAllDataUVOperationCheckStateChanged(const ECheckBoxState NewState)
@@ -2457,7 +2449,7 @@ void SWetClothingPartEditorPanel::HandleAllDataUVOperationCheckStateChanged(cons
 void SWetClothingPartEditorPanel::SyncDataUVOperationSelection()
 {
     const TSet<int32> SelectableSlots = CollectSelectableDataUVOperationSlotIndices();
-    TArray<int32> SelectedSlotsToRemove;
+    TArray<int32>     SelectedSlotsToRemove;
     for (const int32 MaterialSlotIndex : SelectedDataUVOperationSlotIndices)
     {
         if (!SelectableSlots.Contains(MaterialSlotIndex))
@@ -2477,7 +2469,7 @@ FDWCDataUVBuildResult SWetClothingPartEditorPanel::GenerateDataUVForTargetSlots(
     const TSet<int32>* SkippedMaterialSlotIndices)
 {
     FDWCDataUVBuildResult Result;
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    UWetClothingAsset*    Asset = WetClothingAsset.Get();
     if (Asset == nullptr || TargetMaterialSlotIndices.IsEmpty())
     {
         Result.Message = TEXT("No material slots were selected for the DWC UV build.");
@@ -2489,7 +2481,7 @@ FDWCDataUVBuildResult SWetClothingPartEditorPanel::GenerateDataUVForTargetSlots(
     // Skip applies to the user's requested operation, not merely to the internal rebuild set.
     // If every selected slot was skipped, stop immediately and preserve the current Prepared Mesh.
     TSet<int32> EffectiveTargetMaterialSlotIndices = TargetMaterialSlotIndices;
-    bool bHasSkippedExistingDataUVSlot = false;
+    bool        bHasSkippedExistingDataUVSlot = false;
     if (SkippedMaterialSlotIndices != nullptr)
     {
         for (const int32 MaterialSlotIndex : *SkippedMaterialSlotIndices)
@@ -2527,7 +2519,7 @@ FDWCDataUVBuildResult SWetClothingPartEditorPanel::GenerateDataUVForTargetSlots(
         return Result;
     }
 
-    FWetClothingEditableWetPartData& EditableData = Asset->Authored.PartData.EditableWetPartData;
+    FWetClothingEditableWetPartData&         EditableData = Asset->Authored.PartData.EditableWetPartData;
     TArray<FWetClothingAuthoredMaterialSlot> OriginalMaterialSlots = EditableData.MaterialSlots;
 
     for (FWetClothingAuthoredMaterialSlot& Slot : EditableData.MaterialSlots)
@@ -2608,8 +2600,8 @@ void SWetClothingPartEditorPanel::PersistDataUVFailureState()
     Asset->Modify();
     Asset->Derived.Inline.FailedDataUVMaterialSlotIndices = MoveTemp(FailedSlots);
     Asset->Derived.Inline.LastDataUVGenerationFailure = FailedDataUVSlotIndices.IsEmpty()
-        ? FString()
-        : LastDataUVUpdateError;
+                                                            ? FString()
+                                                            : LastDataUVUpdateError;
     Asset->MarkPackageDirty();
 #endif
 }
@@ -2617,8 +2609,8 @@ void SWetClothingPartEditorPanel::PersistDataUVFailureState()
 EVisibility SWetClothingPartEditorPanel::GetDataUVUpdateBarVisibility() const
 {
     return IsDataUVOperationEnabled()
-        ? EVisibility::Visible
-        : EVisibility::Collapsed;
+               ? EVisibility::Visible
+               : EVisibility::Collapsed;
 }
 
 FText SWetClothingPartEditorPanel::GetDataUVOperationSummaryText() const
@@ -2673,8 +2665,8 @@ bool SWetClothingPartEditorPanel::IsDataUVOperationEnabled() const
 FReply SWetClothingPartEditorPanel::HandleDataUVOperationClicked()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const TSet<int32> GenerateSlots = CollectSelectedGenerateDataUVSlotIndices();
-    TSet<int32> TargetSlots = GenerateSlots;
+    const TSet<int32>  GenerateSlots = CollectSelectedGenerateDataUVSlotIndices();
+    TSet<int32>        TargetSlots = GenerateSlots;
     if (Asset == nullptr || TargetSlots.IsEmpty())
     {
         return FReply::Handled();
@@ -2692,10 +2684,10 @@ FReply SWetClothingPartEditorPanel::HandleDataUVOperationClicked()
     SlowTask.EnterProgressFrame(1.0f);
 
     FDWCDataUVBuildResult BuildResult = GenerateDataUVForTargetSlots(TargetSlots);
-    TSet<int32> ConfirmedVisibleExclusionMaterialSlotIndices;
-    TSet<int32> SkippedMaterialSlotIndices;
-    bool bUserCancelledBuild = false;
-    const int32 MaxBuildAttempts =
+    TSet<int32>           ConfirmedVisibleExclusionMaterialSlotIndices;
+    TSet<int32>           SkippedMaterialSlotIndices;
+    bool                  bUserCancelledBuild = false;
+    const int32           MaxBuildAttempts =
         FMath::Max(CollectExistingDataUVSlotIndices().Num() + TargetSlots.Num(), 1) + 3;
 
     for (int32 PassIndex = 0; PassIndex < MaxBuildAttempts; ++PassIndex)
@@ -2711,8 +2703,8 @@ FReply SWetClothingPartEditorPanel::HandleDataUVOperationClicked()
                 Asset->GetSourceSkeletalMesh() != nullptr
                     ? Asset->GetSourceSkeletalMesh()
                     : (BuildResult.PreparedMesh != nullptr
-                        ? BuildResult.PreparedMesh
-                        : Asset->GetRuntimeSkeletalMesh()));
+                           ? BuildResult.PreparedMesh
+                           : Asset->GetRuntimeSkeletalMesh()));
 
         if (Decision.bInternalError)
         {
@@ -2722,8 +2714,8 @@ FReply SWetClothingPartEditorPanel::HandleDataUVOperationClicked()
             BuildResult.ConfirmationRequiredMaterialSlotIndices.Reset();
             BuildResult.ResultSeverity = EDWCDataUVResultSeverity::Failed;
             BuildResult.Message = Decision.ErrorMessage.IsEmpty()
-                ? TEXT("Internal DWC UV diagnostic mismatch while resolving material-slot confirmation.")
-                : Decision.ErrorMessage;
+                                      ? TEXT("Internal DWC UV diagnostic mismatch while resolving material-slot confirmation.")
+                                      : Decision.ErrorMessage;
             break;
         }
 
@@ -2966,11 +2958,11 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateMaterialSlotRow(FMate
 TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildMaterialSlotPreviewWidget(const int32 MaterialSlotIndex) const
 {
     TArray<FWetClothingAssetUVTriangle> PreviewTriangles;
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const USkeletalMesh* RuntimeMesh = Asset != nullptr ? Asset->GetRuntimeSkeletalMesh() : nullptr;
-    const USkeletalMesh* SourceMesh = Asset != nullptr ? Asset->GetSourceSkeletalMesh() : nullptr;
-    const int32 PreferredLODIndex = Asset != nullptr ? Asset->GetSimulationLODIndex() : 0;
-    const int32 PreferredUVChannelIndex = Asset != nullptr ? Asset->GetOriginalUVChannelIndex() : 0;
+    const UWetClothingAsset*            Asset = WetClothingAsset.Get();
+    const USkeletalMesh*                RuntimeMesh = Asset != nullptr ? Asset->GetRuntimeSkeletalMesh() : nullptr;
+    const USkeletalMesh*                SourceMesh = Asset != nullptr ? Asset->GetSourceSkeletalMesh() : nullptr;
+    const int32                         PreferredLODIndex = Asset != nullptr ? Asset->GetSimulationLODIndex() : 0;
+    const int32                         PreferredUVChannelIndex = Asset != nullptr ? Asset->GetOriginalUVChannelIndex() : 0;
 
     FWCAUVIslandViewCache::BuildMaterialSlotPreviewTriangles(
         Asset,
@@ -2979,8 +2971,8 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildMaterialSlotPreviewWidget(
 
     const auto TryUVPreview = [&PreviewTriangles, MaterialSlotIndex](
                                   const USkeletalMesh* Mesh,
-                                  const int32 LODIndex,
-                                  const int32 UVChannelIndex)
+                                  const int32          LODIndex,
+                                  const int32          UVChannelIndex)
     {
         if (PreviewTriangles.IsEmpty() && Mesh != nullptr)
         {
@@ -3004,8 +2996,8 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildMaterialSlotPreviewWidget(
 
     const auto TryGeometryPreview = [&PreviewTriangles, MaterialSlotIndex](
                                         const USkeletalMesh* Mesh,
-                                        const int32 LODIndex,
-                                        const int32 UVChannelIndex)
+                                        const int32          LODIndex,
+                                        const int32          UVChannelIndex)
     {
         if (PreviewTriangles.IsEmpty() && Mesh != nullptr)
         {
@@ -3029,7 +3021,7 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildMaterialSlotPreviewWidget(
     }
 
     TArray<FTextureItemPtr> LocalTextureItems;
-    FTextureItemPtr LocalSelectedTextureItem;
+    FTextureItemPtr         LocalSelectedTextureItem;
     FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
         WetClothingAsset.Get(),
         MaterialSlotIndex,
@@ -3298,7 +3290,7 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
     const FWetClothingUnifiedMaterialSetupResult MaterialSet =
         FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
 
-    FString ResultMessage = MaterialSet.Message;
+    FString    ResultMessage = MaterialSet.Message;
     const bool bSucceeded =
         MaterialSet.bSucceeded && MaterialSet.GeneratedMaterial != nullptr &&
         MaterialSet.GeneratedMaterialInstance != nullptr;
@@ -3431,11 +3423,9 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateUVIslandRow(FUVIsland
                             .WidthOverride(SWetClothingPartEditorPanelLocal::UVIslandIDColumnWidth - 12.0f)
                                 [SNew(STextBlock)
                                      .Text_Lambda([Item]()
-                                     {
-                                         return Item.IsValid()
-                                                    ? FText::Format(LOCTEXT("UVIslandRowID", "#{0}"), FText::AsNumber(Item->UVIslandID))
-                                                    : LOCTEXT("InvalidUVIsland", "Invalid");
-                                     })
+                                                  { return Item.IsValid()
+                                                               ? FText::Format(LOCTEXT("UVIslandRowID", "#{0}"), FText::AsNumber(Item->UVIslandID))
+                                                               : LOCTEXT("InvalidUVIsland", "Invalid"); })
                                      .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]]
 
              + SHorizontalBox::Slot()
@@ -3456,29 +3446,29 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateUVIslandRow(FUVIsland
                                                     [SNew(SBorder)
                                                          .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
                                                          .BorderBackgroundColor_Lambda(
-                                    [this, Item]() -> FSlateColor
-                                    {
-                                        FLinearColor SwatchColor(0.22f, 0.22f, 0.22f, 1.0f);
-                                        if (Item.IsValid())
-                                        {
-                                            if (const FWetClothingWetPartEntry* AssignedEntry = FindWetPartEntryForUVIsland(Item->UVIslandID))
-                                            {
-                                                if (AssignedEntry->WetPartID != 0)
-                                                {
-                                                    SwatchColor = AssignedEntry->Color;
-                                                    SwatchColor.A = 1.0f;
-                                                }
-                                            }
-                                        }
-                                        return FSlateColor(SwatchColor);
-                                    })]]
+                                                             [this, Item]() -> FSlateColor
+                                                             {
+                                                                 FLinearColor SwatchColor(0.22f, 0.22f, 0.22f, 1.0f);
+                                                                 if (Item.IsValid())
+                                                                 {
+                                                                     if (const FWetClothingWetPartEntry* AssignedEntry = FindWetPartEntryForUVIsland(Item->UVIslandID))
+                                                                     {
+                                                                         if (AssignedEntry->WetPartID != 0)
+                                                                         {
+                                                                             SwatchColor = AssignedEntry->Color;
+                                                                             SwatchColor.A = 1.0f;
+                                                                         }
+                                                                     }
+                                                                 }
+                                                                 return FSlateColor(SwatchColor);
+                                                             })]]
 
                                  + SHorizontalBox::Slot()
                                        .FillWidth(1.0f)
                                        .VAlign(VAlign_Center)
                                            [SNew(STextBlock)
                                                 .Text_Lambda([this, Item]()
-                                                {
+                                                             {
                                                     if (!Item.IsValid())
                                                     {
                                                         return LOCTEXT("InvalidUVIslandPartID", "Invalid");
@@ -3494,10 +3484,9 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateUVIslandRow(FUVIsland
                                                         }
                                                         return FText::FromString(GetWetPartDisplayName(*AssignedEntry));
                                                     }
-                                                    return LOCTEXT("UVIslandPartUnassigned", "Unassigned");
-                                                })
+                                                    return LOCTEXT("UVIslandPartUnassigned", "Unassigned"); })
                                                 .ColorAndOpacity_Lambda([this, Item]()
-                                                {
+                                                                        {
                                                     if (!Item.IsValid())
                                                     {
                                                         return FSlateColor::UseSubduedForeground();
@@ -3505,10 +3494,8 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateUVIslandRow(FUVIsland
                                                     const FWetClothingWetPartEntry* AssignedEntry = FindWetPartEntryForUVIsland(Item->UVIslandID);
                                                     return AssignedEntry != nullptr && AssignedEntry->WetPartID != 0
                                                         ? FSlateColor::UseForeground()
-                                                        : FSlateColor::UseSubduedForeground();
-                                                })
-                                                .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]]
-                       ]
+                                                        : FSlateColor::UseSubduedForeground(); })
+                                                .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]]]
 
              + SHorizontalBox::Slot()
                    .AutoWidth()
@@ -3519,13 +3506,11 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateUVIslandRow(FUVIsland
                             .HAlign(HAlign_Right)
                                 [SNew(STextBlock)
                                      .Text_Lambda([Item]()
-                                     {
-                                         return Item.IsValid()
-                                                    ? FText::Format(
-                                                          LOCTEXT("UVIslandTriangleCountText", "{0} tris"),
-                                                          FText::AsNumber(Item->TriangleCount))
-                                                    : FText::GetEmpty();
-                                     })
+                                                  { return Item.IsValid()
+                                                               ? FText::Format(
+                                                                     LOCTEXT("UVIslandTriangleCountText", "{0} tris"),
+                                                                     FText::AsNumber(Item->TriangleCount))
+                                                               : FText::GetEmpty(); })
                                      .Justification(ETextJustify::Right)]]];
 }
 
@@ -3792,18 +3777,18 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateWetPartRow(FWetPartEn
                                                                                          .AutoWidth()
                                                                                          .VAlign(VAlign_Center)
                                                                                              [PropertyCustomizationHelpers::MakeUseSelectedButton(
-                                                                                                  FSimpleDelegate::CreateSP(this, &SWetClothingPartEditorPanel::HandleUseSelectedWetnessProfileClicked, Item),
-                                                                                                  LOCTEXT("UseSelectedWetnessProfileTooltip", "Use the selected Wetness Profile from the Content Browser."),
-                                                                                                  TAttribute<bool>::Create(TAttribute<bool>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::IsWetnessProfileControlEnabled, Item)))]
+                                                                                                 FSimpleDelegate::CreateSP(this, &SWetClothingPartEditorPanel::HandleUseSelectedWetnessProfileClicked, Item),
+                                                                                                 LOCTEXT("UseSelectedWetnessProfileTooltip", "Use the selected Wetness Profile from the Content Browser."),
+                                                                                                 TAttribute<bool>::Create(TAttribute<bool>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::IsWetnessProfileControlEnabled, Item)))]
 
                                                                                    + SHorizontalBox::Slot()
                                                                                          .AutoWidth()
                                                                                          .VAlign(VAlign_Center)
                                                                                          .Padding(2.0f, 0.0f, 0.0f, 0.0f)
                                                                                              [PropertyCustomizationHelpers::MakeBrowseButton(
-                                                                                                  FSimpleDelegate::CreateSP(this, &SWetClothingPartEditorPanel::HandleBrowseWetnessProfileClicked, Item),
-                                                                                                  LOCTEXT("BrowseWetnessProfileTooltip", "Find the assigned Wetness Profile in the Content Browser."),
-                                                                                                  TAttribute<bool>::Create(TAttribute<bool>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::IsWetnessProfileBrowseEnabled, Item)))]]]]]
+                                                                                                 FSimpleDelegate::CreateSP(this, &SWetClothingPartEditorPanel::HandleBrowseWetnessProfileClicked, Item),
+                                                                                                 LOCTEXT("BrowseWetnessProfileTooltip", "Find the assigned Wetness Profile in the Content Browser."),
+                                                                                                 TAttribute<bool>::Create(TAttribute<bool>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::IsWetnessProfileBrowseEnabled, Item)))]]]]]
 
                                          + SHorizontalBox::Slot()
                                                .AutoWidth()
@@ -3829,7 +3814,7 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateWetPartRow(FWetPartEn
 
 FReply SWetClothingPartEditorPanel::HandleResetWetPartClicked(FWetPartEntryPtr Item)
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    UWetClothingAsset*        Asset = WetClothingAsset.Get();
     FWetClothingWetPartEntry* Entry = Item.IsValid() ? FindMutableWetPartEntry(Item->WetPartID) : nullptr;
     if (Asset == nullptr || Entry == nullptr)
     {
@@ -3902,7 +3887,7 @@ void SWetClothingPartEditorPanel::HandleWetPartNameCommitted(const FText& InText
         return;
     }
 
-    UWetClothingAsset*             WetClothingAssetPtr = WetClothingAsset.Get();
+    UWetClothingAsset*        WetClothingAssetPtr = WetClothingAsset.Get();
     FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(Item->WetPartID);
     if (WetClothingAssetPtr == nullptr || Entry == nullptr)
     {
@@ -3949,7 +3934,7 @@ void SWetClothingPartEditorPanel::HandleWetPartColorCommitted(FLinearColor NewCo
         return;
     }
 
-    UWetClothingAsset*             WetClothingAssetPtr = WetClothingAsset.Get();
+    UWetClothingAsset*        WetClothingAssetPtr = WetClothingAsset.Get();
     FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(Item->WetPartID);
     if (WetClothingAssetPtr == nullptr || Entry == nullptr)
     {
@@ -3979,7 +3964,7 @@ FReply SWetClothingPartEditorPanel::HandleToggleWetPartViewClicked(FWetPartEntry
         return FReply::Handled();
     }
 
-    UWetClothingAsset*             WetClothingAssetPtr = WetClothingAsset.Get();
+    UWetClothingAsset*        WetClothingAssetPtr = WetClothingAsset.Get();
     FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(Item->WetPartID);
     if (WetClothingAssetPtr != nullptr && Entry != nullptr)
     {
@@ -4007,7 +3992,7 @@ void SWetClothingPartEditorPanel::HandleWetnessProfilePicked(FWetPartEntryPtr It
         return;
     }
 
-    UWetClothingAsset*             WetClothingAssetPtr = WetClothingAsset.Get();
+    UWetClothingAsset*        WetClothingAssetPtr = WetClothingAsset.Get();
     FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(Item->WetPartID);
     if (WetClothingAssetPtr == nullptr || Entry == nullptr)
     {
@@ -4057,8 +4042,8 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::GenerateAssignWetPartComboItem(
                                                ? FText::FromString(GetWetPartDisplayName(*Item))
                                                : LOCTEXT("AssignWetPartInvalid", "Invalid Part"))
                                      .ColorAndOpacity(Item.IsValid() && Item->WetPartID == 0
-                                         ? FSlateColor::UseSubduedForeground()
-                                         : FSlateColor::UseForeground())]
+                                                          ? FSlateColor::UseSubduedForeground()
+                                                          : FSlateColor::UseForeground())]
 
                       + SVerticalBox::Slot()
                             .AutoHeight()
@@ -4093,7 +4078,7 @@ FReply SWetClothingPartEditorPanel::HandleAddWetPartClicked()
     FWetClothingEditableWetPartData& EditableData = WetClothingAssetPtr->Authored.PartData.EditableWetPartData;
     EditableData.EnsureDefaultProfile();
     FWetClothingAuthoredMaterialSlot& SlotData = EditableData.FindOrAddMaterialSlot(SelectedMaterialSlotIndex);
-    FWetClothingWetPartEntry& NewEntry = SlotData.WetPartEntries.AddDefaulted_GetRef();
+    FWetClothingWetPartEntry&         NewEntry = SlotData.WetPartEntries.AddDefaulted_GetRef();
     NewEntry.WetPartID = NewWetPartID;
     NewEntry.DisplayName = GetDefaultWetPartName(NewWetPartID);
     NewEntry.Color = GetDefaultWetPartColor(NewWetPartID);
@@ -4162,10 +4147,10 @@ bool SWetClothingPartEditorPanel::HasAutoPartitionDataToReplace() const
         const FWetClothingAuthoredMaterialSlot* SlotData =
             WetClothingAssetPtr->Authored.PartData.EditableWetPartData.FindMaterialSlot(SelectedMaterialSlotIndex);
         return SlotData != nullptr && SlotData->WetPartEntries.ContainsByPredicate(
-            [](const FWetClothingWetPartEntry& Entry)
-            {
-                return Entry.WetPartID != 0;
-            });
+                                          [](const FWetClothingWetPartEntry& Entry)
+                                          {
+                                              return Entry.WetPartID != 0;
+                                          });
     }
 
     return false;
@@ -4216,8 +4201,8 @@ FReply SWetClothingPartEditorPanel::HandleAutoPartitionClicked()
     }
 
     TSharedRef<FWetClothingTextureReadback> PreviewTextureData = MakeShared<FWetClothingTextureReadback>(TextureData);
-    TSharedPtr<SWCAUVView>     BeforePreviewView;
-    TSharedPtr<SWCAUVView>     AfterPreviewView;
+    TSharedPtr<SWCAUVView>                  BeforePreviewView;
+    TSharedPtr<SWCAUVView>                  AfterPreviewView;
     const FSlateFontInfo                    AutoPartitionDialogTextFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 13);
     const FSlateFontInfo                    AutoPartitionDialogHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 14);
 
@@ -4227,9 +4212,9 @@ FReply SWetClothingPartEditorPanel::HandleAutoPartitionClicked()
                                                   .SupportsMinimize(false)
                                                   .SupportsMaximize(false);
 
-    TWeakPtr<SWindow>                             WeakPreviewWindow = PreviewWindow.ToSharedPtr();
+    TWeakPtr<SWindow>                WeakPreviewWindow = PreviewWindow.ToSharedPtr();
     TSharedRef<TWeakPtr<SWCAUVView>> WeakAfterPreviewView = MakeShared<TWeakPtr<SWCAUVView>>();
-    const auto                                    RefreshAutoPartitionPreview = [this, PreviewTextureData, PreviewClusters, WeakAfterPreviewView]()
+    const auto                       RefreshAutoPartitionPreview = [this, PreviewTextureData, PreviewClusters, WeakAfterPreviewView]()
     {
         FString PreviewErrorMessage;
         if (FWetPartAutoPartitioner::BuildClusters(UVIslandItems, *PreviewTextureData, AutoPartitionTolerancePercent, AutoPartitionColorMode, *PreviewClusters, &PreviewErrorMessage))
@@ -4483,7 +4468,7 @@ void SWetClothingPartEditorPanel::ApplyAutoPartitionClusters(const TArray<FWetPa
     WetClothingAssetPtr->Modify();
     MarkSelectedMaterialSlotWettable();
 
-    FWetClothingEditableWetPartData& EditableData = WetClothingAssetPtr->Authored.PartData.EditableWetPartData;
+    FWetClothingEditableWetPartData&  EditableData = WetClothingAssetPtr->Authored.PartData.EditableWetPartData;
     FWetClothingAuthoredMaterialSlot& SlotData = EditableData.FindOrAddMaterialSlot(SelectedMaterialSlotIndex);
     SlotData.WetPartEntries.RemoveAll(
         [](const FWetClothingWetPartEntry& Entry)
@@ -4673,10 +4658,10 @@ FText SWetClothingPartEditorPanel::GetRenderProfileBakeSourceText() const
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     return Asset != nullptr
-        ? FText::Format(
-            LOCTEXT("WetPartDataBakeSource", "Output UV: DWC UV Channel {0}"),
-            FText::AsNumber(Asset->GetDWCDataUVChannelIndex()))
-        : LOCTEXT("WetPartDataBakeNoAsset", "Output UV: unavailable");
+               ? FText::Format(
+                     LOCTEXT("WetPartDataBakeSource", "Output UV: DWC UV Channel {0}"),
+                     FText::AsNumber(Asset->GetDWCDataUVChannelIndex()))
+               : LOCTEXT("WetPartDataBakeNoAsset", "Output UV: unavailable");
 }
 
 FText SWetClothingPartEditorPanel::GetRenderProfileBakeSlotsText() const
@@ -4707,10 +4692,10 @@ FText SWetClothingPartEditorPanel::GetRenderProfileBakeSlotsText() const
         Labels.Add(FString::FromInt(Slot));
     }
     return Labels.IsEmpty()
-        ? LOCTEXT("WetPartDataBakeNoSlots2", "Material Slots: None")
-        : FText::Format(
-            LOCTEXT("WetPartDataBakeSlots", "Material Slots: {0}"),
-            FText::FromString(FString::Join(Labels, TEXT(", "))));
+               ? LOCTEXT("WetPartDataBakeNoSlots2", "Material Slots: None")
+               : FText::Format(
+                     LOCTEXT("WetPartDataBakeSlots", "Material Slots: {0}"),
+                     FText::FromString(FString::Join(Labels, TEXT(", "))));
 }
 
 FText SWetClothingPartEditorPanel::GetRenderProfileBakeStatusText() const
@@ -4830,8 +4815,8 @@ FText SWetClothingPartEditorPanel::GetUVStatusText() const
 {
     const FText EmptyState = GetCommonPartEditingEmptyStateText();
     return EmptyState.IsEmpty()
-        ? FText::FromString(UVStatusMessage)
-        : EmptyState;
+               ? FText::FromString(UVStatusMessage)
+               : EmptyState;
 }
 
 EVisibility SWetClothingPartEditorPanel::GetUVStatusOverlayVisibility() const
@@ -4844,8 +4829,8 @@ EVisibility SWetClothingPartEditorPanel::GetUVStatusOverlayVisibility() const
 EVisibility SWetClothingPartEditorPanel::GetUVEditorContentVisibility() const
 {
     return UVIslandItems.IsEmpty()
-        ? EVisibility::Collapsed
-        : EVisibility::Visible;
+               ? EVisibility::Collapsed
+               : EVisibility::Visible;
 }
 
 FText SWetClothingPartEditorPanel::GetCommonPartEditingEmptyStateText() const
@@ -4928,8 +4913,8 @@ EVisibility SWetClothingPartEditorPanel::GetSelectedWetPartTextVisibility() cons
         return EVisibility::Collapsed;
     }
     return GetSelectedWetPartText().IsEmpty()
-        ? EVisibility::Collapsed
-        : EVisibility::Visible;
+               ? EVisibility::Collapsed
+               : EVisibility::Visible;
 }
 
 FText SWetClothingPartEditorPanel::GetWetnessProfileLibraryStatusText() const
@@ -5005,11 +4990,11 @@ FText SWetClothingPartEditorPanel::GetBlendModeText(FWetPartEntryPtr Item) const
         return LOCTEXT("InvalidBlendMode", "Standard");
     }
 
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const UWetClothingAsset*         Asset = WetClothingAsset.Get();
     const FWetPartProfileAssignment* Profile = Asset != nullptr
-        ? Asset->Authored.PartData.EditableWetPartData.FindProfile(*Item)
-        : nullptr;
-    const UEnum* BlendModeEnum = StaticEnum<EWetPartProfileBlendMode>();
+                                                   ? Asset->Authored.PartData.EditableWetPartData.FindProfile(*Item)
+                                                   : nullptr;
+    const UEnum*                     BlendModeEnum = StaticEnum<EWetPartProfileBlendMode>();
     return BlendModeEnum != nullptr && Profile != nullptr
                ? BlendModeEnum->GetDisplayNameTextByValue(static_cast<int64>(Profile->BlendMode))
                : LOCTEXT("BlendModeFallback", "Standard");
@@ -5029,11 +5014,11 @@ FString SWetClothingPartEditorPanel::GetWetnessProfileObjectPath(FWetPartEntryPt
         return FString();
     }
 
-    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(Item->WetPartID);
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const FWetClothingWetPartEntry*  Entry = FindWetPartEntry(Item->WetPartID);
+    const UWetClothingAsset*         Asset = WetClothingAsset.Get();
     const FWetPartProfileAssignment* Profile = Asset != nullptr && Entry != nullptr
-        ? Asset->Authored.PartData.EditableWetPartData.FindProfile(*Entry)
-        : nullptr;
+                                                   ? Asset->Authored.PartData.EditableWetPartData.FindProfile(*Entry)
+                                                   : nullptr;
     return Profile != nullptr ? Profile->GetSourceProfilePath().ToString() : FString();
 }
 
@@ -5079,7 +5064,7 @@ void SWetClothingPartEditorPanel::HandleBrowseWetnessProfileClicked(FWetPartEntr
     UObject* ProfileObject = FSoftObjectPath(GetWetnessProfileObjectPath(Item)).TryLoad();
     if (ProfileObject != nullptr)
     {
-        TArray<UObject*> ObjectsToSync{ProfileObject};
+        TArray<UObject*> ObjectsToSync{ ProfileObject };
         GEditor->SyncBrowserToObjects(ObjectsToSync);
     }
 }
@@ -5162,11 +5147,11 @@ bool SWetClothingPartEditorPanel::IsSurfaceWaterTilingEnabled(const FWetPartEntr
         return false;
     }
 
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(Item->WetPartID);
+    const UWetClothingAsset*         Asset = WetClothingAsset.Get();
+    const FWetClothingWetPartEntry*  Entry = FindWetPartEntry(Item->WetPartID);
     const FWetPartProfileAssignment* Assignment = Asset != nullptr && Entry != nullptr
-        ? Asset->Authored.PartData.EditableWetPartData.FindProfile(*Entry)
-        : nullptr;
+                                                      ? Asset->Authored.PartData.EditableWetPartData.FindProfile(*Entry)
+                                                      : nullptr;
     if (Assignment == nullptr)
     {
         return false;
@@ -5234,11 +5219,11 @@ FReply SWetClothingPartEditorPanel::HandleOpenSurfaceWaterTilingClicked(FWetPart
     HandleWetPartSelectionChanged(Item, ESelectInfo::Direct);
     ResetSurfaceWaterTilingPreviewState();
     const TSharedRef<SWindow> Window = SNew(SWindow)
-        .Title(LOCTEXT("SurfaceWaterTilingWindowTitle", "Surface Water Tiling"))
-        .ClientSize(FVector2D(1120.0f, 760.0f))
-        .SupportsMinimize(false)
-        .SupportsMaximize(true)
-        .SizingRule(ESizingRule::UserSized);
+                                           .Title(LOCTEXT("SurfaceWaterTilingWindowTitle", "Surface Water Tiling"))
+                                           .ClientSize(FVector2D(1120.0f, 760.0f))
+                                           .SupportsMinimize(false)
+                                           .SupportsMaximize(true)
+                                           .SizingRule(ESizingRule::UserSized);
     Window->SetContent(BuildSurfaceWaterTilingWindowContent());
     Window->SetOnWindowClosed(FOnWindowClosed::CreateSP(
         this, &SWetClothingPartEditorPanel::HandleSurfaceWaterTilingWindowClosed));
@@ -5347,8 +5332,8 @@ bool SWetClothingPartEditorPanel::IsSurfaceWaterTilingDirty() const
 const FWetPartSurfaceWaterSettings* SWetClothingPartEditorPanel::GetSurfaceWaterTilingWorkingSettings() const
 {
     return bSurfaceWaterTilingEditSessionActive
-        ? &SurfaceWaterTilingEditedSettings
-        : nullptr;
+               ? &SurfaceWaterTilingEditedSettings
+               : nullptr;
 }
 
 void SWetClothingPartEditorPanel::NotifySurfaceWaterTilingWorkingSettingsChanged()
@@ -5370,13 +5355,13 @@ void SWetClothingPartEditorPanel::NotifySurfaceWaterTilingWorkingSettingsChanged
 
 FReply SWetClothingPartEditorPanel::HandleApplySurfaceWaterTilingChangesClicked()
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    UWetClothingAsset*        Asset = WetClothingAsset.Get();
     FWetClothingWetPartEntry* Entry = bSurfaceWaterTilingEditSessionActive
-        ? FWetPartEditingService::FindMutableEntry(
-              Asset,
-              FWetPartEditingService::MakeScope(SurfaceWaterTilingEditMaterialSlotIndex),
-              SurfaceWaterTilingEditWetPartID)
-        : nullptr;
+                                          ? FWetPartEditingService::FindMutableEntry(
+                                                Asset,
+                                                FWetPartEditingService::MakeScope(SurfaceWaterTilingEditMaterialSlotIndex),
+                                                SurfaceWaterTilingEditWetPartID)
+                                          : nullptr;
     if (!bSurfaceWaterTilingEditSessionActive || !bSurfaceWaterTilingHasPendingChanges ||
         Asset == nullptr || Entry == nullptr)
     {
@@ -5508,78 +5493,34 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
             .ContentPadding(FMargin(3.0f))
             .ToolTipText(ToolTip)
             .OnClicked_Lambda([OnReset = MoveTemp(OnReset)]()
-            {
+                              {
                 OnReset();
-                return FReply::Handled();
-            })
-            [SNew(SImage)
-                 .Image(FAppStyle::Get().GetBrush(TEXT("PropertyWindow.DiffersFromDefault")))];
+                return FReply::Handled(); })
+                [SNew(SImage)
+                     .Image(FAppStyle::Get().GetBrush(TEXT("PropertyWindow.DiffersFromDefault")))];
     };
 
     const auto BuildNumericEditor = [&BuildResetButton](
-        const FText& Label,
-        const FText& ToolTip,
-        const float MinValue,
-        const float MaxValue,
-        const float Delta,
-        const TAttribute<bool>& IsEnabled,
-        const TAttribute<float>& Value,
-        TFunction<void(float)> OnValueChanged,
-        TFunction<void()> OnReset) -> TSharedRef<SWidget>
+                                        const FText&             Label,
+                                        const FText&             ToolTip,
+                                        const float              MinValue,
+                                        const float              MaxValue,
+                                        const float              Delta,
+                                        const TAttribute<bool>&  IsEnabled,
+                                        const TAttribute<float>& Value,
+                                        TFunction<void(float)>   OnValueChanged,
+                                        TFunction<void()>        OnReset) -> TSharedRef<SWidget>
     {
-        return SNew(SVerticalBox)
-            + SVerticalBox::Slot()
-                  .AutoHeight()
-                  .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                      [SNew(STextBlock)
-                           .Text(Label)
-                           .ToolTipText(ToolTip)]
-            + SVerticalBox::Slot()
-                  .AutoHeight()
-                      [SNew(SHorizontalBox)
-                       + SHorizontalBox::Slot()
-                             .FillWidth(1.0f)
-                             .VAlign(VAlign_Center)
-                                 [SNew(SSlider)
-                                      .IsEnabled(IsEnabled)
-                                      .MinValue(MinValue)
-                                      .MaxValue(MaxValue)
-                                      .Value(Value)
-                                      .OnValueChanged_Lambda(
-                                          [OnValueChanged](const float NewValue)
-                                          {
-                                              OnValueChanged(NewValue);
-                                          })]
-                       + SHorizontalBox::Slot()
-                             .AutoWidth()
-                             .VAlign(VAlign_Center)
-                             .Padding(8.0f, 0.0f, 0.0f, 0.0f)
-                                 [SNew(SBox)
-                                      .WidthOverride(68.0f)
-                                          [SNew(SSpinBox<float>)
-                                               .IsEnabled(IsEnabled)
-                                               .MinValue(MinValue)
-                                               .MaxValue(MaxValue)
-                                               .MinSliderValue(MinValue)
-                                               .MaxSliderValue(MaxValue)
-                                               .Delta(Delta)
-                                               .Value(Value)
-                                               .OnValueChanged_Lambda(
-                                                   [OnValueChanged](const float NewValue)
-                                                   {
-                                                       OnValueChanged(NewValue);
-                                                   })]]
-                       + SHorizontalBox::Slot()
-                             .AutoWidth()
-                             .VAlign(VAlign_Center)
-                             .Padding(3.0f, 0.0f, 0.0f, 0.0f)
-                                 [BuildResetButton(
-                                     LOCTEXT("SurfaceWaterResetToAppliedTooltip", "Reset this value to the last applied value."),
-                                     MoveTemp(OnReset))]];
+        return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)[SNew(STextBlock).Text(Label).ToolTipText(ToolTip)] + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(SSlider).IsEnabled(IsEnabled).MinValue(MinValue).MaxValue(MaxValue).Value(Value).OnValueChanged_Lambda([OnValueChanged](const float NewValue)
+                                                                                                                                                                                                                                                                                                                                                                                             { OnValueChanged(NewValue); })] +
+                                                                                                                                                                                             SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)[SNew(SBox).WidthOverride(68.0f)[SNew(SSpinBox<float>).IsEnabled(IsEnabled).MinValue(MinValue).MaxValue(MaxValue).MinSliderValue(MinValue).MaxSliderValue(MaxValue).Delta(Delta).Value(Value).OnValueChanged_Lambda([OnValueChanged](const float NewValue)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         { OnValueChanged(NewValue); })]] +
+                                                                                                                                                                                             SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(3.0f, 0.0f, 0.0f, 0.0f)[BuildResetButton(LOCTEXT("SurfaceWaterResetToAppliedTooltip", "Reset this value to the last applied value."), MoveTemp(OnReset))]];
     };
 
     const TAttribute<bool> SurfaceSettingsEnabled = TAttribute<bool>::CreateLambda(
-        [this]() { return bSurfaceWaterTilingEditSessionActive; });
+        [this]()
+        { return bSurfaceWaterTilingEditSessionActive; });
 
     return SNew(SBorder)
         .Padding(8.0f)
@@ -5595,28 +5536,13 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
                                   [SNew(SBorder)
                                        .Padding(0.0f)
                                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.DarkGroupBorder")))
-                                           [SNew(SOverlay)
-                                            + SOverlay::Slot()
-                                                  [SAssignNew(SurfaceWaterTilingPreviewViewport, SDWCPartViewport)
-                                                       .WetClothingAsset(WetClothingAsset.Get())
-                                                       .SurfaceWaterTilingPreview(true)]
-                                            + SOverlay::Slot()
-                                                  .HAlign(HAlign_Right)
-                                                  .VAlign(VAlign_Top)
-                                                  .Padding(0.0f, 34.0f, 8.0f, 0.0f)
-                                                      [SNew(SButton)
-                                                           .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
-                                                           .ContentPadding(FMargin(8.0f, 3.0f))
-                                                           .Text(LOCTEXT("SurfaceWaterTilingFrameMesh", "Frame"))
-                                                           .ToolTipText(LOCTEXT("SurfaceWaterTilingFrameMeshTooltip", "Frame the preview mesh in the viewport."))
-                                                           .OnClicked_Lambda([this]()
-                                                           {
+                                           [SNew(SOverlay) + SOverlay::Slot()[SAssignNew(SurfaceWaterTilingPreviewViewport, SDWCPartViewport).WetClothingAsset(WetClothingAsset.Get()).SurfaceWaterTilingPreview(true)] + SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Top).Padding(0.0f, 34.0f, 8.0f, 0.0f)[SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ContentPadding(FMargin(8.0f, 3.0f)).Text(LOCTEXT("SurfaceWaterTilingFrameMesh", "Frame")).ToolTipText(LOCTEXT("SurfaceWaterTilingFrameMeshTooltip", "Frame the preview mesh in the viewport.")).OnClicked_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       {
                                                                if (SurfaceWaterTilingPreviewViewport.IsValid())
                                                                {
                                                                    SurfaceWaterTilingPreviewViewport->FocusOnPreviewMesh();
                                                                }
-                                                               return FReply::Handled();
-                                                           })]]]
+                                                               return FReply::Handled(); })]]]
 
                         + SVerticalBox::Slot()
                               .AutoHeight()
@@ -5624,75 +5550,65 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
                                   [SNew(SBorder)
                                        .Padding(12.0f)
                                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
-                                           [SNew(SScrollBox)
-                                            + SScrollBox::Slot()
-                                                  [SNew(SVerticalBox)
+                                           [SNew(SScrollBox) + SScrollBox::Slot()
+                                                                   [SNew(SVerticalBox)
 
-                                                   + SVerticalBox::Slot()
-                                                         .AutoHeight()
-                                                             [SNew(STextBlock)
-                                                                  .Text(LOCTEXT("SurfaceWaterTilingDropletTilingHeader", "Droplet Tiling"))
-                                                                  .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
+                                                                    + SVerticalBox::Slot()
+                                                                          .AutoHeight()
+                                                                              [SNew(STextBlock)
+                                                                                   .Text(LOCTEXT("SurfaceWaterTilingDropletTilingHeader", "Droplet Tiling"))
+                                                                                   .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
 
-                                                   + SVerticalBox::Slot()
-                                                         .AutoHeight()
-                                                         .Padding(0.0f, 10.0f, 0.0f, 0.0f)
-                                                             [BuildNumericEditor(
-                                                                 LOCTEXT("PopupPrimaryDetailSize", "Primary Detail Size"),
-                                                                 LOCTEXT("PopupPrimaryDetailSizeTooltip", "Controls the repeating detail-normal size for the Primary droplet layer on this Part."),
-                                                                 0.0f,
-                                                                 4.0f,
-                                                                 0.05f,
-                                                                 SurfaceSettingsEnabled,
-                                                                 TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletDetailSize)),
-                                                                 [this](const float NewValue) { HandleSelectedDropletDetailSizeChanged(NewValue); },
-                                                                 [this]() { ResetSelectedDropletDetailSizeToApplied(); })]
+                                                                    + SVerticalBox::Slot()
+                                                                          .AutoHeight()
+                                                                          .Padding(0.0f, 10.0f, 0.0f, 0.0f)
+                                                                              [BuildNumericEditor(
+                                                                                  LOCTEXT("PopupPrimaryDetailSize", "Primary Detail Size"),
+                                                                                  LOCTEXT("PopupPrimaryDetailSizeTooltip", "Controls the repeating detail-normal size for the Primary droplet layer on this Part."),
+                                                                                  0.0f,
+                                                                                  4.0f,
+                                                                                  0.05f,
+                                                                                  SurfaceSettingsEnabled,
+                                                                                  TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletDetailSize)),
+                                                                                  [this](const float NewValue)
+                                                                                  { HandleSelectedDropletDetailSizeChanged(NewValue); },
+                                                                                  [this]()
+                                                                                  { ResetSelectedDropletDetailSizeToApplied(); })]
 
-                                                   + SVerticalBox::Slot()
-                                                         .AutoHeight()
-                                                         .Padding(0.0f, 12.0f, 0.0f, 0.0f)
-                                                             [BuildNumericEditor(
-                                                                 LOCTEXT("PopupSecondaryDetailSize", "Secondary Detail Size"),
-                                                                 LOCTEXT("PopupSecondaryDetailSizeTooltip", "Controls the repeating detail-normal size for the Secondary droplet layer on this Part."),
-                                                                 0.0f,
-                                                                 4.0f,
-                                                                 0.05f,
-                                                                 SurfaceSettingsEnabled,
-                                                                 TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSize)),
-                                                                 [this](const float NewValue) { HandleSelectedDropletFlowDetailSizeChanged(NewValue); },
-                                                                 [this]() { ResetSelectedDropletFlowDetailSizeToApplied(); })]
+                                                                    + SVerticalBox::Slot()
+                                                                          .AutoHeight()
+                                                                          .Padding(0.0f, 12.0f, 0.0f, 0.0f)
+                                                                              [BuildNumericEditor(
+                                                                                  LOCTEXT("PopupSecondaryDetailSize", "Secondary Detail Size"),
+                                                                                  LOCTEXT("PopupSecondaryDetailSizeTooltip", "Controls the repeating detail-normal size for the Secondary droplet layer on this Part."),
+                                                                                  0.0f,
+                                                                                  4.0f,
+                                                                                  0.05f,
+                                                                                  SurfaceSettingsEnabled,
+                                                                                  TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSize)),
+                                                                                  [this](const float NewValue)
+                                                                                  { HandleSelectedDropletFlowDetailSizeChanged(NewValue); },
+                                                                                  [this]()
+                                                                                  { ResetSelectedDropletFlowDetailSizeToApplied(); })]
 
-                                                   ]]]]
+    ]]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(8.0f, 8.0f, 8.0f, 2.0f)
-                       [SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                              .FillWidth(1.0f)
-                              .VAlign(VAlign_Center)
-                                  [SNew(STextBlock)
-                                       .Text(LOCTEXT(
-                                           "SurfaceWaterTilingApplyHint",
-                                           "Changes are previewed immediately. Closing the window discards unapplied changes."))
-                                       .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                              .VAlign(VAlign_Center)
-                              .Padding(8.0f, 0.0f, 0.0f, 0.0f)
-                                  [SNew(SButton)
-                                       .Text(LOCTEXT("SurfaceWaterTilingRevert", "Revert"))
-                                       .IsEnabled_Lambda([this]() { return bSurfaceWaterTilingHasPendingChanges; })
-                                       .OnClicked(this, &SWetClothingPartEditorPanel::HandleRevertSurfaceWaterTilingChangesClicked)]
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                              .VAlign(VAlign_Center)
-                              .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                                  [SNew(SButton)
-                                       .ButtonStyle(FAppStyle::Get(), TEXT("PrimaryButton"))
-                                       .Text(LOCTEXT("SurfaceWaterTilingApply", "Apply"))
-                                       .IsEnabled_Lambda([this]() { return bSurfaceWaterTilingHasPendingChanges; })
-                                       .OnClicked(this, &SWetClothingPartEditorPanel::HandleApplySurfaceWaterTilingChangesClicked)]]];
+                       [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("SurfaceWaterTilingApplyHint", "Changes are previewed immediately. Closing the window discards unapplied changes.")).ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)[SNew(SButton).Text(LOCTEXT("SurfaceWaterTilingRevert", "Revert")).IsEnabled_Lambda([this]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          { return bSurfaceWaterTilingHasPendingChanges; })
+                                                                                                                                                                                                                                                                                                                                                                                                                           .OnClicked(this, &SWetClothingPartEditorPanel::HandleRevertSurfaceWaterTilingChangesClicked)] +
+                        SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                                [SNew(SButton)
+                                     .ButtonStyle(FAppStyle::Get(), TEXT("PrimaryButton"))
+                                     .Text(LOCTEXT("SurfaceWaterTilingApply", "Apply"))
+                                     .IsEnabled_Lambda([this]()
+                                                       { return bSurfaceWaterTilingHasPendingChanges; })
+                                     .OnClicked(this, &SWetClothingPartEditorPanel::HandleApplySurfaceWaterTilingChangesClicked)]]];
 }
 
 void SWetClothingPartEditorPanel::HandleSurfaceWaterTilingWindowClosed(const TSharedRef<SWindow>& /*Window*/)
@@ -5914,12 +5830,12 @@ ECheckBoxState SWetClothingPartEditorPanel::GetSurfaceWaterPreviewCoverageModeSt
     const EDWCSurfaceWaterTilingPreviewCoverageMode Mode) const
 {
     return SurfaceWaterPreviewCoverageMode == Mode
-        ? ECheckBoxState::Checked
-        : ECheckBoxState::Unchecked;
+               ? ECheckBoxState::Checked
+               : ECheckBoxState::Unchecked;
 }
 
 void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewCoverageModeChanged(
-    const ECheckBoxState NewState,
+    const ECheckBoxState                            NewState,
     const EDWCSurfaceWaterTilingPreviewCoverageMode Mode)
 {
     if (NewState != ECheckBoxState::Checked || SurfaceWaterPreviewCoverageMode == Mode)
@@ -5938,12 +5854,12 @@ ECheckBoxState SWetClothingPartEditorPanel::GetSurfaceWaterPreviewDisplayModeSta
     const EDWCSurfaceWaterTilingPreviewDisplayMode Mode) const
 {
     return SurfaceWaterPreviewDisplayMode == Mode
-        ? ECheckBoxState::Checked
-        : ECheckBoxState::Unchecked;
+               ? ECheckBoxState::Checked
+               : ECheckBoxState::Unchecked;
 }
 
 void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewDisplayModeChanged(
-    const ECheckBoxState NewState,
+    const ECheckBoxState                           NewState,
     const EDWCSurfaceWaterTilingPreviewDisplayMode Mode)
 {
     if (NewState != ECheckBoxState::Checked || SurfaceWaterPreviewDisplayMode == Mode)
@@ -5961,8 +5877,8 @@ void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewDisplayModeChanged(
 EVisibility SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility() const
 {
     return SurfaceWaterPreviewCoverageMode == EDWCSurfaceWaterTilingPreviewCoverageMode::SingleCircle
-        ? EVisibility::Visible
-        : EVisibility::Collapsed;
+               ? EVisibility::Visible
+               : EVisibility::Collapsed;
 }
 
 ECheckBoxState SWetClothingPartEditorPanel::GetShowPartColorsCheckState() const
@@ -6083,9 +5999,7 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildPartPreviewControlsPanel()
                                                              [SNew(STextBlock)
                                                                   .Justification(ETextJustify::Right)
                                                                   .Text_Lambda([this]()
-                                                                  {
-                                                                      return FText::AsPercent(PartColorIntensity);
-                                                                  })]]]]
+                                                                               { return FText::AsPercent(PartColorIntensity); })]]]]
 
                       + SVerticalBox::Slot()
                             .AutoHeight()
@@ -6120,14 +6034,13 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildPartPreviewControlsPanel()
                                                              [SNew(STextBlock)
                                                                   .Justification(ETextJustify::Right)
                                                                   .Text_Lambda([this]()
-                                                                  {
+                                                                               {
                                                                       FNumberFormattingOptions Options;
                                                                       Options.MinimumFractionalDigits = 1;
                                                                       Options.MaximumFractionalDigits = 1;
                                                                       return FText::Format(
                                                                           LOCTEXT("SelectionLineWeightValue", "{0}x"),
-                                                                          FText::AsNumber(GetSelectionLineThicknessScale(), &Options));
-                                                                  })]]]]]];
+                                                                          FText::AsNumber(GetSelectionLineThicknessScale(), &Options)); })]]]]]];
 }
 
 FReply SWetClothingPartEditorPanel::HandleFocusPreviewClicked()
@@ -6171,7 +6084,7 @@ bool SWetClothingPartEditorPanel::CanBakeAnyRenderProfileData() const
 FReply SWetClothingPartEditorPanel::HandleBakeRenderProfileDataClicked()
 {
     FString Summary;
-    bool bHadWarnings = false;
+    bool    bHadWarnings = false;
     if (!BakeRenderProfileDataAndUpdateMaterials(Summary, &bHadWarnings))
     {
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));

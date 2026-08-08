@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/DerivedAssets/Materials/DWCMaterialSetupEditorLibrary.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -9,7 +10,7 @@
 
 bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
     UWetClothingAsset* WetClothingAsset,
-    FString& OutReport)
+    FString&           OutReport)
 {
     OutReport.Reset();
     if (!WetClothingAsset)
@@ -18,7 +19,7 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
         return false;
     }
 
-    int32 RepairedCount = 0;
+    int32           RepairedCount = 0;
     TArray<FString> Messages;
     WetClothingAsset->Modify();
 
@@ -72,8 +73,8 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
 
 bool UDWCMaterialSetupEditorLibrary::BakeRenderProfileDataAndUpdateMaterials(
     UWetClothingAsset* WetClothingAsset,
-    FString& OutReport,
-    bool& bOutHadWarnings)
+    FString&           OutReport,
+    bool&              bOutHadWarnings)
 {
     bOutHadWarnings = false;
     OutReport.Reset();

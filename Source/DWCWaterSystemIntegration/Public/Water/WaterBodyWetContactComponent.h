@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "WaterBodyWetContactComponent.generated.h"
@@ -57,13 +59,13 @@ class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActo
 
   private:
     // Internal integration policy. These values are intentionally not exposed in Details or Blueprint.
-    bool bApplyToExistingOverlapsOnBeginPlay = true;
-    bool bRefreshReceiversInsideBounds = true;
+    bool  bApplyToExistingOverlapsOnBeginPlay = true;
+    bool  bRefreshReceiversInsideBounds = true;
     float ReceiverRefreshInterval = 0.25f;
-    bool bCreateOverlapProxy = true;
+    bool  bCreateOverlapProxy = true;
 
     // Profiling remains available in C++ without becoming part of the product-facing component UI.
-    bool bEnablePerformanceLogging = false;
+    bool  bEnablePerformanceLogging = false;
     float PerformanceLogInterval = 1.0f;
 
     UPROPERTY(Transient)

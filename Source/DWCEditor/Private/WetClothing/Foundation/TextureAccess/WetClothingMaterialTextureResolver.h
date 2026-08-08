@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Declares material texture candidate discovery, representative texture selection, and preview suitability evaluation.
  */
@@ -16,7 +17,7 @@ class FWetClothingMaterialTextureResolver
 {
   public:
     static void BuildTextureItems(
-        UMaterialInterface*                          Material,
+        UMaterialInterface*                  Material,
         TArray<TSharedPtr<FWCATextureItem>>& OutItems);
 
     static UTexture* ResolveBestMaterialTexture(UMaterialInterface* Material);
@@ -25,25 +26,25 @@ class FWetClothingMaterialTextureResolver
 
     static UTexture* FindSavedTextureSelection(
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex);
+        int32                    MaterialSlotIndex);
 
     static bool HasSavedTextureSelection(
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex);
+        int32                    MaterialSlotIndex);
 
     static void SaveTextureSelection(
         UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
-        UTexture* Texture);
+        int32              MaterialSlotIndex,
+        UTexture*          Texture);
 
     static UTexture* ResolveOrSaveTextureSelection(
         UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex);
+        int32              MaterialSlotIndex);
 
     static void BuildTextureItemsForMaterialSlot(
-        UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
+        UWetClothingAsset*                   WetClothingAsset,
+        int32                                MaterialSlotIndex,
         TArray<TSharedPtr<FWCATextureItem>>& OutItems,
-        TSharedPtr<FWCATextureItem>& OutSelectedItem,
-        bool bDefaultToNone = false);
+        TSharedPtr<FWCATextureItem>&         OutSelectedItem,
+        bool                                 bDefaultToNone = false);
 };

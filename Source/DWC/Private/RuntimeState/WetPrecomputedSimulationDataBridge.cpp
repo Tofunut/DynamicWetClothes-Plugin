@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/WetPrecomputedSimulationDataBridge.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -94,7 +95,7 @@ bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
     OutFlatNeighborIndices.Reserve(static_cast<int32>(TotalNeighborCount));
     for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
     {
-        const TArray<int32>& PrecomputedNeighbors = PrecomputedData.NeighborGraph[VertexIndex].Neighbors;
+        const TArray<int32>&     PrecomputedNeighbors = PrecomputedData.NeighborGraph[VertexIndex].Neighbors;
         FWetVertexNeighborRange& RuntimeRange = OutNeighborRanges[VertexIndex];
         RuntimeRange.StartOffset = OutFlatNeighborIndices.Num();
         RuntimeRange.Count = PrecomputedNeighbors.Num();

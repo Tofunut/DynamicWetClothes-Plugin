@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Components/DWCDemoNiagaraWetContactSourceComponent.h"
 
 #include "Components/SkeletalMeshComponent.h"
@@ -99,7 +100,6 @@ void UDWCDemoNiagaraWetContactSourceComponent::BeginPlay()
     {
         BindCallbackUserParameter();
     }
-
 }
 
 void UDWCDemoNiagaraWetContactSourceComponent::ReceiveParticleData_Implementation(
@@ -366,8 +366,8 @@ bool UDWCDemoNiagaraWetContactSourceComponent::BuildContactsFromParticle(
         ReceiverSkeletalMeshes.IsEmpty() ? nullptr : ReceiverSkeletalMeshes[0];
 
     FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(DWCDemoNiagaraWetContactSource), bTraceComplex);
-    const AActor* SourceOwner = GetOwner();
-    const AActor* ReceiverOwner = IsValid(InOutReceiver) ? InOutReceiver->GetOwner() : nullptr;
+    const AActor*         SourceOwner = GetOwner();
+    const AActor*         ReceiverOwner = IsValid(InOutReceiver) ? InOutReceiver->GetOwner() : nullptr;
     if (SourceOwner && SourceOwner != ReceiverOwner)
     {
         QueryParams.AddIgnoredActor(SourceOwner);

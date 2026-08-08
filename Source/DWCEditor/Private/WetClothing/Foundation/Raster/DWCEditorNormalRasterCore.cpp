@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Raster/DWCEditorNormalRasterCore.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -48,8 +49,8 @@ namespace
         for (int32 Index = 0; Index < Rects.Num();)
         {
             const FIntRect& Existing = Rects[Index];
-            const bool bTouches = Rect.Min.X <= Existing.Max.X && Rect.Max.X >= Existing.Min.X &&
-                Rect.Min.Y <= Existing.Max.Y && Rect.Max.Y >= Existing.Min.Y;
+            const bool      bTouches = Rect.Min.X <= Existing.Max.X && Rect.Max.X >= Existing.Min.X &&
+                                  Rect.Min.Y <= Existing.Max.Y && Rect.Max.Y >= Existing.Min.Y;
             if (!bTouches)
             {
                 ++Index;
@@ -68,17 +69,17 @@ namespace
     template <typename GetNormalType, typename SetNormalType, typename GetCoverageType, typename SetCoverageType>
     FDWCEditorRasterResult RasterizeStampPixels(
         const FDWCEditorNormalStampCommand& Command,
-        const FIntPoint CanvasSize,
-        const FIntRect& EffectiveClip,
-        const bool bHasCoverage,
-        GetNormalType&& GetNormal,
-        SetNormalType&& SetNormal,
-        GetCoverageType&& GetCoverage,
-        SetCoverageType&& SetCoverage,
-        const FDWCEditorCancellationToken* CancellationToken)
+        const FIntPoint                     CanvasSize,
+        const FIntRect&                     EffectiveClip,
+        const bool                          bHasCoverage,
+        GetNormalType&&                     GetNormal,
+        SetNormalType&&                     SetNormal,
+        GetCoverageType&&                   GetCoverage,
+        SetCoverageType&&                   SetCoverage,
+        const FDWCEditorCancellationToken*  CancellationToken)
     {
         FDWCEditorRasterResult Result;
-        const FVector2f Center(
+        const FVector2f        Center(
             Command.Footprint.bWrap ? RasterWrapUnit(Command.Footprint.CenterUV.X) : Command.Footprint.CenterUV.X,
             Command.Footprint.bWrap ? RasterWrapUnit(Command.Footprint.CenterUV.Y) : Command.Footprint.CenterUV.Y);
         const FVector2f SafeScale(
@@ -89,14 +90,14 @@ namespace
         const float SinRotation = FMath::Sin(Command.Footprint.RotationRadians);
         const int32 MinTile = Command.Footprint.bWrap ? -1 : 0;
         const int32 MaxTile = Command.Footprint.bWrap ? 1 : 0;
-        bool bHasDirtyRect = false;
+        bool        bHasDirtyRect = false;
 
         for (int32 TileY = MinTile; TileY <= MaxTile; ++TileY)
         {
             for (int32 TileX = MinTile; TileX <= MaxTile; ++TileX)
             {
                 const FVector2f TileCenter = Center + FVector2f(static_cast<float>(TileX), static_cast<float>(TileY));
-                const int32 MinX = FMath::Max(
+                const int32     MinX = FMath::Max(
                     FMath::FloorToInt((TileCenter.X - Command.Footprint.RadiusUV) * CanvasSize.X),
                     EffectiveClip.Min.X);
                 const int32 MaxX = FMath::Min(
@@ -129,7 +130,7 @@ namespace
                             Delta.Y = RasterWrappedDelta(Delta.Y);
                         }
                         const FVector2f Local = Delta / FMath::Max(Command.Footprint.RadiusUV, UE_SMALL_NUMBER);
-                        const float Distance = Local.Size();
+                        const float     Distance = Local.Size();
                         if (Distance > 1.0f)
                         {
                             continue;
@@ -153,16 +154,14 @@ namespace
                             Sampled.X * CosRotation - Sampled.Y * SinRotation,
                             Sampled.X * SinRotation + Sampled.Y * CosRotation,
                             Sampled.Z);
-                        const float Strength = FMath::Max(Command.Strength * EdgeFade, 0.0f);
+                        const float     Strength = FMath::Max(Command.Strength * EdgeFade, 0.0f);
                         const FVector3f Detail(Rotated.X * Strength, Rotated.Y * Strength, Rotated.Z);
-                        SetNormal(X, Y, FDWCEditorNormalRasterCore::BlendAngleCorrected(
-                            GetNormal(X, Y),
-                            Detail.GetSafeNormal(UE_SMALL_NUMBER, FVector3f(0.0f, 0.0f, 1.0f))));
+                        SetNormal(X, Y, FDWCEditorNormalRasterCore::BlendAngleCorrected(GetNormal(X, Y), Detail.GetSafeNormal(UE_SMALL_NUMBER, FVector3f(0.0f, 0.0f, 1.0f))));
                         if (bHasCoverage)
                         {
                             const float SourceCoverage = Command.CoverageSource.IsValid()
-                                ? Command.CoverageSource.SampleBilinear(SourceUV)
-                                : 1.0f;
+                                                             ? Command.CoverageSource.SampleBilinear(SourceUV)
+                                                             : 1.0f;
                             SetCoverage(
                                 X,
                                 Y,
@@ -177,7 +176,7 @@ namespace
         Result.bAffectedPixels = bHasDirtyRect;
         return Result;
     }
-}
+} // namespace
 
 FVector3f FDWCEditorNormalRasterCore::BlendAngleCorrected(
     const FVector3f& BaseNormal,
@@ -192,9 +191,9 @@ FVector3f FDWCEditorNormalRasterCore::BlendAngleCorrected(
 
 FDWCEditorRasterResult FDWCEditorNormalRasterCore::RasterizeStamp(
     const FDWCEditorNormalStampCommand& Command,
-    FDWCEditorNormalRasterSurface& Surface,
-    const FDWCEditorCancellationToken* CancellationToken,
-    const FIntRect* ClipRect)
+    FDWCEditorNormalRasterSurface&      Surface,
+    const FDWCEditorCancellationToken*  CancellationToken,
+    const FIntRect*                     ClipRect)
 {
     if (!Surface.IsValid() || !Command.NormalSource.IsValid() ||
         Command.Footprint.RadiusUV <= 0.0f || Command.Strength <= 0.0f)
@@ -204,14 +203,14 @@ FDWCEditorRasterResult FDWCEditorNormalRasterCore::RasterizeStamp(
 
     const FIntRect SurfaceRect(FIntPoint::ZeroValue, Surface.Size);
     const FIntRect EffectiveClip = ClipRect != nullptr
-        ? FIntRect(
-            FIntPoint(
-                FMath::Max(ClipRect->Min.X, SurfaceRect.Min.X),
-                FMath::Max(ClipRect->Min.Y, SurfaceRect.Min.Y)),
-            FIntPoint(
-                FMath::Min(ClipRect->Max.X, SurfaceRect.Max.X),
-                FMath::Min(ClipRect->Max.Y, SurfaceRect.Max.Y)))
-        : SurfaceRect;
+                                       ? FIntRect(
+                                             FIntPoint(
+                                                 FMath::Max(ClipRect->Min.X, SurfaceRect.Min.X),
+                                                 FMath::Max(ClipRect->Min.Y, SurfaceRect.Min.Y)),
+                                             FIntPoint(
+                                                 FMath::Min(ClipRect->Max.X, SurfaceRect.Max.X),
+                                                 FMath::Min(ClipRect->Max.Y, SurfaceRect.Max.Y)))
+                                       : SurfaceRect;
     if (EffectiveClip.IsEmpty())
     {
         return FDWCEditorRasterResult();
@@ -221,18 +220,22 @@ FDWCEditorRasterResult FDWCEditorNormalRasterCore::RasterizeStamp(
         Surface.Size,
         EffectiveClip,
         Surface.HasCoverage(),
-        [&Surface](const int32 X, const int32 Y) { return Surface.GetNormal(Y * Surface.Size.X + X); },
-        [&Surface](const int32 X, const int32 Y, const FVector3f& Normal) { Surface.SetNormal(Y * Surface.Size.X + X, Normal); },
-        [&Surface](const int32 X, const int32 Y) { return Surface.Coverage[Y * Surface.Size.X + X]; },
-        [&Surface](const int32 X, const int32 Y, const float Coverage) { Surface.Coverage[Y * Surface.Size.X + X] = Coverage; },
+        [&Surface](const int32 X, const int32 Y)
+        { return Surface.GetNormal(Y * Surface.Size.X + X); },
+        [&Surface](const int32 X, const int32 Y, const FVector3f& Normal)
+        { Surface.SetNormal(Y * Surface.Size.X + X, Normal); },
+        [&Surface](const int32 X, const int32 Y)
+        { return Surface.Coverage[Y * Surface.Size.X + X]; },
+        [&Surface](const int32 X, const int32 Y, const float Coverage)
+        { Surface.Coverage[Y * Surface.Size.X + X] = Coverage; },
         CancellationToken);
 }
 
 FDWCEditorRasterResult FDWCEditorNormalRasterCore::RasterizeStampRegion(
     const FDWCEditorNormalStampCommand& Command,
-    FDWCEditorNormalRasterRegion& Region,
-    const FDWCEditorCancellationToken* CancellationToken,
-    const FIntRect* ClipRect)
+    FDWCEditorNormalRasterRegion&       Region,
+    const FDWCEditorCancellationToken*  CancellationToken,
+    const FIntRect*                     ClipRect)
 {
     if (!Region.IsValid() || !Command.NormalSource.IsValid() ||
         Command.Footprint.RadiusUV <= 0.0f || Command.Strength <= 0.0f)
@@ -256,17 +259,21 @@ FDWCEditorRasterResult FDWCEditorNormalRasterCore::RasterizeStampRegion(
         Region.CanvasSize,
         EffectiveClip,
         Region.Surface.HasCoverage(),
-        [&Region](const int32 X, const int32 Y) { return Region.GetNormal(X, Y); },
-        [&Region](const int32 X, const int32 Y, const FVector3f& Normal) { Region.SetNormal(X, Y, Normal); },
-        [&Region](const int32 X, const int32 Y) { return Region.GetCoverage(X, Y); },
-        [&Region](const int32 X, const int32 Y, const float Coverage) { Region.SetCoverage(X, Y, Coverage); },
+        [&Region](const int32 X, const int32 Y)
+        { return Region.GetNormal(X, Y); },
+        [&Region](const int32 X, const int32 Y, const FVector3f& Normal)
+        { Region.SetNormal(X, Y, Normal); },
+        [&Region](const int32 X, const int32 Y)
+        { return Region.GetCoverage(X, Y); },
+        [&Region](const int32 X, const int32 Y, const float Coverage)
+        { Region.SetCoverage(X, Y, Coverage); },
         CancellationToken);
 }
 
 void FDWCEditorNormalRasterCore::ComputeStampBounds(
     const FDWCEditorNormalStampCommand& Command,
-    const FIntPoint CanvasSize,
-    TArray<FIntRect>& OutBounds)
+    const FIntPoint                     CanvasSize,
+    TArray<FIntRect>&                   OutBounds)
 {
     OutBounds.Reset();
     if (CanvasSize.X <= 0 || CanvasSize.Y <= 0 || Command.Footprint.RadiusUV <= 0.0f)
@@ -283,7 +290,7 @@ void FDWCEditorNormalRasterCore::ComputeStampBounds(
         for (int32 TileX = MinTile; TileX <= MaxTile; ++TileX)
         {
             const FVector2f TileCenter = Center + FVector2f(static_cast<float>(TileX), static_cast<float>(TileY));
-            FIntRect Bounds(
+            FIntRect        Bounds(
                 FMath::FloorToInt((TileCenter.X - Command.Footprint.RadiusUV) * CanvasSize.X),
                 FMath::FloorToInt((TileCenter.Y - Command.Footprint.RadiusUV) * CanvasSize.Y),
                 FMath::CeilToInt((TileCenter.X + Command.Footprint.RadiusUV) * CanvasSize.X) + 1,

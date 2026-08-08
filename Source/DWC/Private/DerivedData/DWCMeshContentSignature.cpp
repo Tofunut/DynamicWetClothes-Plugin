@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DerivedData/DWCMeshContentSignature.h"
 
 #include "Engine/SkeletalMesh.h"
@@ -13,13 +14,13 @@ namespace DWCMeshContentSignaturePrivate
         TArray<uint32> IndexBuffer;
         LODData.MultiSizeIndexContainer.GetIndexBuffer(IndexBuffer);
         return IndexBuffer.IsEmpty()
-            ? 0
-            : FCrc::MemCrc32(IndexBuffer.GetData(), IndexBuffer.Num() * sizeof(uint32));
+                   ? 0
+                   : FCrc::MemCrc32(IndexBuffer.GetData(), IndexBuffer.Num() * sizeof(uint32));
     }
 
     uint32 BuildPositionHash(const FSkeletalMeshLODRenderData& LODData)
     {
-        uint32 Hash = 0;
+        uint32      Hash = 0;
         const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
         for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
         {
@@ -35,8 +36,7 @@ namespace DWCMeshContentSignaturePrivate
         uint32 Hash = 0;
         for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
         {
-            const int32 SectionData[] =
-            {
+            const int32 SectionData[] = {
                 static_cast<int32>(Section.MaterialIndex),
                 static_cast<int32>(Section.BaseIndex),
                 static_cast<int32>(Section.NumTriangles),
@@ -50,14 +50,14 @@ namespace DWCMeshContentSignaturePrivate
 
     uint32 BuildUVHash(
         const FSkeletalMeshLODRenderData& LODData,
-        const int32 UVChannelIndex)
+        const int32                       UVChannelIndex)
     {
         if (UVChannelIndex < 0 || UVChannelIndex >= static_cast<int32>(LODData.GetNumTexCoords()))
         {
             return 0;
         }
 
-        uint32 Hash = 0;
+        uint32      Hash = 0;
         const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
         for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
         {
@@ -67,11 +67,11 @@ namespace DWCMeshContentSignaturePrivate
         }
         return Hash;
     }
-}
+} // namespace DWCMeshContentSignaturePrivate
 
 FString FDWCMeshContentSignature::BuildStructure(
     const USkeletalMesh* SkeletalMesh,
-    const int32 LODIndex)
+    const int32          LODIndex)
 {
     const FSkeletalMeshRenderData* RenderData =
         SkeletalMesh != nullptr ? SkeletalMesh->GetResourceForRendering() : nullptr;
@@ -84,9 +84,9 @@ FString FDWCMeshContentSignature::BuildStructure(
 }
 
 FString FDWCMeshContentSignature::BuildStructure(
-    const USkeletalMesh* SkeletalMesh,
+    const USkeletalMesh*              SkeletalMesh,
     const FSkeletalMeshLODRenderData& LODData,
-    const int32 LODIndex)
+    const int32                       LODIndex)
 {
     TArray<uint32> IndexBuffer;
     LODData.MultiSizeIndexContainer.GetIndexBuffer(IndexBuffer);
@@ -104,8 +104,8 @@ FString FDWCMeshContentSignature::BuildStructure(
 
 FString FDWCMeshContentSignature::BuildUVContent(
     const USkeletalMesh* SkeletalMesh,
-    const int32 LODIndex,
-    const int32 UVChannelIndex)
+    const int32          LODIndex,
+    const int32          UVChannelIndex)
 {
     const FSkeletalMeshRenderData* RenderData =
         SkeletalMesh != nullptr ? SkeletalMesh->GetResourceForRendering() : nullptr;

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurface.h"
@@ -25,10 +26,10 @@ class FDWCRevealBakeSurfaceCache
   public:
     const FDWCRevealBakeSurface* FindOrBuild(
         const FDWCBakeResolvedLayer& Layer,
-        int32                       LayerIndex,
-        int32                       LODIndex,
-        int32                       UVChannelIndex,
-        FString&                    OutErrorMessage);
+        int32                        LayerIndex,
+        int32                        LODIndex,
+        int32                        UVChannelIndex,
+        FString&                     OutErrorMessage);
 
   private:
     TMap<FDWCRevealBakeSurfaceCacheKey, FDWCRevealBakeSurface> Surfaces;

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Async/Async.h"
@@ -22,8 +23,8 @@ namespace
 
     FDWCEditorResourceReservationRequest MakeRequest(
         const EDWCEditorResourcePool Pool,
-        const uint64 Bytes,
-        const uint64 OperationId)
+        const uint64                 Bytes,
+        const uint64                 OperationId)
     {
         FDWCEditorResourceReservationRequest Request;
         Request.Pool = Pool;
@@ -44,7 +45,7 @@ namespace
         Config.PreviewGPUBytes = 100;
         return Config;
     }
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorResourceGovernorBudgetTest,
@@ -54,11 +55,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorResourceGovernorBudgetTest::RunTest(const FString&)
 {
     FDWCEditorResourceGovernor Governor(MakeSmallBudgetConfig());
-    FDWCEditorMemoryLease WorkerLease = Governor.TryAcquire(
+    FDWCEditorMemoryLease      WorkerLease = Governor.TryAcquire(
         MakeRequest(EDWCEditorResourcePool::WorkerPrivateCPU, 60, 1));
     TestTrue(TEXT("First CPU reservation is admitted"), WorkerLease.IsValid());
 
-    FString Error;
+    FString               Error;
     FDWCEditorMemoryLease RejectedCPU = Governor.TryAcquire(
         MakeRequest(EDWCEditorResourcePool::PreviewWorkspaceCPU, 50, 2),
         &Error);
@@ -84,13 +85,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorResourceGovernorDeferredAdmissionTest::RunTest(const FString&)
 {
     FDWCEditorResourceGovernor Governor(MakeSmallBudgetConfig());
-    FDWCEditorMemoryLease Owner = Governor.TryAcquire(
+    FDWCEditorMemoryLease      Owner = Governor.TryAcquire(
         MakeRequest(EDWCEditorResourcePool::WorkerPrivateCPU, 100, 10));
     TestTrue(TEXT("The budget owner is admitted"), Owner.IsValid());
 
     EDWCEditorResourceAdmissionResult AdmissionResult =
         EDWCEditorResourceAdmissionResult::InvalidRequest;
-    FString Error;
+    FString               Error;
     FDWCEditorMemoryLease Deferred = Governor.TryAcquireForAdmission(
         MakeRequest(EDWCEditorResourcePool::WorkerPrivateCPU, 1, 11),
         AdmissionResult,
@@ -102,7 +103,7 @@ bool FDWCEditorResourceGovernorDeferredAdmissionTest::RunTest(const FString&)
         EDWCEditorResourceAdmissionResult::TemporarilyUnavailable);
     TestFalse(TEXT("Temporary pressure still provides a diagnostic"), Error.IsEmpty());
     const FDWCEditorResourceGovernorDiagnostics DeferredDiagnostics = Governor.GetDiagnostics();
-    const FDWCEditorResourcePoolDiagnostics* WorkerPool =
+    const FDWCEditorResourcePoolDiagnostics*    WorkerPool =
         DeferredDiagnostics.Pools.FindByPredicate(
             [](const FDWCEditorResourcePoolDiagnostics& Pool)
             {
@@ -138,7 +139,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorResourceGovernorLeaseTest::RunTest(const FString&)
 {
     FDWCEditorResourceGovernor Governor(MakeSmallBudgetConfig());
-    FDWCEditorMemoryLease Lease = Governor.TryAcquire(
+    FDWCEditorMemoryLease      Lease = Governor.TryAcquire(
         MakeRequest(EDWCEditorResourcePool::WorkerPrivateCPU, 40, 4));
     TestTrue(TEXT("Lease starts valid"), Lease.IsValid());
     TestTrue(TEXT("Lease can grow within budget"), Lease.TryGrow(40));
@@ -165,12 +166,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorResourceGovernorAsyncLeaseTest::RunTest(const FString&)
 {
     FDWCEditorResourceGovernor Governor(MakeSmallBudgetConfig());
-    FDWCEditorMemoryLease Lease = Governor.TryAcquire(
+    FDWCEditorMemoryLease      Lease = Governor.TryAcquire(
         MakeRequest(EDWCEditorResourcePool::WorkerPrivateCPU, 75, 5));
     TestTrue(TEXT("Worker lease is admitted"), Lease.IsValid());
 
-    FEvent* WorkerStarted = FPlatformProcess::GetSynchEventFromPool(false);
-    FEvent* AllowWorkerRelease = FPlatformProcess::GetSynchEventFromPool(false);
+    FEvent*       WorkerStarted = FPlatformProcess::GetSynchEventFromPool(false);
+    FEvent*       AllowWorkerRelease = FPlatformProcess::GetSynchEventFromPool(false);
     TFuture<void> Worker = Async(
         EAsyncExecution::ThreadPool,
         [WorkerLease = MoveTemp(Lease), WorkerStarted, AllowWorkerRelease]() mutable
@@ -182,11 +183,11 @@ bool FDWCEditorResourceGovernorAsyncLeaseTest::RunTest(const FString&)
 
     TestTrue(TEXT("Worker starts while owning the lease"), WorkerStarted->Wait(5000));
     TestEqual(TEXT("Cross-thread lease remains accounted"),
-        Governor.GetDiagnostics().GlobalCPUUsedBytes, 75ull);
+              Governor.GetDiagnostics().GlobalCPUUsedBytes, 75ull);
     AllowWorkerRelease->Trigger();
     Worker.Wait();
     TestEqual(TEXT("Cross-thread release returns the reservation"),
-        Governor.GetDiagnostics().GlobalCPUUsedBytes, 0ull);
+              Governor.GetDiagnostics().GlobalCPUUsedBytes, 0ull);
 
     FPlatformProcess::ReturnSynchEventToPool(WorkerStarted);
     FPlatformProcess::ReturnSynchEventToPool(AllowWorkerRelease);

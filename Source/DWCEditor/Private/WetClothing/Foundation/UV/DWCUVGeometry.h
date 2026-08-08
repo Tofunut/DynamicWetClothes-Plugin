@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -6,7 +7,7 @@
 /** Shared UV geometry predicates used by DWC UV Channel chart construction and validation. */
 class FDWCUVGeometry
 {
-public:
+  public:
     static double ComputeTriangleArea2D(
         const FVector2D& A,
         const FVector2D& B,

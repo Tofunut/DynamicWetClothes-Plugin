@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
 
 #include "Engine/Texture2D.h"
@@ -32,17 +33,25 @@ namespace
     {
         switch (State)
         {
-        case EDWCEditorWorkerJobLifecycleState::PendingAdmission: return TEXT("PendingAdmission");
-        case EDWCEditorWorkerJobLifecycleState::Preparing: return TEXT("Preparing");
-        case EDWCEditorWorkerJobLifecycleState::Ready: return TEXT("Ready");
-        case EDWCEditorWorkerJobLifecycleState::Running: return TEXT("Running");
-        case EDWCEditorWorkerJobLifecycleState::CancelRequested: return TEXT("CancelRequested");
-        case EDWCEditorWorkerJobLifecycleState::Finalizing: return TEXT("Finalizing");
-        case EDWCEditorWorkerJobLifecycleState::Completed: return TEXT("Completed");
-        default: return TEXT("Unknown");
+        case EDWCEditorWorkerJobLifecycleState::PendingAdmission:
+            return TEXT("PendingAdmission");
+        case EDWCEditorWorkerJobLifecycleState::Preparing:
+            return TEXT("Preparing");
+        case EDWCEditorWorkerJobLifecycleState::Ready:
+            return TEXT("Ready");
+        case EDWCEditorWorkerJobLifecycleState::Running:
+            return TEXT("Running");
+        case EDWCEditorWorkerJobLifecycleState::CancelRequested:
+            return TEXT("CancelRequested");
+        case EDWCEditorWorkerJobLifecycleState::Finalizing:
+            return TEXT("Finalizing");
+        case EDWCEditorWorkerJobLifecycleState::Completed:
+            return TEXT("Completed");
+        default:
+            return TEXT("Unknown");
         }
     }
-}
+} // namespace
 
 void FDWCEditorPreviewDiagnostics::RegisterSession(FDWCEditorPreviewSession* Session)
 {
@@ -101,7 +110,6 @@ void FDWCEditorPreviewDiagnostics::DumpAllSessions()
             Session->DumpDiagnostics(SessionIndex);
         }
     }
-
 
     const TArray<FDWCEditorWorkerJobScheduler*>& Schedulers = GetActiveWorkerSchedulers();
     UE_LOG(

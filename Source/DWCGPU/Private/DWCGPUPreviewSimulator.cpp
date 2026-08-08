@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCGPUPreviewSimulator.h"
 
 #include "DWCGPUShaders.h"
@@ -128,17 +129,17 @@ bool FDWCGPUPreviewSimulator::Initialize(const FDWCGPUPreviewInitArgs& Args)
 
     RenderState = MakeShared<FRenderState, ESPMode::ThreadSafe>();
     constexpr float PreviewRestSurfaceArea = 1.0f;
-    const float PreviewRestTexelArea = PreviewRestSurfaceArea /
-        static_cast<float>(Resolution * Resolution);
+    const float     PreviewRestTexelArea = PreviewRestSurfaceArea /
+                                       static_cast<float>(Resolution * Resolution);
     const uint32 PackedRestTexelArea = PackFloatToBits(PreviewRestTexelArea);
 
     RenderState->TexelLookup.SetNum(Resolution * Resolution);
     for (FUint4& Lookup : RenderState->TexelLookup)
     {
-        Lookup.X = 0u;                       // Triangle ID.
-        Lookup.Y = 0u;                       // Packed barycentric coordinates.
-        Lookup.Z = PackedRestTexelArea;      // Positive rest area required by diffusion.
-        Lookup.W = 1u;                       // Island 0 + valid texel.
+        Lookup.X = 0u;                  // Triangle ID.
+        Lookup.Y = 0u;                  // Packed barycentric coordinates.
+        Lookup.Z = PackedRestTexelArea; // Positive rest area required by diffusion.
+        Lookup.W = 1u;                  // Island 0 + valid texel.
     }
     // The normalized preview domain uses +V as its canonical downward direction.
     // TriangleMetric is a local UV metric tensor, not the triangle's total surface
@@ -248,8 +249,8 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float /*Scena
     TArray<float> PendingWaterLimitValues;
     PendingWaterLimitValues.Add(Parameters.GetMaxPendingWaterPerPixel());
 
-    const bool bWriteSingleSplash = bManualSplashRequested;
-    const float StampScale = FMath::Clamp(InteractionCursorScale, 0.5f, 3.0f);
+    const bool            bWriteSingleSplash = bManualSplashRequested;
+    const float           StampScale = FMath::Clamp(InteractionCursorScale, 0.5f, 3.0f);
     bool                  bWriteAbsorptionSplash = false;
     TArray<FSurfaceStamp> SurfaceStamps;
     if (bWriteSingleSplash)

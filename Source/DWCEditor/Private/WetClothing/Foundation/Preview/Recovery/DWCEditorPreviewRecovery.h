@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -39,10 +40,10 @@ enum class EDWCEditorPreviewRecoveryAction : uint8
 
 struct FDWCEditorPreviewRecoveryPolicy
 {
-    int32 WorkspaceRetryLimit = 5;
-    int32 WorkerRetryLimit = 3;
-    int32 InvalidPayloadRetryLimit = 1;
-    int32 SchedulerRetryLimit = 5;
+    int32  WorkspaceRetryLimit = 5;
+    int32  WorkerRetryLimit = 3;
+    int32  InvalidPayloadRetryLimit = 1;
+    int32  SchedulerRetryLimit = 5;
     double InitialBackoffSeconds = 0.1;
     double MaximumBackoffSeconds = 1.0;
 };
@@ -67,20 +68,20 @@ class FDWCEditorPreviewRecoveryController final
     explicit FDWCEditorPreviewRecoveryController(
         const FDWCEditorPreviewRecoveryPolicy& InPolicy = FDWCEditorPreviewRecoveryPolicy());
 
-    void Reset(bool bAdvanceGeneration = true);
-    void ResetDiagnostics() { Diagnostics = {}; }
-    void Invalidate(EDWCEditorPreviewInvalidationReason Reason);
-    void RequestFullRebuild(EDWCEditorPreviewInvalidationReason Reason);
-    void MarkIncrementalPending();
-    void MarkIncrementalSucceeded();
-    bool TryBeginFullRebuild(double CurrentTimeSeconds = 0.0);
-    void MarkSucceeded();
+    void                            Reset(bool bAdvanceGeneration = true);
+    void                            ResetDiagnostics() { Diagnostics = {}; }
+    void                            Invalidate(EDWCEditorPreviewInvalidationReason Reason);
+    void                            RequestFullRebuild(EDWCEditorPreviewInvalidationReason Reason);
+    void                            MarkIncrementalPending();
+    void                            MarkIncrementalSucceeded();
+    bool                            TryBeginFullRebuild(double CurrentTimeSeconds = 0.0);
+    void                            MarkSucceeded();
     EDWCEditorPreviewRecoveryAction MarkFailure(
         EDWCEditorPreviewInvalidationReason Reason,
-        double CurrentTimeSeconds);
+        double                              CurrentTimeSeconds);
     EDWCEditorPreviewRecoveryAction HandleCommitResult(
         EDWCEditorPreviewCommitResult Result,
-        double CurrentTimeSeconds);
+        double                        CurrentTimeSeconds);
     void RecordStaleResult();
     void Suspend();
     void Resume(bool bRequireFullRebuild);
@@ -92,27 +93,27 @@ class FDWCEditorPreviewRecoveryController final
     {
         return State == EDWCEditorPreviewRecoveryState::FullRebuildInFlight;
     }
-    bool IsDegraded() const { return State == EDWCEditorPreviewRecoveryState::Degraded; }
-    bool IsSuspended() const { return State == EDWCEditorPreviewRecoveryState::Suspended; }
-    uint64 GetGeneration() const { return Generation; }
-    uint64 GetLastSuccessfulGeneration() const { return LastSuccessfulGeneration; }
-    int32 GetAttemptCount() const { return AttemptCount; }
-    double GetNextRetryTimeSeconds() const { return NextRetryTimeSeconds; }
-    EDWCEditorPreviewInvalidationReason GetLastReason() const { return LastReason; }
-    EDWCEditorPreviewRecoveryState GetState() const { return State; }
+    bool                                        IsDegraded() const { return State == EDWCEditorPreviewRecoveryState::Degraded; }
+    bool                                        IsSuspended() const { return State == EDWCEditorPreviewRecoveryState::Suspended; }
+    uint64                                      GetGeneration() const { return Generation; }
+    uint64                                      GetLastSuccessfulGeneration() const { return LastSuccessfulGeneration; }
+    int32                                       GetAttemptCount() const { return AttemptCount; }
+    double                                      GetNextRetryTimeSeconds() const { return NextRetryTimeSeconds; }
+    EDWCEditorPreviewInvalidationReason         GetLastReason() const { return LastReason; }
+    EDWCEditorPreviewRecoveryState              GetState() const { return State; }
     const FDWCEditorPreviewRecoveryDiagnostics& GetDiagnostics() const { return Diagnostics; }
 
   private:
-    int32 ResolveRetryLimit(EDWCEditorPreviewInvalidationReason Reason) const;
+    int32  ResolveRetryLimit(EDWCEditorPreviewInvalidationReason Reason) const;
     double ResolveBackoffSeconds() const;
 
-    FDWCEditorPreviewRecoveryPolicy Policy;
+    FDWCEditorPreviewRecoveryPolicy      Policy;
     FDWCEditorPreviewRecoveryDiagnostics Diagnostics;
-    EDWCEditorPreviewRecoveryState State = EDWCEditorPreviewRecoveryState::Ready;
-    EDWCEditorPreviewInvalidationReason LastReason = EDWCEditorPreviewInvalidationReason::None;
-    uint64 Generation = 1;
-    uint64 LastSuccessfulGeneration = 0;
-    int32 AttemptCount = 0;
-    double NextRetryTimeSeconds = 0.0;
-    bool bRebuildRequiredAfterResume = false;
+    EDWCEditorPreviewRecoveryState       State = EDWCEditorPreviewRecoveryState::Ready;
+    EDWCEditorPreviewInvalidationReason  LastReason = EDWCEditorPreviewInvalidationReason::None;
+    uint64                               Generation = 1;
+    uint64                               LastSuccessfulGeneration = 0;
+    int32                                AttemptCount = 0;
+    double                               NextRetryTimeSeconds = 0.0;
+    bool                                 bRebuildRequiredAfterResume = false;
 };

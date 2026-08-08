@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -25,7 +26,7 @@ namespace
         Pixels.Init(Descriptor.InitialBGRA8, Descriptor.Size.X * Descriptor.Size.Y);
         return Pixels;
     }
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorPreviewCommitLifetimeTest,
@@ -38,11 +39,11 @@ bool FDWCEditorPreviewCommitLifetimeTest::RunTest(const FString&)
         MakeShared<FDWCEditorRenderUploadQueue>();
     const TSharedRef<FDWCEditorTextureWorkspace> Workspace =
         MakeShared<FDWCEditorTextureWorkspace>(UploadQueue);
-    const FGuid ProducerSessionEpoch = FGuid::NewGuid();
+    const FGuid                        ProducerSessionEpoch = FGuid::NewGuid();
     FDWCEditorPreviewCommitCoordinator Coordinator(Workspace, ProducerSessionEpoch);
-    FDWCEditorPreviewConsumerLifetime Lifetime;
+    FDWCEditorPreviewConsumerLifetime  Lifetime;
 
-    UTexture2D* Owner = NewObject<UTexture2D>();
+    UTexture2D*          Owner = NewObject<UTexture2D>();
     FDWCEditorTextureKey Key;
     Key.Owner = FObjectKey(Owner);
     Key.Purpose = EDWCEditorTexturePurpose::TransparencyVisualization;
@@ -52,7 +53,8 @@ bool FDWCEditorPreviewCommitLifetimeTest::RunTest(const FString&)
     FDWCEditorPreviewCommitContext Context;
     Context.ConsumerToken = Lifetime.CaptureToken();
     Context.ProducerSessionEpoch = ProducerSessionEpoch;
-    Context.IsCurrent = []() { return true; };
+    Context.IsCurrent = []()
+    { return true; };
     Context.DebugName = TEXT("Commit lifetime test");
 
     FDWCEditorTextureLease Lease;
@@ -83,7 +85,8 @@ bool FDWCEditorPreviewCommitLifetimeTest::RunTest(const FString&)
 
     Lifetime.Resume();
     Context.ConsumerToken = Lifetime.CaptureToken();
-    Context.IsCurrent = []() { return false; };
+    Context.IsCurrent = []()
+    { return false; };
     FDWCEditorTextureLease StaleLease;
     TestEqual(
         TEXT("A stale request cannot replace the current texture"),
@@ -95,7 +98,8 @@ bool FDWCEditorPreviewCommitLifetimeTest::RunTest(const FString&)
             StaleLease),
         EDWCEditorPreviewCommitResult::StaleRequest);
 
-    Context.IsCurrent = []() { return true; };
+    Context.IsCurrent = []()
+    { return true; };
     Context.ProducerSessionEpoch = FGuid::NewGuid();
     FDWCEditorTextureLease ForeignSessionLease;
     TestEqual(

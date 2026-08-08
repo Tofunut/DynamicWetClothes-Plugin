@@ -1,11 +1,12 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Preview/Layers/DWCEditorPreviewLayerResolver.h"
 
 #include "DataAssets/WetClothingAsset.h"
 
 FDWCEditorPreviewSavedLayers FDWCEditorPreviewLayerResolver::Resolve(
     const UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex)
+    const int32              MaterialSlotIndex)
 {
     FDWCEditorPreviewSavedLayers Result;
     if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)

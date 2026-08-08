@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -42,7 +43,7 @@ struct DWC_API FWetWrinkleNormalBuildStats
 
 struct DWC_API FWetWrinkleTexturePixelBuffer
 {
-    FIntPoint Size = FIntPoint::ZeroValue;
+    FIntPoint      Size = FIntPoint::ZeroValue;
     TArray<FColor> Pixels;
 
     bool IsValid() const
@@ -53,7 +54,7 @@ struct DWC_API FWetWrinkleTexturePixelBuffer
 
 struct DWC_API FWetWrinkleTextureScalarBuffer
 {
-    FIntPoint Size = FIntPoint::ZeroValue;
+    FIntPoint     Size = FIntPoint::ZeroValue;
     TArray<float> Values;
 
     bool IsValid() const
@@ -66,10 +67,10 @@ struct DWC_API FWetWrinkleTextureScalarBuffer
 
 struct DWC_API FWetWrinkleNormalBuildOutput
 {
-    FWetWrinkleTexturePixelBuffer CorrectedNormal;
-    FWetWrinkleTexturePixelBuffer DeviationPreview;
-    FWetWrinkleTexturePixelBuffer CorrectedDeviationPreview;
-    FWetWrinkleTexturePixelBuffer ConvexSeparationPreview;
+    FWetWrinkleTexturePixelBuffer  CorrectedNormal;
+    FWetWrinkleTexturePixelBuffer  DeviationPreview;
+    FWetWrinkleTexturePixelBuffer  CorrectedDeviationPreview;
+    FWetWrinkleTexturePixelBuffer  ConvexSeparationPreview;
     FWetWrinkleTextureScalarBuffer ConvexSeparation;
-    FWetWrinkleNormalBuildStats Stats;
+    FWetWrinkleNormalBuildStats    Stats;
 };

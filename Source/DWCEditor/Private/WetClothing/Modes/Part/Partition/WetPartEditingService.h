@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Declares editing services for Wet Parts in a Wet Clothing Asset.
  */
@@ -24,39 +25,39 @@ class FWetPartEditingService
   public:
     static FWetPartScope MakeScope(int32 MaterialSlotIndex);
 
-    static bool EnsureDefaultWetPartForScope(UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope);
+    static bool  EnsureDefaultWetPartForScope(UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope);
     static int32 FindNextWetPartIDForScope(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope);
 
-    static FWetClothingWetPartEntry* FindMutableEntry(UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 WetPartID);
+    static FWetClothingWetPartEntry*       FindMutableEntry(UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 WetPartID);
     static const FWetClothingWetPartEntry* FindEntry(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 WetPartID);
     static const FWetClothingWetPartEntry* FindEntryForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID);
     static const FWetClothingWetPartEntry* FindEffectiveEntryForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID);
 
     static void BuildWetPartItemsForScope(
-        const UWetClothingAsset* WetClothingAsset,
-        const FWetPartScope& Scope,
+        const UWetClothingAsset*                      WetClothingAsset,
+        const FWetPartScope&                          Scope,
         TArray<TSharedPtr<FWetClothingWetPartEntry>>& OutItems);
 
     static TSet<int32> GetUVIslandIDsForWetPart(
-        const UWetClothingAsset* WetClothingAsset,
-        const FWetPartScope& Scope,
+        const UWetClothingAsset*                             WetClothingAsset,
+        const FWetPartScope&                                 Scope,
         const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& Islands,
-        int32 WetPartID);
+        int32                                                WetPartID);
 
     static int32 GetEffectiveWetPartIDForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID);
 
     static FLinearColor GetDefaultWetPartColor(int32 WetPartID);
-    static FString GetDefaultWetPartName(int32 WetPartID);
-    static FString GetWetPartDisplayName(const FWetClothingWetPartEntry& Entry);
-    static FString GetAssignedProfileLabel(const UWetClothingAsset* WetClothingAsset, const FWetClothingWetPartEntry& Entry);
+    static FString      GetDefaultWetPartName(int32 WetPartID);
+    static FString      GetWetPartDisplayName(const FWetClothingWetPartEntry& Entry);
+    static FString      GetAssignedProfileLabel(const UWetClothingAsset* WetClothingAsset, const FWetClothingWetPartEntry& Entry);
 
     static TMap<int32, int32> BuildUVIslandWetPartIDMap(
-        const UWetClothingAsset* WetClothingAsset,
-        const FWetPartScope& Scope,
+        const UWetClothingAsset*                             WetClothingAsset,
+        const FWetPartScope&                                 Scope,
         const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& Islands);
 
     static TMap<int32, FLinearColor> BuildUVIslandColorMap(
-        const UWetClothingAsset* WetClothingAsset,
-        const FWetPartScope& Scope,
+        const UWetClothingAsset*                             WetClothingAsset,
+        const FWetPartScope&                                 Scope,
         const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& Islands);
 };

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -20,7 +21,7 @@ namespace
 
     bool PumpAsyncOwnershipUntil(
         TFunctionRef<bool()> Predicate,
-        const double TimeoutSeconds = 5.0)
+        const double         TimeoutSeconds = 5.0)
     {
         const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
         while (!Predicate() && FPlatformTime::Seconds() < Deadline)
@@ -36,8 +37,7 @@ namespace
     {
       public:
         FDeterministicWorkerGate()
-            : Started(FPlatformProcess::GetSynchEventFromPool(true))
-            , Release(FPlatformProcess::GetSynchEventFromPool(true))
+            : Started(FPlatformProcess::GetSynchEventFromPool(true)), Release(FPlatformProcess::GetSynchEventFromPool(true))
         {
         }
 
@@ -71,10 +71,10 @@ namespace
 
     struct FIntegratedPreviewResult final : FDWCEditorWorkerJobResult
     {
-        TArray<FColor> Pixels;
+        TArray<FColor>                Pixels;
         FDWCEditorNormalRasterSurface WorkingSurface;
-        TArray<uint8> RebuiltCPUState;
-        bool bNormalPayload = false;
+        TArray<uint8>                 RebuiltCPUState;
+        bool                          bNormalPayload = false;
     };
 
     class FIntegratedAsyncOwnershipHarness final
@@ -110,14 +110,14 @@ namespace
         }
 
         FDWCEditorWorkerJobTicket Submit(
-            const FColor PixelColor,
-            const bool bNormalPayload,
-            TArray<uint8> RebuiltCPUState,
+            const FColor                                PixelColor,
+            const bool                                  bNormalPayload,
+            TArray<uint8>                               RebuiltCPUState,
             const TSharedPtr<FDeterministicWorkerGate>& Gate = nullptr,
-            const EDWCEditorAsyncRequestPolicy RequestPolicy = EDWCEditorAsyncRequestPolicy::LatestWins)
+            const EDWCEditorAsyncRequestPolicy          RequestPolicy = EDWCEditorAsyncRequestPolicy::LatestWins)
         {
             FDWCEditorTextureDescriptor Descriptor = MakeDescriptor();
-            TArray<FColor> Pixels;
+            TArray<FColor>              Pixels;
             Pixels.Init(PixelColor, Descriptor.Size.X * Descriptor.Size.Y);
 
             FDWCEditorNormalRasterSurface WorkingSurface;
@@ -132,23 +132,23 @@ namespace
 
             FDWCEditorWorkerJobDescriptor JobDescriptor;
             JobDescriptor.Key.Kind = bNormalPayload
-                ? EDWCEditorWorkerJobKind::WrinkleAccumulatedPreview
-                : EDWCEditorWorkerJobKind::TransparencyVisualization;
+                                         ? EDWCEditorWorkerJobKind::WrinkleAccumulatedPreview
+                                         : EDWCEditorWorkerJobKind::TransparencyVisualization;
             JobDescriptor.Key.MaterialSlotIndex = 3;
             JobDescriptor.Domain = bNormalPayload
-                ? EDWCEditorAuthoringDomain::Wrinkle
-                : EDWCEditorAuthoringDomain::Transparency;
+                                       ? EDWCEditorAuthoringDomain::Wrinkle
+                                       : EDWCEditorAuthoringDomain::Transparency;
             JobDescriptor.DomainRevision = DomainRevision;
             JobDescriptor.Priority = EDWCEditorWorkerJobPriority::Interactive;
             JobDescriptor.RequestPolicy = RequestPolicy;
             JobDescriptor.EstimatedBytes = TestJobBytes;
             JobDescriptor.DebugName = bNormalPayload
-                ? TEXT("Integrated wrinkle preview ownership")
-                : TEXT("Integrated transparency preview ownership");
+                                          ? TEXT("Integrated wrinkle preview ownership")
+                                          : TEXT("Integrated transparency preview ownership");
 
             const FDWCEditorPreviewConsumerToken ConsumerToken = ConsumerLifetime.CaptureToken();
-            FString SubmissionError;
-            const FDWCEditorWorkerJobTicket Ticket = Scheduler->SubmitTwoPhase(
+            FString                              SubmissionError;
+            const FDWCEditorWorkerJobTicket      Ticket = Scheduler->SubmitTwoPhase(
                 JobDescriptor,
                 [Pixels = MoveTemp(Pixels),
                  WorkingSurface = MoveTemp(WorkingSurface),
@@ -188,7 +188,7 @@ namespace
                     return true;
                 },
                 [this, ConsumerToken](
-                    const FDWCEditorWorkerJobTicket& AppliedTicket,
+                    const FDWCEditorWorkerJobTicket&                           AppliedTicket,
                     TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> Result)
                 {
                     ++ApplyCallbackCount;
@@ -205,27 +205,27 @@ namespace
                     CommitContext.IsCurrent = [this, AppliedTicket]()
                     {
                         return CurrentTicket.JobId == AppliedTicket.JobId &&
-                            CurrentTicket.Generation == AppliedTicket.Generation;
+                               CurrentTicket.Generation == AppliedTicket.Generation;
                     };
                     CommitContext.DebugName = TEXT("Integrated async ownership regression");
 
                     FDWCEditorTextureLease NewLease;
                     LastCommitResult = TypedResult->bNormalPayload
-                        ? Coordinator->CommitNormalBGRA8(
-                            CommitContext,
-                            MakeTextureKey(true),
-                            MakeDescriptor(),
-                            MoveTemp(TypedResult->Pixels),
-                            MoveTemp(TypedResult->WorkingSurface),
-                            NewLease,
-                            EDWCEditorTextureUploadPriority::Interactive)
-                        : Coordinator->CommitBGRA8(
-                            CommitContext,
-                            MakeTextureKey(false),
-                            MakeDescriptor(),
-                            MoveTemp(TypedResult->Pixels),
-                            NewLease,
-                            EDWCEditorTextureUploadPriority::Interactive);
+                                                ? Coordinator->CommitNormalBGRA8(
+                                                 CommitContext,
+                                                 MakeTextureKey(true),
+                                                 MakeDescriptor(),
+                                                 MoveTemp(TypedResult->Pixels),
+                                                 MoveTemp(TypedResult->WorkingSurface),
+                                                 NewLease,
+                                                 EDWCEditorTextureUploadPriority::Interactive)
+                                                : Coordinator->CommitBGRA8(
+                                                 CommitContext,
+                                                 MakeTextureKey(false),
+                                                 MakeDescriptor(),
+                                                 MoveTemp(TypedResult->Pixels),
+                                                 NewLease,
+                                                 EDWCEditorTextureUploadPriority::Interactive);
 
                     if (LastCommitResult == EDWCEditorPreviewCommitResult::Applied)
                     {
@@ -254,7 +254,8 @@ namespace
         bool WaitForCompletionCount(const int32 ExpectedCount, const double TimeoutSeconds = 5.0)
         {
             return PumpAsyncOwnershipUntil(
-                [this, ExpectedCount]() { return Completions.Num() >= ExpectedCount; },
+                [this, ExpectedCount]()
+                { return Completions.Num() >= ExpectedCount; },
                 TimeoutSeconds);
         }
 
@@ -264,8 +265,8 @@ namespace
                 [this]()
                 {
                     return Scheduler->GetActiveJobCount() == 0 &&
-                        Scheduler->GetQueuedJobCount() == 0 &&
-                        Scheduler->GetReservedBytes() == 0;
+                           Scheduler->GetQueuedJobCount() == 0 &&
+                           Scheduler->GetReservedBytes() == 0;
                 },
                 TimeoutSeconds);
         }
@@ -285,8 +286,8 @@ namespace
             FDWCEditorTextureKey Key;
             Key.Owner = FObjectKey(Owner);
             Key.Purpose = bNormalPayload
-                ? EDWCEditorTexturePurpose::WrinkleAccumulated
-                : EDWCEditorTexturePurpose::TransparencyVisualization;
+                              ? EDWCEditorTexturePurpose::WrinkleAccumulated
+                              : EDWCEditorTexturePurpose::TransparencyVisualization;
             Key.MaterialSlotIndex = 3;
             return Key;
         }
@@ -314,26 +315,26 @@ namespace
             UploadQueue->Shutdown();
         }
 
-        TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
+        TSharedPtr<FDWCEditorResourceGovernor>                        ResourceGovernor;
         TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler;
-        TSharedPtr<FDWCEditorRenderUploadQueue> UploadQueue;
-        TSharedPtr<FDWCEditorTextureWorkspace> Workspace;
-        TSharedPtr<FDWCEditorPreviewCommitCoordinator> Coordinator;
-        FDWCEditorPreviewConsumerLifetime ConsumerLifetime;
-        UTexture2D* Owner = nullptr;
-        FDWCEditorTextureLease ActiveLease;
-        TArray<uint8> PublishedCPUState;
-        TArray<EDWCEditorWorkerJobCompletion> Completions;
-        FDWCEditorWorkerJobTicket CurrentTicket;
-        EDWCEditorPreviewCommitResult LastCommitResult =
+        TSharedPtr<FDWCEditorRenderUploadQueue>                       UploadQueue;
+        TSharedPtr<FDWCEditorTextureWorkspace>                        Workspace;
+        TSharedPtr<FDWCEditorPreviewCommitCoordinator>                Coordinator;
+        FDWCEditorPreviewConsumerLifetime                             ConsumerLifetime;
+        UTexture2D*                                                   Owner = nullptr;
+        FDWCEditorTextureLease                                        ActiveLease;
+        TArray<uint8>                                                 PublishedCPUState;
+        TArray<EDWCEditorWorkerJobCompletion>                         Completions;
+        FDWCEditorWorkerJobTicket                                     CurrentTicket;
+        EDWCEditorPreviewCommitResult                                 LastCommitResult =
             EDWCEditorPreviewCommitResult::WorkspaceRejected;
         FString LastSubmissionError;
-        uint64 DomainRevision = 1;
-        int32 ApplyCallbackCount = 0;
-        int32 SuccessfulCommitCount = 0;
-        bool bCleanedUp = false;
+        uint64  DomainRevision = 1;
+        int32   ApplyCallbackCount = 0;
+        int32   SuccessfulCommitCount = 0;
+        bool    bCleanedUp = false;
     };
-}
+} // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorAsyncOwnershipLatestWinsRegressionTest,
@@ -342,14 +343,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorAsyncOwnershipLatestWinsRegressionTest::RunTest(const FString&)
 {
-    FIntegratedAsyncOwnershipHarness Harness;
+    FIntegratedAsyncOwnershipHarness           Harness;
     const TSharedPtr<FDeterministicWorkerGate> FirstGate =
         MakeShared<FDeterministicWorkerGate>();
 
     const FDWCEditorWorkerJobTicket FirstTicket = Harness.Submit(
         FColor::Red,
         true,
-        {1},
+        { 1 },
         FirstGate);
     TestTrue(TEXT("The first latest-wins request is accepted"), FirstTicket.IsValid());
     TestTrue(TEXT("The first worker reaches the deterministic gate"), FirstGate->WaitUntilStarted());
@@ -357,7 +358,7 @@ bool FDWCEditorAsyncOwnershipLatestWinsRegressionTest::RunTest(const FString&)
     const FDWCEditorWorkerJobTicket LatestTicket = Harness.Submit(
         FColor::Green,
         true,
-        {2});
+        { 2 });
     TestTrue(TEXT("The replacement latest-wins request is accepted"), LatestTicket.IsValid());
     FirstGate->ReleaseWork();
 
@@ -369,14 +370,14 @@ bool FDWCEditorAsyncOwnershipLatestWinsRegressionTest::RunTest(const FString&)
     {
         const TArray<FColor>& Pixels = Harness.ActiveLease->GetBGRA8Pixels();
         TestTrue(TEXT("The published buffer contains the latest generation"),
-            !Pixels.IsEmpty() && Pixels[0] == FColor::Green);
+                 !Pixels.IsEmpty() && Pixels[0] == FColor::Green);
         TestEqual(TEXT("Exactly one consumer lease owns the result"),
-            Harness.ActiveLease->GetActiveLeaseCount(), 1u);
+                  Harness.ActiveLease->GetActiveLeaseCount(), 1u);
     }
     TestEqual(TEXT("CPU-side companion state commits atomically with the latest result"),
-        Harness.PublishedCPUState, TArray<uint8>({2}));
+              Harness.PublishedCPUState, TArray<uint8>({ 2 }));
     TestTrue(TEXT("Worker ownership is released after both generations retire"),
-        Harness.WaitForNoWorkerOwnership());
+             Harness.WaitForNoWorkerOwnership());
 
     const FDWCEditorResourceGovernorDiagnostics GovernorDiagnostics =
         Harness.ResourceGovernor->GetDiagnostics();
@@ -393,13 +394,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorAsyncOwnershipStaleAndSuspendRegressionTest::RunTest(const FString&)
 {
-    FIntegratedAsyncOwnershipHarness Harness;
+    FIntegratedAsyncOwnershipHarness           Harness;
     const TSharedPtr<FDeterministicWorkerGate> StaleGate =
         MakeShared<FDeterministicWorkerGate>();
     const FDWCEditorWorkerJobTicket StaleTicket = Harness.Submit(
         FColor::Blue,
         false,
-        {3},
+        { 3 },
         StaleGate,
         EDWCEditorAsyncRequestPolicy::FIFO);
     TestTrue(TEXT("The revision test request is accepted"), StaleTicket.IsValid());
@@ -410,14 +411,14 @@ bool FDWCEditorAsyncOwnershipStaleAndSuspendRegressionTest::RunTest(const FStrin
     TestEqual(TEXT("A stale domain revision never reaches Apply"), Harness.ApplyCallbackCount, 0);
     TestEqual(TEXT("A stale domain revision never publishes a lease"), Harness.SuccessfulCommitCount, 0);
     TestEqual(TEXT("The scheduler reports stale completion"),
-        Harness.Completions.Last(), EDWCEditorWorkerJobCompletion::Stale);
+              Harness.Completions.Last(), EDWCEditorWorkerJobCompletion::Stale);
 
     const TSharedPtr<FDeterministicWorkerGate> SuspendedGate =
         MakeShared<FDeterministicWorkerGate>();
     const FDWCEditorWorkerJobTicket SuspendedTicket = Harness.Submit(
         FColor::Yellow,
         false,
-        {4},
+        { 4 },
         SuspendedGate,
         EDWCEditorAsyncRequestPolicy::FIFO);
     TestTrue(TEXT("The consumer lifetime test request is accepted"), SuspendedTicket.IsValid());
@@ -427,10 +428,10 @@ bool FDWCEditorAsyncOwnershipStaleAndSuspendRegressionTest::RunTest(const FStrin
     TestTrue(TEXT("The suspended consumer request retires"), Harness.WaitForCompletionCount(2));
     TestEqual(TEXT("The scheduler reaches the consumer commit gate"), Harness.ApplyCallbackCount, 1);
     TestEqual(TEXT("An expired consumer token is rejected"),
-        Harness.LastCommitResult, EDWCEditorPreviewCommitResult::ConsumerExpired);
+              Harness.LastCommitResult, EDWCEditorPreviewCommitResult::ConsumerExpired);
     TestEqual(TEXT("A rejected consumer receives no workspace lease"), Harness.SuccessfulCommitCount, 0);
     TestTrue(TEXT("All stale and rejected jobs release their memory ownership"),
-        Harness.WaitForNoWorkerOwnership());
+             Harness.WaitForNoWorkerOwnership());
     Harness.Cleanup();
     return true;
 }
@@ -443,27 +444,27 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorAsyncOwnershipPayloadAtomicityRegressionTest::RunTest(const FString&)
 {
     FIntegratedAsyncOwnershipHarness Harness;
-    const FDWCEditorWorkerJobTicket InitialTicket = Harness.Submit(
+    const FDWCEditorWorkerJobTicket  InitialTicket = Harness.Submit(
         FColor(140, 128, 250, 255),
         true,
-        {11},
+        { 11 },
         nullptr,
         EDWCEditorAsyncRequestPolicy::FIFO);
     TestTrue(TEXT("The initial wrinkle payload is accepted"), InitialTicket.IsValid());
     TestTrue(TEXT("The initial wrinkle payload commits"), Harness.WaitForCompletionCount(1));
     TestTrue(TEXT("The committed wrinkle payload owns a lease"), Harness.ActiveLease.IsValid());
     TestEqual(TEXT("The normal working surface transfers with encoded pixels"),
-        Harness.ActiveLease.IsValid() && Harness.ActiveLease->GetWorkingNormalSurface().IsValid(), true);
+              Harness.ActiveLease.IsValid() && Harness.ActiveLease->GetWorkingNormalSurface().IsValid(), true);
     const FDWCEditorTextureHandle InitialHandle = Harness.ActiveLease.GetHandle();
-    const uint64 InitialRevision = InitialHandle.IsValid() ? InitialHandle->GetContentRevision() : 0;
-    const TArray<uint8> InitialCPUState = Harness.PublishedCPUState;
+    const uint64                  InitialRevision = InitialHandle.IsValid() ? InitialHandle->GetContentRevision() : 0;
+    const TArray<uint8>           InitialCPUState = Harness.PublishedCPUState;
 
     const TSharedPtr<FDeterministicWorkerGate> RejectedGate =
         MakeShared<FDeterministicWorkerGate>();
     const FDWCEditorWorkerJobTicket RejectedTicket = Harness.Submit(
         FColor::Magenta,
         false,
-        {22},
+        { 22 },
         RejectedGate,
         EDWCEditorAsyncRequestPolicy::FIFO);
     TestTrue(TEXT("The replacement payload is accepted by the scheduler"), RejectedTicket.IsValid());
@@ -473,24 +474,24 @@ bool FDWCEditorAsyncOwnershipPayloadAtomicityRegressionTest::RunTest(const FStri
     TestTrue(TEXT("The replacement payload retires"), Harness.WaitForCompletionCount(2));
 
     TestEqual(TEXT("A rejected result does not replace the prior lease"),
-        Harness.ActiveLease.GetHandle(), InitialHandle);
+              Harness.ActiveLease.GetHandle(), InitialHandle);
     TestEqual(TEXT("A rejected result does not change prior texture content"),
-        InitialHandle.IsValid() ? InitialHandle->GetContentRevision() : 0, InitialRevision);
+              InitialHandle.IsValid() ? InitialHandle->GetContentRevision() : 0, InitialRevision);
     TestEqual(TEXT("A rejected result does not partially commit companion CPU state"),
-        Harness.PublishedCPUState, InitialCPUState);
+              Harness.PublishedCPUState, InitialCPUState);
     TestEqual(TEXT("Only the initial payload commits"), Harness.SuccessfulCommitCount, 1);
 
     const TWeakPtr<FDWCEditorTextureWorkspaceEntry> RetiredHandle = InitialHandle;
     Harness.Workspace->Discard(Harness.ActiveLease);
     TestTrue(TEXT("Discard preserves an entry while its consumer lease is active"),
-        Harness.ActiveLease.IsValid());
+             Harness.ActiveLease.IsValid());
     Harness.ActiveLease.Reset();
     Harness.Workspace->TrimToBudget();
     const FDWCEditorTextureHandle Reacquired = Harness.Workspace->Acquire(
         Harness.MakeTextureKey(true),
         Harness.MakeDescriptor());
     TestTrue(TEXT("Releasing the lease lets the workspace replace the discarded entry"),
-        Reacquired.IsValid() && Reacquired != RetiredHandle.Pin());
+             Reacquired.IsValid() && Reacquired != RetiredHandle.Pin());
 
     Harness.Cleanup();
     return true;
@@ -503,13 +504,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorAsyncOwnershipShutdownRegressionTest::RunTest(const FString&)
 {
-    FIntegratedAsyncOwnershipHarness Harness;
+    FIntegratedAsyncOwnershipHarness           Harness;
     const TSharedPtr<FDeterministicWorkerGate> ShutdownGate =
         MakeShared<FDeterministicWorkerGate>();
     const FDWCEditorWorkerJobTicket Ticket = Harness.Submit(
         FColor::Cyan,
         true,
-        {31},
+        { 31 },
         ShutdownGate,
         EDWCEditorAsyncRequestPolicy::FIFO);
     TestTrue(TEXT("The shutdown test request is accepted"), Ticket.IsValid());
@@ -518,16 +519,16 @@ bool FDWCEditorAsyncOwnershipShutdownRegressionTest::RunTest(const FString&)
     Harness.ShutdownAsyncPath();
     ShutdownGate->ReleaseWork();
     TestTrue(TEXT("Shutdown eventually retires active worker ownership"),
-        Harness.WaitForNoWorkerOwnership());
+             Harness.WaitForNoWorkerOwnership());
     TestEqual(TEXT("A late shutdown result never reaches Apply"), Harness.ApplyCallbackCount, 0);
     TestFalse(TEXT("A late shutdown result never acquires a texture lease"),
-        Harness.ActiveLease.IsValid());
+              Harness.ActiveLease.IsValid());
     const FDWCEditorResourceGovernorDiagnostics GovernorDiagnostics =
         Harness.ResourceGovernor->GetDiagnostics();
     TestEqual(TEXT("Shutdown releases every governor reservation"),
-        GovernorDiagnostics.Reservations.Num(), 0);
+              GovernorDiagnostics.Reservations.Num(), 0);
     TestEqual(TEXT("Shutdown releases all reserved CPU bytes"),
-        GovernorDiagnostics.GlobalCPUUsedBytes, 0ull);
+              GovernorDiagnostics.GlobalCPUUsedBytes, 0ull);
 
     Harness.Cleanup();
     return true;

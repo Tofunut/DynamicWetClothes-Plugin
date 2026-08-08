@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Raster/DWCEditorRasterTypes.h"
 
 namespace
@@ -12,11 +13,12 @@ namespace
         const float FracY)
     {
         return FMath::Lerp(
-            FMath::Lerp(static_cast<float>(V00), static_cast<float>(V10), FracX),
-            FMath::Lerp(static_cast<float>(V01), static_cast<float>(V11), FracX),
-            FracY) / 255.0f;
+                   FMath::Lerp(static_cast<float>(V00), static_cast<float>(V10), FracX),
+                   FMath::Lerp(static_cast<float>(V01), static_cast<float>(V11), FracX),
+                   FracY) /
+               255.0f;
     }
-}
+} // namespace
 
 bool FDWCEditorNormalSourceSnapshot::IsValid() const
 {
@@ -30,14 +32,14 @@ FVector3f FDWCEditorNormalSourceSnapshot::SampleBilinear(const FVector2f& UV) co
         return FVector3f(0.0f, 0.0f, 1.0f);
     }
 
-    const float SampleX = FMath::Clamp(UV.X, 0.0f, 1.0f) * static_cast<float>(Texture.Width - 1);
-    const float SampleY = FMath::Clamp(UV.Y, 0.0f, 1.0f) * static_cast<float>(Texture.Height - 1);
-    const int32 X0 = FMath::FloorToInt(SampleX);
-    const int32 Y0 = FMath::FloorToInt(SampleY);
-    const int32 X1 = FMath::Min(X0 + 1, Texture.Width - 1);
-    const int32 Y1 = FMath::Min(Y0 + 1, Texture.Height - 1);
-    const float FracX = SampleX - static_cast<float>(X0);
-    const float FracY = SampleY - static_cast<float>(Y0);
+    const float   SampleX = FMath::Clamp(UV.X, 0.0f, 1.0f) * static_cast<float>(Texture.Width - 1);
+    const float   SampleY = FMath::Clamp(UV.Y, 0.0f, 1.0f) * static_cast<float>(Texture.Height - 1);
+    const int32   X0 = FMath::FloorToInt(SampleX);
+    const int32   Y0 = FMath::FloorToInt(SampleY);
+    const int32   X1 = FMath::Min(X0 + 1, Texture.Width - 1);
+    const int32   Y1 = FMath::Min(Y0 + 1, Texture.Height - 1);
+    const float   FracX = SampleX - static_cast<float>(X0);
+    const float   FracY = SampleY - static_cast<float>(Y0);
     const FColor* Pixels = reinterpret_cast<const FColor*>(Texture.RawData->GetData());
     const FColor& C00 = Pixels[Y0 * Texture.Width + X0];
     const FColor& C10 = Pixels[Y0 * Texture.Width + X1];
@@ -45,7 +47,7 @@ FVector3f FDWCEditorNormalSourceSnapshot::SampleBilinear(const FVector2f& UV) co
     const FColor& C11 = Pixels[Y1 * Texture.Width + X1];
 
     const float X = BilinearChannel(C00.R, C10.R, C01.R, C11.R, FracX, FracY) * 2.0f - 1.0f;
-    float Y = -(BilinearChannel(C00.G, C10.G, C01.G, C11.G, FracX, FracY) * 2.0f - 1.0f);
+    float       Y = -(BilinearChannel(C00.G, C10.G, C01.G, C11.G, FracX, FracY) * 2.0f - 1.0f);
     if (bFlipGreenChannel)
     {
         Y = -Y;
@@ -111,7 +113,7 @@ bool FDWCEditorNormalRasterSurface::Initialize(const FIntPoint& InSize, const bo
 bool FDWCEditorNormalRasterSurface::IsValid() const
 {
     return Size.X > 0 && Size.Y > 0 && PackedNormalXY.Num() == Size.X * Size.Y &&
-        (Coverage.IsEmpty() || Coverage.Num() == PackedNormalXY.Num());
+           (Coverage.IsEmpty() || Coverage.Num() == PackedNormalXY.Num());
 }
 
 bool FDWCEditorNormalRasterSurface::HasCoverage() const
@@ -132,8 +134,8 @@ int32 FDWCEditorNormalRasterSurface::GetPixelCount() const
 FVector3f FDWCEditorNormalRasterSurface::GetNormal(const int32 Index) const
 {
     return PackedNormalXY.IsValidIndex(Index)
-        ? UnpackNormalXY(PackedNormalXY[Index])
-        : FVector3f(0.0f, 0.0f, 1.0f);
+               ? UnpackNormalXY(PackedNormalXY[Index])
+               : FVector3f(0.0f, 0.0f, 1.0f);
 }
 
 void FDWCEditorNormalRasterSurface::SetNormal(const int32 Index, const FVector3f& Normal)
@@ -147,8 +149,8 @@ void FDWCEditorNormalRasterSurface::SetNormal(const int32 Index, const FVector3f
 uint32 FDWCEditorNormalRasterSurface::PackNormalXY(const FVector3f& Normal)
 {
     const FVector3f SafeNormal = Normal.GetSafeNormal(UE_SMALL_NUMBER, FVector3f(0.0f, 0.0f, 1.0f));
-    const int16 X = static_cast<int16>(FMath::RoundToInt(FMath::Clamp(SafeNormal.X, -1.0f, 1.0f) * 32767.0f));
-    const int16 Y = static_cast<int16>(FMath::RoundToInt(FMath::Clamp(SafeNormal.Y, -1.0f, 1.0f) * 32767.0f));
+    const int16     X = static_cast<int16>(FMath::RoundToInt(FMath::Clamp(SafeNormal.X, -1.0f, 1.0f) * 32767.0f));
+    const int16     Y = static_cast<int16>(FMath::RoundToInt(FMath::Clamp(SafeNormal.Y, -1.0f, 1.0f) * 32767.0f));
     return static_cast<uint16>(X) | (static_cast<uint32>(static_cast<uint16>(Y)) << 16);
 }
 
@@ -163,7 +165,7 @@ FVector3f FDWCEditorNormalRasterSurface::UnpackNormalXY(const uint32 PackedNorma
 bool FDWCEditorNormalRasterRegion::Initialize(
     const FIntPoint InCanvasSize,
     const FIntRect& InRect,
-    const bool bWithCoverage)
+    const bool      bWithCoverage)
 {
     CanvasSize = InCanvasSize;
     Rect = FIntRect(
@@ -183,7 +185,7 @@ bool FDWCEditorNormalRasterRegion::Initialize(
 
 bool FDWCEditorNormalRasterRegion::InitializeFromSurface(
     const FDWCEditorNormalRasterSurface& Source,
-    const FIntRect& InRect)
+    const FIntRect&                      InRect)
 {
     if (!Source.IsValid() || !Initialize(Source.Size, InRect, Source.HasCoverage()))
     {
@@ -211,9 +213,9 @@ bool FDWCEditorNormalRasterRegion::InitializeFromSurface(
 bool FDWCEditorNormalRasterRegion::IsValid() const
 {
     return CanvasSize.X > 0 && CanvasSize.Y > 0 && !Rect.IsEmpty() &&
-        Rect.Min.X >= 0 && Rect.Min.Y >= 0 && Rect.Max.X <= CanvasSize.X &&
-        Rect.Max.Y <= CanvasSize.Y && Surface.IsValid() &&
-        Surface.Size == FIntPoint(Rect.Width(), Rect.Height());
+           Rect.Min.X >= 0 && Rect.Min.Y >= 0 && Rect.Max.X <= CanvasSize.X &&
+           Rect.Max.Y <= CanvasSize.Y && Surface.IsValid() &&
+           Surface.Size == FIntPoint(Rect.Width(), Rect.Height());
 }
 
 bool FDWCEditorNormalRasterRegion::Contains(const int32 X, const int32 Y) const
@@ -229,8 +231,8 @@ uint64 FDWCEditorNormalRasterRegion::GetAllocatedSizeBytes() const
 int32 FDWCEditorNormalRasterRegion::ToLocalIndex(const int32 X, const int32 Y) const
 {
     return Contains(X, Y)
-        ? (Y - Rect.Min.Y) * Rect.Width() + (X - Rect.Min.X)
-        : INDEX_NONE;
+               ? (Y - Rect.Min.Y) * Rect.Width() + (X - Rect.Min.X)
+               : INDEX_NONE;
 }
 
 FVector3f FDWCEditorNormalRasterRegion::GetNormal(const int32 X, const int32 Y) const
@@ -239,8 +241,8 @@ FVector3f FDWCEditorNormalRasterRegion::GetNormal(const int32 X, const int32 Y) 
 }
 
 void FDWCEditorNormalRasterRegion::SetNormal(
-    const int32 X,
-    const int32 Y,
+    const int32      X,
+    const int32      Y,
     const FVector3f& Normal)
 {
     Surface.SetNormal(ToLocalIndex(X, Y), Normal);

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
 
 #include "Algo/Sort.h"
@@ -14,13 +15,13 @@
 
 namespace
 {
-    const FName SpatialCacheNamespace(TEXT("SpatialQuery"));
+    const FName     SpatialCacheNamespace(TEXT("SpatialQuery"));
     constexpr int32 BVHLeafTriangleCount = 8;
 
     uint64 MakeTriangleLookupKey(const int32 MaterialSlotIndex, const int32 TriangleID)
     {
         return (static_cast<uint64>(static_cast<uint32>(MaterialSlotIndex)) << 32) |
-            static_cast<uint32>(TriangleID);
+               static_cast<uint32>(TriangleID);
     }
 
     FVector3f AnyPerpendicular(const FVector3f& Normal)
@@ -44,7 +45,7 @@ namespace
     }
 
     bool DoesSegmentIntersectBox(
-        const FBox3f& Box,
+        const FBox3f&    Box,
         const FVector3f& SegmentStart,
         const FVector3f& SegmentEnd)
     {
@@ -54,8 +55,8 @@ namespace
         }
 
         const FVector3f Delta = SegmentEnd - SegmentStart;
-        float Entry = 0.0f;
-        float Exit = 1.0f;
+        float           Entry = 0.0f;
+        float           Exit = 1.0f;
         for (int32 Axis = 0; Axis < 3; ++Axis)
         {
             if (FMath::IsNearlyZero(Delta[Axis]))
@@ -89,28 +90,28 @@ namespace
         const FVector3f& A,
         const FVector3f& B,
         const FVector3f& C,
-        float& OutSegmentT,
-        FVector3f& OutBarycentric)
+        float&           OutSegmentT,
+        FVector3f&       OutBarycentric)
     {
         const FVector3f SegmentDelta = SegmentEnd - SegmentStart;
         const FVector3f EdgeAB = B - A;
         const FVector3f EdgeAC = C - A;
         const FVector3f P = FVector3f::CrossProduct(SegmentDelta, EdgeAC);
-        const float Determinant = FVector3f::DotProduct(EdgeAB, P);
+        const float     Determinant = FVector3f::DotProduct(EdgeAB, P);
         if (FMath::Abs(Determinant) <= UE_SMALL_NUMBER)
         {
             return false;
         }
 
-        const float InverseDeterminant = 1.0f / Determinant;
+        const float     InverseDeterminant = 1.0f / Determinant;
         const FVector3f T = SegmentStart - A;
-        const float BarycentricB = FVector3f::DotProduct(T, P) * InverseDeterminant;
+        const float     BarycentricB = FVector3f::DotProduct(T, P) * InverseDeterminant;
         if (BarycentricB < -UE_KINDA_SMALL_NUMBER || BarycentricB > 1.0f + UE_KINDA_SMALL_NUMBER)
         {
             return false;
         }
         const FVector3f Q = FVector3f::CrossProduct(T, EdgeAB);
-        const float BarycentricC = FVector3f::DotProduct(SegmentDelta, Q) * InverseDeterminant;
+        const float     BarycentricC = FVector3f::DotProduct(SegmentDelta, Q) * InverseDeterminant;
         if (BarycentricC < -UE_KINDA_SMALL_NUMBER ||
             BarycentricB + BarycentricC > 1.0f + UE_KINDA_SMALL_NUMBER)
         {
@@ -136,7 +137,7 @@ namespace
         const FVector2f V0 = B - A;
         const FVector2f V1 = C - A;
         const FVector2f V2 = Point - A;
-        const float Denominator = V0.X * V1.Y - V1.X * V0.Y;
+        const float     Denominator = V0.X * V1.Y - V1.X * V0.Y;
         if (FMath::Abs(Denominator) <= UE_SMALL_NUMBER)
         {
             return FVector3f(-1.0f, -1.0f, -1.0f);
@@ -150,8 +151,8 @@ namespace
     {
         constexpr float Tolerance = 0.0001f;
         return Barycentric.X >= -Tolerance &&
-            Barycentric.Y >= -Tolerance &&
-            Barycentric.Z >= -Tolerance;
+               Barycentric.Y >= -Tolerance &&
+               Barycentric.Z >= -Tolerance;
     }
 
     float WrapUV(const float Value)
@@ -161,9 +162,9 @@ namespace
 
     void FillProjectedSurface(
         const FDWCEditorSpatialTriangle& Triangle,
-        const FVector3f& Barycentric,
-        const FTransform& ComponentTransform,
-        FDWCEditorProjectedSurface& OutSurface)
+        const FVector3f&                 Barycentric,
+        const FTransform&                ComponentTransform,
+        FDWCEditorProjectedSurface&      OutSurface)
     {
         const FVector3f LocalPosition =
             Triangle.LocalPositions[0] * Barycentric.X +
@@ -175,14 +176,15 @@ namespace
         OutSurface.Barycentric = FVector(Barycentric);
         OutSurface.WorldPosition = ComponentTransform.TransformPosition(FVector(LocalPosition));
         OutSurface.WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalNormal))
-            .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+                                     .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
         OutSurface.WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalTangent))
-            .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+                                      .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
         OutSurface.WorldBitangent = FVector::CrossProduct(
-            OutSurface.WorldNormal,
-            OutSurface.WorldTangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+                                        OutSurface.WorldNormal,
+                                        OutSurface.WorldTangent)
+                                        .GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
     }
-}
+} // namespace
 
 FName FDWCEditorSpatialData::StaticCacheTypeName()
 {
@@ -193,10 +195,10 @@ FName FDWCEditorSpatialData::StaticCacheTypeName()
 uint64 FDWCEditorSpatialData::GetAllocatedSizeBytes() const
 {
     uint64 Bytes = static_cast<uint64>(Triangles.GetAllocatedSize()) +
-        static_cast<uint64>(TriangleLookup.GetAllocatedSize()) +
-        static_cast<uint64>(BVHTriangleIndices.GetAllocatedSize()) +
-        static_cast<uint64>(BVHNodes.GetAllocatedSize()) +
-        static_cast<uint64>(UVTriangleGrid.GetAllocatedSize());
+                   static_cast<uint64>(TriangleLookup.GetAllocatedSize()) +
+                   static_cast<uint64>(BVHTriangleIndices.GetAllocatedSize()) +
+                   static_cast<uint64>(BVHNodes.GetAllocatedSize()) +
+                   static_cast<uint64>(UVTriangleGrid.GetAllocatedSize());
     for (const TArray<int32>& Cell : UVTriangleGrid)
     {
         Bytes += static_cast<uint64>(Cell.GetAllocatedSize());
@@ -212,10 +214,10 @@ FDWCEditorSpatialQueryService::FDWCEditorSpatialQueryService(
 
 FDWCEditorSpatialHandle FDWCEditorSpatialQueryService::Acquire(
     const UWetClothingAsset* WetClothingAsset,
-    USkeletalMesh* Mesh,
-    const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex,
-    FString* OutError)
+    USkeletalMesh*           Mesh,
+    const int32              UVChannelIndex,
+    const int32              MaterialSlotIndex,
+    FString*                 OutError)
 {
     FDWCEditorSpatialLease Lease = AcquireLease(
         WetClothingAsset,
@@ -228,15 +230,15 @@ FDWCEditorSpatialHandle FDWCEditorSpatialQueryService::Acquire(
 
 FDWCEditorSpatialLease FDWCEditorSpatialQueryService::AcquireLease(
     const UWetClothingAsset* WetClothingAsset,
-    USkeletalMesh* Mesh,
-    const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex,
-    FString* OutError)
+    USkeletalMesh*           Mesh,
+    const int32              UVChannelIndex,
+    const int32              MaterialSlotIndex,
+    FString*                 OutError)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorSpatialQueryService_Acquire);
     check(IsInGameThread());
 
-    constexpr int32 LODIndex = 0;
+    constexpr int32                     LODIndex = 0;
     const TOptional<FDWCEditorCacheKey> CacheKey = MakeCacheKey(
         WetClothingAsset,
         Mesh,
@@ -279,10 +281,10 @@ FDWCEditorSpatialLease FDWCEditorSpatialQueryService::AcquireLease(
 
 bool FDWCEditorSpatialQueryService::TraceSurface(
     const FDWCEditorSpatialHandle& Handle,
-    const USkeletalMeshComponent* MeshComponent,
-    const FVector& RayOrigin,
-    const FVector& RayDirection,
-    FDWCEditorSurfaceHit& OutHit) const
+    const USkeletalMeshComponent*  MeshComponent,
+    const FVector&                 RayOrigin,
+    const FVector&                 RayDirection,
+    FDWCEditorSurfaceHit&          OutHit) const
 {
     OutHit = FDWCEditorSurfaceHit();
     if (!Handle.IsValid() || Handle->Triangles.IsEmpty() || MeshComponent == nullptr)
@@ -297,10 +299,10 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
     }
 
     const FTransform ComponentTransform = MeshComponent->GetComponentTransform();
-    const FVector3f LocalRayOrigin(ComponentTransform.InverseTransformPosition(RayOrigin));
-    const FVector3f LocalRayEnd(ComponentTransform.InverseTransformPosition(
+    const FVector3f  LocalRayOrigin(ComponentTransform.InverseTransformPosition(RayOrigin));
+    const FVector3f  LocalRayEnd(ComponentTransform.InverseTransformPosition(
         RayOrigin + Direction * 1000000.0f));
-    float BestSegmentT = TNumericLimits<float>::Max();
+    float            BestSegmentT = TNumericLimits<float>::Max();
 
     auto TestTriangle = [&](const FDWCEditorSpatialTriangle& Triangle)
     {
@@ -310,7 +312,7 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
             return;
         }
 
-        float SegmentT = 0.0f;
+        float     SegmentT = 0.0f;
         FVector3f Barycentric = FVector3f::ZeroVector;
         if (!IntersectLocalTriangle(
                 LocalRayOrigin,
@@ -330,7 +332,7 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
             Triangle.LocalPositions[1] * Barycentric.Y +
             Triangle.LocalPositions[2] * Barycentric.Z;
         const FVector WorldPosition = ComponentTransform.TransformPosition(FVector(LocalPosition));
-        FVector WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalNormal)).GetSafeNormal();
+        FVector       WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalNormal)).GetSafeNormal();
         if (WorldNormal.IsNearlyZero())
         {
             WorldNormal = FVector::UpVector;
@@ -405,8 +407,10 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
         }
         else
         {
-            if (Node.LeftChildIndex != INDEX_NONE) NodeStack.Add(Node.LeftChildIndex);
-            if (Node.RightChildIndex != INDEX_NONE) NodeStack.Add(Node.RightChildIndex);
+            if (Node.LeftChildIndex != INDEX_NONE)
+                NodeStack.Add(Node.LeftChildIndex);
+            if (Node.RightChildIndex != INDEX_NONE)
+                NodeStack.Add(Node.RightChildIndex);
         }
     }
 
@@ -421,9 +425,9 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
 }
 
 void FDWCEditorSpatialQueryService::FindSurfacesAtUV(
-    const FDWCEditorSpatialHandle& Handle,
-    const USkeletalMeshComponent* MeshComponent,
-    const FVector2D& UV,
+    const FDWCEditorSpatialHandle&      Handle,
+    const USkeletalMeshComponent*       MeshComponent,
+    const FVector2D&                    UV,
     TArray<FDWCEditorProjectedSurface>& OutSurfaces) const
 {
     OutSurfaces.Reset();
@@ -433,22 +437,22 @@ void FDWCEditorSpatialQueryService::FindSurfacesAtUV(
     }
 
     const FVector2D QueryUV(
-        UV.X >= 0.0 && UV.X <= 1.0 ? UV.X : WrapUV(UV.X),
-        UV.Y >= 0.0 && UV.Y <= 1.0 ? UV.Y : WrapUV(UV.Y));
-    const int32 CellX = FMath::Clamp(
+        UV.X >= 0.0 && UV.X <= 1.0 ? UV.X : WrapUV(static_cast<float>(UV.X)),
+        UV.Y >= 0.0 && UV.Y <= 1.0 ? UV.Y : WrapUV(static_cast<float>(UV.Y)));
+    const int32          CellX = IntCastChecked<int32>(FMath::Clamp(
         FMath::FloorToInt(QueryUV.X * FDWCEditorSpatialData::UVGridResolution),
         0,
-        FDWCEditorSpatialData::UVGridResolution - 1);
-    const int32 CellY = FMath::Clamp(
+        FDWCEditorSpatialData::UVGridResolution - 1));
+    const int32          CellY = IntCastChecked<int32>(FMath::Clamp(
         FMath::FloorToInt(QueryUV.Y * FDWCEditorSpatialData::UVGridResolution),
         0,
-        FDWCEditorSpatialData::UVGridResolution - 1);
-    const int32 CellIndex = CellY * FDWCEditorSpatialData::UVGridResolution + CellX;
+        FDWCEditorSpatialData::UVGridResolution - 1));
+    const int32          CellIndex = CellY * FDWCEditorSpatialData::UVGridResolution + CellX;
     const TArray<int32>* Candidates = Handle->UVTriangleGrid.IsValidIndex(CellIndex)
-        ? &Handle->UVTriangleGrid[CellIndex]
-        : nullptr;
-    const FVector2f QueryUV2f(QueryUV);
-    const FTransform ComponentTransform = MeshComponent->GetComponentTransform();
+                                          ? &Handle->UVTriangleGrid[CellIndex]
+                                          : nullptr;
+    const FVector2f      QueryUV2f(QueryUV);
+    const FTransform     ComponentTransform = MeshComponent->GetComponentTransform();
 
     auto TestTriangle = [&](const FDWCEditorSpatialTriangle& Triangle)
     {
@@ -499,11 +503,11 @@ void FDWCEditorSpatialQueryService::FindSurfacesAtUV(
 
 bool FDWCEditorSpatialQueryService::ResolveTriangleAnchor(
     const FDWCEditorSpatialHandle& Handle,
-    const USkeletalMeshComponent* MeshComponent,
-    const int32 MaterialSlotIndex,
-    const int32 TriangleID,
-    const FVector3f& Barycentric,
-    FDWCEditorProjectedSurface& OutSurface) const
+    const USkeletalMeshComponent*  MeshComponent,
+    const int32                    MaterialSlotIndex,
+    const int32                    TriangleID,
+    const FVector3f&               Barycentric,
+    FDWCEditorProjectedSurface&    OutSurface) const
 {
     if (!Handle.IsValid() || MeshComponent == nullptr)
     {
@@ -548,10 +552,10 @@ void FDWCEditorSpatialQueryService::ResetDiagnosticCounters()
 
 TOptional<FDWCEditorCacheKey> FDWCEditorSpatialQueryService::MakeCacheKey(
     const UWetClothingAsset* WetClothingAsset,
-    const USkeletalMesh* Mesh,
-    const int32 LODIndex,
-    const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex)
+    const USkeletalMesh*     Mesh,
+    const int32              LODIndex,
+    const int32              UVChannelIndex,
+    const int32              MaterialSlotIndex)
 {
     if (Mesh == nullptr || UVChannelIndex == INDEX_NONE || MaterialSlotIndex == INDEX_NONE)
     {
@@ -598,12 +602,12 @@ TOptional<FDWCEditorCacheKey> FDWCEditorSpatialQueryService::MakeCacheKey(
 
 bool FDWCEditorSpatialQueryService::BuildSpatialData(
     const UWetClothingAsset* WetClothingAsset,
-    USkeletalMesh* Mesh,
-    const int32 LODIndex,
-    const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex,
-    FDWCEditorSpatialData& OutData,
-    FString* OutError)
+    USkeletalMesh*           Mesh,
+    const int32              LODIndex,
+    const int32              UVChannelIndex,
+    const int32              MaterialSlotIndex,
+    FDWCEditorSpatialData&   OutData,
+    FString*                 OutError)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorSpatialQueryService_BuildSpatialData);
 
@@ -625,12 +629,12 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
     }
 
     const FDWCDataUVLODMetadata* DataUVMetadata = WetClothingAsset != nullptr
-        ? WetClothingAsset->FindDataUVMetadataForLOD(LODIndex)
-        : nullptr;
-    bool bUseStoredIslandIDs = DataUVMetadata != nullptr &&
-        DataUVMetadata->bIsValid &&
-        DataUVMetadata->UVChannelIndex == UVChannelIndex &&
-        !DataUVMetadata->DataUVIslandIDByTriangleID.IsEmpty();
+                                                      ? WetClothingAsset->FindDataUVMetadataForLOD(LODIndex)
+                                                      : nullptr;
+    bool                         bUseStoredIslandIDs = DataUVMetadata != nullptr &&
+                               DataUVMetadata->bIsValid &&
+                               DataUVMetadata->UVChannelIndex == UVChannelIndex &&
+                               !DataUVMetadata->DataUVIslandIDByTriangleID.IsEmpty();
     if (bUseStoredIslandIDs)
     {
         for (const FWCAUVPreviewSourceTriangle& Triangle : SourceTriangles)
@@ -677,8 +681,8 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
         Triangle.TriangleID = Source.TriangleID;
         const int32* FallbackIslandID = FallbackIslandIDByTriangleID.Find(Source.TriangleID);
         Triangle.UVIslandID = bUseStoredIslandIDs
-            ? DataUVMetadata->DataUVIslandIDByTriangleID[Source.TriangleID]
-            : (FallbackIslandID != nullptr ? *FallbackIslandID : INDEX_NONE);
+                                  ? DataUVMetadata->DataUVIslandIDByTriangleID[Source.TriangleID]
+                                  : (FallbackIslandID != nullptr ? *FallbackIslandID : INDEX_NONE);
         for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
         {
             Triangle.LocalPositions[CornerIndex] = Source.LocalPositions[CornerIndex];
@@ -688,8 +692,9 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
         }
 
         Triangle.LocalNormal = FVector3f::CrossProduct(
-            Triangle.LocalPositions[1] - Triangle.LocalPositions[0],
-            Triangle.LocalPositions[2] - Triangle.LocalPositions[0]).GetSafeNormal();
+                                   Triangle.LocalPositions[1] - Triangle.LocalPositions[0],
+                                   Triangle.LocalPositions[2] - Triangle.LocalPositions[0])
+                                   .GetSafeNormal();
         if (Triangle.LocalNormal.IsNearlyZero())
         {
             Triangle.LocalNormal = FVector3f(0.0f, 0.0f, 1.0f);
@@ -697,14 +702,16 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
         Triangle.LocalTangent =
             (Triangle.LocalPositions[1] - Triangle.LocalPositions[0]).GetSafeNormal();
         Triangle.LocalTangent = (Triangle.LocalTangent - Triangle.LocalNormal *
-            FVector3f::DotProduct(Triangle.LocalTangent, Triangle.LocalNormal)).GetSafeNormal();
+                                                             FVector3f::DotProduct(Triangle.LocalTangent, Triangle.LocalNormal))
+                                    .GetSafeNormal();
         if (Triangle.LocalTangent.IsNearlyZero())
         {
             Triangle.LocalTangent = AnyPerpendicular(Triangle.LocalNormal);
         }
         Triangle.LocalBitangent = FVector3f::CrossProduct(
-            Triangle.LocalNormal,
-            Triangle.LocalTangent).GetSafeNormal();
+                                      Triangle.LocalNormal,
+                                      Triangle.LocalTangent)
+                                      .GetSafeNormal();
         if (Triangle.LocalBitangent.IsNearlyZero())
         {
             Triangle.LocalBitangent = AnyPerpendicular(Triangle.LocalNormal);
@@ -747,8 +754,7 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
         {
             for (int32 CellX = MinCellX; CellX <= MaxCellX; ++CellX)
             {
-                OutData.UVTriangleGrid[
-                    CellY * FDWCEditorSpatialData::UVGridResolution + CellX].Add(TriangleIndex);
+                OutData.UVTriangleGrid[CellY * FDWCEditorSpatialData::UVGridResolution + CellX].Add(TriangleIndex);
             }
         }
     }
@@ -757,8 +763,8 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
     BuildNode = [&OutData, &BuildNode](const int32 FirstIndex, const int32 TriangleCount)
     {
         const int32 NodeIndex = OutData.BVHNodes.AddDefaulted();
-        FBox3f Bounds(ForceInit);
-        FBox3f CenterBounds(ForceInit);
+        FBox3f      Bounds(ForceInit);
+        FBox3f      CenterBounds(ForceInit);
         for (int32 Offset = 0; Offset < TriangleCount; ++Offset)
         {
             const FDWCEditorSpatialTriangle& Triangle =
@@ -774,18 +780,16 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
             return NodeIndex;
         }
 
-        const FVector3f Extent = CenterBounds.GetExtent();
-        const int32 SplitAxis = Extent.Y > Extent.X
-            ? (Extent.Z > Extent.Y ? 2 : 1)
-            : (Extent.Z > Extent.X ? 2 : 0);
+        const FVector3f   Extent = CenterBounds.GetExtent();
+        const int32       SplitAxis = Extent.Y > Extent.X
+                                          ? (Extent.Z > Extent.Y ? 2 : 1)
+                                          : (Extent.Z > Extent.X ? 2 : 0);
         TArrayView<int32> Range(
             OutData.BVHTriangleIndices.GetData() + FirstIndex,
             TriangleCount);
         Algo::Sort(Range, [&OutData, SplitAxis](const int32 A, const int32 B)
-        {
-            return OutData.Triangles[A].LocalBounds.GetCenter()[SplitAxis] <
-                OutData.Triangles[B].LocalBounds.GetCenter()[SplitAxis];
-        });
+                   { return OutData.Triangles[A].LocalBounds.GetCenter()[SplitAxis] <
+                            OutData.Triangles[B].LocalBounds.GetCenter()[SplitAxis]; });
 
         const int32 LeftCount = TriangleCount / 2;
         const int32 LeftChild = BuildNode(FirstIndex, LeftCount);

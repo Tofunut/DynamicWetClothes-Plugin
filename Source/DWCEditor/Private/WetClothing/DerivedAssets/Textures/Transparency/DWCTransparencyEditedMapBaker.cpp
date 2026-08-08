@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -35,11 +36,11 @@ namespace
     }
 
     UTexture2D* CreateOrUpdateTransparencyMapAsset(
-        UWetClothingAsset& Asset,
+        UWetClothingAsset&                       Asset,
         const FWetClothingTransparencyLayerData& Layer,
-        const FDWCTransparencyAutoBakeResult& AutoResult,
-        const TArray<FColor>& Pixels,
-        FString& OutErrorMessage)
+        const FDWCTransparencyAutoBakeResult&    AutoResult,
+        const TArray<FColor>&                    Pixels,
+        FString&                                 OutErrorMessage)
     {
         const FString PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(Asset, TEXT("Textures/Transparency"));
         const FString AssetName = BuildTransparencyMapAssetName(Asset, AutoResult);
@@ -51,8 +52,8 @@ namespace
 
         const FString PackageName = PackagePath / AssetName;
         const FString ObjectPath = PackageName + TEXT(".") + AssetName;
-        UTexture2D* Texture = nullptr;
-        bool bFromSerializedReference = false;
+        UTexture2D*   Texture = nullptr;
+        bool          bFromSerializedReference = false;
 
         const FWetClothingBakedTransparencyMap* ExistingMap = Layer.BakedMaps.FindByPredicate(
             [&AutoResult](const FWetClothingBakedTransparencyMap& Candidate)
@@ -80,10 +81,10 @@ namespace
         }
 
         UPackage* Package = nullptr;
-        bool bCreatedAsset = false;
+        bool      bCreatedAsset = false;
         if (Texture != nullptr)
         {
-            FGuid ExistingOwnerGuid;
+            FGuid      ExistingOwnerGuid;
             const bool bHasOwnerGuid = Asset.TryGetGeneratedAssetOwnerGuid(Texture, ExistingOwnerGuid);
             if (bHasOwnerGuid && ExistingOwnerGuid != Asset.GetAssetGuid())
             {
@@ -145,8 +146,8 @@ namespace
         Texture->SRGB = true;
         Texture->LODGroup = TEXTUREGROUP_Pixels2D;
         const TextureAddress Address = Layer.TargetSurface.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap
-            ? TA_Wrap
-            : TA_Clamp;
+                                           ? TA_Wrap
+                                           : TA_Clamp;
         Texture->AddressX = Address;
         Texture->AddressY = Address;
         Texture->PostEditChange();
@@ -161,12 +162,12 @@ namespace
     }
 
     FString MakeFinalBuildSignature(
-        const FDWCTransparencyAutoBakeResult& AutoResult,
+        const FDWCTransparencyAutoBakeResult&    AutoResult,
         const FWetClothingTransparencyLayerData& Layer,
-        const FString& WrinkleMaskBuildSignature,
-        const FString& SuppressionSettingsSignature,
-        const int32 PaddingPixels,
-        const float EdgeFeatherPixels)
+        const FString&                           WrinkleMaskBuildSignature,
+        const FString&                           SuppressionSettingsSignature,
+        const int32                              PaddingPixels,
+        const float                              EdgeFeatherPixels)
     {
         FString Canonical = FString::Printf(
             TEXT("DWC.Transparency.Edited.v3|Auto=%s|WrinkleMask=%s|Suppression=%s|Padding=%d|EdgeFeather=%.9g"),
@@ -206,12 +207,12 @@ namespace
     }
 
     void ApplyCoverageEdgeFeather(
-        const FIntPoint Resolution,
+        const FIntPoint      Resolution,
         const TArray<uint8>& OuterCoverage,
-        const float FeatherPixels,
-        TArray<FColor>& InOutPixels)
+        const float          FeatherPixels,
+        TArray<FColor>&      InOutPixels)
     {
-        const int32 PixelCount = Resolution.X * Resolution.Y;
+        const int32   PixelCount = Resolution.X * Resolution.Y;
         TArray<uint8> EdgeFeatherBuffer;
         if (InOutPixels.Num() != PixelCount ||
             !FDWCTransparencyComposite::BuildCoverageEdgeFeatherBuffer(
@@ -226,15 +227,17 @@ namespace
         {
             InOutPixels[PixelIndex].A = static_cast<uint8>(
                 (static_cast<uint32>(InOutPixels[PixelIndex].A) *
-                 EdgeFeatherBuffer[PixelIndex] + 127u) / 255u);
+                     EdgeFeatherBuffer[PixelIndex] +
+                 127u) /
+                255u);
         }
     }
 
     void DilateOutsideCoverage(
-        const FIntPoint Resolution,
+        const FIntPoint      Resolution,
         const TArray<uint8>& OuterCoverage,
-        const int32 PaddingPixels,
-        TArray<FColor>& InOutPixels)
+        const int32          PaddingPixels,
+        TArray<FColor>&      InOutPixels)
     {
         const int32 SafePadding = FMath::Max(PaddingPixels, 0);
         const int32 PixelCount = Resolution.X * Resolution.Y;
@@ -243,8 +246,8 @@ namespace
             return;
         }
 
-        TArray<uint8> Filled = OuterCoverage;
-        TArray<uint8> NextFilled;
+        TArray<uint8>  Filled = OuterCoverage;
+        TArray<uint8>  NextFilled;
         TArray<FColor> NextPixels;
         for (int32 Step = 0; Step < SafePadding; ++Step)
         {
@@ -297,10 +300,10 @@ namespace
                     if (SampleCount > 0)
                     {
                         NextPixels[PixelIndex] = FColor(
-                            SumR / SampleCount,
-                            SumG / SampleCount,
-                            SumB / SampleCount,
-                            SumA / SampleCount);
+                            IntCastChecked<uint8>(SumR / SampleCount),
+                            IntCastChecked<uint8>(SumG / SampleCount),
+                            IntCastChecked<uint8>(SumB / SampleCount),
+                            IntCastChecked<uint8>(SumA / SampleCount));
                         NextFilled[PixelIndex] = 1;
                         bExpanded = true;
                     }
@@ -314,30 +317,30 @@ namespace
             }
         }
     }
-}
+} // namespace
 
 struct FDWCTransparencyEditedMapBakeSnapshot::FImpl
 {
     TSharedPtr<const FDWCTransparencyAutoBakeResult> AutoResult;
-    FGuid LayerGuid;
-    FWetClothingTransparencyTargetSurface TargetSurface;
-    FWetClothingTransparencyManualColorSource ManualColorSource;
-    TArray<FDWCTransparencyBrushStroke> EditableStrokes;
-    TArray<FDWCTransparencyRevealColorStroke> RevealColorPaintStrokes;
-    TArray<uint8> WrinkleSuppressionBuffer;
-    FString SuppressionWarning;
-    FString SourceWrinkleMaskBuildSignature;
-    FString SuppressionSettingsSignature;
-    FString FinalBuildSignature;
-    FGuid SourceWrinkleMaskBakeGuid;
-    float TransparencyStrength = 0.0f;
-    float SuppressionStrength = 0.0f;
-    float EdgeFeatherPixels = 0.0f;
-    int32 PaddingPixels = 0;
-    int32 BakedStrokeCount = 0;
-    bool bHasWrinkleSuppression = false;
-    bool bValid = false;
-    uint64 EstimatedBytes = 0;
+    FGuid                                            LayerGuid;
+    FWetClothingTransparencyTargetSurface            TargetSurface;
+    FWetClothingTransparencyManualColorSource        ManualColorSource;
+    TArray<FDWCTransparencyBrushStroke>              EditableStrokes;
+    TArray<FDWCTransparencyRevealColorStroke>        RevealColorPaintStrokes;
+    TArray<uint8>                                    WrinkleSuppressionBuffer;
+    FString                                          SuppressionWarning;
+    FString                                          SourceWrinkleMaskBuildSignature;
+    FString                                          SuppressionSettingsSignature;
+    FString                                          FinalBuildSignature;
+    FGuid                                            SourceWrinkleMaskBakeGuid;
+    float                                            TransparencyStrength = 0.0f;
+    float                                            SuppressionStrength = 0.0f;
+    float                                            EdgeFeatherPixels = 0.0f;
+    int32                                            PaddingPixels = 0;
+    int32                                            BakedStrokeCount = 0;
+    bool                                             bHasWrinkleSuppression = false;
+    bool                                             bValid = false;
+    uint64                                           EstimatedBytes = 0;
 };
 
 FDWCTransparencyEditedMapBakeSnapshot::FDWCTransparencyEditedMapBakeSnapshot()
@@ -359,8 +362,8 @@ bool FDWCTransparencyEditedMapBakeSnapshot::IsValid() const
 int32 FDWCTransparencyEditedMapBakeSnapshot::GetMaterialSlotIndex() const
 {
     return Impl.IsValid() && Impl->AutoResult.IsValid()
-        ? Impl->AutoResult->MaterialSlotIndex
-        : INDEX_NONE;
+               ? Impl->AutoResult->MaterialSlotIndex
+               : INDEX_NONE;
 }
 
 FGuid FDWCTransparencyEditedMapBakeSnapshot::GetLayerGuid() const
@@ -375,8 +378,8 @@ uint64 FDWCTransparencyEditedMapBakeSnapshot::GetEstimatedBytes() const
 
 bool FDWCTransparencyEditedMapBaker::IsAutoResultCompatible(
     const FWetClothingTransparencyLayerData& Layer,
-    const FDWCTransparencyAutoBakeResult& AutoResult,
-    FString& OutReason)
+    const FDWCTransparencyAutoBakeResult&    AutoResult,
+    FString&                                 OutReason)
 {
     OutReason.Reset();
     if (AutoResult.LayerGuid != Layer.LayerGuid ||
@@ -401,9 +404,9 @@ bool FDWCTransparencyEditedMapBaker::IsAutoResultCompatible(
 }
 
 bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
-    const UWetClothingAsset& WetClothingAsset,
+    const UWetClothingAsset&                 WetClothingAsset,
     const FWetClothingTransparencyLayerData& Layer,
-    FString* OutReason)
+    FString*                                 OutReason)
 {
     if (OutReason != nullptr)
     {
@@ -411,7 +414,7 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
     }
 
     FDWCTransparencyAutoBakeResult AutoResult;
-    FString SignatureError;
+    FString                        SignatureError;
     if (!FDWCTransparencyAutoMapGenerator::BuildSignatureOnlyResult(
             WetClothingAsset,
             Layer,
@@ -421,8 +424,8 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
         if (OutReason != nullptr)
         {
             *OutReason = SignatureError.IsEmpty()
-                ? TEXT("Transparency build signature could not be generated for validation.")
-                : SignatureError;
+                             ? TEXT("Transparency build signature could not be generated for validation.")
+                             : SignatureError;
         }
         return false;
     }
@@ -442,14 +445,14 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
     }
 
     const FWetClothingTransparencyData& TransparencyData = WetClothingAsset.Authored.TransparencyData;
-    const FDWCWrinkleSuppressionSource SuppressionSource =
+    const FDWCWrinkleSuppressionSource  SuppressionSource =
         FDWCWrinkleSuppressionProcessor::FindExactSource(
             &WetClothingAsset,
             AutoResult.MaterialSlotIndex);
     const bool bHasWrinkleSuppression = SuppressionSource.IsValid() &&
-        SuppressionSource.MaskTexture->Source.IsValid() &&
-        SuppressionSource.MaskTexture->Source.GetSizeX() > 0 &&
-        SuppressionSource.MaskTexture->Source.GetSizeY() > 0;
+                                        SuppressionSource.MaskTexture->Source.IsValid() &&
+                                        SuppressionSource.MaskTexture->Source.GetSizeX() > 0 &&
+                                        SuppressionSource.MaskTexture->Source.GetSizeY() > 0;
     const FString SourceWrinkleMaskBuildSignature =
         bHasWrinkleSuppression && SuppressionSource.BakedMap != nullptr
             ? SuppressionSource.BakedMap->BuildSignature
@@ -483,11 +486,11 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
 }
 
 bool FDWCTransparencyEditedMapBaker::Bake(
-    UWetClothingAsset& WetClothingAsset,
-    FWetClothingTransparencyLayerData& Layer,
+    UWetClothingAsset&                    WetClothingAsset,
+    FWetClothingTransparencyLayerData&    Layer,
     const FDWCTransparencyAutoBakeResult& AutoResult,
-    FDWCTransparencyEditedMapBakeResult& OutResult,
-    FString& OutErrorMessage)
+    FDWCTransparencyEditedMapBakeResult&  OutResult,
+    FString&                              OutErrorMessage)
 {
     FDWCTransparencyEditedMapBakeSnapshot Snapshot;
     if (!BuildSnapshot(WetClothingAsset, Layer, AutoResult, Snapshot, OutErrorMessage))
@@ -504,11 +507,11 @@ bool FDWCTransparencyEditedMapBaker::Bake(
 }
 
 bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
-    const UWetClothingAsset& WetClothingAsset,
+    const UWetClothingAsset&                 WetClothingAsset,
     const FWetClothingTransparencyLayerData& Layer,
-    const FDWCTransparencyAutoBakeResult& AutoResult,
-    FDWCTransparencyEditedMapBakeSnapshot& OutSnapshot,
-    FString& OutErrorMessage)
+    const FDWCTransparencyAutoBakeResult&    AutoResult,
+    FDWCTransparencyEditedMapBakeSnapshot&   OutSnapshot,
+    FString&                                 OutErrorMessage)
 {
     return BuildSnapshot(
         WetClothingAsset,
@@ -519,16 +522,16 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
 }
 
 bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
-    const UWetClothingAsset& WetClothingAsset,
-    const FWetClothingTransparencyLayerData& Layer,
+    const UWetClothingAsset&                         WetClothingAsset,
+    const FWetClothingTransparencyLayerData&         Layer,
     TSharedRef<const FDWCTransparencyAutoBakeResult> AutoResultRef,
-    FDWCTransparencyEditedMapBakeSnapshot& OutSnapshot,
-    FString& OutErrorMessage)
+    FDWCTransparencyEditedMapBakeSnapshot&           OutSnapshot,
+    FString&                                         OutErrorMessage)
 {
     check(IsInGameThread());
     OutSnapshot = FDWCTransparencyEditedMapBakeSnapshot();
     const FDWCTransparencyAutoBakeResult& AutoResult = *AutoResultRef;
-    FString CompatibilityReason;
+    FString                               CompatibilityReason;
     if (!IsAutoResultCompatible(Layer, AutoResult, CompatibilityReason))
     {
         OutErrorMessage = CompatibilityReason;
@@ -545,20 +548,20 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
     Snapshot.BakedStrokeCount = Layer.EditableStrokes.Num();
 
     const FWetClothingTransparencyData& TransparencyData = WetClothingAsset.Authored.TransparencyData;
-    const FDWCWrinkleSuppressionSource SuppressionSource = AutoResult.bIsFinalBakedBaseline
-        ? FDWCWrinkleSuppressionSource()
-        : FDWCWrinkleSuppressionProcessor::FindExactSource(
-            &WetClothingAsset,
-            AutoResult.MaterialSlotIndex);
+    const FDWCWrinkleSuppressionSource  SuppressionSource = AutoResult.bIsFinalBakedBaseline
+                                                                ? FDWCWrinkleSuppressionSource()
+                                                                : FDWCWrinkleSuppressionProcessor::FindExactSource(
+                                                                     &WetClothingAsset,
+                                                                     AutoResult.MaterialSlotIndex);
     Snapshot.bHasWrinkleSuppression = !AutoResult.bIsFinalBakedBaseline &&
-        SuppressionSource.IsValid() &&
-        FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
-            SuppressionSource,
-            AutoResult.Resolution,
-            TransparencyData.WrinkleSuppressionCoverageThreshold,
-            TransparencyData.WrinkleSuppressionMaskSoftness,
-            Snapshot.WrinkleSuppressionBuffer,
-            Snapshot.SuppressionWarning);
+                                      SuppressionSource.IsValid() &&
+                                      FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
+                                          SuppressionSource,
+                                          AutoResult.Resolution,
+                                          TransparencyData.WrinkleSuppressionCoverageThreshold,
+                                          TransparencyData.WrinkleSuppressionMaskSoftness,
+                                          Snapshot.WrinkleSuppressionBuffer,
+                                          Snapshot.SuppressionWarning);
     if (AutoResult.bIsFinalBakedBaseline)
     {
         Snapshot.SuppressionWarning.Reset();
@@ -615,7 +618,7 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
 
 FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeSnapshot(
     const FDWCTransparencyEditedMapBakeSnapshot& SnapshotHandle,
-    const FDWCEditorCancellationToken* CancellationToken)
+    const FDWCEditorCancellationToken*           CancellationToken)
 {
     FDWCTransparencyEditedMapComputedResult Result;
     if (!SnapshotHandle.IsValid())
@@ -624,8 +627,8 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
         return Result;
     }
     const FDWCTransparencyEditedMapBakeSnapshot::FImpl& Snapshot = *SnapshotHandle.Impl;
-    const FDWCTransparencyAutoBakeResult& AutoResult = *Snapshot.AutoResult;
-    const int32 PixelCount = AutoResult.Resolution.X * AutoResult.Resolution.Y;
+    const FDWCTransparencyAutoBakeResult&               AutoResult = *Snapshot.AutoResult;
+    const int32                                         PixelCount = AutoResult.Resolution.X * AutoResult.Resolution.Y;
 
     FWetClothingTransparencyLayerData WorkerLayer;
     WorkerLayer.LayerGuid = Snapshot.LayerGuid;
@@ -662,7 +665,7 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
             return Result;
         }
         const bool bHasValidInnerColor = AutoResult.ValidHitBuffer.IsValidIndex(PixelIndex) &&
-            AutoResult.ValidHitBuffer[PixelIndex] != 0;
+                                         AutoResult.ValidHitBuffer[PixelIndex] != 0;
         const float EditedAlpha = FDWCTransparencyBrushRasterizer::ResolveEditedAlpha(
             AutoResult,
             ManualPremultipliedBuffer,
@@ -682,9 +685,9 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
         else
         {
             const uint8 WrinkleSuppression = Snapshot.bHasWrinkleSuppression &&
-                Snapshot.WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
-                ? Snapshot.WrinkleSuppressionBuffer[PixelIndex]
-                : 0;
+                                                     Snapshot.WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
+                                                 ? Snapshot.WrinkleSuppressionBuffer[PixelIndex]
+                                                 : 0;
             Result.FinalPixels[PixelIndex].A = FDWCTransparencyComposite::ResolveFinalAlpha8(
                 EditedAlpha,
                 Snapshot.TransparencyStrength,
@@ -729,11 +732,11 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
 }
 
 bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
-    UWetClothingAsset& WetClothingAsset,
+    UWetClothingAsset&                           WetClothingAsset,
     const FDWCTransparencyEditedMapBakeSnapshot& SnapshotHandle,
-    FDWCTransparencyEditedMapComputedResult&& ComputedResult,
-    FDWCTransparencyEditedMapBakeResult& OutResult,
-    FString& OutErrorMessage)
+    FDWCTransparencyEditedMapComputedResult&&    ComputedResult,
+    FDWCTransparencyEditedMapBakeResult&         OutResult,
+    FString&                                     OutErrorMessage)
 {
     check(IsInGameThread());
     OutResult = FDWCTransparencyEditedMapBakeResult();
@@ -741,12 +744,12 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
     if (!SnapshotHandle.IsValid() || !ComputedResult.bSucceeded)
     {
         OutErrorMessage = ComputedResult.Error.IsEmpty()
-            ? TEXT("The transparency bake calculation failed.")
-            : MoveTemp(ComputedResult.Error);
+                              ? TEXT("The transparency bake calculation failed.")
+                              : MoveTemp(ComputedResult.Error);
         return false;
     }
     const FDWCTransparencyEditedMapBakeSnapshot::FImpl& Snapshot = *SnapshotHandle.Impl;
-    FWetClothingTransparencyLayerData* Layer =
+    FWetClothingTransparencyLayerData*                  Layer =
         WetClothingAsset.Authored.TransparencyData.TransparencyLayers.FindByPredicate(
             [&Snapshot](const FWetClothingTransparencyLayerData& Candidate)
             {

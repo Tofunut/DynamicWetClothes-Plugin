@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -19,13 +20,13 @@ class FDWCTransparencyLiveStrokeLayer final
 
     void RecordSample(
         const FDWCTransparencyBrushSample& Sample,
-        EDWCTransparencyUVAddressMode AddressMode);
+        EDWCTransparencyUVAddressMode      AddressMode);
 
-    bool IsActive() const { return StrokeGuid.IsValid(); }
-    bool IsForStroke(const FGuid& InStrokeGuid) const { return StrokeGuid == InStrokeGuid; }
-    int32 GetTileCount() const { return Tiles.Num(); }
-    int32 GetSampleCount() const { return Samples.Num(); }
-    uint64 GetAllocatedBytes() const;
+    bool                    IsActive() const { return StrokeGuid.IsValid(); }
+    bool                    IsForStroke(const FGuid& InStrokeGuid) const { return StrokeGuid == InStrokeGuid; }
+    int32                   GetTileCount() const { return Tiles.Num(); }
+    int32                   GetSampleCount() const { return Samples.Num(); }
+    uint64                  GetAllocatedBytes() const;
     const TArray<FIntRect>& GetDirtyRegions() const { return DirtyRegions; }
 
   private:
@@ -37,9 +38,9 @@ class FDWCTransparencyLiveStrokeLayer final
     void AddTileSample(int32 TileX, int32 TileY, int32 SampleIndex);
     void AddDirtyRegion(const FIntRect& Region, bool bWrap);
 
-    FGuid StrokeGuid;
-    FIntPoint Resolution = FIntPoint::ZeroValue;
+    FGuid                               StrokeGuid;
+    FIntPoint                           Resolution = FIntPoint::ZeroValue;
     TArray<FDWCTransparencyBrushSample> Samples;
-    TMap<FIntPoint, FTile> Tiles;
-    TArray<FIntRect> DirtyRegions;
+    TMap<FIntPoint, FTile>              Tiles;
+    TArray<FIntRect>                    DirtyRegions;
 };

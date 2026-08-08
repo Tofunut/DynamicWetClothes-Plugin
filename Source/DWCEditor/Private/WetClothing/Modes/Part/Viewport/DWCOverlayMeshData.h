@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Defines vertex, index, normal, UV, color, and tangent arrays used to build Wet Part and selection overlays.
  */

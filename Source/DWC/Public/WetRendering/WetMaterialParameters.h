@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -13,7 +14,7 @@ namespace DWCWetMaterialParameters
     DWC_API const FName& GlobalRenderProfileLUT();
     DWC_API const FName& GlobalRenderProfileTexelSize();
     DWC_API const FName& UseRenderProfileLUT();
-    DWC_API FName FallbackRenderProfileTexel(int32 TexelIndex);
+    DWC_API FName        FallbackRenderProfileTexel(int32 TexelIndex);
     DWC_API const FName& DropletMaskTextureArray();
     DWC_API const FName& DropletNormalTextureArray();
     DWC_API const FName& SurfaceWaterTargetRoughness();
@@ -31,7 +32,6 @@ namespace DWCWetMaterialParameters
     DWC_API const FName& Droplet1RenderingEnabled();
     DWC_API const FName& Droplet2RenderingEnabled();
     DWC_API const FName& SurfaceWaterTexelSize();
-
 
     DWC_API const FName& WrinkleNormalMap();
     DWC_API const FName& UseWrinkleNormalMap();
@@ -52,4 +52,4 @@ namespace DWCWetMaterialParameters
 
     DWC_API float DefaultTransparencyWetnessMin();
     DWC_API float DefaultTransparencyWetnessMax();
-}
+} // namespace DWCWetMaterialParameters

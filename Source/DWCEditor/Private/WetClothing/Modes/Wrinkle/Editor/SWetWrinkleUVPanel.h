@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -18,18 +19,18 @@ class SWetWrinkleUVPanel : public SCompoundWidget
     void Construct(const FArguments& InArgs);
 
     TSharedPtr<SWCAUVView> GetView() const { return UVView; }
-    EWCAUVDisplayMode GetDisplayMode() const { return DisplayMode; }
-    float GetIslandLineOpacity() const { return IslandLineOpacity; }
-    float GetIslandLineThicknessScale() const { return IslandLineThicknessScale; }
+    EWCAUVDisplayMode      GetDisplayMode() const { return DisplayMode; }
+    float                  GetIslandLineOpacity() const { return IslandLineOpacity; }
+    float                  GetIslandLineThicknessScale() const { return IslandLineThicknessScale; }
 
   private:
     void HandleIslandLineOpacityChanged(float NewValue);
     void HandleIslandLineThicknessScaleChanged(float NewValue);
     void ApplyViewSettings();
 
-    TSharedPtr<SWCAUVView> UVView;
-    EWCAUVDisplayMode DisplayMode = EWCAUVDisplayMode::Normal;
-    float IslandLineOpacity = 1.0f;
-    float IslandLineThicknessScale = 1.0f;
+    TSharedPtr<SWCAUVView>             UVView;
+    EWCAUVDisplayMode                  DisplayMode = EWCAUVDisplayMode::Normal;
+    float                              IslandLineOpacity = 1.0f;
+    float                              IslandLineThicknessScale = 1.0f;
     FOnWetWrinkleUVViewSettingsChanged OnViewSettingsChanged;
 };

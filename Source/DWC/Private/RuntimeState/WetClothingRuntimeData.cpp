@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/WetClothingRuntimeData.h"
 
 uint64 FWetClothingRuntimeData::GetAllocatedMemoryBytes() const

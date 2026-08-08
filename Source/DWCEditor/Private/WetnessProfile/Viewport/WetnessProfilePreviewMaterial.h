@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -35,4 +36,4 @@ namespace DWCWetnessProfilePreviewMaterial
      * be ready during that phase.
      */
     UMaterialInterface* LoadOrCreateBaseMaterial();
-}
+} // namespace DWCWetnessProfilePreviewMaterial

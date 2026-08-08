@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/Processing/DWCWrinkleSuppressionProcessor.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -11,8 +12,8 @@ namespace
 {
     float SampleMaskBilinear(
         const FWetClothingTextureReadback& Readback,
-        const float U,
-        const float V)
+        const float                        U,
+        const float                        V)
     {
         const float SourceX = FMath::Clamp(U, 0.0f, 1.0f) * static_cast<float>(Readback.Width - 1);
         const float SourceY = FMath::Clamp(V, 0.0f, 1.0f) * static_cast<float>(Readback.Height - 1);
@@ -43,11 +44,11 @@ namespace
         const float T = FMath::Clamp((Value - MinValue) / (MaxValue - MinValue), 0.0f, 1.0f);
         return T * T * (3.0f - 2.0f * T);
     }
-}
+} // namespace
 
 FDWCWrinkleSuppressionSource FDWCWrinkleSuppressionProcessor::FindExactSource(
     const UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex)
+    const int32              MaterialSlotIndex)
 {
     FDWCWrinkleSuppressionSource Result;
     if (WetClothingAsset == nullptr)
@@ -62,18 +63,18 @@ FDWCWrinkleSuppressionSource FDWCWrinkleSuppressionProcessor::FindExactSource(
                    Candidate.BakedWrinkleMask != nullptr;
         });
     Result.MaskTexture = Result.BakedMap != nullptr
-        ? Result.BakedMap->BakedWrinkleMask.Get()
-        : nullptr;
+                             ? Result.BakedMap->BakedWrinkleMask.Get()
+                             : nullptr;
     return Result;
 }
 
 bool FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
     const FDWCWrinkleSuppressionSource& Source,
-    const FIntPoint OutputSize,
-    const float CoverageThreshold,
-    const float MaskSoftness,
-    TArray<uint8>& OutBuffer,
-    FString& OutErrorMessage)
+    const FIntPoint                     OutputSize,
+    const float                         CoverageThreshold,
+    const float                         MaskSoftness,
+    TArray<uint8>&                      OutBuffer,
+    FString&                            OutErrorMessage)
 {
     TArray<uint16> Coverage;
     if (!BuildResampledCoverageBuffer(Source, OutputSize, Coverage, OutErrorMessage))
@@ -92,9 +93,9 @@ bool FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
 
 bool FDWCWrinkleSuppressionProcessor::BuildResampledCoverageBuffer(
     const FDWCWrinkleSuppressionSource& Source,
-    const FIntPoint OutputSize,
-    TArray<uint16>& OutCoverage,
-    FString& OutErrorMessage)
+    const FIntPoint                     OutputSize,
+    TArray<uint16>&                     OutCoverage,
+    FString&                            OutErrorMessage)
 {
     OutCoverage.Reset();
     OutErrorMessage.Reset();
@@ -141,10 +142,10 @@ bool FDWCWrinkleSuppressionProcessor::BuildResampledCoverageBuffer(
 
 bool FDWCWrinkleSuppressionProcessor::BuildProcessedBufferFromCoverage(
     const TArray<uint16>& Coverage,
-    const float CoverageThreshold,
-    const float MaskSoftness,
-    TArray<uint8>& OutBuffer,
-    FString& OutErrorMessage)
+    const float           CoverageThreshold,
+    const float           MaskSoftness,
+    TArray<uint8>&        OutBuffer,
+    FString&              OutErrorMessage)
 {
     OutBuffer.Reset();
     OutErrorMessage.Reset();

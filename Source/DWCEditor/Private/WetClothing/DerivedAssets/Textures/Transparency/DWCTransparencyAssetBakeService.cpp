@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyAssetBakeService.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -16,7 +17,7 @@ namespace
             InOutPackages.AddUnique(Object->GetOutermost());
         }
     }
-}
+} // namespace
 
 bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingAsset* WetClothingAsset)
 {

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialCache.h"
 
 #include "Materials/Material.h"
@@ -72,7 +73,7 @@ FDWCEditorPreviewMaterialResult FDWCEditorPreviewMaterialCache::GetOrCreate(
     if (GraphEntry == nullptr)
     {
         const double BuildStartSeconds = FPlatformTime::Seconds();
-        FGraphEntry NewEntry;
+        FGraphEntry  NewEntry;
         NewEntry.SourceMaterial = Request.SourceMaterial;
         NewEntry.Material = FDWCEditorPreviewMaterialFactory::BuildTransientBaseMaterialGraph(
             Request, NewEntry.FailureMessage);
@@ -108,7 +109,7 @@ FDWCEditorPreviewMaterialResult FDWCEditorPreviewMaterialCache::GetOrCreate(
 
     if (GraphEntry->State == EDWCEditorPreviewMaterialState::Compiling)
     {
-        FString CompileMessage;
+        FString                              CompileMessage;
         const EDWCEditorPreviewMaterialState CompileState =
             FDWCEditorPreviewMaterialFactory::PollTransientBaseMaterialCompilation(
                 GraphEntry->Material,
@@ -185,8 +186,8 @@ FDWCEditorPreviewMaterialResult FDWCEditorPreviewMaterialCache::GetOrCreate(
     if (SlotEntry == nullptr)
     {
         const double BuildStartSeconds = FPlatformTime::Seconds();
-        FString MIDError;
-        FSlotEntry NewEntry;
+        FString      MIDError;
+        FSlotEntry   NewEntry;
         NewEntry.SlotOwner = SlotOwner;
         NewEntry.SourceMaterial = Request.SourceMaterial;
         NewEntry.MID = FDWCEditorPreviewMaterialFactory::BuildSlotMID(
@@ -222,7 +223,7 @@ FDWCEditorPreviewMaterialResult FDWCEditorPreviewMaterialCache::GetOrCreate(
 
 void FDWCEditorPreviewMaterialCache::InvalidateSource(
     UMaterialInterface* SourceMaterial,
-    const bool bIncludeSharedBaseMaterial)
+    const bool          bIncludeSharedBaseMaterial)
 {
     if (SourceMaterial == nullptr)
     {
@@ -236,8 +237,8 @@ void FDWCEditorPreviewMaterialCache::InvalidateSource(
         [SourceMaterial, SourceBaseMaterial, bIncludeSharedBaseMaterial](UMaterialInterface* Candidate)
     {
         return Candidate == SourceMaterial ||
-            (bIncludeSharedBaseMaterial && Candidate != nullptr &&
-             Candidate->GetMaterial() == SourceBaseMaterial);
+               (bIncludeSharedBaseMaterial && Candidate != nullptr &&
+                Candidate->GetMaterial() == SourceBaseMaterial);
     };
 
     for (auto It = SlotEntries.CreateIterator(); It; ++It)

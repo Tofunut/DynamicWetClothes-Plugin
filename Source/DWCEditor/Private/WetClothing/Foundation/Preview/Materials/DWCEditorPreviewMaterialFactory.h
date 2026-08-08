@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -16,27 +17,27 @@ class FDWCEditorPreviewMaterialFactory
 
     static UMaterial* BuildTransientBaseMaterialGraph(
         const FDWCEditorPreviewMaterialRequest& Request,
-        FString& OutErrorMessage);
+        FString&                                OutErrorMessage);
 
     /** Starts shader compilation without blocking the editor thread. */
     static bool BeginTransientBaseMaterialCompilation(
         UMaterial* TransientBaseMaterial,
-        FString& OutErrorMessage);
+        FString&   OutErrorMessage);
 
     /** Polls a previously submitted compile and never waits for completion. */
     static EDWCEditorPreviewMaterialState PollTransientBaseMaterialCompilation(
         UMaterial* TransientBaseMaterial,
-        FString& OutErrorMessage);
+        FString&   OutErrorMessage);
 
     static void CancelTransientBaseMaterialCompilation(UMaterial* TransientBaseMaterial);
 
     static UMaterialInstanceConstant* BuildTransientParent(
         UMaterialInterface* SourceMaterial,
-        UMaterial* TransientBaseMaterial,
-        FString& OutErrorMessage);
+        UMaterial*          TransientBaseMaterial,
+        FString&            OutErrorMessage);
 
     static UMaterialInstanceDynamic* BuildSlotMID(
         UMaterialInterface* TransientParent,
-        UObject* Outer,
-        FString& OutErrorMessage);
+        UObject*            Outer,
+        FString&            OutErrorMessage);
 };

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -7,14 +8,13 @@
 UENUM()
 enum class EDWCBakeStatus : uint8
 {
-    Disabled UMETA(DisplayName = "Disabled"),
-    Required UMETA(DisplayName = "Required"),
-    Valid UMETA(DisplayName = "Valid"),
+    Disabled             UMETA(DisplayName = "Disabled"),
+    Required             UMETA(DisplayName = "Required"),
+    Valid                UMETA(DisplayName = "Valid"),
     ValidWithDiagnostics UMETA(DisplayName = "Valid"),
-    OutOfDate UMETA(DisplayName = "Out of Date"),
-    Failed UMETA(DisplayName = "Failed")
+    OutOfDate            UMETA(DisplayName = "Out of Date"),
+    Failed               UMETA(DisplayName = "Failed")
 };
-
 
 namespace DWCBuildStatus
 {
@@ -22,7 +22,7 @@ namespace DWCBuildStatus
     {
         return Status == EDWCBakeStatus::Valid || Status == EDWCBakeStatus::ValidWithDiagnostics;
     }
-}
+} // namespace DWCBuildStatus
 
 UENUM()
 enum class EDWCDataUVResultSeverity : uint8
@@ -43,10 +43,14 @@ namespace DWCDataUVResultSeverity
     {
         switch (Normalize(Severity))
         {
-        case EDWCDataUVResultSeverity::Ready: return 0;
-        case EDWCDataUVResultSeverity::ReadyWithWarnings: return 1;
-        case EDWCDataUVResultSeverity::Failed: return 2;
-        default: return 3;
+        case EDWCDataUVResultSeverity::Ready:
+            return 0;
+        case EDWCDataUVResultSeverity::ReadyWithWarnings:
+            return 1;
+        case EDWCDataUVResultSeverity::Failed:
+            return 2;
+        default:
+            return 3;
         }
     }
 
@@ -58,7 +62,7 @@ namespace DWCDataUVResultSeverity
         const EDWCDataUVResultSeverity NormalizedB = Normalize(B);
         return Rank(NormalizedA) >= Rank(NormalizedB) ? NormalizedA : NormalizedB;
     }
-}
+} // namespace DWCDataUVResultSeverity
 
 UENUM()
 enum class EDWCDataUVSlotLODResultState : uint8
@@ -95,7 +99,7 @@ namespace DWCGeneratedDataVersion
     // accepted by the user. Accepted slots remain usable as Ready with warnings.
     static constexpr int32 DataUV = 11;
     static constexpr int32 OriginalUVTopology = 7;
-}
+} // namespace DWCGeneratedDataVersion
 
 namespace DWCBakeOutput
 {
@@ -111,13 +115,13 @@ namespace DWCBakeOutput
     {
         return (Mask & Output) != 0;
     }
-}
+} // namespace DWCBakeOutput
 
 UENUM()
 enum class EDWCMapResolution : uint8
 {
-    Resolution256 UMETA(DisplayName = "256"),
-    Resolution512 UMETA(DisplayName = "512"),
+    Resolution256  UMETA(DisplayName = "256"),
+    Resolution512  UMETA(DisplayName = "512"),
     Resolution1024 UMETA(DisplayName = "1024"),
     Resolution2048 UMETA(DisplayName = "2048"),
     Resolution4096 UMETA(DisplayName = "4096")
@@ -129,24 +133,34 @@ namespace DWCMapResolution
     {
         switch (Resolution)
         {
-        case EDWCMapResolution::Resolution256: return 256;
-        case EDWCMapResolution::Resolution512: return 512;
-        case EDWCMapResolution::Resolution1024: return 1024;
-        case EDWCMapResolution::Resolution2048: return 2048;
-        case EDWCMapResolution::Resolution4096: return 4096;
-        default: return 1024;
+        case EDWCMapResolution::Resolution256:
+            return 256;
+        case EDWCMapResolution::Resolution512:
+            return 512;
+        case EDWCMapResolution::Resolution1024:
+            return 1024;
+        case EDWCMapResolution::Resolution2048:
+            return 2048;
+        case EDWCMapResolution::Resolution4096:
+            return 4096;
+        default:
+            return 1024;
         }
     }
 
     FORCEINLINE EDWCMapResolution FromInt(const int32 Resolution)
     {
-        if (Resolution < 384) return EDWCMapResolution::Resolution256;
-        if (Resolution < 768) return EDWCMapResolution::Resolution512;
-        if (Resolution < 1536) return EDWCMapResolution::Resolution1024;
-        if (Resolution < 3072) return EDWCMapResolution::Resolution2048;
+        if (Resolution < 384)
+            return EDWCMapResolution::Resolution256;
+        if (Resolution < 768)
+            return EDWCMapResolution::Resolution512;
+        if (Resolution < 1536)
+            return EDWCMapResolution::Resolution1024;
+        if (Resolution < 3072)
+            return EDWCMapResolution::Resolution2048;
         return EDWCMapResolution::Resolution4096;
     }
-}
+} // namespace DWCMapResolution
 
 /** Settings selected when a Wet Clothing Asset is created or reconfigured. */
 USTRUCT()
@@ -335,14 +349,14 @@ struct DWC_API FDWCDataUVSlotWarning
     bool HasDiagnostics() const
     {
         return Degenerate3DTriangleCount > 0 ||
-            DegenerateSourceUVTriangleCount > 0 ||
-            InvalidSourceUVTriangleCount > 0 ||
-            PackedDegenerateTriangleCount > 0 ||
-            ExcludedVisibleTriangleCount > 0 ||
-            SplitOriginalUVIslandCount > 0 ||
-            SelfOverlapPairCount > 0 ||
-            BudgetFallbackIslandCount > 0 ||
-            bVisibleExclusionSafetyLimitExceeded;
+               DegenerateSourceUVTriangleCount > 0 ||
+               InvalidSourceUVTriangleCount > 0 ||
+               PackedDegenerateTriangleCount > 0 ||
+               ExcludedVisibleTriangleCount > 0 ||
+               SplitOriginalUVIslandCount > 0 ||
+               SelfOverlapPairCount > 0 ||
+               BudgetFallbackIslandCount > 0 ||
+               bVisibleExclusionSafetyLimitExceeded;
     }
 };
 

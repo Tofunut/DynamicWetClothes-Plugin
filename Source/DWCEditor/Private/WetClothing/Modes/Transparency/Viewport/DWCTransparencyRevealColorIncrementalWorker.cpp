@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyRevealColorIncrementalWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -6,9 +7,9 @@
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 
 FDWCEditorWorkerMemoryEstimate FDWCTransparencyRevealColorIncrementalWorker::EstimateMemory(
-    const TArray<FDWCTransparencyRevealColorTilePayload>& SnapshotTiles,
+    const TArray<FDWCTransparencyRevealColorTilePayload>&         SnapshotTiles,
     const TArray<FDWCTransparencyRevealColorComposeTileSnapshot>& ComposeTiles,
-    const int32 OutputTileCount)
+    const int32                                                   OutputTileCount)
 {
     FDWCEditorWorkerMemoryEstimate Estimate;
     for (const FDWCTransparencyRevealColorTilePayload& Tile : SnapshotTiles)
@@ -32,7 +33,7 @@ FDWCEditorWorkerMemoryEstimate FDWCTransparencyRevealColorIncrementalWorker::Est
 
 TSharedPtr<FDWCTransparencyRevealColorIncrementalJobResult, ESPMode::ThreadSafe>
 FDWCTransparencyRevealColorIncrementalWorker::Build(
-    FDWCTransparencyRevealColorIncrementalJobInput&& Input,
+    FDWCTransparencyRevealColorIncrementalJobInput&&                    Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FDWCTransparencyRevealColorIncrementalJobResult, ESPMode::ThreadSafe> Output =
@@ -104,8 +105,8 @@ FDWCTransparencyRevealColorIncrementalWorker::Build(
     Context.VisualizationMode = Input.VisualizationMode;
     Context.bDeferPresentationToMaterial = true;
     Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
-        ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
-        : KINDA_SMALL_NUMBER;
+                                     ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
+                                     : KINDA_SMALL_NUMBER;
 
     Output->RevealTiles = MoveTemp(WorkingTiles);
     for (const FDWCTransparencyRevealColorComposeTileSnapshot& Tile : Input.ComposeTiles)

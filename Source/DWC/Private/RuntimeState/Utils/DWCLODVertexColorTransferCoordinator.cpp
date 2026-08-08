@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/Utils/DWCLODVertexColorTransferCoordinator.h"
 
 #include "Async/DWCLODVertexColorTasks.h"
@@ -16,8 +17,8 @@
 
 bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
     FDWCWetMeshReceiverRuntime& Receiver,
-    UDWCRuntimeDataSubsystem& RuntimeDataSubsystem,
-    const int32 RuntimeLODIndex) const
+    UDWCRuntimeDataSubsystem&   RuntimeDataSubsystem,
+    const int32                 RuntimeLODIndex) const
 {
     Receiver.LODVertexStaticDataByLOD.Reset();
     Receiver.LODVertexColorTransferMapsByLOD.Reset();
@@ -29,8 +30,8 @@ bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
         return false;
     }
 
-    USkeletalMeshComponent* Mesh = Receiver.MeshComponent.Get();
-    const USkeletalMesh* SkeletalMesh = Mesh != nullptr ? Mesh->GetSkeletalMeshAsset() : nullptr;
+    USkeletalMeshComponent*  Mesh = Receiver.MeshComponent.Get();
+    const USkeletalMesh*     SkeletalMesh = Mesh != nullptr ? Mesh->GetSkeletalMeshAsset() : nullptr;
     FSkeletalMeshRenderData* RenderData = SkeletalMesh != nullptr ? SkeletalMesh->GetResourceForRendering() : nullptr;
     if (Mesh == nullptr || RenderData == nullptr)
     {
@@ -111,13 +112,10 @@ bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
                 MeshSignature);
         if (!SharedTransferMap.IsValid())
         {
-            MissingTargetGeometries.Add({
-                Pair.Key,
-                FDWCLODVertexColorTransferGeometryView{
-                    Pair.Value->Geometry.LocalPositions,
-                    Pair.Value->Geometry.LocalNormals
-                }
-            });
+            MissingTargetGeometries.Add({ Pair.Key,
+                                          FDWCLODVertexColorTransferGeometryView{
+                                              Pair.Value->Geometry.LocalPositions,
+                                              Pair.Value->Geometry.LocalNormals } });
             continue;
         }
 
@@ -128,8 +126,7 @@ bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
     if (BuildDWCLODVertexColorTransferMaps(
             FDWCLODVertexColorTransferGeometryView{
                 SourceLODData->Geometry.LocalPositions,
-                SourceLODData->Geometry.LocalNormals
-            },
+                SourceLODData->Geometry.LocalNormals },
             MissingTargetGeometries,
             BuiltTransferMaps))
     {
@@ -161,9 +158,9 @@ bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
 
 bool FDWCLODVertexColorTransferCoordinator::RequestTask(
     UDynamicWetClothesComponent& Owner,
-    FDWCTaskQueue* AsyncTaskQueue,
-    UWorld* World,
-    FDWCWetMeshReceiverRuntime& Receiver) const
+    FDWCTaskQueue*               AsyncTaskQueue,
+    UWorld*                      World,
+    FDWCWetMeshReceiverRuntime&  Receiver) const
 {
     DWC_PROFILE_SCOPE(DWC_Component_RequestLODVertexColorTransferTask);
 
@@ -187,7 +184,7 @@ bool FDWCLODVertexColorTransferCoordinator::RequestTask(
         return true;
     }
 
-    const int32 SourceLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    const int32                                                    SourceLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> SourceLODData =
         Receiver.LODVertexStaticDataByLOD.FindRef(SourceLODIndex);
     if (!SourceLODData.IsValid() ||
@@ -261,12 +258,12 @@ bool FDWCLODVertexColorTransferCoordinator::RequestTask(
 }
 
 void FDWCLODVertexColorTransferCoordinator::CommitTaskResult(
-    UDynamicWetClothesComponent& Owner,
+    UDynamicWetClothesComponent&                    Owner,
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>& Receivers,
-    FDWCTaskQueue* AsyncTaskQueue,
-    UWorld* World,
-    FDWCLODVertexColorTransferResult&& Result,
-    const bool bHasPendingCpuSkinningTasks) const
+    FDWCTaskQueue*                                  AsyncTaskQueue,
+    UWorld*                                         World,
+    FDWCLODVertexColorTransferResult&&              Result,
+    const bool                                      bHasPendingCpuSkinningTasks) const
 {
     DWC_PROFILE_SCOPE(DWC_Component_CommitLODVertexColorTransferResult);
 
@@ -308,7 +305,7 @@ void FDWCLODVertexColorTransferCoordinator::CommitTaskResult(
 
             if (!LODResult.TargetToSourceVertex.IsEmpty())
             {
-                TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> TransferMap;
+                TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>                 TransferMap;
                 const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> TargetLODData =
                     Receiver->LODVertexStaticDataByLOD.FindRef(LODResult.LODIndex);
                 if (RuntimeDataSubsystem != nullptr && SourceLODData.IsValid() && TargetLODData.IsValid())

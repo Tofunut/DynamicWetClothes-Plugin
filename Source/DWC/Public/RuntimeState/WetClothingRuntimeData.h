@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -6,8 +7,6 @@
 #include "RuntimeState/WetBoneOptimizationCache.h"
 
 struct FWetnessProfileParameters;
-
-
 
 struct FWetVertexNeighborRange
 {
@@ -29,15 +28,15 @@ class DWC_API FWetClothingRuntimeData
     static constexpr uint16 InvalidWetnessProfileIndex = 0xFFFFu;
 
     // Identity of this immutable shared payload.
-    int32 LODIndex = INDEX_NONE;
-    int32 VertexCount = 0;
-    int32 DataVersion = 0;
+    int32   LODIndex = INDEX_NONE;
+    int32   VertexCount = 0;
+    int32   DataVersion = 0;
     FString MeshSignature;
     FString SourceDataSignature;
 
-    void ResetWetPartData();
-    void ResetNeighborGraph();
-    void ResetBoneOptimizationCache();
+    void   ResetWetPartData();
+    void   ResetNeighborGraph();
+    void   ResetBoneOptimizationCache();
     uint64 GetAllocatedMemoryBytes() const;
 
     const FWetnessProfileParameters* GetWetnessProfileParameters(int32 VertexIndex) const

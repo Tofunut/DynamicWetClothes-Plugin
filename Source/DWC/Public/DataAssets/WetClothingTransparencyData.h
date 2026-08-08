@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -39,7 +40,7 @@ enum class EDWCTransparencyRevealColorBrushMode : uint8
 {
     Paint,
     EraseToBase UMETA(DisplayName = "Erase to Base"),
-    Smooth UMETA(DisplayName = "Smooth")
+    Smooth      UMETA(DisplayName = "Smooth")
 };
 
 USTRUCT()
@@ -143,7 +144,6 @@ struct DWC_API FWetClothingTransparencyInnerSlot
 
     UPROPERTY(EditAnywhere, Category = "Transparency Inner Slot", meta = (ClampMin = "0"))
     int32 SourceUVChannel = 0;
-
 };
 
 USTRUCT()
@@ -202,7 +202,6 @@ struct DWC_API FWetClothingTransparencyManualColorSource
 
     UPROPERTY(EditAnywhere, Category = "Transparency Manual Color", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float InitialTransparencyAlpha = 0.0f;
-
 };
 
 USTRUCT()
@@ -374,7 +373,7 @@ struct DWC_API FWetClothingTransparencyData
     UPROPERTY(EditAnywhere, Category = "Multi-Mesh Source")
     TSoftClassPtr<AActor> SourceBlueprintClass;
 
-    FWetClothingTransparencyLayerData* FindTransparencyLayer(int32 MaterialSlotIndex);
+    FWetClothingTransparencyLayerData*       FindTransparencyLayer(int32 MaterialSlotIndex);
     const FWetClothingTransparencyLayerData* FindTransparencyLayer(int32 MaterialSlotIndex) const;
 
     const FWetClothingBakedTransparencyMap* FindBakedTransparencyMap(int32 MaterialSlotIndex) const;
@@ -389,8 +388,8 @@ class DWC_API FWetClothingTransparencyDataHelpers
 {
   public:
     static bool ValidateTransparencyLayer(
-        const USkeletalMesh* TargetMesh,
+        const USkeletalMesh*                     TargetMesh,
         const FWetClothingTransparencyLayerData& Layer,
-        TArray<FString>& OutErrors,
-        int32 DWCDataUVChannelIndex);
+        TArray<FString>&                         OutErrors,
+        int32                                    DWCDataUVChannelIndex);
 };

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Converts selected UV Island boundaries into thick 3D selection-overlay mesh data.
  */
@@ -120,9 +121,9 @@ namespace
 
     void AddSelectionOverlayBuilderVertex(
         FDWCOverlayMeshData& MeshData,
-        const FVector&               Position,
-        const FVector&               Normal,
-        const FLinearColor&          Color)
+        const FVector&       Position,
+        const FVector&       Normal,
+        const FLinearColor&  Color)
     {
         MeshData.Vertices.Add(Position);
         MeshData.Normals.Add(Normal);
@@ -147,7 +148,7 @@ namespace
     }
 
     void AddSelectionOverlayBuilderEdgeMesh(
-        FDWCOverlayMeshData&            MeshData,
+        FDWCOverlayMeshData&                    MeshData,
         const FWetClothingSelectionOverlayEdge& Edge,
         float                                   HalfThickness,
         const FLinearColor&                     Color)
@@ -212,7 +213,7 @@ void FWetClothingSelectionOverlayMeshBuilder::BuildMeshData(
     const TSet<int32>&                       HighlightedUVIslandIDs,
     float                                    HalfThickness,
     const FLinearColor&                      Color,
-    FDWCOverlayMeshData&             OutMeshData)
+    FDWCOverlayMeshData&                     OutMeshData)
 {
     OutMeshData.Reset();
 

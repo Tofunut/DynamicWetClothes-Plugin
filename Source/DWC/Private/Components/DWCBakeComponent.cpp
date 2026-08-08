@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Components/DWCBakeComponent.h"
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
@@ -61,7 +62,7 @@ bool UDWCBakeComponent::ResolveLayer(const FDWCBakeLayer& Layer, FDWCBakeResolve
         return false;
     }
 
-    //Save Actual Component Information.
+    // Save Actual Component Information.
     OutResolvedLayer.LayerId = Layer.LayerId;
     OutResolvedLayer.LayerOrder = Layer.LayerOrder;
     OutResolvedLayer.ComponentDisplayName = SkeletalMeshComponent->GetFName();

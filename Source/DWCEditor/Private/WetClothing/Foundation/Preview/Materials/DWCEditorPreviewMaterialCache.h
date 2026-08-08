@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -21,20 +22,20 @@ class FDWCEditorPreviewMaterialCache final : public FGCObject
 
     FDWCEditorPreviewMaterialCacheStats GetStats() const;
 
-    virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
+    virtual void    AddReferencedObjects(FReferenceCollector& Collector) override;
     virtual FString GetReferencerName() const override;
 
   private:
     struct FGraphKey
     {
         FObjectKey SourceBaseMaterial;
-        FGuid SourceStateId;
-        int32 DWCDataUVChannelIndex = INDEX_NONE;
-        int32 SurfaceWaterNormalUVChannelIndex = INDEX_NONE;
-        uint8 FeatureMask = 0;
-        uint32 FeatureSchemaVersion = 0;
+        FGuid      SourceStateId;
+        int32      DWCDataUVChannelIndex = INDEX_NONE;
+        int32      SurfaceWaterNormalUVChannelIndex = INDEX_NONE;
+        uint8      FeatureMask = 0;
+        uint32     FeatureSchemaVersion = 0;
 
-        bool operator==(const FGraphKey& Other) const;
+        bool          operator==(const FGraphKey& Other) const;
         friend uint32 GetTypeHash(const FGraphKey& Key)
         {
             uint32 Hash = GetTypeHash(Key.SourceBaseMaterial);
@@ -50,9 +51,9 @@ class FDWCEditorPreviewMaterialCache final : public FGCObject
     {
         FObjectKey SourceMaterial;
         FObjectKey TransientBaseMaterial;
-        uint32 SourceParameterRevision = 0;
+        uint32     SourceParameterRevision = 0;
 
-        bool operator==(const FParentKey& Other) const;
+        bool          operator==(const FParentKey& Other) const;
         friend uint32 GetTypeHash(const FParentKey& Key)
         {
             uint32 Hash = HashCombine(GetTypeHash(Key.SourceMaterial), GetTypeHash(Key.TransientBaseMaterial));
@@ -63,10 +64,10 @@ class FDWCEditorPreviewMaterialCache final : public FGCObject
     struct FSlotKey
     {
         FObjectKey SlotOwner;
-        int32 MaterialSlotIndex = INDEX_NONE;
+        int32      MaterialSlotIndex = INDEX_NONE;
         FObjectKey TransientParent;
 
-        bool operator==(const FSlotKey& Other) const;
+        bool          operator==(const FSlotKey& Other) const;
         friend uint32 GetTypeHash(const FSlotKey& Key)
         {
             uint32 Hash = GetTypeHash(Key.SlotOwner);
@@ -77,28 +78,28 @@ class FDWCEditorPreviewMaterialCache final : public FGCObject
 
     struct FGraphEntry
     {
-        TObjectPtr<UMaterial> Material = nullptr;
+        TObjectPtr<UMaterial>          Material = nullptr;
         TObjectPtr<UMaterialInterface> SourceMaterial = nullptr;
         EDWCEditorPreviewMaterialState State = EDWCEditorPreviewMaterialState::Failed;
-        FString FailureMessage;
+        FString                        FailureMessage;
     };
 
     struct FParentEntry
     {
         TObjectPtr<UMaterialInstanceConstant> Parent = nullptr;
-        TObjectPtr<UMaterialInterface> SourceMaterial = nullptr;
-        FString FailureMessage;
+        TObjectPtr<UMaterialInterface>        SourceMaterial = nullptr;
+        FString                               FailureMessage;
     };
 
     struct FSlotEntry
     {
         TObjectPtr<UMaterialInstanceDynamic> MID = nullptr;
-        TObjectPtr<UObject> SlotOwner = nullptr;
-        TObjectPtr<UMaterialInterface> SourceMaterial = nullptr;
+        TObjectPtr<UObject>                  SlotOwner = nullptr;
+        TObjectPtr<UMaterialInterface>       SourceMaterial = nullptr;
     };
 
-    TMap<FGraphKey, FGraphEntry> GraphEntries;
-    TMap<FParentKey, FParentEntry> ParentEntries;
-    TMap<FSlotKey, FSlotEntry> SlotEntries;
+    TMap<FGraphKey, FGraphEntry>        GraphEntries;
+    TMap<FParentKey, FParentEntry>      ParentEntries;
+    TMap<FSlotKey, FSlotEntry>          SlotEntries;
     FDWCEditorPreviewMaterialCacheStats LifetimeStats;
 };

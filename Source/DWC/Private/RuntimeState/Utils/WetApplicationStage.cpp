@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/Utils/WetApplicationStage.h"
 
 #include "Components/DynamicWetClothesComponent.h"
@@ -17,25 +18,25 @@ namespace
 
     struct FGPUSurfaceWaterAccumulator
     {
-        int32 MaterialSlotIndex = INDEX_NONE;
-        float TotalSurfaceAmount = 0.0f;
-        float BestInfluence = -1.0f;
-        FVector2f BestUV = FVector2f::ZeroVector;
-        float FlowSelectionWeight = 0.0f;
-        FVector2f FlowCandidateUV = FVector2f::ZeroVector;
-        FVector3f FlowCandidateBarycentric = FVector3f::ZeroVector;
-        int32 FlowCandidateTriangleID = INDEX_NONE;
+        int32                          MaterialSlotIndex = INDEX_NONE;
+        float                          TotalSurfaceAmount = 0.0f;
+        float                          BestInfluence = -1.0f;
+        FVector2f                      BestUV = FVector2f::ZeroVector;
+        float                          FlowSelectionWeight = 0.0f;
+        FVector2f                      FlowCandidateUV = FVector2f::ZeroVector;
+        FVector3f                      FlowCandidateBarycentric = FVector3f::ZeroVector;
+        int32                          FlowCandidateTriangleID = INDEX_NONE;
         FSurfaceWaterProfileParameters Profile;
-        float DropletRadiusScale = 1.0f;
-        float Droplet2SizeScale = 1.0f;
-        bool bHasProfile = false;
-        bool bHasFlowCandidate = false;
+        float                          DropletRadiusScale = 1.0f;
+        float                          Droplet2SizeScale = 1.0f;
+        bool                           bHasProfile = false;
+        bool                           bHasFlowCandidate = false;
     };
 
     struct FGPUSurfaceWaterAccumulatorKey
     {
-        int32 MaterialSlotIndex = INDEX_NONE;
-        int32 WetPartID = INDEX_NONE;
+        int32  MaterialSlotIndex = INDEX_NONE;
+        int32  WetPartID = INDEX_NONE;
         uint16 ProfileIndex = FWetClothingRuntimeData::InvalidWetnessProfileIndex;
 
         bool operator==(const FGPUSurfaceWaterAccumulatorKey& Other) const
@@ -55,18 +56,18 @@ namespace
 
     struct FResolvedSurfaceWaterPart
     {
-        const FWetClothingWetPartEntry* WetPart = nullptr;
+        const FWetClothingWetPartEntry*  WetPart = nullptr;
         const FWetnessProfileParameters* WetnessProfile = nullptr;
-        uint16 ProfileIndex = FWetClothingRuntimeData::InvalidWetnessProfileIndex;
+        uint16                           ProfileIndex = FWetClothingRuntimeData::InvalidWetnessProfileIndex;
     };
 
     FResolvedSurfaceWaterPart ResolveSurfaceWaterPartForTriangle(
-        const FDWCWetMeshReceiverRuntime& Receiver,
+        const FDWCWetMeshReceiverRuntime&       Receiver,
         const FWetClothingAuthoredMaterialSlot& MaterialSlot,
-        const FDWCGPUBakedTriangle& Triangle)
+        const FDWCGPUBakedTriangle&             Triangle)
     {
         FResolvedSurfaceWaterPart Result;
-        const UWetClothingAsset* Asset = Receiver.WetClothingAsset.Get();
+        const UWetClothingAsset*  Asset = Receiver.WetClothingAsset.Get();
         if (Asset == nullptr || !Receiver.SharedRuntimeData.IsValid())
         {
             return Result;
@@ -106,24 +107,24 @@ namespace
 
     FVector2f MakeIndependentFlowStampUV(
         const FDWCGPUBakedTriangle& Triangle,
-        const FVector3f& ContactBarycentric,
-        const float PositionSpread,
-        FRandomStream& RandomStream)
+        const FVector3f&            ContactBarycentric,
+        const float                 PositionSpread,
+        FRandomStream&              RandomStream)
     {
         FVector3f SafeContactBarycentric(
             FMath::Max(ContactBarycentric.X, 0.0f),
             FMath::Max(ContactBarycentric.Y, 0.0f),
             FMath::Max(ContactBarycentric.Z, 0.0f));
         const float ContactWeight = SafeContactBarycentric.X +
-            SafeContactBarycentric.Y +
-            SafeContactBarycentric.Z;
+                                    SafeContactBarycentric.Y +
+                                    SafeContactBarycentric.Z;
         SafeContactBarycentric = ContactWeight > KINDA_SMALL_NUMBER
-            ? SafeContactBarycentric / ContactWeight
-            : FVector3f(1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f);
+                                     ? SafeContactBarycentric / ContactWeight
+                                     : FVector3f(1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f);
 
         // Square-root sampling produces a uniform point inside the selected UV triangle.
-        const float Root = FMath::Sqrt(RandomStream.FRand());
-        const float Edge = RandomStream.FRand();
+        const float     Root = FMath::Sqrt(RandomStream.FRand());
+        const float     Edge = RandomStream.FRand();
         const FVector3f RandomBarycentric(
             1.0f - Root,
             Root * (1.0f - Edge),
@@ -145,7 +146,7 @@ namespace
     }
 
     bool QueueGPUSurfaceWaterStamps(
-        FDWCWetMeshReceiverRuntime& Receiver,
+        FDWCWetMeshReceiverRuntime&               Receiver,
         const TArray<FDWCResolvedSurfaceContact>& Contacts)
     {
         const UWetClothingAsset* Asset = Receiver.WetClothingAsset.Get();
@@ -162,7 +163,7 @@ namespace
         const FDWCGPULODBakeData& GPUData =
             Asset->GetGPUWetMapRuntimeData(UWetClothingAsset::RuntimeSimulationLODIndex);
         TMap<FGPUSurfaceWaterAccumulatorKey, FGPUSurfaceWaterAccumulator> Accumulators;
-        FRandomStream& RandomStream = Receiver.GPUSurfaceWaterRandomStream;
+        FRandomStream&                                                    RandomStream = Receiver.GPUSurfaceWaterRandomStream;
 
         for (const FDWCResolvedSurfaceContact& Contact : Contacts)
         {
@@ -196,11 +197,11 @@ namespace
                 continue;
             }
 
-            const FWetnessProfileParameters& WetnessProfile = *ResolvedPart.WetnessProfile;
+            const FWetnessProfileParameters&      WetnessProfile = *ResolvedPart.WetnessProfile;
             const FSurfaceWaterProfileParameters& SurfaceProfile = WetnessProfile.SurfaceWater;
-            const float SurfaceAmount = Contact.Amount *
-                FMath::Clamp(Contact.TriangleInfluence, 0.0f, 1.0f) *
-                WetnessProfile.GetRejectedWaterFraction();
+            const float                           SurfaceAmount = Contact.Amount *
+                                        FMath::Clamp(Contact.TriangleInfluence, 0.0f, 1.0f) *
+                                        WetnessProfile.GetRejectedWaterFraction();
             if (SurfaceAmount <= 0.0f)
             {
                 continue;
@@ -209,7 +210,8 @@ namespace
             const FGPUSurfaceWaterAccumulatorKey AccumulatorKey{
                 Contact.MaterialSlotIndex,
                 ResolvedPart.WetPart->WetPartID,
-                ResolvedPart.ProfileIndex};
+                ResolvedPart.ProfileIndex
+            };
             FGPUSurfaceWaterAccumulator& Accumulator = Accumulators.FindOrAdd(AccumulatorKey);
             Accumulator.MaterialSlotIndex = Contact.MaterialSlotIndex;
             Accumulator.TotalSurfaceAmount += SurfaceAmount;
@@ -289,13 +291,12 @@ namespace
                 Request.Amount = Accumulator.TotalSurfaceAmount;
                 Request.bDroplet2 = true;
             }
-
         }
 
         return !Requests.IsEmpty() && Receiver.GPUBackend->EnqueueSurfaceStamps(Requests);
     }
 
-}
+} // namespace
 
 FWetInputStageArgs FWetApplicationStage::MakeWetInputStageArgs(
     const FWetApplicationStageContext& Context,
@@ -425,7 +426,7 @@ bool FWetApplicationStage::ApplyWetContact(
             }
 
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
-            FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
+            FWetSurfaceContactResolverArgs     ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
             if (FWetSurfaceContactResolver::ResolveContact(ResolverArgs, Contact, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
@@ -445,7 +446,7 @@ bool FWetApplicationStage::ApplyWetContact(
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetContact(InputArgs, Contact);
+        const bool         bChanged = FWetInputStage::ApplyWetContact(InputArgs, Contact);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -459,9 +460,9 @@ bool FWetApplicationStage::ApplyWetContact(
 }
 
 bool FWetApplicationStage::ApplyWetContacts(
-    FWetApplicationStageContext& Context,
+    FWetApplicationStageContext&  Context,
     const TArray<FDWCWetContact>& Contacts,
-    const bool                  bApplyMaterial)
+    const bool                    bApplyMaterial)
 {
     const uint32 ContactCount = static_cast<uint32>(Contacts.Num());
     FDWCWorkloadStats::RecordWetContactsReceived(ContactCount);
@@ -504,7 +505,7 @@ bool FWetApplicationStage::ApplyWetContacts(
             }
 
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
-            FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
+            FWetSurfaceContactResolverArgs     ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
             if (FWetSurfaceContactResolver::ResolveContacts(ResolverArgs, ReceiverContacts, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
@@ -539,7 +540,7 @@ bool FWetApplicationStage::ApplyWetContacts(
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts);
+        const bool         bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -554,8 +555,8 @@ bool FWetApplicationStage::ApplyWetContacts(
 
 bool FWetApplicationStage::ApplyWetArea(
     FWetApplicationStageContext& Context,
-    const FDWCWetAreaData&        AreaData,
-    const bool                    bApplyMaterial)
+    const FDWCWetAreaData&       AreaData,
+    const bool                   bApplyMaterial)
 {
     if (Context.Receivers == nullptr)
     {
@@ -579,7 +580,7 @@ bool FWetApplicationStage::ApplyWetArea(
             }
 
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
-            FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
+            FWetSurfaceContactResolverArgs     ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
             if (FWetSurfaceContactResolver::ResolveWetArea(ResolverArgs, AreaData, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
@@ -599,7 +600,7 @@ bool FWetApplicationStage::ApplyWetArea(
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetArea(InputArgs, AreaData);
+        const bool         bChanged = FWetInputStage::ApplyWetArea(InputArgs, AreaData);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -614,9 +615,9 @@ bool FWetApplicationStage::ApplyWetArea(
 
 bool FWetApplicationStage::ApplyWetSurface(
     FWetApplicationStageContext& Context,
-    const FDWCWaterSurfaceData&   WaterSurfaceData,
-    const float                   Amount,
-    const bool                    bApplyMaterial)
+    const FDWCWaterSurfaceData&  WaterSurfaceData,
+    const float                  Amount,
+    const bool                   bApplyMaterial)
 {
     if (Context.Receivers == nullptr)
     {
@@ -635,7 +636,7 @@ bool FWetApplicationStage::ApplyWetSurface(
             }
 
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
-            FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
+            FWetSurfaceContactResolverArgs     ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
             if (FWetSurfaceContactResolver::ResolveWaterSurface(ResolverArgs, WaterSurfaceData, Amount, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
@@ -655,7 +656,7 @@ bool FWetApplicationStage::ApplyWetSurface(
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetSurface(InputArgs, WaterSurfaceData, Amount);
+        const bool         bChanged = FWetInputStage::ApplyWetSurface(InputArgs, WaterSurfaceData, Amount);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -723,7 +724,7 @@ bool FWetApplicationStage::FlushPendingWetContacts(FWetApplicationStageContext& 
             }
 
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
-            FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
+            FWetSurfaceContactResolverArgs     ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
             if (FWetSurfaceContactResolver::ResolveContacts(ResolverArgs, ReceiverContacts, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
@@ -772,7 +773,7 @@ bool FWetApplicationStage::FlushPendingWetContacts(FWetApplicationStageContext& 
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts);
+        const bool         bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts);
         if (bChanged)
         {
             bAnyChanged = true;

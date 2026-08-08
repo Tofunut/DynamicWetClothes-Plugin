@@ -1,11 +1,11 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 
 #include "DWCQualityLODProfile.generated.h"
-
 
 /**
  * Internal data model for DWC quality LOD support. Not exposed through the public API.
@@ -30,7 +30,6 @@ struct DWC_API FDWCQualityLODPolicy
 
     UPROPERTY()
     float RenderUpdateInterval = 0.0f;
-
 };
 
 USTRUCT()
@@ -47,9 +46,9 @@ struct DWC_API FDWCQualityLODPolicyEntry
 
 struct DWC_API FDWCQualityLODRuntimeState
 {
-    int32 CurrentQualityLOD = 0;
+    int32                CurrentQualityLOD = 0;
     FDWCQualityLODPolicy ResolvedPolicy;
-    float RenderUpdateAccumulator = 0.0f;
+    float                RenderUpdateAccumulator = 0.0f;
 };
 
 USTRUCT()
@@ -68,9 +67,9 @@ struct DWC_API FDWCQualityLODScreenSizeThreshold
 struct DWC_API FDWCQualityLODScreenSizeRuntimeState
 {
     FBoxSphereBounds MergedBounds;
-    float ScreenSize = 0.0f;
-    bool bHasValidScreenSize = false;
-    int32 ActiveLODLevel = INDEX_NONE;
+    float            ScreenSize = 0.0f;
+    bool             bHasValidScreenSize = false;
+    int32            ActiveLODLevel = INDEX_NONE;
 };
 
 UCLASS(NotBlueprintable, HideDropdown)
@@ -89,5 +88,5 @@ class DWC_API UDWCQualityLODProfile : public UDataAsset
 #endif
 
     static FDWCQualityLODPolicy MakeDefaultPolicyForLOD(int32 InQualityLOD);
-    void NormalizeLODLevels();
+    void                        NormalizeLODLevels();
 };

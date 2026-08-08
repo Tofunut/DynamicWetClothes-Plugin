@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetWrinkleNormalCorrectionService.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -29,10 +30,10 @@ UTexture2D* FWetWrinkleNormalCorrectionService::FindExistingCorrectedTexture(con
 }
 
 bool FWetWrinkleNormalCorrectionService::CreateOrUpdateCorrectedTexture(
-    UTexture2D& SourceTexture,
+    UTexture2D&                          SourceTexture,
     const FWetWrinkleTexturePixelBuffer& CorrectedPixels,
-    UTexture2D*& OutTexture,
-    FString& OutError)
+    UTexture2D*&                         OutTexture,
+    FString&                             OutError)
 {
     OutTexture = nullptr;
 #if WITH_EDITORONLY_DATA

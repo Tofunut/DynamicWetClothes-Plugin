@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,25 +13,25 @@ struct FDWCActivateEditorModeAction
 
 struct FDWCReconcileAuthoringAction
 {
-    uint64 AuthoringRevision = 0;
+    uint64                    AuthoringRevision = 0;
     EDWCEditorAuthoringDomain Domain = EDWCEditorAuthoringDomain::None;
-    FDWCEditorAuthoringIndex Index;
+    FDWCEditorAuthoringIndex  Index;
     EDWCEditorAuthoringImpact Impact = EDWCEditorAuthoringImpact::None;
 };
 
 struct FDWCSetWrinkleBrushAction
 {
     FWetWrinkleBrushSettings Brush;
-    float BrushSizeCm = 8.0f;
-    float BrushSizeUV = 0.0677f;
-    EDWCEditorSessionEffect Effects = EDWCEditorSessionEffect::UpdatePreviewParameters;
+    float                    BrushSizeCm = 8.0f;
+    float                    BrushSizeUV = 0.0677f;
+    EDWCEditorSessionEffect  Effects = EDWCEditorSessionEffect::UpdatePreviewParameters;
 };
 
 struct FDWCSelectWrinkleElementAction
 {
-    FGuid ElementGuid;
+    FGuid                  ElementGuid;
     EWetWrinkleElementType ElementType = EWetWrinkleElementType::Patch;
-    int32 RidgePointIndex = INDEX_NONE;
+    int32                  RidgePointIndex = INDEX_NONE;
 };
 
 struct FDWCSetWrinkleCrossPreviewAction
@@ -45,7 +46,7 @@ struct FDWCSelectTransparencyLayerAction
 
 struct FDWCSetTransparencyStageAction
 {
-    FGuid LayerGuid;
+    FGuid                       LayerGuid;
     EDWCTransparencyEditorStage Stage = EDWCTransparencyEditorStage::StructureSetup;
 };
 
@@ -55,22 +56,22 @@ struct FDWCSetTransparencyPreviewAction
         EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     EDWCTransparencyVisualizationMode VisualizationMode =
         EDWCTransparencyVisualizationMode::Final;
-    float WetnessPreviewPercent = 100.0f;
+    float                           WetnessPreviewPercent = 100.0f;
     FDWCTransparencyPreviewSettings Settings;
-    bool bShowSavedWrinkle = true;
+    bool                            bShowSavedWrinkle = true;
 };
 
 struct FDWCInitializeTransparencyPreviewSettingsAction
 {
     FDWCTransparencyPreviewSettings Settings;
-    bool bForce = false;
+    bool                            bForce = false;
 };
 
 struct FDWCSetTransparencyPaintAction
 {
     FDWCTransparencyPaintSettings Paint;
-    bool bRevealPaint = false;
-    EDWCEditorSessionEffect Effects = EDWCEditorSessionEffect::UpdatePreviewParameters;
+    bool                          bRevealPaint = false;
+    EDWCEditorSessionEffect       Effects = EDWCEditorSessionEffect::UpdatePreviewParameters;
 };
 
 struct FDWCSetTransparencyEditContextAction

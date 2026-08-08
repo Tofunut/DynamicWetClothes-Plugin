@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Wrinkle/Generate/WetWrinkleTextureGenerator.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -23,8 +24,8 @@ namespace
                 return;
             }
 
-            SizeX = Texture->Source.GetSizeX();
-            SizeY = Texture->Source.GetSizeY();
+            SizeX = IntCastChecked<int32>(Texture->Source.GetSizeX());
+            SizeY = IntCastChecked<int32>(Texture->Source.GetSizeY());
             SourceFormat = Texture->Source.GetFormat();
             if (SizeX <= 0 || SizeY <= 0 || (SourceFormat != TSF_BGRA8 && SourceFormat != TSF_BGRE8))
             {
@@ -64,10 +65,10 @@ namespace
             const int32 PixelY = FMath::Clamp(FMath::FloorToInt(ClampedV * static_cast<float>(SizeY)), 0, SizeY - 1);
 
             const FColor* ColorData = reinterpret_cast<const FColor*>(MipData);
-            const FColor Color = ColorData[PixelY * SizeX + PixelX];
+            const FColor  Color = ColorData[PixelY * SizeX + PixelX];
 
             const float DecodedX = static_cast<float>(Color.R) / 255.0f * 2.0f - 1.0f;
-            float DecodedY = -(static_cast<float>(Color.G) / 255.0f * 2.0f - 1.0f);
+            float       DecodedY = -(static_cast<float>(Color.G) / 255.0f * 2.0f - 1.0f);
             if (bFlipGreenChannel)
             {
                 DecodedY = -DecodedY;
@@ -79,19 +80,19 @@ namespace
                 static_cast<float>(Color.B) / 255.0f * 2.0f - 1.0f);
             if (DecodedNormal.Z <= UE_SMALL_NUMBER)
             {
-                const float XYLengthSq = FMath::Min(DecodedNormal.X * DecodedNormal.X + DecodedNormal.Y * DecodedNormal.Y, 1.0f);
+                const float XYLengthSq = FMath::Min(static_cast<float>(DecodedNormal.X * DecodedNormal.X + DecodedNormal.Y * DecodedNormal.Y), 1.0f);
                 DecodedNormal.Z = FMath::Sqrt(FMath::Max(1.0f - XYLengthSq, 0.0f));
             }
 
             return DecodedNormal.GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
         }
 
-        UTexture2D* Texture = nullptr;
-        const uint8* MipData = nullptr;
-        int32 SizeX = 0;
-        int32 SizeY = 0;
+        UTexture2D*          Texture = nullptr;
+        const uint8*         MipData = nullptr;
+        int32                SizeX = 0;
+        int32                SizeY = 0;
         ETextureSourceFormat SourceFormat = TSF_Invalid;
-        bool bFlipGreenChannel = false;
+        bool                 bFlipGreenChannel = false;
     };
 
     float WetWrinkleWrapUnit(float Value)
@@ -102,7 +103,7 @@ namespace
 
     FVector2D WetWrinkleWrapUV(const FVector2D& UV)
     {
-        return FVector2D(WetWrinkleWrapUnit(UV.X), WetWrinkleWrapUnit(UV.Y));
+        return FVector2D(WetWrinkleWrapUnit(static_cast<float>(UV.X)), WetWrinkleWrapUnit(static_cast<float>(UV.Y)));
     }
 
     float WetWrinkleStableUnitRandom(uint32 Seed)
@@ -120,12 +121,12 @@ namespace
         const FVector2D V0 = B - A;
         const FVector2D V1 = C - A;
         const FVector2D V2 = Point - A;
-        const double D00 = FVector2D::DotProduct(V0, V0);
-        const double D01 = FVector2D::DotProduct(V0, V1);
-        const double D11 = FVector2D::DotProduct(V1, V1);
-        const double D20 = FVector2D::DotProduct(V2, V0);
-        const double D21 = FVector2D::DotProduct(V2, V1);
-        const double Denom = D00 * D11 - D01 * D01;
+        const double    D00 = FVector2D::DotProduct(V0, V0);
+        const double    D01 = FVector2D::DotProduct(V0, V1);
+        const double    D11 = FVector2D::DotProduct(V1, V1);
+        const double    D20 = FVector2D::DotProduct(V2, V0);
+        const double    D21 = FVector2D::DotProduct(V2, V1);
+        const double    Denom = D00 * D11 - D01 * D01;
         if (FMath::IsNearlyZero(Denom))
         {
             return FVector(-1.0, -1.0, -1.0);
@@ -143,9 +144,9 @@ namespace
     }
 
     void WetWrinkleAddPreviewEdge(
-        const FVector2D& A,
-        const FVector2D& B,
-        TMap<FDWCCanonicalUVEdge, int32>& EdgeUseCounts,
+        const FVector2D&                                        A,
+        const FVector2D&                                        B,
+        TMap<FDWCCanonicalUVEdge, int32>&                       EdgeUseCounts,
         TMap<FDWCCanonicalUVEdge, TPair<FVector2D, FVector2D>>& EdgeSegments)
     {
         const FDWCCanonicalUVEdge Key(A, B);
@@ -185,23 +186,23 @@ namespace
     }
 
     void WetWrinkleDrawPreviewLine(
-        TArray<FColor>& Pixels,
-        const int32 Width,
-        const int32 Height,
+        TArray<FColor>&  Pixels,
+        const int32      Width,
+        const int32      Height,
         const FVector2D& StartUV,
         const FVector2D& EndUV,
-        const FColor& Color,
-        const int32 ThicknessPixels)
+        const FColor&    Color,
+        const int32      ThicknessPixels)
     {
         if (Width <= 0 || Height <= 0)
         {
             return;
         }
 
-        const int32 X0 = FMath::Clamp(FMath::RoundToInt(StartUV.X * static_cast<double>(Width - 1)), 0, Width - 1);
-        const int32 Y0 = FMath::Clamp(FMath::RoundToInt(StartUV.Y * static_cast<double>(Height - 1)), 0, Height - 1);
-        const int32 X1 = FMath::Clamp(FMath::RoundToInt(EndUV.X * static_cast<double>(Width - 1)), 0, Width - 1);
-        const int32 Y1 = FMath::Clamp(FMath::RoundToInt(EndUV.Y * static_cast<double>(Height - 1)), 0, Height - 1);
+        const int32 X0 = IntCastChecked<int32>(FMath::Clamp(FMath::RoundToInt(StartUV.X * static_cast<double>(Width - 1)), 0, Width - 1));
+        const int32 Y0 = IntCastChecked<int32>(FMath::Clamp(FMath::RoundToInt(StartUV.Y * static_cast<double>(Height - 1)), 0, Height - 1));
+        const int32 X1 = IntCastChecked<int32>(FMath::Clamp(FMath::RoundToInt(EndUV.X * static_cast<double>(Width - 1)), 0, Width - 1));
+        const int32 Y1 = IntCastChecked<int32>(FMath::Clamp(FMath::RoundToInt(EndUV.Y * static_cast<double>(Height - 1)), 0, Height - 1));
         const int32 Steps = FMath::Max(FMath::Abs(X1 - X0), FMath::Abs(Y1 - Y0));
         if (Steps <= 0)
         {
@@ -249,7 +250,7 @@ namespace
         Texture->AddressY = TA_Clamp;
 
         FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
-        void* MipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+        void*             MipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
         FMemory::Memcpy(MipData, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
         Mip.BulkData.Unlock();
         Texture->UpdateResource();
@@ -290,20 +291,20 @@ namespace
         Texture->LODGroup = TEXTUREGROUP_WorldNormalMap;
 
         FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
-        void* MipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+        void*             MipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
         FMemory::Memcpy(MipData, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
         Mip.BulkData.Unlock();
         Texture->UpdateResource();
         return Texture;
     }
-}
+} // namespace
 
 bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
-    UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex,
+    UWetClothingAsset*                          WetClothingAsset,
+    const int32                                 MaterialSlotIndex,
     const FWetWrinkleTextureGenerationSettings& Settings,
-    FWetWrinkleTextureGenerationResult& OutResult,
-    FString& OutErrorMessage)
+    FWetWrinkleTextureGenerationResult&         OutResult,
+    FString&                                    OutErrorMessage)
 {
     OutResult = FWetWrinkleTextureGenerationResult();
 
@@ -360,7 +361,8 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
             LODIndex,
             MaterialSlotIndex,
             Islands,
-            &OutErrorMessage) || Islands.Num() == 0)
+            &OutErrorMessage) ||
+        Islands.Num() == 0)
     {
         if (OutErrorMessage.IsEmpty())
         {
@@ -378,8 +380,8 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
     TArray<bool> bCoveredPixels;
     bCoveredPixels.Init(false, Width * Height);
 
-    const float Intensity = FMath::Clamp(Settings.Intensity, 0.0f, 4.0f);
-    const float PatternScale = FMath::Clamp(Settings.PatternScale, 0.25f, 4.0f);
+    const float     Intensity = FMath::Clamp(Settings.Intensity, 0.0f, 4.0f);
+    const float     PatternScale = FMath::Clamp(Settings.PatternScale, 0.25f, 4.0f);
     const FVector2D PatternOffset(
         WetWrinkleWrapUnit(static_cast<float>(Settings.PatternOffset.X)),
         WetWrinkleWrapUnit(static_cast<float>(Settings.PatternOffset.Y)));
@@ -399,16 +401,16 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
             FMath::Max(static_cast<float>(Island.UVBounds.Max.Y - Island.UVBounds.Min.Y), UE_SMALL_NUMBER));
 
         const uint32 IslandSeed = HashCombine(::GetTypeHash(MaterialSlotIndex), ::GetTypeHash(Island.UVIslandID));
-        const float TwoPi = 2.0f * UE_PI;
-        const float PhaseA = WetWrinkleStableUnitRandom(IslandSeed * 1664525u + 1013904223u) * TwoPi;
-        const float PhaseB = WetWrinkleStableUnitRandom(IslandSeed * 22695477u + 1u) * TwoPi;
-        const float PhaseC = WetWrinkleStableUnitRandom(IslandSeed * 1103515245u + 12345u) * TwoPi;
-        const float FrequencyA = 1.35f + WetWrinkleStableUnitRandom(IslandSeed * 747796405u + 2891336453u) * 1.65f;
-        const float FrequencyB = 1.35f + WetWrinkleStableUnitRandom(IslandSeed * 277803737u + 1013904223u) * 1.65f;
-        const float FrequencyC = 0.85f + WetWrinkleStableUnitRandom(IslandSeed * 3266489917u + 668265263u) * 1.25f;
-        const float WarpAmplitude = Noise * 0.075f;
-        const float CosRotation = FMath::Cos(DirectionRadians);
-        const float SinRotation = FMath::Sin(DirectionRadians);
+        const float  TwoPi = 2.0f * UE_PI;
+        const float  PhaseA = WetWrinkleStableUnitRandom(IslandSeed * 1664525u + 1013904223u) * TwoPi;
+        const float  PhaseB = WetWrinkleStableUnitRandom(IslandSeed * 22695477u + 1u) * TwoPi;
+        const float  PhaseC = WetWrinkleStableUnitRandom(IslandSeed * 1103515245u + 12345u) * TwoPi;
+        const float  FrequencyA = 1.35f + WetWrinkleStableUnitRandom(IslandSeed * 747796405u + 2891336453u) * 1.65f;
+        const float  FrequencyB = 1.35f + WetWrinkleStableUnitRandom(IslandSeed * 277803737u + 1013904223u) * 1.65f;
+        const float  FrequencyC = 0.85f + WetWrinkleStableUnitRandom(IslandSeed * 3266489917u + 668265263u) * 1.25f;
+        const float  WarpAmplitude = Noise * 0.075f;
+        const float  CosRotation = FMath::Cos(DirectionRadians);
+        const float  SinRotation = FMath::Sin(DirectionRadians);
 
         for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
         {
@@ -416,14 +418,14 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
             const FVector2D UV0 = Triangle.UVs[0] - TriangleTileOffset;
             const FVector2D UV1 = Triangle.UVs[1] - TriangleTileOffset;
             const FVector2D UV2 = Triangle.UVs[2] - TriangleTileOffset;
-            const float MinU = FMath::Min(FMath::Min(static_cast<float>(UV0.X), static_cast<float>(UV1.X)), static_cast<float>(UV2.X));
-            const float MaxU = FMath::Max(FMath::Max(static_cast<float>(UV0.X), static_cast<float>(UV1.X)), static_cast<float>(UV2.X));
-            const float MinV = FMath::Min(FMath::Min(static_cast<float>(UV0.Y), static_cast<float>(UV1.Y)), static_cast<float>(UV2.Y));
-            const float MaxV = FMath::Max(FMath::Max(static_cast<float>(UV0.Y), static_cast<float>(UV1.Y)), static_cast<float>(UV2.Y));
-            const int32 MinX = FMath::Clamp(FMath::FloorToInt(MinU * Width), 0, Width - 1);
-            const int32 MaxX = FMath::Clamp(FMath::CeilToInt(MaxU * Width), 0, Width - 1);
-            const int32 MinY = FMath::Clamp(FMath::FloorToInt(MinV * Height), 0, Height - 1);
-            const int32 MaxY = FMath::Clamp(FMath::CeilToInt(MaxV * Height), 0, Height - 1);
+            const float     MinU = FMath::Min(FMath::Min(static_cast<float>(UV0.X), static_cast<float>(UV1.X)), static_cast<float>(UV2.X));
+            const float     MaxU = FMath::Max(FMath::Max(static_cast<float>(UV0.X), static_cast<float>(UV1.X)), static_cast<float>(UV2.X));
+            const float     MinV = FMath::Min(FMath::Min(static_cast<float>(UV0.Y), static_cast<float>(UV1.Y)), static_cast<float>(UV2.Y));
+            const float     MaxV = FMath::Max(FMath::Max(static_cast<float>(UV0.Y), static_cast<float>(UV1.Y)), static_cast<float>(UV2.Y));
+            const int32     MinX = FMath::Clamp(FMath::FloorToInt(MinU * Width), 0, Width - 1);
+            const int32     MaxX = FMath::Clamp(FMath::CeilToInt(MaxU * Width), 0, Width - 1);
+            const int32     MinY = FMath::Clamp(FMath::FloorToInt(MinV * Height), 0, Height - 1);
+            const int32     MaxY = FMath::Clamp(FMath::CeilToInt(MaxV * Height), 0, Height - 1);
             if (MinX > MaxX || MinY > MaxY)
             {
                 continue;
@@ -443,27 +445,28 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
                     }
 
                     const FVector2D OriginalPixelUV = PixelUV + TriangleTileOffset;
-                    FVector2D LocalUV(
+                    FVector2D       LocalUV(
                         (OriginalPixelUV.X - IslandMin.X) / IslandSize.X - 0.5f,
                         (OriginalPixelUV.Y - IslandMin.Y) / IslandSize.Y - 0.5f);
                     LocalUV /= PatternScale;
                     const FVector2D RotatedLocal(
                         CosRotation * LocalUV.X + SinRotation * LocalUV.Y,
                         -SinRotation * LocalUV.X + CosRotation * LocalUV.Y);
-                    const float WaveX = FMath::Sin(RotatedLocal.Y * FrequencyA * TwoPi + PhaseA);
-                    const float WaveY = FMath::Sin(RotatedLocal.X * FrequencyB * TwoPi + PhaseB);
-                    const float CrossWave = FMath::Sin((RotatedLocal.X + RotatedLocal.Y) * FrequencyC * TwoPi + PhaseC);
+                    const float     WaveX = static_cast<float>(FMath::Sin(RotatedLocal.Y * FrequencyA * TwoPi + PhaseA));
+                    const float     WaveY = static_cast<float>(FMath::Sin(RotatedLocal.X * FrequencyB * TwoPi + PhaseB));
+                    const float     CrossWave = static_cast<float>(FMath::Sin((RotatedLocal.X + RotatedLocal.Y) * FrequencyC * TwoPi + PhaseC));
                     const FVector2D WarpedLocal = RotatedLocal + FVector2D(
-                        WaveX + CrossWave * 0.35f,
-                        WaveY - CrossWave * 0.35f) * WarpAmplitude;
+                                                                     WaveX + CrossWave * 0.35f,
+                                                                     WaveY - CrossWave * 0.35f) *
+                                                                     WarpAmplitude;
                     const FVector2D BaseSampleUV = WetWrinkleWrapUV(WarpedLocal + FVector2D(0.5f, 0.5f) + PatternOffset);
 
                     const FVector SampledNormalTS = BaseNormalSource.SampleNormalTS(BaseSampleUV);
                     const FVector FinalNormalTS = FVector(
-                        SampledNormalTS.X * Intensity,
-                        SampledNormalTS.Y * Intensity,
-                        SampledNormalTS.Z)
-                        .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
+                                                      SampledNormalTS.X * Intensity,
+                                                      SampledNormalTS.Y * Intensity,
+                                                      SampledNormalTS.Z)
+                                                      .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
 
                     const int32 PixelIndex = PixelY * Width + PixelX;
                     Pixels[PixelIndex] = WetWrinkleEncodeNormal(FinalNormalTS);
@@ -491,11 +494,11 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
     }
     constexpr int32 IslandOutlineShadowThickness = 5;
     constexpr int32 IslandOutlineThickness = 2;
-    const FColor IslandOutlineShadow(8, 8, 16, 255);
-    const FColor IslandOutlineColor(255, 244, 96, 255);
+    const FColor    IslandOutlineShadow(8, 8, 16, 255);
+    const FColor    IslandOutlineColor(255, 244, 96, 255);
     for (const FWetClothingAssetUVIsland& Island : Islands)
     {
-        TMap<FDWCCanonicalUVEdge, int32> EdgeUseCounts;
+        TMap<FDWCCanonicalUVEdge, int32>                       EdgeUseCounts;
         TMap<FDWCCanonicalUVEdge, TPair<FVector2D, FVector2D>> EdgeSegments;
 
         for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)

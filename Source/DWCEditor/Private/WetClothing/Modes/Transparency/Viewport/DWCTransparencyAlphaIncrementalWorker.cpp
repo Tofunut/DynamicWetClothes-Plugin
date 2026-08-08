@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyAlphaIncrementalWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -6,9 +7,9 @@
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 
 FDWCEditorWorkerMemoryEstimate FDWCTransparencyAlphaIncrementalWorker::EstimateMemory(
-    const TArray<FDWCTransparencyAlphaTilePayload>& SnapshotTiles,
+    const TArray<FDWCTransparencyAlphaTilePayload>&         SnapshotTiles,
     const TArray<FDWCTransparencyAlphaComposeTileSnapshot>& ComposeTiles,
-    const int32 OutputTileCount)
+    const int32                                             OutputTileCount)
 {
     FDWCEditorWorkerMemoryEstimate Estimate;
     for (const FDWCTransparencyAlphaTilePayload& Tile : SnapshotTiles)
@@ -31,7 +32,7 @@ FDWCEditorWorkerMemoryEstimate FDWCTransparencyAlphaIncrementalWorker::EstimateM
 
 TSharedPtr<FDWCTransparencyAlphaIncrementalJobResult, ESPMode::ThreadSafe>
 FDWCTransparencyAlphaIncrementalWorker::Build(
-    FDWCTransparencyAlphaIncrementalJobInput&& Input,
+    FDWCTransparencyAlphaIncrementalJobInput&&                          Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FDWCTransparencyAlphaIncrementalJobResult, ESPMode::ThreadSafe> Output =
@@ -47,11 +48,11 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
 
     TArray<FDWCTransparencyAlphaTilePayload> WorkingTiles = MoveTemp(Input.SnapshotTiles);
     Output->bHasChanges = FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
-            *Input.AutoResult,
-            Input.Stroke,
-            Input.Samples,
-            Input.OutputTileCoordinates,
-            WorkingTiles);
+        *Input.AutoResult,
+        Input.Stroke,
+        Input.Samples,
+        Input.OutputTileCoordinates,
+        WorkingTiles);
     if (!Output->bHasChanges)
     {
         Output->bSucceeded = true;
@@ -79,8 +80,8 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
     Context.VisualizationMode = Input.VisualizationMode;
     Context.bDeferPresentationToMaterial = true;
     Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
-        ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
-        : KINDA_SMALL_NUMBER;
+                                     ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
+                                     : KINDA_SMALL_NUMBER;
 
     Output->AlphaTiles = MoveTemp(WorkingTiles);
     for (const FDWCTransparencyAlphaComposeTileSnapshot& Tile : Input.ComposeTiles)

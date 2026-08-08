@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeUtilities.h"
 #include "Core/DWCGeneratedAssetPaths.h"
 
@@ -29,7 +30,7 @@ double FDWCRevealBakeUtilities::GetElapsedMilliseconds(const double StartTimeSec
 
 FString FDWCRevealBakeUtilities::SanitizeAssetToken(const FString& InToken)
 {
-    FString Result = InToken;
+    FString      Result = InToken;
     const TCHAR* InvalidChars = INVALID_OBJECTNAME_CHARACTERS;
     while (*InvalidChars)
     {

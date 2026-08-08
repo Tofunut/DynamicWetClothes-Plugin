@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Core/DWCEditorStyle.h"
 #include "Utility/DWCLog.h"
 #include "Core/DWCGeneratedAssetRelocator.h"
@@ -85,7 +86,7 @@ class FDWCEditorModule : public IModuleInterface
     }
 
     void HandleObjectPropertyChanged(
-        UObject* ObjectBeingModified,
+        UObject*               ObjectBeingModified,
         FPropertyChangedEvent& PropertyChangedEvent)
     {
         if (ObjectBeingModified == nullptr ||
@@ -113,7 +114,7 @@ class FDWCEditorModule : public IModuleInterface
         }
 
         const FName PropertyName = PropertyChangedEvent.GetPropertyName();
-        const bool bTextureReferenceChanged =
+        const bool  bTextureReferenceChanged =
             PropertyName.IsNone() ||
             PropertyName == GET_MEMBER_NAME_CHECKED(FSurfaceWaterProfileParameters, DropletNormalTexture) ||
             PropertyName == GET_MEMBER_NAME_CHECKED(FSurfaceWaterProfileParameters, DropletMaskTexture) ||

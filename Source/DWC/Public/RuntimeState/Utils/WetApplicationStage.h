@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -18,22 +19,22 @@ struct FDWCWetMeshReceiverRuntime;
  */
 struct DWC_API FWetApplicationStageContext
 {
-    UObject* OwnerForLogs = nullptr;
+    UObject*                    OwnerForLogs = nullptr;
     const FWetClothingSettings* WetnessSettings = nullptr;
-    int32 MaxNearestSeedVertices = 12;
+    int32                       MaxNearestSeedVertices = 12;
 
     EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
 
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>* Receivers = nullptr;
-    TArray<FDWCWetContact>* PendingWetContacts = nullptr;
-    bool* bPendingWetContactsApplyMaterial = nullptr;
+    TArray<FDWCWetContact>*                         PendingWetContacts = nullptr;
+    bool*                                           bPendingWetContactsApplyMaterial = nullptr;
 
-    bool bBatchWetContactsPerFrame = true;
+    bool  bBatchWetContactsPerFrame = true;
     int32 MaxBatchedWetContactsPerFrame = 64;
 
-    TFunction<bool()> EnsureWetRuntimeInitialized;
-    TFunction<void()> RequestContinuousCpuSkinningTasks;
-    TFunction<void(bool)> SetComponentTickEnabled;
+    TFunction<bool()>                            EnsureWetRuntimeInitialized;
+    TFunction<void()>                            RequestContinuousCpuSkinningTasks;
+    TFunction<void(bool)>                        SetComponentTickEnabled;
     TFunction<void(FDWCWetMeshReceiverRuntime&)> RequestWetRenderingUpdate;
 };
 
@@ -49,18 +50,18 @@ class DWC_API FWetApplicationStage
         const FDWCWetContact&        Contact,
         bool                         bApplyMaterial);
     static bool ApplyWetContacts(
-        FWetApplicationStageContext& Context,
+        FWetApplicationStageContext&  Context,
         const TArray<FDWCWetContact>& Contacts,
         bool                          bApplyMaterial);
     static bool ApplyWetArea(
         FWetApplicationStageContext& Context,
-        const FDWCWetAreaData&        AreaData,
-        bool                          bApplyMaterial);
+        const FDWCWetAreaData&       AreaData,
+        bool                         bApplyMaterial);
     static bool ApplyWetSurface(
         FWetApplicationStageContext& Context,
-        const FDWCWaterSurfaceData&   WaterSurfaceData,
-        float                         Amount,
-        bool                          bApplyMaterial);
+        const FDWCWaterSurfaceData&  WaterSurfaceData,
+        float                        Amount,
+        bool                         bApplyMaterial);
     static bool FlushPendingWetContacts(FWetApplicationStageContext& Context);
 
   private:

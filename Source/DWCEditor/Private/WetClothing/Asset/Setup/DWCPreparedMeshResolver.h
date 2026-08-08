@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -19,18 +20,18 @@ enum class EDWCPreparedMeshPreflightAction : uint8
 
 struct FDWCPreparedMeshPreflightResult
 {
-    bool bCanProceed = false;
+    bool                            bCanProceed = false;
     EDWCPreparedMeshPreflightAction Action = EDWCPreparedMeshPreflightAction::InvalidSourceMesh;
-    USkeletalMesh* ResolvedMesh = nullptr;
-    FString TargetPackageName;
-    FString TargetObjectPath;
-    FString ErrorMessage;
+    USkeletalMesh*                  ResolvedMesh = nullptr;
+    FString                         TargetPackageName;
+    FString                         TargetObjectPath;
+    FString                         ErrorMessage;
 };
 
 struct FDWCPreparedMeshResolveResult
 {
     USkeletalMesh* Mesh = nullptr;
-    FString ErrorMessage;
+    FString        ErrorMessage;
 
     bool IsSuccess() const
     {
@@ -41,15 +42,15 @@ struct FDWCPreparedMeshResolveResult
 /** Resolves or creates the persistent Skeletal Mesh that owns the generated DWC UV Channel coordinates. */
 class FDWCPreparedMeshResolver
 {
-public:
+  public:
     /** Cheap build-time validation. Never scans the project and checks at most one deterministic path. */
     static FDWCPreparedMeshPreflightResult Preflight(
         UWetClothingAsset& Asset,
-        bool bForceNewAsset);
+        bool               bForceNewAsset);
 
     static FDWCPreparedMeshResolveResult Resolve(
         UWetClothingAsset& Asset,
-        bool bForceNewAsset);
+        bool               bForceNewAsset);
 
     /** Explicit recovery-only operation. This may query the project and must not be called by normal Build. */
     static USkeletalMesh* FindMovedOwnedPreparedMesh(UWetClothingAsset& Asset);

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -102,7 +103,6 @@ struct DWC_API FWetPartSurfaceWaterSettings
     {
         return bOverrideDropletFlowStampSize ? FMath::Clamp(DropletFlowSizeScale, 0.25f, 4.0f) : 1.0f;
     }
-
 };
 
 /** Part-local data. Material slot and UV channel are owned by the parent WCA/slot. */
@@ -249,9 +249,9 @@ struct DWC_API FWetClothingEditableWetPartData
     }
 
     int32 FindOrAddProfile(
-        const FSoftObjectPath& SourceProfile,
+        const FSoftObjectPath&           SourceProfile,
         const FWetnessProfileParameters& Parameters,
-        const EWetPartProfileBlendMode BlendMode = EWetPartProfileBlendMode::Standard)
+        const EWetPartProfileBlendMode   BlendMode = EWetPartProfileBlendMode::Standard)
     {
         EnsureDefaultProfile();
         if (!SourceProfile.IsValid())
@@ -313,8 +313,8 @@ struct DWC_API FWetClothingEditableWetPartData
             for (FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
             {
                 Entry.ProfileIndex = OldToNew.IsValidIndex(Entry.ProfileIndex) && OldToNew[Entry.ProfileIndex] != INDEX_NONE
-                    ? OldToNew[Entry.ProfileIndex]
-                    : 0;
+                                         ? OldToNew[Entry.ProfileIndex]
+                                         : 0;
             }
         }
         Profiles = MoveTemp(Compacted);
@@ -348,7 +348,6 @@ struct DWC_API FWetClothingGeneratedWetMaterialOverride
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
     int32 GeneratorVersion = 0;
 };
-
 
 USTRUCT()
 struct DWC_API FWetClothingLocalRenderProfile
@@ -442,7 +441,6 @@ struct DWC_API FWetClothingLocalRenderProfile
     {
         SourceDropletFlowMaskTexture = Texture;
     }
-
 };
 
 USTRUCT()

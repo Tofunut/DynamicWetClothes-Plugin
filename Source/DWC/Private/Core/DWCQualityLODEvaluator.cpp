@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Core/DWCQualityLODEvaluator.h"
 
 void FDWCQualityLODEvaluator::NormalizeScreenSizeThresholds(
@@ -12,21 +13,21 @@ void FDWCQualityLODEvaluator::NormalizeScreenSizeThresholds(
 
 bool FDWCQualityLODEvaluator::ResolveLODFromScreenSize(
     const TArray<FDWCQualityLODScreenSizeThreshold>& Thresholds,
-    const float ScreenSize,
-    int32& OutLODLevel) const
+    const float                                      ScreenSize,
+    int32&                                           OutLODLevel) const
 {
     OutLODLevel = INDEX_NONE;
 
     const float ClampedScreenSize = FMath::Clamp(ScreenSize, 0.0f, 1.0f);
-    int32 BestLODLevel = INDEX_NONE;
-    float BestActivationScreenSize = -1.0f;
-    int32 LowestLODLevel = INDEX_NONE;
-    float LowestActivationScreenSize = 1.0f + KINDA_SMALL_NUMBER;
+    int32       BestLODLevel = INDEX_NONE;
+    float       BestActivationScreenSize = -1.0f;
+    int32       LowestLODLevel = INDEX_NONE;
+    float       LowestActivationScreenSize = 1.0f + KINDA_SMALL_NUMBER;
 
     for (int32 LODLevel = 0; LODLevel < Thresholds.Num(); ++LODLevel)
     {
         const FDWCQualityLODScreenSizeThreshold& Candidate = Thresholds[LODLevel];
-        const float ActivationScreenSize = FMath::Clamp(Candidate.ScreenSize, 0.0f, 1.0f);
+        const float                              ActivationScreenSize = FMath::Clamp(Candidate.ScreenSize, 0.0f, 1.0f);
         if (ActivationScreenSize < LowestActivationScreenSize)
         {
             LowestLODLevel = LODLevel;

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -33,10 +34,7 @@ struct DWC_API FDWCGPUProfileParameters
 
     explicit FDWCGPUProfileParameters(
         const FResolvedAbsorbedWaterSimulationParameters& Parameters)
-        : AbsorptionMultiplier(Parameters.AbsorptionMultiplier)
-        , SpreadRatePerSecond(Parameters.SpreadRatePerSecond)
-        , DryRatePerSecond(Parameters.DryRatePerSecond)
-        , GravityFlowStrength(Parameters.GravityFlowStrength)
+        : AbsorptionMultiplier(Parameters.AbsorptionMultiplier), SpreadRatePerSecond(Parameters.SpreadRatePerSecond), DryRatePerSecond(Parameters.DryRatePerSecond), GravityFlowStrength(Parameters.GravityFlowStrength)
     {
     }
 

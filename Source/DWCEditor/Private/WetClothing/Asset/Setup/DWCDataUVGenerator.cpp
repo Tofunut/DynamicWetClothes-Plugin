@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCDataUVGenerator.h"
 
 #include "DWCDataUVChartBuilder.h"
@@ -22,9 +23,9 @@ namespace DWCDataUVGeneratorInternal
 {
     // Data UV padding is authored in texels at the minimum/reference data-texture resolution,
     // then converted once to normalized UV space for the resolution-independent packer.
-    static constexpr int32 DataUVReferenceResolution = 256;
-    static constexpr int32 ChartPaddingTexels = 2;
-    static constexpr int32 BorderPaddingTexels = 2;
+    static constexpr int32  DataUVReferenceResolution = 256;
+    static constexpr int32  ChartPaddingTexels = 2;
+    static constexpr int32  BorderPaddingTexels = 2;
     static constexpr double ChartPaddingUV =
         static_cast<double>(ChartPaddingTexels) / static_cast<double>(DataUVReferenceResolution);
     static constexpr double BorderPaddingUV =
@@ -33,12 +34,12 @@ namespace DWCDataUVGeneratorInternal
 
     struct FExcludedVisibleTriangle
     {
-        int32 MaterialSlotIndex = INDEX_NONE;
-        int32 GeneratorTriangleIndex = INDEX_NONE;
-        int32 MeshTriangleID = INDEX_NONE;
+        int32     MaterialSlotIndex = INDEX_NONE;
+        int32     GeneratorTriangleIndex = INDEX_NONE;
+        int32     MeshTriangleID = INDEX_NONE;
         FVertexID Vertices[3];
-        double SurfaceArea = 0.0;
-        bool bPackedDegenerate = false;
+        double    SurfaceArea = 0.0;
+        bool      bPackedDegenerate = false;
     };
 
     struct FMeshEdgeKey
@@ -62,19 +63,19 @@ namespace DWCDataUVGeneratorInternal
         const int32 ValueA = A.GetValue();
         const int32 ValueB = B.GetValue();
         return ValueA <= ValueB
-            ? FMeshEdgeKey{ValueA, ValueB}
-            : FMeshEdgeKey{ValueB, ValueA};
+                   ? FMeshEdgeKey{ ValueA, ValueB }
+                   : FMeshEdgeKey{ ValueB, ValueA };
     }
 
     static double ComputeTriangleSurfaceArea3D(const FDWCDataUVTriangle& Triangle)
     {
         return 0.5 * FDWCUVGeometry::ComputeTriangleDoubleArea3D(
-            Triangle.Positions[0], Triangle.Positions[1], Triangle.Positions[2]);
+                         Triangle.Positions[0], Triangle.Positions[1], Triangle.Positions[2]);
     }
 
     static double ComputeLargestConnectedExcludedArea(
         const TArray<FExcludedVisibleTriangle>& ExcludedTriangles,
-        const int32 MaterialSlotIndex)
+        const int32                             MaterialSlotIndex)
     {
         TArray<int32> LocalIndices;
         for (int32 Index = 0; Index < ExcludedTriangles.Num(); ++Index)
@@ -165,7 +166,7 @@ namespace DWCDataUVGeneratorInternal
 
     static FDWCDataUVSlotWarning& FindOrAddSlotWarning(
         TArray<FDWCDataUVSlotWarning>& SlotWarnings,
-        const int32 MaterialSlotIndex)
+        const int32                    MaterialSlotIndex)
     {
         for (FDWCDataUVSlotWarning& SlotWarning : SlotWarnings)
         {
@@ -187,11 +188,11 @@ namespace DWCDataUVGeneratorInternal
     }
 
     static int32 ResolveMaterialSlotIndex(
-        const USkeletalMesh* SkeletalMesh,
-        const int32 LODIndex,
-        const FMeshDescription& MeshDescription,
-        FSkeletalMeshAttributes& Attributes,
-        FTriangleID TriangleID,
+        const USkeletalMesh*      SkeletalMesh,
+        const int32               LODIndex,
+        const FMeshDescription&   MeshDescription,
+        FSkeletalMeshAttributes&  Attributes,
+        FTriangleID               TriangleID,
         const TMap<FName, int32>* MaterialSlotIndexByNameOverride)
     {
         const FPolygonID PolygonID = MeshDescription.GetTrianglePolygon(TriangleID);
@@ -230,7 +231,7 @@ namespace DWCDataUVGeneratorInternal
             }
         }
 
-        const auto MaterialSlotNames = Attributes.GetPolygonGroupMaterialSlotNames();
+        const auto  MaterialSlotNames = Attributes.GetPolygonGroupMaterialSlotNames();
         const FName PolygonGroupMaterialName = MaterialSlotNames[PolygonGroupID];
         if (MaterialSlotIndexByNameOverride != nullptr)
         {
@@ -257,16 +258,16 @@ namespace DWCDataUVGeneratorInternal
 
     struct FDataUVTransferSourceTriangle
     {
-        int32 MaterialSlotIndex = INDEX_NONE;
-        FVector Positions[3];
+        int32     MaterialSlotIndex = INDEX_NONE;
+        FVector   Positions[3];
         FVector2f DataUVs[3];
-        FBox Bounds = FBox(ForceInit);
-        FVector Centroid = FVector::ZeroVector;
+        FBox      Bounds = FBox(ForceInit);
+        FVector   Centroid = FVector::ZeroVector;
     };
 
     struct FDataUVTransferBVHNode
     {
-        FBox Bounds = FBox(ForceInit);
+        FBox  Bounds = FBox(ForceInit);
         int32 LeftChildIndex = INDEX_NONE;
         int32 RightChildIndex = INDEX_NONE;
         int32 FirstTriangleIndex = 0;
@@ -280,7 +281,7 @@ namespace DWCDataUVGeneratorInternal
 
     struct FDataUVTransferBVH
     {
-        TArray<int32> TriangleIndices;
+        TArray<int32>                  TriangleIndices;
         TArray<FDataUVTransferBVHNode> Nodes;
     };
 
@@ -289,17 +290,17 @@ namespace DWCDataUVGeneratorInternal
         const FVector& A,
         const FVector& B,
         const FVector& C,
-        FVector3d& OutBarycentric)
+        FVector3d&     OutBarycentric)
     {
         const FVector V0 = B - A;
         const FVector V1 = C - A;
         const FVector V2 = Point - A;
-        const double D00 = FVector::DotProduct(V0, V0);
-        const double D01 = FVector::DotProduct(V0, V1);
-        const double D11 = FVector::DotProduct(V1, V1);
-        const double D20 = FVector::DotProduct(V2, V0);
-        const double D21 = FVector::DotProduct(V2, V1);
-        const double Denominator = D00 * D11 - D01 * D01;
+        const double  D00 = FVector::DotProduct(V0, V0);
+        const double  D01 = FVector::DotProduct(V0, V1);
+        const double  D11 = FVector::DotProduct(V1, V1);
+        const double  D20 = FVector::DotProduct(V2, V0);
+        const double  D21 = FVector::DotProduct(V2, V1);
+        const double  Denominator = D00 * D11 - D01 * D01;
         if (FMath::Abs(Denominator) <= SMALL_NUMBER)
         {
             return false;
@@ -329,10 +330,9 @@ namespace DWCDataUVGeneratorInternal
         }
 
         const FVector Extent = Bounds.GetSize();
-        return 2.0 * (
-            Extent.X * Extent.Y +
-            Extent.Y * Extent.Z +
-            Extent.Z * Extent.X);
+        return 2.0 * (Extent.X * Extent.Y +
+                      Extent.Y * Extent.Z +
+                      Extent.Z * Extent.X);
     }
 
     static double GetSquaredDistanceToBox(const FVector& Point, const FBox& Bounds)
@@ -370,9 +370,9 @@ namespace DWCDataUVGeneratorInternal
 
     static int32 BuildTransferBVHRecursive(
         const TArray<FDataUVTransferSourceTriangle>& Triangles,
-        FDataUVTransferBVH& BVH,
-        const int32 FirstTriangleIndex,
-        const int32 TriangleCount)
+        FDataUVTransferBVH&                          BVH,
+        const int32                                  FirstTriangleIndex,
+        const int32                                  TriangleCount)
     {
         static constexpr int32 LeafTriangleCount = 8;
         static constexpr int32 BinCount = 16;
@@ -394,9 +394,9 @@ namespace DWCDataUVGeneratorInternal
             return NodeIndex;
         }
 
-        int32 BestAxis = INDEX_NONE;
-        int32 BestSplitBin = INDEX_NONE;
-        double BestCost = TNumericLimits<double>::Max();
+        int32        BestAxis = INDEX_NONE;
+        int32        BestSplitBin = INDEX_NONE;
+        double       BestCost = TNumericLimits<double>::Max();
         const double ParentArea = FMath::Max(GetBoxSurfaceArea(Node.Bounds), SMALL_NUMBER);
 
         for (int32 Axis = 0; Axis < 3; ++Axis)
@@ -409,7 +409,7 @@ namespace DWCDataUVGeneratorInternal
                 continue;
             }
 
-            FBox BinBounds[BinCount];
+            FBox  BinBounds[BinCount];
             int32 BinTriangleCounts[BinCount] = {};
             for (int32 BinIndex = 0; BinIndex < BinCount; ++BinIndex)
             {
@@ -419,19 +419,19 @@ namespace DWCDataUVGeneratorInternal
             for (int32 Offset = 0; Offset < TriangleCount; ++Offset)
             {
                 const FDataUVTransferSourceTriangle& Triangle = Triangles[BVH.TriangleIndices[FirstTriangleIndex + Offset]];
-                const int32 BinIndex = FMath::Clamp(
+                const int32                          BinIndex = IntCastChecked<int32>(FMath::Clamp(
                     FMath::FloorToInt(((Triangle.Centroid[Axis] - AxisMin) / AxisExtent) * static_cast<double>(BinCount)),
                     0,
-                    BinCount - 1);
+                    BinCount - 1));
                 BinBounds[BinIndex] += Triangle.Bounds;
                 ++BinTriangleCounts[BinIndex];
             }
 
-            FBox LeftBounds[BinCount - 1];
-            FBox RightBounds[BinCount - 1];
+            FBox  LeftBounds[BinCount - 1];
+            FBox  RightBounds[BinCount - 1];
             int32 LeftCounts[BinCount - 1] = {};
             int32 RightCounts[BinCount - 1] = {};
-            FBox RunningBounds(ForceInit);
+            FBox  RunningBounds(ForceInit);
             int32 RunningCount = 0;
             for (int32 BinIndex = 0; BinIndex < BinCount - 1; ++BinIndex)
             {
@@ -475,15 +475,15 @@ namespace DWCDataUVGeneratorInternal
         {
             const double AxisMin = CentroidBounds.Min[BestAxis];
             const double AxisExtent = CentroidBounds.Max[BestAxis] - AxisMin;
-            int32 Left = FirstTriangleIndex;
-            int32 Right = FirstTriangleIndex + TriangleCount - 1;
+            int32        Left = FirstTriangleIndex;
+            int32        Right = FirstTriangleIndex + TriangleCount - 1;
             while (Left <= Right)
             {
                 const FDataUVTransferSourceTriangle& Triangle = Triangles[BVH.TriangleIndices[Left]];
-                const int32 BinIndex = FMath::Clamp(
+                const int32                          BinIndex = IntCastChecked<int32>(FMath::Clamp(
                     FMath::FloorToInt(((Triangle.Centroid[BestAxis] - AxisMin) / AxisExtent) * static_cast<double>(BinCount)),
                     0,
-                    BinCount - 1);
+                    BinCount - 1));
                 if (BinIndex <= BestSplitBin)
                 {
                     ++Left;
@@ -535,7 +535,7 @@ namespace DWCDataUVGeneratorInternal
 
     static bool EnsureRenderVertexBufferUVChannel(
         FStaticMeshVertexBuffer& VertexBuffer,
-        const int32 RequiredUVChannelIndex)
+        const int32              RequiredUVChannelIndex)
     {
         if (RequiredUVChannelIndex < 0 || RequiredUVChannelIndex >= 8)
         {
@@ -555,8 +555,8 @@ namespace DWCDataUVGeneratorInternal
 
         const int32 VertexCount = static_cast<int32>(VertexBuffer.GetNumVertices());
         const int32 OldNumTexCoords = static_cast<int32>(VertexBuffer.GetNumTexCoords());
-        const bool bUseFullPrecisionUVs = VertexBuffer.GetUseFullPrecisionUVs();
-        const bool bUseHighPrecisionTangentBasis = VertexBuffer.GetUseHighPrecisionTangentBasis();
+        const bool  bUseFullPrecisionUVs = VertexBuffer.GetUseFullPrecisionUVs();
+        const bool  bUseHighPrecisionTangentBasis = VertexBuffer.GetUseHighPrecisionTangentBasis();
 
         TArray<FVector3f> TangentX;
         TArray<FVector3f> TangentY;
@@ -592,8 +592,8 @@ namespace DWCDataUVGeneratorInternal
             for (uint32 UVIndex = 0; UVIndex < RequiredNumTexCoords; ++UVIndex)
             {
                 const FVector2f UV = static_cast<int32>(UVIndex) < OldNumTexCoords
-                    ? OldUVs[VertexIndex * OldNumTexCoords + static_cast<int32>(UVIndex)]
-                    : FVector2f(0.0f, 0.0f);
+                                         ? OldUVs[VertexIndex * OldNumTexCoords + static_cast<int32>(UVIndex)]
+                                         : FVector2f(0.0f, 0.0f);
                 VertexBuffer.SetVertexUV(VertexIndex, UVIndex, UV);
             }
         }
@@ -604,15 +604,15 @@ namespace DWCDataUVGeneratorInternal
 
     static const FDataUVTransferSourceTriangle* FindClosestTransferSourceTriangle(
         const TArray<FDataUVTransferSourceTriangle>& SourceTriangles,
-        const FDataUVTransferBVH& BVH,
-        const FVector& TargetPosition,
-        const int32 TargetMaterialSlotIndex,
-        const bool bRequireMaterialMatch,
-        FVector3d& OutBarycentric)
+        const FDataUVTransferBVH&                    BVH,
+        const FVector&                               TargetPosition,
+        const int32                                  TargetMaterialSlotIndex,
+        const bool                                   bRequireMaterialMatch,
+        FVector3d&                                   OutBarycentric)
     {
         const FDataUVTransferSourceTriangle* BestTriangle = nullptr;
-        FVector BestClosestPoint = FVector::ZeroVector;
-        double BestDistanceSquared = TNumericLimits<double>::Max();
+        FVector                              BestClosestPoint = FVector::ZeroVector;
+        double                               BestDistanceSquared = TNumericLimits<double>::Max();
 
         TArray<int32, TInlineAllocator<64>> NodeStack;
         if (!BVH.Nodes.IsEmpty())
@@ -656,11 +656,11 @@ namespace DWCDataUVGeneratorInternal
             }
 
             const double LeftDistance = BVH.Nodes.IsValidIndex(Node.LeftChildIndex)
-                ? GetSquaredDistanceToBox(TargetPosition, BVH.Nodes[Node.LeftChildIndex].Bounds)
-                : TNumericLimits<double>::Max();
+                                            ? GetSquaredDistanceToBox(TargetPosition, BVH.Nodes[Node.LeftChildIndex].Bounds)
+                                            : TNumericLimits<double>::Max();
             const double RightDistance = BVH.Nodes.IsValidIndex(Node.RightChildIndex)
-                ? GetSquaredDistanceToBox(TargetPosition, BVH.Nodes[Node.RightChildIndex].Bounds)
-                : TNumericLimits<double>::Max();
+                                             ? GetSquaredDistanceToBox(TargetPosition, BVH.Nodes[Node.RightChildIndex].Bounds)
+                                             : TNumericLimits<double>::Max();
 
             if (LeftDistance < RightDistance)
             {
@@ -687,38 +687,37 @@ namespace DWCDataUVGeneratorInternal
         }
 
         return BestTriangle != nullptr &&
-               ComputeBarycentric3D(
-                   BestClosestPoint,
-                   BestTriangle->Positions[0],
-                   BestTriangle->Positions[1],
-                   BestTriangle->Positions[2],
-                   OutBarycentric)
-            ? BestTriangle
-            : nullptr;
+                       ComputeBarycentric3D(
+                           BestClosestPoint,
+                           BestTriangle->Positions[0],
+                           BestTriangle->Positions[1],
+                           BestTriangle->Positions[2],
+                           OutBarycentric)
+                   ? BestTriangle
+                   : nullptr;
     }
-
 
 } // namespace DWCDataUVGeneratorInternal
 
 FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
-    USkeletalMesh* SkeletalMesh,
-    int32 LODIndex,
-    int32 SourceUVChannelIndex,
-    int32 PreferredUVChannelIndex,
-    bool bAllowOverwriteExistingChannel,
-    int32 TargetMaterialSlotIndex,
-    const TSet<int32>* TargetMaterialSlotIndices,
-    const bool bDeferMeshCommit,
-    FMeshDescription* MeshDescriptionOverride,
-    const bool bAnalysisOnly,
-    const bool bClearNonTargetVertexInstances,
+    USkeletalMesh*            SkeletalMesh,
+    int32                     LODIndex,
+    int32                     SourceUVChannelIndex,
+    int32                     PreferredUVChannelIndex,
+    bool                      bAllowOverwriteExistingChannel,
+    int32                     TargetMaterialSlotIndex,
+    const TSet<int32>*        TargetMaterialSlotIndices,
+    const bool                bDeferMeshCommit,
+    FMeshDescription*         MeshDescriptionOverride,
+    const bool                bAnalysisOnly,
+    const bool                bClearNonTargetVertexInstances,
     const TMap<FName, int32>* MaterialSlotIndexByNameOverride,
-    const bool bAllowVisibleExclusionAboveSafetyLimit)
+    const bool                bAllowVisibleExclusionAboveSafetyLimit)
 {
     using namespace DWCDataUVGeneratorInternal;
 
     FDWCDataUVGenerationResult Result;
-    const double GenerationStartTime = FPlatformTime::Seconds();
+    const double               GenerationStartTime = FPlatformTime::Seconds();
 
     if (SkeletalMesh == nullptr)
     {
@@ -727,8 +726,8 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     }
 
     FMeshDescription* MeshDescription = MeshDescriptionOverride != nullptr
-        ? MeshDescriptionOverride
-        : SkeletalMesh->GetMeshDescription(LODIndex);
+                                            ? MeshDescriptionOverride
+                                            : SkeletalMesh->GetMeshDescription(LODIndex);
     if (MeshDescription == nullptr)
     {
         SetFailure(Result, FString::Printf(TEXT("The target skeletal mesh does not expose editable mesh description data for LOD %d."), LODIndex));
@@ -746,16 +745,16 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     if (SafeSourceUVChannelIndex >= ExistingUVChannelCount)
     {
         SetFailure(Result, FString::Printf(
-            TEXT("Source UV Channel %d does not exist. A DWC UV Channel needs an existing material UV channel to preserve material-slot UV islands."),
-            SafeSourceUVChannelIndex));
+                               TEXT("Source UV Channel %d does not exist. A DWC UV Channel needs an existing material UV channel to preserve material-slot UV islands."),
+                               SafeSourceUVChannelIndex));
         return Result;
     }
 
     const int32 SafePreferredUVChannelIndex = FMath::Clamp(PreferredUVChannelIndex, 0, 7);
 
     int32 NewUVChannelIndex = INDEX_NONE;
-    bool bOverwritingExistingChannel = false;
-    bool bAppendedBecausePreferredChannelWasOccupied = false;
+    bool  bOverwritingExistingChannel = false;
+    bool  bAppendedBecausePreferredChannelWasOccupied = false;
 
     if (SafePreferredUVChannelIndex >= ExistingUVChannelCount)
     {
@@ -773,8 +772,8 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         if (ExistingUVChannelCount >= 8)
         {
             SetFailure(Result, FString::Printf(
-                TEXT("UV Channel %d already exists and is not marked as generated by DWC. The target mesh also already has 8 UV channels, so a new safe DWC UV Channel cannot be appended."),
-                SafePreferredUVChannelIndex));
+                                   TEXT("UV Channel %d already exists and is not marked as generated by DWC. The target mesh also already has 8 UV channels, so a new safe DWC UV Channel cannot be appended."),
+                                   SafePreferredUVChannelIndex));
             return Result;
         }
 
@@ -782,17 +781,17 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         bAppendedBecausePreferredChannelWasOccupied = true;
     }
 
-    TArray<FDWCDataUVTriangle> Triangles;
-    TMap<int32, TArray<int32>> SlotToTriangleIndices;
-    TMap<int32, int32> MatchingTriangleCountBySlot;
-    TMap<int32, int32> VisibleTriangleCountBySlot;
-    TMap<int32, double> TotalValid3DSurfaceAreaBySlot;
-    TMap<int32, int32> Degenerate3DTriangleCountBySlot;
-    TMap<int32, int32> DegenerateUVTriangleCountBySlot;
-    TMap<int32, int32> InvalidUVTriangleCountBySlot;
+    TArray<FDWCDataUVTriangle>       Triangles;
+    TMap<int32, TArray<int32>>       SlotToTriangleIndices;
+    TMap<int32, int32>               MatchingTriangleCountBySlot;
+    TMap<int32, int32>               VisibleTriangleCountBySlot;
+    TMap<int32, double>              TotalValid3DSurfaceAreaBySlot;
+    TMap<int32, int32>               Degenerate3DTriangleCountBySlot;
+    TMap<int32, int32>               DegenerateUVTriangleCountBySlot;
+    TMap<int32, int32>               InvalidUVTriangleCountBySlot;
     TArray<FExcludedVisibleTriangle> ExcludedVisibleTriangles;
-    TSet<int32> ExcludedTriangleIndices;
-    TSet<int32> ExcludedVertexInstanceIDs;
+    TSet<int32>                      ExcludedTriangleIndices;
+    TSet<int32>                      ExcludedVertexInstanceIDs;
 
     for (const FTriangleID TriangleID : MeshDescription->Triangles().GetElementIDs())
     {
@@ -841,7 +840,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             Triangle.SourceUVs[CornerIndex] = FVector2D(SourceUV.X, SourceUV.Y);
         }
 
-        const int32 TriangleArrayIndex = Triangles.Add(Triangle);
+        const int32  TriangleArrayIndex = Triangles.Add(Triangle);
         const double TriangleSurfaceArea = ComputeTriangleSurfaceArea3D(Triangle);
         if (TriangleSurfaceArea <= 0.5e-10)
         {
@@ -1007,9 +1006,9 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
 
     Result.OriginalUVIslandCount = OriginalUVIslands.Num();
 
-    TArray<FDWCDataUVChart> DataUVCharts;
+    TArray<FDWCDataUVChart>     DataUVCharts;
     FDWCDataUVChartBuildFailure ChartBuildFailure;
-    const bool bChartsBuilt = FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
+    const bool                  bChartsBuilt = FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
         Triangles,
         OriginalUVIslands,
         DataUVCharts,
@@ -1025,10 +1024,10 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         {
             Result.FailedMaterialSlotIndices.Add(ChartBuildFailure.MaterialSlotIndex);
             SetFailure(Result, FString::Printf(
-                TEXT("Material Slot %d contains a physical Source UV shell whose internal self-overlap analysis exceeds the supported limit after %lld exact triangle-pair tests within a shell containing %d triangle(s)."),
-                ChartBuildFailure.MaterialSlotIndex,
-                static_cast<long long>(ChartBuildFailure.TestedCandidatePairCount),
-                ChartBuildFailure.SourceTriangleCount));
+                                   TEXT("Material Slot %d contains a physical Source UV shell whose internal self-overlap analysis exceeds the supported limit after %lld exact triangle-pair tests within a shell containing %d triangle(s)."),
+                                   ChartBuildFailure.MaterialSlotIndex,
+                                   static_cast<long long>(ChartBuildFailure.TestedCandidatePairCount),
+                                   ChartBuildFailure.SourceTriangleCount));
         }
         else
         {
@@ -1068,9 +1067,9 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     }
 
     TArray<FDWCDataUVChart> ValidatedCharts = DataUVCharts;
-    TMap<int32, FVector2f> PackedUVBySyntheticCorner;
-    int32 PackingFailedMaterialSlotIndex = INDEX_NONE;
-    int32 PackingFailedChartCount = 0;
+    TMap<int32, FVector2f>  PackedUVBySyntheticCorner;
+    int32                   PackingFailedMaterialSlotIndex = INDEX_NONE;
+    int32                   PackingFailedChartCount = 0;
     if (!FDWCDataUVPacker::Pack(
             PackingTriangles,
             ValidatedCharts,
@@ -1085,16 +1084,16 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             Result.FailedMaterialSlotIndices.Add(PackingFailedMaterialSlotIndex);
         }
         SetFailure(Result, FString::Printf(
-            TEXT("Material Slot %d generated %d DWC UV packing chart(s), which cannot be packed into the 0-1 UV space while preserving %d texels of padding around each chart."),
-            PackingFailedMaterialSlotIndex,
-            PackingFailedChartCount,
-            ChartPaddingTexels));
+                               TEXT("Material Slot %d generated %d DWC UV packing chart(s), which cannot be packed into the 0-1 UV space while preserving %d texels of padding around each chart."),
+                               PackingFailedMaterialSlotIndex,
+                               PackingFailedChartCount,
+                               ChartPaddingTexels));
         return Result;
     }
 
-    TSet<int32> ProblemMaterialSlots;
-    FString PackedValidationError;
-    FDWCDataUVValidationFailure ValidationFailure;
+    TSet<int32>                           ProblemMaterialSlots;
+    FString                               PackedValidationError;
+    FDWCDataUVValidationFailure           ValidationFailure;
     TArray<FDWCDataUVValidationExclusion> PackedDegenerateExclusions;
     if (!FDWCDataUVValidator::Validate(
             PackingTriangles,
@@ -1112,8 +1111,8 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         }
         Result.ValidationFailure = MoveTemp(ValidationFailure);
         SetFailure(Result, FString::Printf(
-            TEXT("DWC UV Channel generation failed final non-overlap validation: %s"),
-            *PackedValidationError));
+                               TEXT("DWC UV Channel generation failed final non-overlap validation: %s"),
+                               *PackedValidationError));
         return Result;
     }
 
@@ -1148,7 +1147,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         }
     }
 
-    TMap<int32, int32> ExcludedVisibleTriangleCountBySlot;
+    TMap<int32, int32>  ExcludedVisibleTriangleCountBySlot;
     TMap<int32, double> ExcludedVisibleAreaBySlot;
     for (const FExcludedVisibleTriangle& ExcludedTriangle : ExcludedVisibleTriangles)
     {
@@ -1174,21 +1173,21 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         SlotDiagnostic.ExcludedVisibleTriangleCount = ExcludedVisibleTriangleCountBySlot.FindRef(MaterialSlotIndex);
         SlotDiagnostic.ExcludedVisible3DSurfaceArea = ExcludedVisibleAreaBySlot.FindRef(MaterialSlotIndex);
         SlotDiagnostic.ExcludedVisible3DSurfaceRatio = SlotDiagnostic.TotalValid3DSurfaceArea > SMALL_NUMBER
-            ? SlotDiagnostic.ExcludedVisible3DSurfaceArea / SlotDiagnostic.TotalValid3DSurfaceArea
-            : 0.0;
+                                                           ? SlotDiagnostic.ExcludedVisible3DSurfaceArea / SlotDiagnostic.TotalValid3DSurfaceArea
+                                                           : 0.0;
         SlotDiagnostic.LargestConnectedExcluded3DSurfaceArea = ComputeLargestConnectedExcludedArea(
             ExcludedVisibleTriangles,
             MaterialSlotIndex);
         SlotDiagnostic.LargestConnectedExcluded3DSurfaceRatio = SlotDiagnostic.TotalValid3DSurfaceArea > SMALL_NUMBER
-            ? SlotDiagnostic.LargestConnectedExcluded3DSurfaceArea / SlotDiagnostic.TotalValid3DSurfaceArea
-            : 0.0;
+                                                                    ? SlotDiagnostic.LargestConnectedExcluded3DSurfaceArea / SlotDiagnostic.TotalValid3DSurfaceArea
+                                                                    : 0.0;
 
         // Automatic cleanup remains a normal Ready result. Degenerate source UVs,
         // overlap separation, chart splits, and sub-threshold visible exclusions are
         // retained in Technical Details without escalating the user-facing status.
         EDWCDataUVResultSeverity Severity = SlotDiagnostic.BudgetFallbackIslandCount > 0
-            ? EDWCDataUVResultSeverity::ReadyWithWarnings
-            : EDWCDataUVResultSeverity::Ready;
+                                                ? EDWCDataUVResultSeverity::ReadyWithWarnings
+                                                : EDWCDataUVResultSeverity::Ready;
 
         if (SlotDiagnostic.InvalidSourceUVTriangleCount > 0)
         {
@@ -1289,7 +1288,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
 
     if (bAnalysisOnly)
     {
-        const int32 FinalDataUVChartCount = DataUVCharts.Num();
+        const int32                                               FinalDataUVChartCount = DataUVCharts.Num();
         TSharedPtr<FDWCDataUVGenerationPlan, ESPMode::ThreadSafe> Plan =
             MakeShared<FDWCDataUVGenerationPlan, ESPMode::ThreadSafe>();
         Plan->UVChannelIndex = NewUVChannelIndex;
@@ -1326,8 +1325,8 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     if (!SeamSplitResult.bSucceeded)
     {
         SetFailure(Result, FString::Printf(
-            TEXT("DWC UV Channel chart-boundary seam generation failed: %s"),
-            *SeamSplitResult.Message));
+                               TEXT("DWC UV Channel chart-boundary seam generation failed: %s"),
+                               *SeamSplitResult.Message));
         return Result;
     }
     Result.ChartBoundarySplitVertexInstanceCount = SeamSplitResult.SplitVertexInstanceCount;
@@ -1343,15 +1342,15 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         }
         for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
         {
-            const int32 SyntheticCornerIndex = TriangleIndex * 3 + CornerIndex;
+            const int32      SyntheticCornerIndex = TriangleIndex * 3 + CornerIndex;
             const FVector2f* PackedUV = PackedUVBySyntheticCorner.Find(SyntheticCornerIndex);
             if (PackedUV == nullptr)
             {
                 Result.FailedMaterialSlotIndices.Add(PackingTriangles[TriangleIndex].MaterialSlotIndex);
                 SetFailure(Result, FString::Printf(
-                    TEXT("DWC UV Channel packing omitted triangle %d corner %d."),
-                    TriangleIndex,
-                    CornerIndex));
+                                       TEXT("DWC UV Channel packing omitted triangle %d corner %d."),
+                                       TriangleIndex,
+                                       CornerIndex));
                 return Result;
             }
 
@@ -1363,8 +1362,8 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
                 {
                     Result.FailedMaterialSlotIndices.Add(Triangles[TriangleIndex].MaterialSlotIndex);
                     SetFailure(Result, FString::Printf(
-                        TEXT("A final DWC UV Channel VertexInstance received conflicting packed coordinates in material slot %d."),
-                        Triangles[TriangleIndex].MaterialSlotIndex));
+                                           TEXT("A final DWC UV Channel VertexInstance received conflicting packed coordinates in material slot %d."),
+                                           Triangles[TriangleIndex].MaterialSlotIndex));
                     return Result;
                 }
             }
@@ -1451,9 +1450,9 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
 
     const FString TargetLabel = TargetMaterialSlotIndices != nullptr
                                     ? FString::Printf(TEXT("%d selected Wettable material slot(s)"), TargetMaterialSlotIndices->Num())
-                                    : TargetMaterialSlotIndex != INDEX_NONE
-                                        ? FString::Printf(TEXT("Material Slot %d"), TargetMaterialSlotIndex)
-                                        : FString(TEXT("all material slots"));
+                                : TargetMaterialSlotIndex != INDEX_NONE
+                                    ? FString::Printf(TEXT("Material Slot %d"), TargetMaterialSlotIndex)
+                                    : FString(TEXT("all material slots"));
     if (bOverwritingExistingChannel)
     {
         Result.Message = FString::Printf(
@@ -1508,11 +1507,11 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
 }
 
 FDWCDataUVPlanApplyResult FDWCDataUVGenerator::ApplyGenerationPlan(
-    USkeletalMesh* SkeletalMesh,
-    const int32 LODIndex,
+    USkeletalMesh*                  SkeletalMesh,
+    const int32                     LODIndex,
     const FDWCDataUVGenerationPlan& Plan,
-    const bool bClearDestinationChannel,
-    const bool bDeferMeshCommit)
+    const bool                      bClearDestinationChannel,
+    const bool                      bDeferMeshCommit)
 {
     using namespace DWCDataUVGeneratorInternal;
 
@@ -1536,7 +1535,7 @@ FDWCDataUVPlanApplyResult FDWCDataUVGenerator::ApplyGenerationPlan(
 
     const double StartTime = FPlatformTime::Seconds();
     SkeletalMesh->Modify();
-    TArray<FDWCDataUVTriangle> Triangles = Plan.Triangles;
+    TArray<FDWCDataUVTriangle>      Triangles = Plan.Triangles;
     const FDWCDataUVSeamSplitResult SeamSplitResult = FDWCDataUVSeamSplitter::SplitChartBoundaries(
         *MeshDescription,
         Triangles,
@@ -1650,11 +1649,11 @@ FDWCDataUVPlanApplyResult FDWCDataUVGenerator::ApplyGenerationPlan(
 
 FDWCDataUVGenerationResult FDWCDataUVGenerator::TransferFromSourceLOD(
     USkeletalMesh* SkeletalMesh,
-    const int32 SourceLODIndex,
-    const int32 TargetLODIndex,
-    const int32 DataUVChannelIndex,
-    const bool bAllowOverwriteExistingChannel,
-    const int32 TargetMaterialSlotIndex)
+    const int32    SourceLODIndex,
+    const int32    TargetLODIndex,
+    const int32    DataUVChannelIndex,
+    const bool     bAllowOverwriteExistingChannel,
+    const int32    TargetMaterialSlotIndex)
 {
     using namespace DWCDataUVGeneratorInternal;
 
@@ -1688,8 +1687,8 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::TransferFromSourceLOD(
 
     FSkeletalMeshLODRenderData& SourceLODData = RenderData->LODRenderData[SourceLODIndex];
     FSkeletalMeshLODRenderData& TargetLODData = RenderData->LODRenderData[TargetLODIndex];
-    FStaticMeshVertexBuffer& SourceVertexBuffer = SourceLODData.StaticVertexBuffers.StaticMeshVertexBuffer;
-    FStaticMeshVertexBuffer& TargetVertexBuffer = TargetLODData.StaticVertexBuffers.StaticMeshVertexBuffer;
+    FStaticMeshVertexBuffer&    SourceVertexBuffer = SourceLODData.StaticVertexBuffers.StaticMeshVertexBuffer;
+    FStaticMeshVertexBuffer&    TargetVertexBuffer = TargetLODData.StaticVertexBuffers.StaticMeshVertexBuffer;
     if (SourceVertexBuffer.GetNumTexCoords() <= static_cast<uint32>(DataUVChannelIndex))
     {
         SetFailure(Result, FString::Printf(TEXT("Source LOD%d render data does not contain DWC UV Channel %d."), SourceLODIndex, DataUVChannelIndex));
@@ -1733,8 +1732,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::TransferFromSourceLOD(
             SourceIndexBuffer.Num());
         for (int32 IndexOffset = FirstIndex; IndexOffset + 2 < LastIndex; IndexOffset += 3)
         {
-            const int32 VertexIndices[3] =
-            {
+            const int32 VertexIndices[3] = {
                 static_cast<int32>(SourceIndexBuffer[IndexOffset]),
                 static_cast<int32>(SourceIndexBuffer[IndexOffset + 1]),
                 static_cast<int32>(SourceIndexBuffer[IndexOffset + 2])
@@ -1779,7 +1777,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::TransferFromSourceLOD(
     }
 
     const FDataUVTransferBVH SourceBVH = BuildTransferBVH(SourceTriangles);
-    TArray<uint32> TargetIndexBuffer;
+    TArray<uint32>           TargetIndexBuffer;
     TargetLODData.MultiSizeIndexContainer.GetIndexBuffer(TargetIndexBuffer);
     if (TargetIndexBuffer.IsEmpty())
     {
@@ -1787,10 +1785,10 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::TransferFromSourceLOD(
         return Result;
     }
 
-    int32 WrittenVertexCount = 0;
-    int32 FailedVertexCount = 0;
-    TSet<int32> WrittenVertices;
-    const int32 TargetVertexCount = static_cast<int32>(TargetLODData.GetNumVertices());
+    int32             WrittenVertexCount = 0;
+    int32             FailedVertexCount = 0;
+    TSet<int32>       WrittenVertices;
+    const int32       TargetVertexCount = static_cast<int32>(TargetLODData.GetNumVertices());
     TArray<FVector2f> TransferredUVs;
     TransferredUVs.SetNum(TargetVertexCount);
     for (int32 VertexIndex = 0; VertexIndex < TargetVertexCount; ++VertexIndex)
@@ -1816,8 +1814,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::TransferFromSourceLOD(
             TargetIndexBuffer.Num());
         for (int32 IndexOffset = FirstIndex; IndexOffset + 2 < LastIndex; IndexOffset += 3)
         {
-            const int32 TargetVertexIndices[3] =
-            {
+            const int32 TargetVertexIndices[3] = {
                 static_cast<int32>(TargetIndexBuffer[IndexOffset]),
                 static_cast<int32>(TargetIndexBuffer[IndexOffset + 1]),
                 static_cast<int32>(TargetIndexBuffer[IndexOffset + 2])
@@ -1829,14 +1826,13 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::TransferFromSourceLOD(
                 continue;
             }
 
-            const FVector TargetPositions[3] =
-            {
+            const FVector TargetPositions[3] = {
                 FVector(TargetLODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(TargetVertexIndices[0])),
                 FVector(TargetLODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(TargetVertexIndices[1])),
                 FVector(TargetLODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(TargetVertexIndices[2]))
             };
-            const FVector TargetCentroid = (TargetPositions[0] + TargetPositions[1] + TargetPositions[2]) / 3.0;
-            FVector3d SourceCentroidBarycentric = FVector3d::ZeroVector;
+            const FVector                        TargetCentroid = (TargetPositions[0] + TargetPositions[1] + TargetPositions[2]) / 3.0;
+            FVector3d                            SourceCentroidBarycentric = FVector3d::ZeroVector;
             const FDataUVTransferSourceTriangle* SourceTriangle = FindClosestTransferSourceTriangle(
                 SourceTriangles,
                 SourceBVH,
@@ -1871,7 +1867,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::TransferFromSourceLOD(
 
             for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
             {
-                FVector3d Barycentric = FVector3d::ZeroVector;
+                FVector3d     Barycentric = FVector3d::ZeroVector;
                 const FVector ClosestSourcePoint = FMath::ClosestPointOnTriangleToPoint(
                     TargetPositions[CornerIndex],
                     SourceTriangle->Positions[0],

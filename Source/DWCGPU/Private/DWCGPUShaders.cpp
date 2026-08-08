@@ -1,12 +1,13 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCGPUShaders.h"
 
 namespace DWCGPUShadersPrivate
 {
-bool ShouldCompileDWC(const FGlobalShaderPermutationParameters& Parameters)
-{
-    return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
-}
+    bool ShouldCompileDWC(const FGlobalShaderPermutationParameters& Parameters)
+    {
+        return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+    }
 } // namespace DWCGPUShadersPrivate
 
 using namespace DWCGPUShadersPrivate;
@@ -82,4 +83,3 @@ bool FDWCSurfaceWetnessDryInPlaceCS::ShouldCompilePermutation(const FGlobalShade
 {
     return ShouldCompileDWC(Parameters);
 }
-

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetRendering/WetVertexColorBuffer.h"
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
@@ -51,7 +52,7 @@ bool FWetVertexColorBuffer::ApplyVertexColorOverrideByDirectBufferSwap(
     }
 
     const FSkeletalMeshLODRenderData& LODData = SkelMeshRenderData->LODRenderData[LODIndex];
-    const int32 ExpectedNumVerts = LODData.StaticVertexBuffers.PositionVertexBuffer.GetNumVertices();
+    const int32                       ExpectedNumVerts = LODData.StaticVertexBuffers.PositionVertexBuffer.GetNumVertices();
     if (ExpectedNumVerts <= 0 || VertexColors.Num() != ExpectedNumVerts)
     {
         return false;
@@ -61,7 +62,7 @@ bool FWetVertexColorBuffer::ApplyVertexColorOverrideByDirectBufferSwap(
     NewOverrideVertexColors->InitFromColorArray(VertexColors);
 
     FSkelMeshComponentLODInfo& LODInfo = TargetSkeletalMesh.LODInfo[LODIndex];
-    FColorVertexBuffer* OldOverrideVertexColors = LODInfo.OverrideVertexColors;
+    FColorVertexBuffer*        OldOverrideVertexColors = LODInfo.OverrideVertexColors;
     LODInfo.OverrideVertexColors = NewOverrideVertexColors;
 
     BeginInitResource(NewOverrideVertexColors);

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Profiling/DWCStats.h"
 
 #include <atomic>
@@ -15,24 +16,24 @@
 #if STATS
 namespace
 {
-    std::atomic<uint64> GSurfaceWaterStampsQueued{0};
-    std::atomic<uint64> GSurfaceWaterStampsSubmitted{0};
-    std::atomic<uint64> GSurfaceWaterGPUDispatches{0};
-    std::atomic<uint64> GSurfaceWaterMaxPendingStamps{0};
-    std::atomic<uint64> GCPUSkinningCompleted{0};
-    std::atomic<uint64> GCPUSkinningVerticesProcessed{0};
-    std::atomic<uint64> GLODTransferCompleted{0};
-    std::atomic<uint64> GLODDirtyVerticesTransferred{0};
-    std::atomic<uint64> GWetContactsReceived{0};
-    std::atomic<uint64> GWetContactsApplied{0};
-    std::atomic<uint64> GWetContactsRejected{0};
-    std::atomic<uint64> GWetnessSimulationUpdates{0};
-    std::atomic<uint64> GChangedReceivers{0};
-    std::atomic<uint64> GDirtyVerticesGenerated{0};
-    std::atomic<uint64> GRenderUpdates{0};
-    std::atomic<uint64> GMaterialsUpdated{0};
-    std::atomic<uint64> GGPUBackendUpdatesSubmitted{0};
-    std::atomic<uint64> GGPUBackendDispatches{0};
+    std::atomic<uint64> GSurfaceWaterStampsQueued{ 0 };
+    std::atomic<uint64> GSurfaceWaterStampsSubmitted{ 0 };
+    std::atomic<uint64> GSurfaceWaterGPUDispatches{ 0 };
+    std::atomic<uint64> GSurfaceWaterMaxPendingStamps{ 0 };
+    std::atomic<uint64> GCPUSkinningCompleted{ 0 };
+    std::atomic<uint64> GCPUSkinningVerticesProcessed{ 0 };
+    std::atomic<uint64> GLODTransferCompleted{ 0 };
+    std::atomic<uint64> GLODDirtyVerticesTransferred{ 0 };
+    std::atomic<uint64> GWetContactsReceived{ 0 };
+    std::atomic<uint64> GWetContactsApplied{ 0 };
+    std::atomic<uint64> GWetContactsRejected{ 0 };
+    std::atomic<uint64> GWetnessSimulationUpdates{ 0 };
+    std::atomic<uint64> GChangedReceivers{ 0 };
+    std::atomic<uint64> GDirtyVerticesGenerated{ 0 };
+    std::atomic<uint64> GRenderUpdates{ 0 };
+    std::atomic<uint64> GMaterialsUpdated{ 0 };
+    std::atomic<uint64> GGPUBackendUpdatesSubmitted{ 0 };
+    std::atomic<uint64> GGPUBackendDispatches{ 0 };
 
     void SetAtomicMax(std::atomic<uint64>& Target, const uint64 Value)
     {
@@ -42,7 +43,7 @@ namespace
         {
         }
     }
-}
+} // namespace
 
 void FDWCWorkloadStats::RecordSurfaceWaterStampQueued(const uint32 PendingStampCount)
 {
@@ -215,7 +216,7 @@ DEFINE_STAT(STAT_DWC_GPUBackendDispatchesRate);
 
 namespace
 {
-    bool bDWCStatCommandsRegistered = false;
+    bool            bDWCStatCommandsRegistered = false;
     FDelegateHandle DWCStatAutocompleteHandle;
 
     struct FDWCStatAlias
@@ -224,16 +225,15 @@ namespace
         const TCHAR* Description;
     };
 
-    const FDWCStatAlias GDWCStatAliases[] =
-    {
-        {TEXT("stat dwc"), TEXT("Toggle DWC CPU and GPU memory stats.")},
-        {TEXT("stat dwc mem"), TEXT("Toggle DWC CPU and GPU memory stats.")},
-        {TEXT("stat dwc memory"), TEXT("Toggle DWC CPU and GPU memory stats.")},
-        {TEXT("stat dwc workload"), TEXT("Toggle DWC workload rate stats.")},
-        {TEXT("stat dwc instances"), TEXT("Toggle DWC instance/resource count stats.")},
-        {TEXT("stat dwc cpu"), TEXT("Toggle DWC CPU memory stats.")},
-        {TEXT("stat dwc gpu"), TEXT("Toggle DWC GPU memory stats.")},
-        {TEXT("stat dwc help"), TEXT("Print DWC stat command help.")}
+    const FDWCStatAlias GDWCStatAliases[] = {
+        { TEXT("stat dwc"), TEXT("Toggle DWC CPU and GPU memory stats.") },
+        { TEXT("stat dwc mem"), TEXT("Toggle DWC CPU and GPU memory stats.") },
+        { TEXT("stat dwc memory"), TEXT("Toggle DWC CPU and GPU memory stats.") },
+        { TEXT("stat dwc workload"), TEXT("Toggle DWC workload rate stats.") },
+        { TEXT("stat dwc instances"), TEXT("Toggle DWC instance/resource count stats.") },
+        { TEXT("stat dwc cpu"), TEXT("Toggle DWC CPU memory stats.") },
+        { TEXT("stat dwc gpu"), TEXT("Toggle DWC GPU memory stats.") },
+        { TEXT("stat dwc help"), TEXT("Print DWC stat command help.") }
     };
 
     FCommonViewportClient* ResolveDWCViewportClient(UWorld* World)
@@ -420,7 +420,7 @@ namespace
                 ExecuteDWCStatCommand(World, TEXT("DWCInstances"));
             }),
         ECVF_Default);
-}
+} // namespace
 
 void DWCStats::RegisterStatCommands()
 {

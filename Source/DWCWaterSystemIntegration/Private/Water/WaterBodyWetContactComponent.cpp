@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Water/WaterBodyWetContactComponent.h"
 
 #include "Components/BoxComponent.h"
@@ -103,8 +104,8 @@ void UWaterBodyWetContactComponent::CreateOverlapProxy()
         return;
     }
 
-    const float DesiredTopZ = WaterBodyBounds.Max.Z + WaterBodyComponent->GetMaxWaveHeight();
-    const float DesiredBottomZ = WaterBodyBounds.Min.Z;
+    const float DesiredTopZ = static_cast<float>(WaterBodyBounds.Max.Z + WaterBodyComponent->GetMaxWaveHeight());
+    const float DesiredBottomZ = static_cast<float>(WaterBodyBounds.Min.Z);
 
     const FVector ProxyOrigin(
         (WaterBodyBounds.Min.X + WaterBodyBounds.Max.X) * 0.5f,
@@ -325,7 +326,7 @@ bool UWaterBodyWetContactComponent::BuildWaterSurfaceDataForReceiver(
 
     const FVector BoundsMin = ReceiverBounds.Min;
     const FVector BoundsMax = ReceiverBounds.Max;
-    const float   SampleZ = ReceiverBounds.GetCenter().Z;
+    const float   SampleZ = static_cast<float>(ReceiverBounds.GetCenter().Z);
 
     bool bHasValidSample = false;
 
@@ -387,7 +388,7 @@ bool UWaterBodyWetContactComponent::QueryWaterSurfaceZ(
         return false;
     }
 
-    OutSurfaceZ = QueryResult.GetValue().GetWaterSurfaceLocation().Z;
+    OutSurfaceZ = static_cast<float>(QueryResult.GetValue().GetWaterSurfaceLocation().Z);
     return true;
 }
 

@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringTypes.h"
 
@@ -22,50 +24,50 @@ class FDWCEditorAuthoringDocument final
     ~FDWCEditorAuthoringDocument();
 
     const UWetClothingAsset* GetAsset() const;
-    bool IsValid() const;
-    uint64 GetRevision() const;
-    bool HasInteractiveEdit() const;
+    bool                     IsValid() const;
+    uint64                   GetRevision() const;
+    bool                     HasInteractiveEdit() const;
 
     FDWCEditorAuthoringResult Edit(
-        const FText& TransactionText,
-        FDWCEditorAuthoringChange Change,
+        const FText&                           TransactionText,
+        FDWCEditorAuthoringChange              Change,
         TFunctionRef<bool(UWetClothingAsset&)> Mutation);
 
     bool BeginInteractiveEdit(
-        const FText& TransactionText,
+        const FText&              TransactionText,
         FDWCEditorAuthoringChange Change,
-        FString* OutError = nullptr);
+        FString*                  OutError = nullptr);
     FDWCEditorAuthoringResult UpdateInteractiveEdit(
-        FDWCEditorAuthoringChange Change,
+        FDWCEditorAuthoringChange              Change,
         TFunctionRef<bool(UWetClothingAsset&)> Mutation);
     FDWCEditorAuthoringResult CommitInteractiveEdit(
         FDWCEditorAuthoringChange Change);
     void CancelInteractiveEdit(
-        FDWCEditorAuthoringChange Change,
+        FDWCEditorAuthoringChange              Change,
         TFunctionRef<void(UWetClothingAsset&)> RestoreMutation);
 
-    void NotifyUndoRedo(FDWCEditorAuthoringChange Change);
+    void                        NotifyUndoRedo(FDWCEditorAuthoringChange Change);
     FDWCEditorAuthoringChanged& OnChanged();
 
   private:
     static bool IsOnGameThread(FString* OutError = nullptr);
     static bool ValidateMutationChange(
         const FDWCEditorAuthoringChange& Change,
-        FString* OutError = nullptr);
+        FString*                         OutError = nullptr);
     void ApplyCommittedImpact(
-        UWetClothingAsset& Asset,
+        UWetClothingAsset&               Asset,
         const FDWCEditorAuthoringChange& Change) const;
     FDWCEditorAuthoringResult MakeFailure(
         FDWCEditorAuthoringChange Change,
-        FString Error) const;
+        FString                   Error) const;
     FDWCEditorAuthoringResult BroadcastCommittedChange(
         FDWCEditorAuthoringChange Change);
     void ResetInteractiveState();
 
     TWeakObjectPtr<UWetClothingAsset> Asset;
-    TUniquePtr<FScopedTransaction> InteractiveTransaction;
-    FDWCEditorAuthoringChange InteractiveChange;
-    uint64 Revision = 0;
-    bool bInteractiveMutationChanged = false;
-    FDWCEditorAuthoringChanged ChangedDelegate;
+    TUniquePtr<FScopedTransaction>    InteractiveTransaction;
+    FDWCEditorAuthoringChange         InteractiveChange;
+    uint64                            Revision = 0;
+    bool                              bInteractiveMutationChanged = false;
+    FDWCEditorAuthoringChanged        ChangedDelegate;
 };

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "SDWCPartViewport.h"
 #include "Utility/DWCLog.h"
 
@@ -38,21 +39,20 @@
 namespace
 {
     constexpr int32 PartViewportForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
-    const FName PreviewSurfaceWaterOverrideParameter(TEXT("DWC_PreviewSurfaceWaterOverride"));
-    const FName PreviewSurfaceWaterAmountParameter(TEXT("DWC_PreviewSurfaceWaterAmount"));
-    const FName PreviewDebugModeParameter(TEXT("DWCPreview_DebugMode"));
-    const FName PartPreviewColorTextureParameter(TEXT("DWC_PartPreviewColorTexture"));
-    const FName PartPreviewSelectionTextureParameter(TEXT("DWC_PartPreviewSelectionTexture"));
-    const FName PartPreviewColorOpacityParameter(TEXT("DWC_PartPreviewColorOpacity"));
-    const FName PartPreviewSelectionFillOpacityParameter(TEXT("DWC_PartPreviewSelectionFillOpacity"));
-    const FName PartPreviewSelectionBoundaryOpacityParameter(TEXT("DWC_PartPreviewSelectionBoundaryOpacity"));
-    const FName PartPreviewSelectionFillColorParameter(TEXT("DWC_PartPreviewSelectionFillColor"));
-    const FName PartPreviewSelectionBoundaryColorParameter(TEXT("DWC_PartPreviewSelectionBoundaryColor"));
+    const FName     PreviewSurfaceWaterOverrideParameter(TEXT("DWC_PreviewSurfaceWaterOverride"));
+    const FName     PreviewSurfaceWaterAmountParameter(TEXT("DWC_PreviewSurfaceWaterAmount"));
+    const FName     PreviewDebugModeParameter(TEXT("DWCPreview_DebugMode"));
+    const FName     PartPreviewColorTextureParameter(TEXT("DWC_PartPreviewColorTexture"));
+    const FName     PartPreviewSelectionTextureParameter(TEXT("DWC_PartPreviewSelectionTexture"));
+    const FName     PartPreviewColorOpacityParameter(TEXT("DWC_PartPreviewColorOpacity"));
+    const FName     PartPreviewSelectionFillOpacityParameter(TEXT("DWC_PartPreviewSelectionFillOpacity"));
+    const FName     PartPreviewSelectionBoundaryOpacityParameter(TEXT("DWC_PartPreviewSelectionBoundaryOpacity"));
+    const FName     PartPreviewSelectionFillColorParameter(TEXT("DWC_PartPreviewSelectionFillColor"));
+    const FName     PartPreviewSelectionBoundaryColorParameter(TEXT("DWC_PartPreviewSelectionBoundaryColor"));
     constexpr int32 PartPreviewTextureResolution = 1024;
 
     constexpr float SurfacePreviewMinDetailSize = 0.0f;
     constexpr float SurfacePreviewMaxDetailSize = 4.0f;
-
 
     void ConfigureStaticPartPreviewPose(USkeletalMeshComponent* MeshComponent)
     {
@@ -68,7 +68,6 @@ namespace
         MeshComponent->SetUpdateClothInEditor(false);
         MeshComponent->SetForceRefPose(true);
     }
-
 
     uint8 EncodeSurfacePreviewUNorm(const float Value)
     {
@@ -104,8 +103,8 @@ namespace
         const double D1 = Sign(Point, A, B);
         const double D2 = Sign(Point, B, C);
         const double D3 = Sign(Point, C, A);
-        const bool bHasNegative = D1 < 0.0 || D2 < 0.0 || D3 < 0.0;
-        const bool bHasPositive = D1 > 0.0 || D2 > 0.0 || D3 > 0.0;
+        const bool   bHasNegative = D1 < 0.0 || D2 < 0.0 || D3 < 0.0;
+        const bool   bHasPositive = D1 > 0.0 || D2 > 0.0 || D3 > 0.0;
         return !(bHasNegative && bHasPositive);
     }
 
@@ -139,15 +138,15 @@ namespace
         const FVector2D& D)
     {
         constexpr double Epsilon = 1.0e-12;
-        const double O1 = SurfacePreviewOrientation(A, B, C);
-        const double O2 = SurfacePreviewOrientation(A, B, D);
-        const double O3 = SurfacePreviewOrientation(C, D, A);
-        const double O4 = SurfacePreviewOrientation(C, D, B);
+        const double     O1 = SurfacePreviewOrientation(A, B, C);
+        const double     O2 = SurfacePreviewOrientation(A, B, D);
+        const double     O3 = SurfacePreviewOrientation(C, D, A);
+        const double     O4 = SurfacePreviewOrientation(C, D, B);
 
         const auto IsOnSegment = [Epsilon](
-            const FVector2D& P,
-            const FVector2D& Q,
-            const FVector2D& R)
+                                     const FVector2D& P,
+                                     const FVector2D& Q,
+                                     const FVector2D& R)
         {
             return Q.X >= FMath::Min(P.X, R.X) - Epsilon &&
                    Q.X <= FMath::Max(P.X, R.X) + Epsilon &&
@@ -170,10 +169,10 @@ namespace
         const FVector2D& A,
         const FVector2D& B,
         const FVector2D& C,
-        const int32 X,
-        const int32 Y,
-        const int32 Width,
-        const int32 Height)
+        const int32      X,
+        const int32      Y,
+        const int32      Width,
+        const int32      Height)
     {
         const FVector2D RectMin(
             static_cast<double>(X) / Width,
@@ -203,7 +202,7 @@ namespace
             }
         }
 
-        const FVector2D TriangleEdges[3][2] = {{A, B}, {B, C}, {C, A}};
+        const FVector2D TriangleEdges[3][2] = { { A, B }, { B, C }, { C, A } };
         for (const auto& TriangleEdge : TriangleEdges)
         {
             for (int32 RectEdgeIndex = 0; RectEdgeIndex < 4; ++RectEdgeIndex)
@@ -222,9 +221,9 @@ namespace
     }
 
     void RasterizeSurfacePreviewTriangleMask(
-        TArray<uint8>& Mask,
-        const int32 Width,
-        const int32 Height,
+        TArray<uint8>&                     Mask,
+        const int32                        Width,
+        const int32                        Height,
         const FWetClothingAssetUVTriangle& Triangle)
     {
         const FVector2D& A = Triangle.UVs[0];
@@ -235,10 +234,10 @@ namespace
             return;
         }
 
-        const int32 MinX = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X) * Width), 0, Width - 1);
-        const int32 MaxX = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.X, B.X, C.X) * Width), 0, Width - 1);
-        const int32 MinY = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y) * Height), 0, Height - 1);
-        const int32 MaxY = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Y, B.Y, C.Y) * Height), 0, Height - 1);
+        const int32 MinX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X) * Width), 0, Width - 1));
+        const int32 MaxX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.X, B.X, C.X) * Width), 0, Width - 1));
+        const int32 MinY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y) * Height), 0, Height - 1));
+        const int32 MaxY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Y, B.Y, C.Y) * Height), 0, Height - 1));
 
         bool bPainted = false;
         for (int32 Y = MinY; Y <= MaxY; ++Y)
@@ -258,19 +257,18 @@ namespace
         if (!bPainted)
         {
             const FVector2D Center = (A + B + C) / 3.0;
-            const int32 X = FMath::Clamp(FMath::FloorToInt(Center.X * Width), 0, Width - 1);
-            const int32 Y = FMath::Clamp(FMath::FloorToInt(Center.Y * Height), 0, Height - 1);
+            const int32     X = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Center.X * Width), 0, Width - 1));
+            const int32     Y = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Center.Y * Height), 0, Height - 1));
             Mask[Y * Width + X] = 1;
         }
     }
 
-
     void RasterizePreviewTriangleColor(
-        TArray<FColor>& Pixels,
-        const int32 Width,
-        const int32 Height,
+        TArray<FColor>&                    Pixels,
+        const int32                        Width,
+        const int32                        Height,
         const FWetClothingAssetUVTriangle& Triangle,
-        const FColor& Color)
+        const FColor&                      Color)
     {
         if (Pixels.Num() != Width * Height || Width <= 0 || Height <= 0)
         {
@@ -284,10 +282,10 @@ namespace
         {
             return;
         }
-        const int32 MinX = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X) * Width), 0, Width - 1);
-        const int32 MaxX = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.X, B.X, C.X) * Width), 0, Width - 1);
-        const int32 MinY = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y) * Height), 0, Height - 1);
-        const int32 MaxY = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Y, B.Y, C.Y) * Height), 0, Height - 1);
+        const int32 MinX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X) * Width), 0, Width - 1));
+        const int32 MaxX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.X, B.X, C.X) * Width), 0, Width - 1));
+        const int32 MinY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y) * Height), 0, Height - 1));
+        const int32 MaxY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Y, B.Y, C.Y) * Height), 0, Height - 1));
 
         bool bPainted = false;
         for (int32 Y = MinY; Y <= MaxY; ++Y)
@@ -306,8 +304,8 @@ namespace
         if (!bPainted)
         {
             const FVector2D Center = (A + B + C) / 3.0;
-            const int32 X = FMath::Clamp(FMath::FloorToInt(Center.X * Width), 0, Width - 1);
-            const int32 Y = FMath::Clamp(FMath::FloorToInt(Center.Y * Height), 0, Height - 1);
+            const int32     X = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Center.X * Width), 0, Width - 1));
+            const int32     Y = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Center.Y * Height), 0, Height - 1));
             Pixels[Y * Width + X] = Color;
         }
     }
@@ -321,7 +319,7 @@ namespace
 
     void GetPartPreviewTriangleEdgeKeys(
         const FWetClothingAssetUVTriangle& Triangle,
-        uint64 OutEdgeKeys[3])
+        uint64                             OutEdgeKeys[3])
     {
         OutEdgeKeys[0] = MakePartPreviewRenderEdgeKey(
             Triangle.RenderVertexIndices[0],
@@ -341,9 +339,9 @@ namespace
         // geometric neighbor even when the render-vertex indices differ.
         constexpr double QuantizationScale = 10000.0;
         const FIntVector Quantized(
-            FMath::RoundToInt(Position.X * QuantizationScale),
-            FMath::RoundToInt(Position.Y * QuantizationScale),
-            FMath::RoundToInt(Position.Z * QuantizationScale));
+            IntCastChecked<int32>(FMath::RoundToInt(Position.X * QuantizationScale)),
+            IntCastChecked<int32>(FMath::RoundToInt(Position.Y * QuantizationScale)),
+            IntCastChecked<int32>(FMath::RoundToInt(Position.Z * QuantizationScale)));
         return HashCombine(
             HashCombine(GetTypeHash(Quantized.X), GetTypeHash(Quantized.Y)),
             GetTypeHash(Quantized.Z));
@@ -360,7 +358,7 @@ namespace
 
     void GetPartPreviewTrianglePositionEdgeKeys(
         const FWetClothingAssetUVTriangle& Triangle,
-        uint64 OutEdgeKeys[3])
+        uint64                             OutEdgeKeys[3])
     {
         OutEdgeKeys[0] = MakePartPreviewPositionEdgeKey(
             Triangle.LocalPositions[0],
@@ -375,11 +373,11 @@ namespace
 
     int32 ResolvePartPreviewOverlayUVChannelIndex(
         const UWetClothingAsset* Asset,
-        const USkeletalMesh* PreviewMesh)
+        const USkeletalMesh*     PreviewMesh)
     {
         const int32 OriginalUVChannelIndex = Asset != nullptr
-            ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
-            : 0;
+                                                 ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
+                                                 : 0;
         if (Asset == nullptr || PreviewMesh == nullptr ||
             Asset->GetRuntimeSkeletalMesh() != PreviewMesh)
         {
@@ -410,9 +408,9 @@ namespace
     }
 
     bool ReadPartPreviewRenderTrianglesIncludingDegenerateUV(
-        const USkeletalMesh* SkeletalMesh,
-        const int32 UVChannelIndex,
-        const int32 MaterialSlotIndex,
+        const USkeletalMesh*                 SkeletalMesh,
+        const int32                          UVChannelIndex,
+        const int32                          MaterialSlotIndex,
         TArray<FWetClothingAssetUVTriangle>& OutTriangles)
     {
         OutTriangles.Reset();
@@ -454,8 +452,7 @@ namespace
                 IndexBuffer.Num());
             for (int32 Index = FirstIndex; Index + 2 < LastIndex; Index += 3)
             {
-                const uint32 VertexIndices[3] =
-                {
+                const uint32 VertexIndices[3] = {
                     IndexBuffer[Index],
                     IndexBuffer[Index + 1],
                     IndexBuffer[Index + 2]
@@ -481,7 +478,8 @@ namespace
                     Triangle.LocalPositions[CornerIndex] = FVector(
                         LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex));
                     Triangle.LocalNormals[CornerIndex] = FVector(
-                        LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex)).GetSafeNormal();
+                                                             LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex))
+                                                             .GetSafeNormal();
                 }
 
                 if (!IsSurfacePreviewUVFinite(Triangle.UVs[0]) ||
@@ -513,7 +511,7 @@ namespace
         for (int32 Step = 0; Step < FMath::Clamp(PaddingPixels, 0, 32); ++Step)
         {
             const TArray<uint8> PreviousMask = Mask;
-            bool bChanged = false;
+            bool                bChanged = false;
             for (int32 Y = 0; Y < Height; ++Y)
             {
                 for (int32 X = 0; X < Width; ++X)
@@ -556,14 +554,14 @@ namespace
 
     void DilateSurfacePreviewColors(
         TArray<FColor>& Pixels,
-        const int32 Width,
-        const int32 Height,
-        const int32 PaddingPixels)
+        const int32     Width,
+        const int32     Height,
+        const int32     PaddingPixels)
     {
         for (int32 Step = 0; Step < FMath::Clamp(PaddingPixels, 0, 8); ++Step)
         {
             const TArray<FColor> PreviousPixels = Pixels;
-            bool bChanged = false;
+            bool                 bChanged = false;
             for (int32 Y = 0; Y < Height; ++Y)
             {
                 for (int32 X = 0; X < Width; ++X)
@@ -606,11 +604,11 @@ namespace
     }
 
     bool ReadSurfacePreviewSourcePixels(
-        UTexture2D* Texture,
+        UTexture2D*     Texture,
         TArray<FColor>& OutPixels,
-        int32& OutWidth,
-        int32& OutHeight,
-        FString& OutErrorMessage)
+        int32&          OutWidth,
+        int32&          OutHeight,
+        FString&        OutErrorMessage)
     {
 #if WITH_EDITORONLY_DATA
         if (Texture == nullptr || !Texture->Source.IsValid())
@@ -631,8 +629,8 @@ namespace
             return false;
         }
 
-        OutWidth = Texture->Source.GetSizeX();
-        OutHeight = Texture->Source.GetSizeY();
+        OutWidth = IntCastChecked<int32>(Texture->Source.GetSizeX());
+        OutHeight = IntCastChecked<int32>(Texture->Source.GetSizeY());
         const int64 PixelCount = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight);
         if (OutWidth <= 0 || OutHeight <= 0 || RawData.Num() < PixelCount * static_cast<int64>(sizeof(FColor)))
         {
@@ -651,7 +649,7 @@ namespace
 
     template <typename PixelType>
     bool UploadSurfacePreviewPixels(
-        UTexture2D* Texture,
+        UTexture2D*              Texture,
         const TArray<PixelType>& Pixels)
     {
         if (Texture == nullptr || Texture->GetPlatformData() == nullptr ||
@@ -661,8 +659,8 @@ namespace
         }
 
         FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
-        const int64 ByteCount = static_cast<int64>(Pixels.Num()) * static_cast<int64>(sizeof(PixelType));
-        void* Destination = Mip.BulkData.Lock(LOCK_READ_WRITE);
+        const int64       ByteCount = static_cast<int64>(Pixels.Num()) * static_cast<int64>(sizeof(PixelType));
+        void*             Destination = Mip.BulkData.Lock(LOCK_READ_WRITE);
         if (Destination == nullptr || Mip.BulkData.GetBulkDataSize() < ByteCount)
         {
             Mip.BulkData.Unlock();
@@ -677,9 +675,9 @@ namespace
 
     bool CreateOrUpdateSurfacePreviewByteTexture(
         TObjectPtr<UTexture2D>& Texture,
-        const TArray<FColor>& Pixels,
-        const int32 Width,
-        const int32 Height)
+        const TArray<FColor>&   Pixels,
+        const int32             Width,
+        const int32             Height)
     {
         if (Width <= 0 || Height <= 0 || Pixels.Num() != Width * Height)
         {
@@ -708,10 +706,10 @@ namespace
 
     bool CreateOrUpdateSurfacePreviewWetnessTexture(
         TObjectPtr<UTexture2D>& Texture,
-        const TArray<float>& Pixels,
-        const int32 Width,
-        const int32 Height,
-        const TextureFilter Filter)
+        const TArray<float>&    Pixels,
+        const int32             Width,
+        const int32             Height,
+        const TextureFilter     Filter)
     {
         if (Width <= 0 || Height <= 0 || Pixels.Num() != Width * Height)
         {
@@ -743,11 +741,11 @@ namespace
     }
 
     UTexture2D* ResolveTransientSurfacePreviewTexture(
-        UTexture2D* SourceTexture,
-        const bool bNormalMap,
-        TObjectPtr<UTexture2D>& CachedTexture,
+        UTexture2D*                 SourceTexture,
+        const bool                  bNormalMap,
+        TObjectPtr<UTexture2D>&     CachedTexture,
         TWeakObjectPtr<UTexture2D>& CachedSource,
-        const TCHAR* DebugName)
+        const TCHAR*                DebugName)
     {
         if (SourceTexture == nullptr)
         {
@@ -761,8 +759,8 @@ namespace
         }
 
 #if WITH_EDITORONLY_DATA
-        const int32 SourceWidth = SourceTexture->Source.GetSizeX();
-        const int32 SourceHeight = SourceTexture->Source.GetSizeY();
+        const int32                SourceWidth = IntCastChecked<int32>(SourceTexture->Source.GetSizeX());
+        const int32                SourceHeight = IntCastChecked<int32>(SourceTexture->Source.GetSizeY());
         const ETextureSourceFormat SourceFormat = SourceTexture->Source.GetFormat();
         if (SourceWidth > 0 && SourceHeight > 0 &&
             (SourceFormat == TSF_BGRA8 || SourceFormat == TSF_G8))
@@ -771,21 +769,21 @@ namespace
             if (SourceTexture->Source.GetMipData(SourceBytes, 0))
             {
                 constexpr int32 TargetSize = DWCSurfaceTextureSharedAsset::Resolution;
-                TArray<FColor> Resampled;
+                TArray<FColor>  Resampled;
                 Resampled.SetNumUninitialized(TargetSize * TargetSize);
                 for (int32 Y = 0; Y < TargetSize; ++Y)
                 {
-                    const int32 SourceY = FMath::Clamp(
+                    const int32 SourceY = IntCastChecked<int32>(FMath::Clamp(
                         FMath::FloorToInt((static_cast<double>(Y) + 0.5) * SourceHeight / TargetSize),
                         0,
-                        SourceHeight - 1);
+                        SourceHeight - 1));
                     for (int32 X = 0; X < TargetSize; ++X)
                     {
-                        const int32 SourceX = FMath::Clamp(
+                        const int32 SourceX = IntCastChecked<int32>(FMath::Clamp(
                             FMath::FloorToInt((static_cast<double>(X) + 0.5) * SourceWidth / TargetSize),
                             0,
-                            SourceWidth - 1);
-                        FColor Pixel;
+                            SourceWidth - 1));
+                        FColor      Pixel;
                         if (SourceFormat == TSF_BGRA8)
                         {
                             const int64 ByteOffset =
@@ -796,8 +794,8 @@ namespace
                         {
                             const uint8 Value = SourceBytes[static_cast<int64>(SourceY) * SourceWidth + SourceX];
                             Pixel = bNormalMap
-                                ? FColor(Value, Value, 255, 255)
-                                : FColor(Value, Value, Value, 255);
+                                        ? FColor(Value, Value, 255, 255)
+                                        : FColor(Value, Value, Value, 255);
                         }
                         Resampled[Y * TargetSize + X] = Pixel;
                     }
@@ -832,7 +830,7 @@ namespace
         // contract and exposes uploadable mip-0 data. Otherwise slice 0 is preferable
         // to silently constructing a malformed Texture2DArray.
         const FTexturePlatformData* PlatformData = SourceTexture->GetPlatformData();
-        const bool bDirectFallbackUsable =
+        const bool                  bDirectFallbackUsable =
             SourceTexture->GetSizeX() == DWCSurfaceTextureSharedAsset::Resolution &&
             SourceTexture->GetSizeY() == DWCSurfaceTextureSharedAsset::Resolution &&
             SourceTexture->GetResource() != nullptr &&
@@ -843,7 +841,6 @@ namespace
         CachedSource = SourceTexture;
         return CachedTexture;
     }
-
 
 } // namespace
 
@@ -861,8 +858,6 @@ void SDWCPartViewport::Construct(const FArguments& InArgs)
     PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     ConfigureStaticPartPreviewPose(PreviewMeshComponent);
     PreviewScene->AddComponent(PreviewMeshComponent, FTransform::Identity);
-
-
 
     RefreshPreviewMesh();
 }
@@ -975,7 +970,7 @@ void SDWCPartViewport::RefreshPreviewMesh()
     if (TargetMesh != nullptr)
     {
         const FBoxSphereBounds Bounds = PreviewMeshComponent->CalcBounds(FTransform::Identity);
-        PreviewScene->SetFloorOffset(-Bounds.Origin.Z + Bounds.BoxExtent.Z);
+        PreviewScene->SetFloorOffset(static_cast<float>(-Bounds.Origin.Z + Bounds.BoxExtent.Z));
     }
     else
     {
@@ -1438,7 +1433,6 @@ void SDWCPartViewport::ClearSurfaceWaterTilingPreviewPartSettingsOverride()
     }
 }
 
-
 void SDWCPartViewport::RefreshWetPartOverlayMesh()
 {
     RefreshPartPreviewOverlay();
@@ -1467,8 +1461,8 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
     }
 
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const USkeletalMesh* PreviewMesh = PreviewMeshComponent->GetSkeletalMeshAsset();
-    const int32 PreviewOverlayUVChannelIndex = ResolvePartPreviewOverlayUVChannelIndex(
+    const USkeletalMesh*     PreviewMesh = PreviewMeshComponent->GetSkeletalMeshAsset();
+    const int32              PreviewOverlayUVChannelIndex = ResolvePartPreviewOverlayUVChannelIndex(
         Asset,
         PreviewMesh);
 
@@ -1504,7 +1498,7 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(bSelected));
 
         const int32* WetPartID = CurrentWetPartIslandAssignments.Find(Island.UVIslandID);
-        const int32 EffectiveWetPartID = WetPartID != nullptr ? *WetPartID : INDEX_NONE;
+        const int32  EffectiveWetPartID = WetPartID != nullptr ? *WetPartID : INDEX_NONE;
         PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(EffectiveWetPartID));
 
         const FLinearColor* IslandColor = CurrentWetPartIslandColors.Find(Island.UVIslandID);
@@ -1555,30 +1549,30 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
     TArray<uint8> SelectionMask;
     SelectionMask.Init(0, Width * Height);
 
-    TSet<int32> KnownIslandTriangleIDs;
-    TMap<int32, FColor> ResolvedColorByTriangleID;
-    TSet<int32> ResolvedSelectedTriangleIDs;
+    TSet<int32>          KnownIslandTriangleIDs;
+    TMap<int32, FColor>  ResolvedColorByTriangleID;
+    TSet<int32>          ResolvedSelectedTriangleIDs;
     TMap<uint64, FColor> ColorByRenderEdge;
     TMap<uint64, FColor> ColorByPositionEdge;
-    TSet<uint64> ConflictingRenderColorEdges;
-    TSet<uint64> ConflictingPositionColorEdges;
-    TSet<uint64> SelectedRenderEdges;
-    TSet<uint64> SelectedPositionEdges;
+    TSet<uint64>         ConflictingRenderColorEdges;
+    TSet<uint64>         ConflictingPositionColorEdges;
+    TSet<uint64>         SelectedRenderEdges;
+    TSet<uint64>         SelectedPositionEdges;
 
     struct FPartPreviewOwnerSource
     {
         const FWetClothingAssetUVTriangle* Triangle = nullptr;
-        bool bHasAssignedColor = false;
-        FColor AssignedColor = FColor::Transparent;
-        bool bSelected = false;
+        bool                               bHasAssignedColor = false;
+        FColor                             AssignedColor = FColor::Transparent;
+        bool                               bSelected = false;
     };
     TArray<FPartPreviewOwnerSource> OwnerSources;
 
     const auto RegisterColorEdge = [](
-        TMap<uint64, FColor>& ColorByEdge,
-        TSet<uint64>& ConflictingEdges,
-        const uint64 EdgeKey,
-        const FColor& Color)
+                                       TMap<uint64, FColor>& ColorByEdge,
+                                       TSet<uint64>&         ConflictingEdges,
+                                       const uint64          EdgeKey,
+                                       const FColor&         Color)
     {
         if (ConflictingEdges.Contains(EdgeKey))
         {
@@ -1598,10 +1592,10 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
 
     for (const FWetClothingAssetUVIsland& Island : CurrentSelectableIslands)
     {
-        const bool bSelected = CurrentHighlightedUVIslandIDs.Contains(Island.UVIslandID);
-        const int32* WetPartID = CurrentWetPartIslandAssignments.Find(Island.UVIslandID);
+        const bool          bSelected = CurrentHighlightedUVIslandIDs.Contains(Island.UVIslandID);
+        const int32*        WetPartID = CurrentWetPartIslandAssignments.Find(Island.UVIslandID);
         const FLinearColor* IslandColor = CurrentWetPartIslandColors.Find(Island.UVIslandID);
-        const bool bHasAssignedColor =
+        const bool          bHasAssignedColor =
             bShowWetPartColors &&
             WetPartColorIntensity > KINDA_SMALL_NUMBER &&
             WetPartID != nullptr &&
@@ -1623,7 +1617,7 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
                 &Triangle,
                 bHasAssignedColor,
                 EncodedColor,
-                bSelected});
+                bSelected });
             if (bSelected)
             {
                 ResolvedSelectedTriangleIDs.Add(Triangle.TriangleID);
@@ -1648,8 +1642,8 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
     if (RenderTriangles.IsEmpty())
     {
         const int32 OriginalUVChannelIndex = Asset != nullptr
-            ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
-            : 0;
+                                                 ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
+                                                 : 0;
         if (PreviewOverlayUVChannelIndex != OriginalUVChannelIndex)
         {
             return false;
@@ -1743,7 +1737,7 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
 
     TMap<uint64, int32> FirstOrphanByRenderEdge;
     TMap<uint64, int32> FirstOrphanByPositionEdge;
-    TArray<int32> OrphanTriangleIndices;
+    TArray<int32>       OrphanTriangleIndices;
     OrphanTriangleIndices.Reserve(RenderTriangles.Num());
 
     for (int32 RenderTriangleIndex = 0; RenderTriangleIndex < RenderTriangles.Num(); ++RenderTriangleIndex)
@@ -1785,10 +1779,10 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
 
     struct FOrphanComponentVisual
     {
-        bool bHasColor = false;
-        bool bColorConflict = false;
+        bool   bHasColor = false;
+        bool   bColorConflict = false;
         FColor Color = FColor::Transparent;
-        bool bSelected = false;
+        bool   bSelected = false;
     };
     TMap<int32, FOrphanComponentVisual> ComponentVisuals;
 
@@ -1813,8 +1807,8 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
 
     for (const int32 RenderTriangleIndex : OrphanTriangleIndices)
     {
-        const int32 Root = FindOrphanRoot(RenderTriangleIndex);
-        FOrphanComponentVisual& Visual = ComponentVisuals.FindOrAdd(Root);
+        const int32                        Root = FindOrphanRoot(RenderTriangleIndex);
+        FOrphanComponentVisual&            Visual = ComponentVisuals.FindOrAdd(Root);
         const FWetClothingAssetUVTriangle& Triangle = RenderTriangles[RenderTriangleIndex];
 
         uint64 RenderEdgeKeys[3];
@@ -1839,7 +1833,7 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
 
     for (const int32 RenderTriangleIndex : OrphanTriangleIndices)
     {
-        const int32 Root = FindOrphanRoot(RenderTriangleIndex);
+        const int32                   Root = FindOrphanRoot(RenderTriangleIndex);
         const FOrphanComponentVisual* Visual = ComponentVisuals.Find(Root);
         if (Visual == nullptr)
         {
@@ -1874,13 +1868,13 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         }
 
         const double BoundsDiagonal = RenderBounds.IsValid
-            ? RenderBounds.GetSize().Size()
-            : 0.0;
+                                          ? RenderBounds.GetSize().Size()
+                                          : 0.0;
         const double MaxOwnerDistance = FMath::Max(0.5, BoundsDiagonal * 0.01);
         const double MaxOwnerDistanceSquared = FMath::Square(MaxOwnerDistance);
-        int32 NearestInheritedColorCount = 0;
-        int32 NearestInheritedSelectionCount = 0;
-        int32 RemainingOrphanCount = 0;
+        int32        NearestInheritedColorCount = 0;
+        int32        NearestInheritedSelectionCount = 0;
+        int32        RemainingOrphanCount = 0;
 
         if (!PartPreviewNearestOwnerTriangleCache.Contains(TopologySignature) &&
             PartPreviewNearestOwnerTriangleCache.Num() >= 8)
@@ -1916,8 +1910,9 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
             const FVector TargetCenter =
                 (Triangle.LocalPositions[0] + Triangle.LocalPositions[1] + Triangle.LocalPositions[2]) / 3.0;
             const FVector TargetNormal = FVector::CrossProduct(
-                Triangle.LocalPositions[1] - Triangle.LocalPositions[0],
-                Triangle.LocalPositions[2] - Triangle.LocalPositions[0]).GetSafeNormal();
+                                             Triangle.LocalPositions[1] - Triangle.LocalPositions[0],
+                                             Triangle.LocalPositions[2] - Triangle.LocalPositions[0])
+                                             .GetSafeNormal();
 
             const FPartPreviewOwnerSource* BestOwner = nullptr;
             if (const int32* CachedOwnerTriangleID =
@@ -1943,9 +1938,10 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
                     }
 
                     const FWetClothingAssetUVTriangle& SourceTriangle = *Candidate.Triangle;
-                    const FVector SourceNormal = FVector::CrossProduct(
-                        SourceTriangle.LocalPositions[1] - SourceTriangle.LocalPositions[0],
-                        SourceTriangle.LocalPositions[2] - SourceTriangle.LocalPositions[0]).GetSafeNormal();
+                    const FVector                      SourceNormal = FVector::CrossProduct(
+                                                     SourceTriangle.LocalPositions[1] - SourceTriangle.LocalPositions[0],
+                                                     SourceTriangle.LocalPositions[2] - SourceTriangle.LocalPositions[0])
+                                                     .GetSafeNormal();
                     if (!TargetNormal.IsNearlyZero() && !SourceNormal.IsNearlyZero() &&
                         FMath::Abs(FVector::DotProduct(TargetNormal, SourceNormal)) < 0.15)
                     {
@@ -2089,7 +2085,7 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
     }
     TObjectPtr<UTexture2D> NewPartTexture = nullptr;
     TObjectPtr<UTexture2D> NewSelectionTexture = nullptr;
-    const bool bPartTextureReady = CreateOrUpdateSurfacePreviewByteTexture(
+    const bool             bPartTextureReady = CreateOrUpdateSurfacePreviewByteTexture(
         NewPartTexture,
         PartPixels,
         Width,
@@ -2191,9 +2187,9 @@ void SDWCPartViewport::RefreshMaterialSectionVisibility()
 
     PreviewMeshComponent->ShowAllMaterialSections(0);
     const int32 IsolatedMaterialSlot = bSurfaceWaterTilingPreview
-        ? PreviewMaterialSlotIndex
-        : CurrentHighlightedMaterialSlot;
-    const bool bIsolateSelectedSlot =
+                                           ? PreviewMaterialSlotIndex
+                                           : CurrentHighlightedMaterialSlot;
+    const bool  bIsolateSelectedSlot =
         IsolatedMaterialSlot != INDEX_NONE;
     if (!bIsolateSelectedSlot)
     {
@@ -2201,7 +2197,7 @@ void SDWCPartViewport::RefreshMaterialSectionVisibility()
         return;
     }
 
-    const USkeletalMesh* PreviewMesh = PreviewMeshComponent->GetSkeletalMeshAsset();
+    const USkeletalMesh*           PreviewMesh = PreviewMeshComponent->GetSkeletalMeshAsset();
     const FSkeletalMeshRenderData* RenderData = PreviewMesh != nullptr ? PreviewMesh->GetResourceForRendering() : nullptr;
     if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(0))
     {
@@ -2213,7 +2209,7 @@ void SDWCPartViewport::RefreshMaterialSectionVisibility()
     for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); ++SectionIndex)
     {
         const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
-        const bool bVisible = Section.MaterialIndex == IsolatedMaterialSlot;
+        const bool                    bVisible = Section.MaterialIndex == IsolatedMaterialSlot;
         PreviewMeshComponent->ShowMaterialSection(
             Section.MaterialIndex,
             SectionIndex,
@@ -2232,9 +2228,9 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
         return false;
     }
 
-    const FWetClothingEditableWetPartData& Editable = Asset->Authored.PartData.EditableWetPartData;
+    const FWetClothingEditableWetPartData&  Editable = Asset->Authored.PartData.EditableWetPartData;
     const FWetClothingAuthoredMaterialSlot* Slot = Editable.FindMaterialSlot(PreviewMaterialSlotIndex);
-    const FWetClothingWetPartEntry* Part = Slot != nullptr ? Slot->FindPart(PreviewWetPartID) : nullptr;
+    const FWetClothingWetPartEntry*         Part = Slot != nullptr ? Slot->FindPart(PreviewWetPartID) : nullptr;
     if (Part == nullptr)
     {
         OutErrorMessage = TEXT("The selected Wet Part could not be resolved.");
@@ -2255,7 +2251,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
     for (const FWetClothingAssetUVIsland& Island : CurrentSelectableIslands)
     {
         const int32* AssignedWetPartID = CurrentWetPartIslandAssignments.Find(Island.UVIslandID);
-        const int32 EffectiveWetPartID = AssignedWetPartID != nullptr ? *AssignedWetPartID : 0;
+        const int32  EffectiveWetPartID = AssignedWetPartID != nullptr ? *AssignedWetPartID : 0;
         if (EffectiveWetPartID != PreviewWetPartID)
         {
             continue;
@@ -2284,8 +2280,8 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
 
     if (!bUseCachedLayout)
     {
-        const int32 Width = DWCWetPartDataTextureBake::Resolution;
-        const int32 Height = DWCWetPartDataTextureBake::Resolution;
+        const int32    Width = DWCWetPartDataTextureBake::Resolution;
+        const int32    Height = DWCWetPartDataTextureBake::Resolution;
         TArray<FColor> SourcePartDataPixels;
         SourcePartDataPixels.Init(
             FColor(
@@ -2296,7 +2292,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
             Width * Height);
 
         TArray<FWetClothingAssetUVIsland> DataUVIslands;
-        FString DataUVError;
+        FString                           DataUVError;
         if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotDataUVIslands(
                 *Asset,
                 0,
@@ -2305,8 +2301,8 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
                 &DataUVError))
         {
             OutErrorMessage = DataUVError.IsEmpty()
-                ? TEXT("Could not rebuild the selected slot's DWC UV Channel triangles.")
-                : DataUVError;
+                                  ? TEXT("Could not rebuild the selected slot's DWC UV Channel triangles.")
+                                  : DataUVError;
             return false;
         }
 
@@ -2324,7 +2320,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
         }
 
         const FWetPartProfileAssignment* PartProfile = Editable.FindProfile(*Part);
-        FWetnessProfileParameters PartProfileParameters;
+        FWetnessProfileParameters        PartProfileParameters;
         if (!FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(PartProfile, PartProfileParameters))
         {
             OutErrorMessage = TEXT("Could not resolve the selected Wet Part's authored profile parameters.");
@@ -2332,11 +2328,11 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
         }
 
         constexpr uint8 LocalProfileID = 1;
-        int32 MinSelectedX = Width;
-        int32 MinSelectedY = Height;
-        int32 MaxSelectedX = 0;
-        int32 MaxSelectedY = 0;
-        bool bHasSelectedPixel = false;
+        int32           MinSelectedX = Width;
+        int32           MinSelectedY = Height;
+        int32           MaxSelectedX = 0;
+        int32           MaxSelectedY = 0;
+        bool            bHasSelectedPixel = false;
         for (int32 Y = 0; Y < Height; ++Y)
         {
             for (int32 X = 0; X < Width; ++X)
@@ -2386,7 +2382,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
     SurfacePreviewLocalProfileID = LocalProfileID;
 
     const FWetPartProfileAssignment* PreviewPartProfile = Editable.FindProfile(*Part);
-    FWetnessProfileParameters PreviewProfileParameters;
+    FWetnessProfileParameters        PreviewProfileParameters;
     if (!FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(
             PreviewPartProfile,
             PreviewProfileParameters))
@@ -2395,25 +2391,25 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
         return false;
     }
     const FSurfaceWaterProfileParameters& Surface = PreviewProfileParameters.SurfaceWater;
-    const FVector2D SingleCircleCenter = SurfacePreviewCachedSingleCircleCenter;
-    const float Droplet1StampSizeScale = PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale();
-    const float Droplet1HalfWidthPixels = Surface.DropletRadiusPixels > UE_KINDA_SMALL_NUMBER
-        ? FMath::Clamp(Surface.DropletRadiusPixels * Droplet1StampSizeScale, 1.0f, 256.0f)
-        : 0.0f;
-    const float Droplet1HalfHeightPixels = Surface.DropletHeightPixels > UE_KINDA_SMALL_NUMBER
-        ? FMath::Clamp(Surface.DropletHeightPixels * Droplet1StampSizeScale, 1.0f, 256.0f)
-        : 0.0f;
-    const float FlowStampSizeScale = PreviewPartSurfaceWater.GetResolvedDropletFlowStampSizeScale();
-    const float FlowHalfWidthPixels = Surface.DropletFlowRadiusPixels > UE_KINDA_SMALL_NUMBER
-        ? FMath::Clamp(Surface.DropletFlowRadiusPixels * FlowStampSizeScale, 1.0f, 256.0f)
-        : 0.0f;
-    const float FlowHalfHeightPixels = Surface.DropletFlowHeightPixels > UE_KINDA_SMALL_NUMBER
-        ? FMath::Clamp(Surface.DropletFlowHeightPixels * FlowStampSizeScale, 1.0f, 256.0f)
-        : 0.0f;
-    TArray<FColor> PreviewPartDataPixels = SurfacePreviewCachedSourcePartDataPixels;
-    TArray<float> WetnessPixels;
-    TArray<float> DropletPixels;
-    TArray<float> FlowDropletPixels;
+    const FVector2D                       SingleCircleCenter = SurfacePreviewCachedSingleCircleCenter;
+    const float                           Droplet1StampSizeScale = PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale();
+    const float                           Droplet1HalfWidthPixels = Surface.DropletRadiusPixels > UE_KINDA_SMALL_NUMBER
+                                                                        ? FMath::Clamp(Surface.DropletRadiusPixels * Droplet1StampSizeScale, 1.0f, 256.0f)
+                                                                        : 0.0f;
+    const float                           Droplet1HalfHeightPixels = Surface.DropletHeightPixels > UE_KINDA_SMALL_NUMBER
+                                                                         ? FMath::Clamp(Surface.DropletHeightPixels * Droplet1StampSizeScale, 1.0f, 256.0f)
+                                                                         : 0.0f;
+    const float                           FlowStampSizeScale = PreviewPartSurfaceWater.GetResolvedDropletFlowStampSizeScale();
+    const float                           FlowHalfWidthPixels = Surface.DropletFlowRadiusPixels > UE_KINDA_SMALL_NUMBER
+                                                                    ? FMath::Clamp(Surface.DropletFlowRadiusPixels * FlowStampSizeScale, 1.0f, 256.0f)
+                                                                    : 0.0f;
+    const float                           FlowHalfHeightPixels = Surface.DropletFlowHeightPixels > UE_KINDA_SMALL_NUMBER
+                                                                     ? FMath::Clamp(Surface.DropletFlowHeightPixels * FlowStampSizeScale, 1.0f, 256.0f)
+                                                                     : 0.0f;
+    TArray<FColor>                        PreviewPartDataPixels = SurfacePreviewCachedSourcePartDataPixels;
+    TArray<float>                         WetnessPixels;
+    TArray<float>                         DropletPixels;
+    TArray<float>                         FlowDropletPixels;
     WetnessPixels.Init(0.0f, Width * Height);
     DropletPixels.Init(0.0f, Width * Height);
     FlowDropletPixels.Init(0.0f, Width * Height);
@@ -2433,7 +2429,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
                 continue;
             }
 
-            PreviewPartDataPixels[PixelIndex].R = LocalProfileID;
+            PreviewPartDataPixels[PixelIndex].R = IntCastChecked<uint8>(LocalProfileID);
             PreviewPartDataPixels[PixelIndex].G = DropletDetailSize;
             PreviewPartDataPixels[PixelIndex].B = DropletFlowDetailSize;
             PreviewPartDataPixels[PixelIndex].A = 0;
@@ -2446,17 +2442,17 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
                 if (Droplet1HalfWidthPixels > UE_KINDA_SMALL_NUMBER &&
                     Droplet1HalfHeightPixels > UE_KINDA_SMALL_NUMBER)
                 {
-                    const float EllipseDistance = FMath::Sqrt(
+                    const float EllipseDistance = static_cast<float>(FMath::Sqrt(
                         FMath::Square(CenterDelta.X / Droplet1HalfWidthPixels) +
-                        FMath::Square(CenterDelta.Y / Droplet1HalfHeightPixels));
+                        FMath::Square(CenterDelta.Y / Droplet1HalfHeightPixels)));
                     const float EdgeWidth = FMath::Clamp(
                         1.5f / FMath::Max(Droplet1HalfWidthPixels, Droplet1HalfHeightPixels),
                         0.02f,
                         0.25f);
                     const float RegionAlpha = 1.0f - FMath::SmoothStep(
-                        1.0f - EdgeWidth,
-                        1.0f,
-                        EllipseDistance);
+                                                         1.0f - EdgeWidth,
+                                                         1.0f,
+                                                         EllipseDistance);
                     if (RegionAlpha > UE_KINDA_SMALL_NUMBER)
                     {
                         DropletPixels[PixelIndex] = SurfaceAmount * RegionAlpha;
@@ -2466,17 +2462,17 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
                 if (FlowHalfWidthPixels > UE_KINDA_SMALL_NUMBER &&
                     FlowHalfHeightPixels > UE_KINDA_SMALL_NUMBER)
                 {
-                    const float EllipseDistance = FMath::Sqrt(
+                    const float EllipseDistance = static_cast<float>(FMath::Sqrt(
                         FMath::Square(CenterDelta.X / FlowHalfWidthPixels) +
-                        FMath::Square(CenterDelta.Y / FlowHalfHeightPixels));
+                        FMath::Square(CenterDelta.Y / FlowHalfHeightPixels)));
                     const float EdgeWidth = FMath::Clamp(
                         1.5f / FMath::Max(FlowHalfWidthPixels, FlowHalfHeightPixels),
                         0.02f,
                         0.25f);
                     const float RegionAlpha = 1.0f - FMath::SmoothStep(
-                        1.0f - EdgeWidth,
-                        1.0f,
-                        EllipseDistance);
+                                                         1.0f - EdgeWidth,
+                                                         1.0f,
+                                                         EllipseDistance);
                     if (RegionAlpha > UE_KINDA_SMALL_NUMBER)
                     {
                         FlowDropletPixels[PixelIndex] = SurfaceAmount * RegionAlpha;
@@ -2579,7 +2575,7 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
     bSurfaceWaterPreviewStatusIsError = false;
     bSurfaceWaterPreviewFallbackProfileCacheValid = false;
     FString SurfaceWaterResourceDiagnostics;
-    bool bSurfaceWaterResourceDiagnosticError = false;
+    bool    bSurfaceWaterResourceDiagnosticError = false;
 
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || PreviewMaterialSlotIndex == INDEX_NONE || PreviewWetPartID < 0)
@@ -2598,9 +2594,9 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
         return;
     }
 
-    const FWetClothingEditableWetPartData& Editable = Asset->Authored.PartData.EditableWetPartData;
+    const FWetClothingEditableWetPartData&  Editable = Asset->Authored.PartData.EditableWetPartData;
     const FWetClothingAuthoredMaterialSlot* Slot = Editable.FindMaterialSlot(PreviewMaterialSlotIndex);
-    const FWetClothingWetPartEntry* Part = Slot != nullptr ? Slot->FindPart(PreviewWetPartID) : nullptr;
+    const FWetClothingWetPartEntry*         Part = Slot != nullptr ? Slot->FindPart(PreviewWetPartID) : nullptr;
     if (Slot == nullptr || Part == nullptr)
     {
         SurfaceWaterPreviewStatus = TEXT("The selected Wet Part could not be resolved.");
@@ -2614,14 +2610,14 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             ? SurfaceWaterPreviewPartSettingsOverride.GetValue()
             : Part->SurfaceWater;
 
-    USkeletalMesh* SourceMesh = Asset->GetSourceSkeletalMesh();
-    USkeletalMesh* RuntimeMesh = Asset->GetRuntimeSkeletalMesh();
+    USkeletalMesh*      SourceMesh = Asset->GetSourceSkeletalMesh();
+    USkeletalMesh*      RuntimeMesh = Asset->GetRuntimeSkeletalMesh();
     UMaterialInterface* SourceMaterial =
         SourceMesh != nullptr && SourceMesh->GetMaterials().IsValidIndex(PreviewMaterialSlotIndex)
             ? SourceMesh->GetMaterials()[PreviewMaterialSlotIndex].MaterialInterface
             : (RuntimeMesh != nullptr && RuntimeMesh->GetMaterials().IsValidIndex(PreviewMaterialSlotIndex)
-                ? RuntimeMesh->GetMaterials()[PreviewMaterialSlotIndex].MaterialInterface
-                : nullptr);
+                   ? RuntimeMesh->GetMaterials()[PreviewMaterialSlotIndex].MaterialInterface
+                   : nullptr);
     if (SourceMaterial == nullptr)
     {
         SourceMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
@@ -2683,7 +2679,7 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
     }
 
     const FWetPartProfileAssignment* PreviewPartProfile = Editable.FindProfile(*Part);
-    FWetnessProfileParameters AuthoredPreviewParameters;
+    FWetnessProfileParameters        AuthoredPreviewParameters;
     if (!FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(
             PreviewPartProfile,
             AuthoredPreviewParameters))
@@ -2736,10 +2732,10 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
     if (ResourceSubsystem != nullptr)
     {
         if (!ResourceSubsystem->ApplyPreviewRenderProfileFallbackProfile(
-            nullptr,
-            PreviewMaterialSlotIndex,
-            LocalProfile,
-            *SurfaceWaterPreviewMaterial))
+                nullptr,
+                PreviewMaterialSlotIndex,
+                LocalProfile,
+                *SurfaceWaterPreviewMaterial))
         {
             SurfaceWaterPreviewStatus = TEXT("Could not apply the selected Surface Water render profile to the tiling preview material.");
             bSurfaceWaterPreviewStatusIsError = true;
@@ -2789,29 +2785,29 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             FHashedMaterialParameterInfo(FMaterialParameterInfo(DWCWetMaterialParameters::FallbackRenderProfileTexel(6))),
             SurfaceWaterPreviewBaseFallbackProfile6);
 
-    const int32 ResolvedSurfaceNormalUV = Asset->GetSurfaceWaterNormalUVChannelIndex();
-    const int32 DropletNormalSlice = bSurfaceWaterPreviewFallbackProfileCacheValid
-        ? FMath::Max(0, FMath::RoundToInt(SurfaceWaterPreviewBaseFallbackProfile0.B))
-        : INDEX_NONE;
-    const int32 DropletMaskSlice = bSurfaceWaterPreviewFallbackProfileCacheValid
-        ? FMath::Max(0, FMath::RoundToInt(SurfaceWaterPreviewBaseFallbackProfile2.R))
-        : INDEX_NONE;
+    const int32      ResolvedSurfaceNormalUV = Asset->GetSurfaceWaterNormalUVChannelIndex();
+    const int32      DropletNormalSlice = bSurfaceWaterPreviewFallbackProfileCacheValid
+                                              ? FMath::Max(0, FMath::RoundToInt(SurfaceWaterPreviewBaseFallbackProfile0.B))
+                                              : INDEX_NONE;
+    const int32      DropletMaskSlice = bSurfaceWaterPreviewFallbackProfileCacheValid
+                                            ? FMath::Max(0, FMath::RoundToInt(SurfaceWaterPreviewBaseFallbackProfile2.R))
+                                            : INDEX_NONE;
     UTexture2DArray* NormalArray = ResourceSubsystem != nullptr
-        ? ResourceSubsystem->GetDropletNormalArray()
-        : nullptr;
+                                       ? ResourceSubsystem->GetDropletNormalArray()
+                                       : nullptr;
     UTexture2DArray* MaskArray = ResourceSubsystem != nullptr
-        ? ResourceSubsystem->GetDropletMaskArray()
-        : nullptr;
-    const int32 NormalArrayWidth = NormalArray != nullptr ? NormalArray->GetSizeX() : 0;
-    const int32 NormalArrayHeight = NormalArray != nullptr ? NormalArray->GetSizeY() : 0;
-    const int32 NormalArrayFormat = NormalArray != nullptr
-        ? static_cast<int32>(NormalArray->GetPixelFormat())
-        : static_cast<int32>(PF_Unknown);
-    const int32 MaskArrayWidth = MaskArray != nullptr ? MaskArray->GetSizeX() : 0;
-    const int32 MaskArrayHeight = MaskArray != nullptr ? MaskArray->GetSizeY() : 0;
-    const int32 MaskArrayFormat = MaskArray != nullptr
-        ? static_cast<int32>(MaskArray->GetPixelFormat())
-        : static_cast<int32>(PF_Unknown);
+                                     ? ResourceSubsystem->GetDropletMaskArray()
+                                     : nullptr;
+    const int32      NormalArrayWidth = NormalArray != nullptr ? NormalArray->GetSizeX() : 0;
+    const int32      NormalArrayHeight = NormalArray != nullptr ? NormalArray->GetSizeY() : 0;
+    const int32      NormalArrayFormat = NormalArray != nullptr
+                                             ? static_cast<int32>(NormalArray->GetPixelFormat())
+                                             : static_cast<int32>(PF_Unknown);
+    const int32      MaskArrayWidth = MaskArray != nullptr ? MaskArray->GetSizeX() : 0;
+    const int32      MaskArrayHeight = MaskArray != nullptr ? MaskArray->GetSizeY() : 0;
+    const int32      MaskArrayFormat = MaskArray != nullptr
+                                           ? static_cast<int32>(MaskArray->GetPixelFormat())
+                                           : static_cast<int32>(PF_Unknown);
 
     SurfaceWaterResourceDiagnostics = FString::Printf(
         TEXT("\nUV channels: Original=%d DWCData=%d SurfaceNormal=%d."),
@@ -3020,11 +3016,11 @@ void SDWCPartViewport::ApplySurfaceWaterPreviewRenderOverrides()
         return;
     }
 
-    FLinearColor Texel0 = SurfaceWaterPreviewBaseFallbackProfile0;
+    FLinearColor       Texel0 = SurfaceWaterPreviewBaseFallbackProfile0;
     const FLinearColor Texel1 = SurfaceWaterPreviewBaseFallbackProfile1;
-    FLinearColor Texel2 = SurfaceWaterPreviewBaseFallbackProfile2;
+    FLinearColor       Texel2 = SurfaceWaterPreviewBaseFallbackProfile2;
     const FLinearColor Texel3 = SurfaceWaterPreviewBaseFallbackProfile3;
-    FLinearColor Texel4 = SurfaceWaterPreviewBaseFallbackProfile4;
+    FLinearColor       Texel4 = SurfaceWaterPreviewBaseFallbackProfile4;
     const FLinearColor Texel5 = SurfaceWaterPreviewBaseFallbackProfile5;
     const FLinearColor Texel6 = SurfaceWaterPreviewBaseFallbackProfile6;
 
@@ -3062,8 +3058,8 @@ FText SDWCPartViewport::GetSurfaceWaterPreviewStatusText() const
 FSlateColor SDWCPartViewport::GetSurfaceWaterPreviewStatusColor() const
 {
     return bSurfaceWaterPreviewStatusIsError
-        ? FSlateColor(FStyleColors::Error)
-        : FSlateColor(FStyleColors::ForegroundHover);
+               ? FSlateColor(FStyleColors::Error)
+               : FSlateColor(FStyleColors::ForegroundHover);
 }
 
 void SDWCPartViewport::RequestViewportRedraw()
@@ -3164,7 +3160,6 @@ void SDWCPartViewport::HandleIslandPickedFromClient(int32 UVIslandID, bool bAppe
 void SDWCPartViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Overlay)
 {
     SEditorViewport::PopulateViewportOverlays(Overlay);
-
 }
 
 void SDWCPartViewport::OnFocusViewportToSelection()
@@ -3206,10 +3201,10 @@ void SDWCPartViewport::RestoreOriginalMaterials()
 UMaterialInterface* SDWCPartViewport::ResolveWetPartOverlayMaterial()
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const USkeletalMesh* PreviewMesh = PreviewMeshComponent != nullptr
-        ? PreviewMeshComponent->GetSkeletalMeshAsset()
-        : nullptr;
-    const int32 PreviewOverlayUVChannelIndex = ResolvePartPreviewOverlayUVChannelIndex(
+    const USkeletalMesh*     PreviewMesh = PreviewMeshComponent != nullptr
+                                               ? PreviewMeshComponent->GetSkeletalMeshAsset()
+                                               : nullptr;
+    const int32              PreviewOverlayUVChannelIndex = ResolvePartPreviewOverlayUVChannelIndex(
         Asset,
         PreviewMesh);
 
@@ -3237,7 +3232,7 @@ UMaterialInterface* SDWCPartViewport::ResolveWetPartOverlayMaterial()
             LogDWC,
             Error,
             TEXT("DWC Part Preview overlay material is missing: %s. ")
-            TEXT("Run Scripts/Python/GenerateDWCPartOverlayMaterial.py and save all generated UV variants."),
+                TEXT("Run Scripts/Python/GenerateDWCPartOverlayMaterial.py and save all generated UV variants."),
             *MaterialObjectPath);
         return nullptr;
     }

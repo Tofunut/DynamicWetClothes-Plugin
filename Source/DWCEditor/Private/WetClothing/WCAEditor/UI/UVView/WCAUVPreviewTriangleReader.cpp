@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WCAUVPreviewTriangleReader.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -13,8 +14,8 @@ namespace DWCUVPreviewTriangleReaderPrivate
 {
     bool ValidateMaterialSlot(
         const USkeletalMesh* Mesh,
-        const int32 MaterialSlotIndex,
-        FString* OutErrorMessage)
+        const int32          MaterialSlotIndex,
+        FString*             OutErrorMessage)
     {
         if (Mesh == nullptr || !Mesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
         {
@@ -25,11 +26,11 @@ namespace DWCUVPreviewTriangleReaderPrivate
     }
 
     void AddSectionTriangles(
-        const FSkeletalMeshLODRenderData& LODData,
-        const TArray<uint32>& IndexBuffer,
-        const int32 UVChannelIndex,
-        const TSet<int32>& MaterialSlotIndices,
-        const FDWCDataUVBufferView* DataUVView,
+        const FSkeletalMeshLODRenderData&    LODData,
+        const TArray<uint32>&                IndexBuffer,
+        const int32                          UVChannelIndex,
+        const TSet<int32>&                   MaterialSlotIndices,
+        const FDWCDataUVBufferView*          DataUVView,
         TArray<FWCAUVPreviewSourceTriangle>& OutTriangles)
     {
         const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
@@ -47,8 +48,7 @@ namespace DWCUVPreviewTriangleReaderPrivate
 
             for (int32 TriangleIndex = FirstIndex; TriangleIndex + 2 < LastIndex; TriangleIndex += 3)
             {
-                const uint32 Indices[3] =
-                {
+                const uint32 Indices[3] = {
                     IndexBuffer[TriangleIndex],
                     IndexBuffer[TriangleIndex + 1],
                     IndexBuffer[TriangleIndex + 2]
@@ -67,28 +67,29 @@ namespace DWCUVPreviewTriangleReaderPrivate
                 {
                     const uint32 VertexIndex = Indices[CornerIndex];
                     Triangle.UVs[CornerIndex] = DataUVView != nullptr
-                        ? DataUVView->GetUV(VertexIndex)
-                        : LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(
-                            VertexIndex,
-                            UVChannelIndex);
+                                                    ? DataUVView->GetUV(VertexIndex)
+                                                    : LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(
+                                                          VertexIndex,
+                                                          UVChannelIndex);
                     Triangle.LocalPositions[CornerIndex] =
                         LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex);
                     Triangle.RenderVertexIndices[CornerIndex] = static_cast<int32>(VertexIndex);
                     Triangle.LocalNormals[CornerIndex] = FVector3f(
-                        LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex)).GetSafeNormal();
+                                                             LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex))
+                                                             .GetSafeNormal();
                 }
 
                 const FVector2D UV0(Triangle.UVs[0]);
                 const FVector2D UV1(Triangle.UVs[1]);
                 const FVector2D UV2(Triangle.UVs[2]);
-                const bool bUVsAreValid =
+                const bool      bUVsAreValid =
                     FDWCUVGeometry::IsFiniteReasonableUV(UV0) &&
                     FDWCUVGeometry::IsFiniteReasonableUV(UV1) &&
                     FDWCUVGeometry::IsFiniteReasonableUV(UV2);
                 const bool bHasGeometryArea = FDWCUVGeometry::ComputeTriangleDoubleArea3D(
-                    FVector(Triangle.LocalPositions[0]),
-                    FVector(Triangle.LocalPositions[1]),
-                    FVector(Triangle.LocalPositions[2])) > 1.0e-10;
+                                                  FVector(Triangle.LocalPositions[0]),
+                                                  FVector(Triangle.LocalPositions[1]),
+                                                  FVector(Triangle.LocalPositions[2])) > 1.0e-10;
                 const bool bHasUVArea = FDWCUVGeometry::ComputeTriangleArea2D(UV0, UV1, UV2) > 1.0e-12;
                 if (bUVsAreValid && bHasGeometryArea && bHasUVArea)
                 {
@@ -97,15 +98,15 @@ namespace DWCUVPreviewTriangleReaderPrivate
             }
         }
     }
-}
+} // namespace DWCUVPreviewTriangleReaderPrivate
 
 bool FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
-    const USkeletalMesh* SkeletalMesh,
-    const int32 LODIndex,
-    const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex,
+    const USkeletalMesh*                 SkeletalMesh,
+    const int32                          LODIndex,
+    const int32                          UVChannelIndex,
+    const int32                          MaterialSlotIndex,
     TArray<FWCAUVPreviewSourceTriangle>& OutTriangles,
-    FString* OutErrorMessage)
+    FString*                             OutErrorMessage)
 {
     const int32 MaterialSlotIndices[] = { MaterialSlotIndex };
     return ReadFromSkeletalMesh(
@@ -118,12 +119,12 @@ bool FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
 }
 
 bool FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
-    const USkeletalMesh* SkeletalMesh,
-    const int32 LODIndex,
-    const int32 UVChannelIndex,
-    const TConstArrayView<int32> MaterialSlotIndices,
+    const USkeletalMesh*                 SkeletalMesh,
+    const int32                          LODIndex,
+    const int32                          UVChannelIndex,
+    const TConstArrayView<int32>         MaterialSlotIndices,
     TArray<FWCAUVPreviewSourceTriangle>& OutTriangles,
-    FString* OutErrorMessage)
+    FString*                             OutErrorMessage)
 {
     using namespace DWCUVPreviewTriangleReaderPrivate;
 
@@ -158,7 +159,7 @@ bool FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
     }
 
     const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
-    const int32 NumUVChannels = static_cast<int32>(LODData.GetNumTexCoords());
+    const int32                       NumUVChannels = static_cast<int32>(LODData.GetNumTexCoords());
     if (NumUVChannels <= 0 || UVChannelIndex < 0 || UVChannelIndex >= NumUVChannels)
     {
         DWC::Error::SetMessage(OutErrorMessage, TEXT("The selected UV channel is not available on this mesh."));
@@ -185,11 +186,11 @@ bool FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
 }
 
 bool FWCAUVPreviewTriangleReader::ReadFromDataUV(
-    const UWetClothingAsset& Asset,
-    const int32 LODIndex,
-    const int32 MaterialSlotIndex,
+    const UWetClothingAsset&             Asset,
+    const int32                          LODIndex,
+    const int32                          MaterialSlotIndex,
     TArray<FWCAUVPreviewSourceTriangle>& OutTriangles,
-    FString* OutErrorMessage)
+    FString*                             OutErrorMessage)
 {
     using namespace DWCUVPreviewTriangleReaderPrivate;
 
@@ -220,9 +221,9 @@ bool FWCAUVPreviewTriangleReader::ReadFromDataUV(
     }
 
     const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
-    const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
-    FDWCDataUVBufferView DataUVView;
-    FString DataUVError;
+    const int32                       VertexCount = static_cast<int32>(LODData.GetNumVertices());
+    FDWCDataUVBufferView              DataUVView;
+    FString                           DataUVError;
     if (!DataUVView.Initialize(RuntimeMesh, LODIndex, Asset.GetDWCDataUVChannelIndex(), &DataUVError) ||
         VertexCount <= 0 ||
         Metadata->RenderVertexCount != VertexCount ||

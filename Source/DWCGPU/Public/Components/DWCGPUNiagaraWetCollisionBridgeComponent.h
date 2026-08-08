@@ -1,8 +1,10 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "NiagaraCore.h"
 #include "DWCGPUNiagaraWetCollisionBridgeComponent.generated.h"
 
 class UDynamicWetClothesComponent;
@@ -19,8 +21,8 @@ class DWCGPU_API UDWCGPUNiagaraWetCollisionBridgeComponent : public UActorCompon
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void TickComponent(
-        float DeltaTime,
-        ELevelTick TickType,
+        float                        DeltaTime,
+        ELevelTick                   TickType,
         FActorComponentTickFunction* ThisTickFunction) override;
 
     // Internal refresh entry point used by the component lifecycle and C++ integrations.
@@ -40,12 +42,12 @@ class DWCGPU_API UDWCGPUNiagaraWetCollisionBridgeComponent : public UActorCompon
 
   private:
     UNiagaraComponent* ResolveNiagaraComponent() const;
-    void ApplyWetContactUserParameters(UNiagaraComponent& TargetNiagaraComponent) const;
-    void BuildTargetReceiverGPUIds(TArray<int32>& OutReceiverGPUIds) const;
-    bool ApplyTargetReceivers(
-        int32 SystemInstanceID,
-        bool bRestrict,
-        const TArray<int32>& ReceiverGPUIds);
+    void               ApplyWetContactUserParameters(UNiagaraComponent& TargetNiagaraComponent) const;
+    void               BuildTargetReceiverGPUIds(TArray<int32>& OutReceiverGPUIds) const;
+    bool               ApplyTargetReceivers(
+                      FNiagaraSystemInstanceID SystemInstanceID,
+                      bool                     bRestrict,
+                      const TArray<int32>&     ReceiverGPUIds);
 
   public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara")
@@ -67,7 +69,7 @@ class DWCGPU_API UDWCGPUNiagaraWetCollisionBridgeComponent : public UActorCompon
     UPROPERTY(Transient)
     TArray<TObjectPtr<UDynamicWetClothesComponent>> RuntimeAllowedReceivers;
 
-    int32 LastAppliedSystemInstanceID = 0;
-    bool bLastAppliedTargetRestriction = false;
-    TArray<int32> LastAppliedTargetReceiverGPUIds;
+    FNiagaraSystemInstanceID LastAppliedSystemInstanceID = 0;
+    bool                     bLastAppliedTargetRestriction = false;
+    TArray<int32>            LastAppliedTargetReceiverGPUIds;
 };

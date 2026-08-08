@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -13,4 +14,4 @@ namespace DWCGeneratedAssetPaths
     {
         return OwningFolder / RootFolderName / AssetName;
     }
-}
+} // namespace DWCGeneratedAssetPaths

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -17,14 +18,14 @@ struct FDWCWetMeshReceiverRuntime;
 struct FWetMeshReceiverInitializerContext
 {
     UDynamicWetClothesComponent* Component = nullptr;
-    AActor* Owner = nullptr;
-    UWorld* World = nullptr;
+    AActor*                      Owner = nullptr;
+    UWorld*                      World = nullptr;
 
-    UWetClothingAsset* WetClothingAsset = nullptr;
+    UWetClothingAsset*                              WetClothingAsset = nullptr;
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>* Receivers = nullptr;
-    EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
+    EDWCSimulationMode                              SimulationMode = EDWCSimulationMode::VertexCPU;
 
-    FDWCLODVertexColorTransferCoordinator* LODVertexColorTransferCoordinator = nullptr;
+    FDWCLODVertexColorTransferCoordinator*                           LODVertexColorTransferCoordinator = nullptr;
     TFunction<FWetRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime&)> MakeRuntimeDataBuildArgs;
 };
 
@@ -37,5 +38,5 @@ class FWetMeshReceiverInitializer
     static bool RebuildReceivers(FWetMeshReceiverInitializerContext& Context);
     static bool InitializeReceiver(
         FWetMeshReceiverInitializerContext& Context,
-        FDWCWetMeshReceiverRuntime& Receiver);
+        FDWCWetMeshReceiverRuntime&         Receiver);
 };

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "RuntimeState/Utils/WetMeshReceiverInitializer.h"
 
 #include "Components/DynamicWetClothesComponent.h"
@@ -36,7 +37,6 @@ namespace
         return Mode == EDWCSimulationMode::WetnessMapGPU;
     }
 
-
     void ReleaseReceiverResources(FDWCWetMeshReceiverRuntime& Receiver)
     {
         if (Receiver.GPUBackend.IsValid())
@@ -44,17 +44,16 @@ namespace
             Receiver.GPUBackend->Shutdown();
             Receiver.GPUBackend.Reset();
         }
-
     }
 
     void LogRuntimeModeData(
         const UDynamicWetClothesComponent* Component,
-        const FDWCWetMeshReceiverRuntime& Receiver,
-        const EDWCSimulationMode Mode,
-        const int32 LODIndex)
+        const FDWCWetMeshReceiverRuntime&  Receiver,
+        const EDWCSimulationMode           Mode,
+        const int32                        LODIndex)
     {
         const USkeletalMeshComponent* MeshComponent = Receiver.MeshComponent.Get();
-        const USkeletalMesh* SkeletalMesh =
+        const USkeletalMesh*          SkeletalMesh =
             MeshComponent != nullptr ? MeshComponent->GetSkeletalMeshAsset() : nullptr;
         const UWetClothingAsset* Asset = Receiver.WetClothingAsset.Get();
         if (MeshComponent == nullptr || SkeletalMesh == nullptr || Asset == nullptr)
@@ -143,7 +142,7 @@ namespace
                 Asset->HasGPUMapDataPayload() ? TEXT("true") : TEXT("false"));
         }
     }
-}
+} // namespace
 
 bool FWetMeshReceiverInitializer::RebuildReceivers(FWetMeshReceiverInitializerContext& Context)
 {
@@ -262,7 +261,7 @@ bool FWetMeshReceiverInitializer::RebuildReceivers(FWetMeshReceiverInitializerCo
 
 bool FWetMeshReceiverInitializer::InitializeReceiver(
     FWetMeshReceiverInitializerContext& Context,
-    FDWCWetMeshReceiverRuntime& Receiver)
+    FDWCWetMeshReceiverRuntime&         Receiver)
 {
     constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     if (Context.Component == nullptr ||
@@ -276,8 +275,8 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
     LogRuntimeModeData(Context.Component, Receiver, Context.SimulationMode, RuntimeLODIndex);
 
     UDWCRuntimeDataSubsystem* RuntimeDataSubsystem = Context.World != nullptr
-        ? Context.World->GetSubsystem<UDWCRuntimeDataSubsystem>()
-        : nullptr;
+                                                         ? Context.World->GetSubsystem<UDWCRuntimeDataSubsystem>()
+                                                         : nullptr;
     if (RuntimeDataSubsystem == nullptr || !Receiver.WetClothingAsset.IsValid())
     {
         UE_LOG(
@@ -368,7 +367,6 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
                 *GetNameSafe(Context.Owner));
         }
     }
-
 
     return true;
 }

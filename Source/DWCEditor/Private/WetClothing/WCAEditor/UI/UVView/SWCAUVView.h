@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "Input/Reply.h"
 #include "Styling/SlateBrush.h"
@@ -34,11 +36,11 @@ DECLARE_DELEGATE_TwoParams(FOnWetClothingUVIslandSelectionChanged, const TArray<
 
 struct FWCAUVViewCircleMarker
 {
-    FVector2D CenterUV = FVector2D::ZeroVector;
-    float RadiusUV = 0.025f;
+    FVector2D    CenterUV = FVector2D::ZeroVector;
+    float        RadiusUV = 0.025f;
     FLinearColor FillColor = FLinearColor::Transparent;
     FLinearColor OutlineColor = FLinearColor::Transparent;
-    float OutlineThickness = 1.0f;
+    float        OutlineThickness = 1.0f;
 };
 
 class SWCAUVView : public SLeafWidget
@@ -50,22 +52,22 @@ class SWCAUVView : public SLeafWidget
 
     void Construct(const FArguments& InArgs);
 
-    void                             SetIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& InIslands);
-    void                             SetSelectedIslands(const TSet<int32>& InUVIslandIDs);
-    void                             SetIslandColors(const TMap<int32, FLinearColor>& InIslandColors);
-    void                             SetHiddenUVIslandIDs(const TSet<int32>& InUVIslandIDs);
-    void                             SetCircleMarkers(const TArray<FWCAUVViewCircleMarker>& InCircleMarkers);
-    void                             SetBackgroundTexture(UTexture* InTexture);
-    void                             SetDrawBackgroundTexture(bool bInDrawBackgroundTexture);
-    void                             SetBackgroundTextureOpacity(float InOpacity);
-    void                             SetUVIslandLineOpacity(float InOpacity);
-    void                             SetUVIslandLineThicknessScale(float InThicknessScale);
-    void                             SetNormalizeToContentBounds(bool bInNormalizeToContentBounds);
-    void                             SetSelectionTool(EWCAUVSelectionTool InSelectionTool);
-    void                             SetDisplayMode(EWCAUVDisplayMode InDisplayMode);
+    void                SetIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& InIslands);
+    void                SetSelectedIslands(const TSet<int32>& InUVIslandIDs);
+    void                SetIslandColors(const TMap<int32, FLinearColor>& InIslandColors);
+    void                SetHiddenUVIslandIDs(const TSet<int32>& InUVIslandIDs);
+    void                SetCircleMarkers(const TArray<FWCAUVViewCircleMarker>& InCircleMarkers);
+    void                SetBackgroundTexture(UTexture* InTexture);
+    void                SetDrawBackgroundTexture(bool bInDrawBackgroundTexture);
+    void                SetBackgroundTextureOpacity(float InOpacity);
+    void                SetUVIslandLineOpacity(float InOpacity);
+    void                SetUVIslandLineThicknessScale(float InThicknessScale);
+    void                SetNormalizeToContentBounds(bool bInNormalizeToContentBounds);
+    void                SetSelectionTool(EWCAUVSelectionTool InSelectionTool);
+    void                SetDisplayMode(EWCAUVDisplayMode InDisplayMode);
     EWCAUVSelectionTool GetSelectionTool() const { return SelectionTool; }
     EWCAUVDisplayMode   GetDisplayMode() const { return DisplayMode; }
-    void                             Clear();
+    void                Clear();
 
   protected:
     virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override;
@@ -92,7 +94,7 @@ class SWCAUVView : public SLeafWidget
         const FPointerEvent& MouseEvent) override;
 
   private:
-    void RebuildGeometryCache();
+    void   RebuildGeometryCache();
     FBox2D ComputeUVBounds() const;
     FBox2D ComputeContentUVBounds() const;
     double GetTextureAspectRatio() const;
@@ -154,39 +156,39 @@ class SWCAUVView : public SLeafWidget
         FVector2D End = FVector2D::ZeroVector;
     };
 
-    TArray<FWetClothingAssetUVIsland>      Islands;
+    TArray<FWetClothingAssetUVIsland> Islands;
     // Identity of the shared cached island objects used to build Islands. This lets
     // repeated UV-view refreshes reuse the expensive edge/outline geometry cache.
     TArray<TSharedPtr<FWetClothingAssetUVIsland>> IslandSources;
-    TWeakObjectPtr<UTexture>                 IslandGeometryAddressTexture;
-    uint8                                    IslandGeometryAddressX = 0xFF;
-    uint8                                    IslandGeometryAddressY = 0xFF;
+    TWeakObjectPtr<UTexture>                      IslandGeometryAddressTexture;
+    uint8                                         IslandGeometryAddressX = 0xFF;
+    uint8                                         IslandGeometryAddressY = 0xFF;
     // A canonical, per-island edge list prevents triangle-shared edges from
     // being submitted more than once and becoming brighter than boundaries.
     TMap<int32, TArray<FCachedOutlineEdge>> CachedWireEdgesByIsland;
     TMap<int32, TArray<FCachedOutlineEdge>> CachedOutlineEdgesByIsland;
-    FBox2D                                 CachedContentUVBounds = FBox2D(ForceInit);
-    TSet<int32>                            SelectedUVIslandIDs;
-    TMap<int32, FLinearColor>              IslandColors;
-    TSet<int32>                            HiddenUVIslandIDs;
-    TArray<FWCAUVViewCircleMarker> CircleMarkers;
-    FOnWetClothingUVIslandSelectionChanged OnIslandSelectionChanged;
-    FSlateBrush                            BackgroundTextureBrush;
-    TWeakObjectPtr<UTexture>               BackgroundTexture;
-    bool                                   bDrawBackgroundTexture = true;
-    float                                  BackgroundTextureOpacity = 0.75f;
-    float                                  UVIslandLineOpacity = 1.0f;
-    float                                  UVIslandLineThicknessScale = 1.0f;
-    bool                                   bNormalizeToContentBounds = false;
-    float                                  Padding = 16.0f;
-    double                                 ZoomAmount = 1.0;
-    FVector2D                              ViewOffset = FVector2D::ZeroVector;
-    bool                                   bIsPanning = false;
-    FVector2D                              LastPanLocalPosition = FVector2D::ZeroVector;
-    EWCAUVSelectionTool       SelectionTool = EWCAUVSelectionTool::Select;
-    EWCAUVDisplayMode         DisplayMode = EWCAUVDisplayMode::Normal;
-    bool                                   bIsDraggingSelectionShape = false;
-    FVector2D                              SelectionDragStartLocal = FVector2D::ZeroVector;
-    FVector2D                              SelectionDragCurrentLocal = FVector2D::ZeroVector;
-    TArray<FVector2D>                      SelectionLassoPointsLocal;
+    FBox2D                                  CachedContentUVBounds = FBox2D(ForceInit);
+    TSet<int32>                             SelectedUVIslandIDs;
+    TMap<int32, FLinearColor>               IslandColors;
+    TSet<int32>                             HiddenUVIslandIDs;
+    TArray<FWCAUVViewCircleMarker>          CircleMarkers;
+    FOnWetClothingUVIslandSelectionChanged  OnIslandSelectionChanged;
+    FSlateBrush                             BackgroundTextureBrush;
+    TWeakObjectPtr<UTexture>                BackgroundTexture;
+    bool                                    bDrawBackgroundTexture = true;
+    float                                   BackgroundTextureOpacity = 0.75f;
+    float                                   UVIslandLineOpacity = 1.0f;
+    float                                   UVIslandLineThicknessScale = 1.0f;
+    bool                                    bNormalizeToContentBounds = false;
+    float                                   Padding = 16.0f;
+    double                                  ZoomAmount = 1.0;
+    FVector2D                               ViewOffset = FVector2D::ZeroVector;
+    bool                                    bIsPanning = false;
+    FVector2D                               LastPanLocalPosition = FVector2D::ZeroVector;
+    EWCAUVSelectionTool                     SelectionTool = EWCAUVSelectionTool::Select;
+    EWCAUVDisplayMode                       DisplayMode = EWCAUVDisplayMode::Normal;
+    bool                                    bIsDraggingSelectionShape = false;
+    FVector2D                               SelectionDragStartLocal = FVector2D::ZeroVector;
+    FVector2D                               SelectionDragCurrentLocal = FVector2D::ZeroVector;
+    TArray<FVector2D>                       SelectionLassoPointsLocal;
 };

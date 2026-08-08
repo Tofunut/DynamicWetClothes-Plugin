@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetRendering/DWCGPUResourceSubsystem.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -21,8 +22,8 @@ namespace
 {
     constexpr float GlobalTexelSize = 1.0f / static_cast<float>(UDWCGPUResourceSubsystem::GlobalLUTWidth);
     constexpr int32 InitialTextureArrayCapacity = 16;
-    const FName PreviewSurfaceWaterOverrideParameter(TEXT("DWC_PreviewSurfaceWaterOverride"));
-    const FName PreviewSurfaceWaterAmountParameter(TEXT("DWC_PreviewSurfaceWaterAmount"));
+    const FName     PreviewSurfaceWaterOverrideParameter(TEXT("DWC_PreviewSurfaceWaterOverride"));
+    const FName     PreviewSurfaceWaterAmountParameter(TEXT("DWC_PreviewSurfaceWaterAmount"));
 
     int32 ResolveTextureArrayCapacity(const int32 RequiredSlices)
     {
@@ -31,9 +32,9 @@ namespace
     }
 
     UTexture2D* CreateFloatLUTTexture(
-        UObject* Outer,
-        const FName Name,
-        const int32 Width,
+        UObject*                    Outer,
+        const FName                 Name,
+        const int32                 Width,
         const TArray<FLinearColor>& Pixels)
     {
         if (Width <= 0 || Pixels.Num() != Width)
@@ -58,7 +59,7 @@ namespace
         Texture->NeverStream = true;
 
         FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
-        void* Data = Mip.BulkData.Lock(LOCK_READ_WRITE);
+        void*             Data = Mip.BulkData.Lock(LOCK_READ_WRITE);
         FMemory::Memcpy(Data, Pixels.GetData(), Pixels.Num() * sizeof(FLinearColor));
         Mip.BulkData.Unlock();
         Texture->UpdateResource();
@@ -67,11 +68,11 @@ namespace
 
     UTexture2D* ResolveDirectSurfaceTexture(
         const FWetClothingLocalRenderProfile& LocalProfile,
-        UTexture2D* BakedArrayTexture,
-        UTexture2D* AuthoredSourceTexture,
-        const FSoftObjectPath& AuthoredSourcePath,
-        const TCHAR* TextureRole,
-        const bool bNormalMap)
+        UTexture2D*                           BakedArrayTexture,
+        UTexture2D*                           AuthoredSourceTexture,
+        const FSoftObjectPath&                AuthoredSourcePath,
+        const TCHAR*                          TextureRole,
+        const bool                            bNormalMap)
     {
         // Shipping/non-editor runtime data is self-contained. Only the prepared texture
         // stored in BakedWetPartData may be uploaded to the shared Texture2DArray.
@@ -81,8 +82,8 @@ namespace
         }
 
         const FString ProfileIdentity = !LocalProfile.StableKey.IsEmpty()
-            ? LocalProfile.StableKey
-            : LocalProfile.GetSourceProfilePath().ToString();
+                                            ? LocalProfile.StableKey
+                                            : LocalProfile.GetSourceProfilePath().ToString();
 
 #if WITH_EDITOR
         const auto IsCompatibleAuthoredFallback = [bNormalMap](const UTexture2D* Texture)
@@ -177,8 +178,8 @@ namespace
     }
 
     FString ResolveProfileTextureIdentity(
-        UTexture2D* BakedNormalizedTexture,
-        UTexture2D* AuthoredSourceTexture,
+        UTexture2D*            BakedNormalizedTexture,
+        UTexture2D*            AuthoredSourceTexture,
         const FSoftObjectPath& AuthoredSourcePath)
     {
         if (BakedNormalizedTexture != nullptr)
@@ -206,13 +207,13 @@ namespace
     FString DescribeSurfaceTexture(UTexture2D* Texture)
     {
         return Texture != nullptr
-            ? FString::Printf(
-                TEXT("%s (%dx%d format %d)"),
-                *Texture->GetPathName(),
-                Texture->GetSizeX(),
-                Texture->GetSizeY(),
-                static_cast<int32>(Texture->GetPixelFormat()))
-            : FString(TEXT("None"));
+                   ? FString::Printf(
+                         TEXT("%s (%dx%d format %d)"),
+                         *Texture->GetPathName(),
+                         Texture->GetSizeX(),
+                         Texture->GetSizeY(),
+                         static_cast<int32>(Texture->GetPixelFormat()))
+                   : FString(TEXT("None"));
     }
 
     FString ResolveProfileKey(const FWetClothingLocalRenderProfile& LocalProfile)
@@ -223,14 +224,14 @@ namespace
         }
 
         const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
-        const FString ParameterState = FString::Printf(
+        const FString                         ParameterState = FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|")
-            TEXT("DropletsEnabled=%d|SecondaryDropletsEnabled=%d|Droplet1Normal=%s|Droplet1Mask=%s|")
-            TEXT("Droplet2Normal=%s|Droplet2Mask=%s|")
-            TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
-            TEXT("SurfaceWaterTotalStrength=%.9g|StaticColorBlend=%.9g|WaterSpecular=%.9g|")
-            TEXT("FlowTargetRoughness=%.9g|FlowRoughnessBlend=%.9g|FlowTotalStrength=%.9g|")
-            TEXT("FlowColorBlend=%.9g|FlowNormalStrength=%.9g|FlowSpecular=%.9g"),
+                TEXT("DropletsEnabled=%d|SecondaryDropletsEnabled=%d|Droplet1Normal=%s|Droplet1Mask=%s|")
+                    TEXT("Droplet2Normal=%s|Droplet2Mask=%s|")
+                        TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
+                            TEXT("SurfaceWaterTotalStrength=%.9g|StaticColorBlend=%.9g|WaterSpecular=%.9g|")
+                                TEXT("FlowTargetRoughness=%.9g|FlowRoughnessBlend=%.9g|FlowTotalStrength=%.9g|")
+                                    TEXT("FlowColorBlend=%.9g|FlowNormalStrength=%.9g|FlowSpecular=%.9g"),
             LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
             LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled ? 1 : 0,
@@ -272,11 +273,11 @@ namespace
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         return FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|DropletsEnabled=%d|SecondaryDropletsEnabled=%d|Droplet1Normal=%s|Droplet1Mask=%s|")
-            TEXT("Droplet2Normal=%s|Droplet2Mask=%s|")
-            TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
-            TEXT("SurfaceWaterTotalStrength=%.9g|StaticColorBlend=%.9g|WaterSpecular=%.9g|")
-            TEXT("FlowTargetRoughness=%.9g|FlowRoughnessBlend=%.9g|FlowTotalStrength=%.9g|")
-            TEXT("FlowColorBlend=%.9g|FlowNormalStrength=%.9g|FlowSpecular=%.9g"),
+                TEXT("Droplet2Normal=%s|Droplet2Mask=%s|")
+                    TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
+                        TEXT("SurfaceWaterTotalStrength=%.9g|StaticColorBlend=%.9g|WaterSpecular=%.9g|")
+                            TEXT("FlowTargetRoughness=%.9g|FlowRoughnessBlend=%.9g|FlowTotalStrength=%.9g|")
+                                TEXT("FlowColorBlend=%.9g|FlowNormalStrength=%.9g|FlowSpecular=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled ? 1 : 0,
@@ -300,8 +301,8 @@ namespace
     }
 
     bool ResolveSourceProfileParameters(
-        const FSoftObjectPath& SourceProfilePath,
-        const bool bResolveUnloadedProfile,
+        const FSoftObjectPath&     SourceProfilePath,
+        const bool                 bResolveUnloadedProfile,
         FWetnessProfileParameters& OutParameters)
     {
         if (!SourceProfilePath.IsValid())
@@ -325,7 +326,7 @@ namespace
     }
 
     void ApplyResolvedSourceProfileParameters(
-        FWetClothingLocalRenderProfile& LocalProfile,
+        FWetClothingLocalRenderProfile&  LocalProfile,
         const FWetnessProfileParameters& ResolvedParameters)
     {
         LocalProfile.Parameters = ResolvedParameters;
@@ -373,9 +374,9 @@ namespace
         // texture with null or an incompatible source. The existing LocalProfile value
         // remains the authoritative fallback until a valid prepared reference exists.
         const auto ApplyPreparedTextureIfValid = [](
-            TObjectPtr<UTexture2D>& InOutTexture,
-            UTexture2D* Candidate,
-            const bool bNormalMap)
+                                                     TObjectPtr<UTexture2D>& InOutTexture,
+                                                     UTexture2D*             Candidate,
+                                                     const bool              bNormalMap)
         {
             const TextureCompressionSettings ExpectedCompression =
                 bNormalMap ? TC_Normalmap : TC_Masks;
@@ -456,7 +457,7 @@ namespace
     }
 
     const FWetClothingLocalRenderProfile* FindMatchingBakedFallbackProfile(
-        const UWetClothingAsset* WetClothingAsset,
+        const UWetClothingAsset*         WetClothingAsset,
         const FWetPartProfileAssignment& SourceAssignment,
         const FWetnessProfileParameters& Parameters)
     {
@@ -507,10 +508,10 @@ namespace
     }
 
     bool ResolveFallbackRenderProfile(
-        const UWetClothingAsset* WetClothingAsset,
-        const int32 MaterialSlotIndex,
+        const UWetClothingAsset*        WetClothingAsset,
+        const int32                     MaterialSlotIndex,
         FWetClothingLocalRenderProfile& OutProfile,
-        const bool bResolveSourceProfile)
+        const bool                      bResolveSourceProfile)
     {
         if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
         {
@@ -535,9 +536,9 @@ namespace
             return false;
         }
 
-        const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(SourceEntry->ProfileIndex)
-            ? SourceEntry->ProfileIndex
-            : 0;
+        const int32                      ProfileIndex = WetPartData.Profiles.IsValidIndex(SourceEntry->ProfileIndex)
+                                                            ? SourceEntry->ProfileIndex
+                                                            : 0;
         const FWetPartProfileAssignment* SourceAssignment = WetPartData.FindProfile(ProfileIndex);
         if (SourceAssignment == nullptr)
         {
@@ -608,10 +609,10 @@ namespace
 
     FLinearColor MakeFallbackRenderProfileTexel(
         const FWetClothingLocalRenderProfile& Profile,
-        const FFallbackRenderProfileSlices& Slices,
-        const int32 TexelIndex)
+        const FFallbackRenderProfileSlices&   Slices,
+        const int32                           TexelIndex)
     {
-        const FWetnessProfileParameters& Parameters = Profile.Parameters;
+        const FWetnessProfileParameters&      Parameters = Profile.Parameters;
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         switch (TexelIndex)
         {
@@ -648,12 +649,12 @@ namespace
 
         case 5:
             return Surface.SupportsSecondaryDroplets()
-                ? FLinearColor(
-                    FMath::Clamp(Surface.DropletFlowTotalStrength, 0.0f, 1.0f),
-                    FMath::Clamp(Surface.DropletFlowTargetRoughness, 0.0f, 1.0f),
-                    FMath::Clamp(Surface.DropletFlowRoughnessBlend, 0.0f, 1.0f),
-                    FMath::Clamp(Surface.DropletFlowSpecular, 0.0f, 1.0f))
-                : FLinearColor::Black;
+                       ? FLinearColor(
+                             FMath::Clamp(Surface.DropletFlowTotalStrength, 0.0f, 1.0f),
+                             FMath::Clamp(Surface.DropletFlowTargetRoughness, 0.0f, 1.0f),
+                             FMath::Clamp(Surface.DropletFlowRoughnessBlend, 0.0f, 1.0f),
+                             FMath::Clamp(Surface.DropletFlowSpecular, 0.0f, 1.0f))
+                       : FLinearColor::Black;
 
         case 6:
             return FLinearColor(
@@ -671,12 +672,11 @@ namespace
         }
     }
 
-
     UTexture2D* CreateNeutralWetPartDataTexture(UObject* Outer)
     {
         // The encoded size range is 0.0..4.0, so authored size 1.0 maps to 64/255.
         constexpr uint8 DefaultDetailSizeEncoded = 64u;
-        UTexture2D* Texture = UTexture2D::CreateTransient(1, 1, PF_B8G8R8A8, TEXT("DWC_NeutralWetPartData"));
+        UTexture2D*     Texture = UTexture2D::CreateTransient(1, 1, PF_B8G8R8A8, TEXT("DWC_NeutralWetPartData"));
         if (Texture == nullptr || Texture->GetPlatformData() == nullptr || Texture->GetPlatformData()->Mips.IsEmpty())
         {
             return nullptr;
@@ -694,7 +694,7 @@ namespace
         Texture->NeverStream = true;
 
         FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
-        FColor* Data = static_cast<FColor*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
+        FColor*           Data = static_cast<FColor*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
         *Data = FColor(0u, DefaultDetailSizeEncoded, DefaultDetailSizeEncoded, 0u);
         Mip.BulkData.Unlock();
         Texture->UpdateResource();
@@ -702,9 +702,9 @@ namespace
     }
 
     void AddUniqueTextureGPUBytes(
-        UTexture* Texture,
+        UTexture*              Texture,
         TSet<const UTexture*>& SeenTextures,
-        uint64& OutBytes)
+        uint64&                OutBytes)
     {
         if (Texture == nullptr || SeenTextures.Contains(Texture))
         {
@@ -715,12 +715,11 @@ namespace
         OutBytes += Texture->CalcTextureMemorySizeEnum(TMC_ResidentMips);
     }
 
-}
-
+} // namespace
 
 void UDWCGPUResourceSubsystem::FTextureArrayRegistry::SetNeutral(
     UTexture2D* Texture,
-    bool& bOutChanged)
+    bool&       bOutChanged)
 {
     if (Texture == nullptr || Texture->GetSizeX() <= 0 || Texture->GetSizeY() <= 0)
     {
@@ -779,7 +778,7 @@ void UDWCGPUResourceSubsystem::FTextureArrayRegistry::ReserveNeutralSlice(bool& 
 
 int32 UDWCGPUResourceSubsystem::FTextureArrayRegistry::FindOrAdd(
     UTexture2D* Texture,
-    bool& bOutChanged)
+    bool&       bOutChanged)
 {
     if (Texture == nullptr || Texture->GetSizeX() <= 0 || Texture->GetSizeY() <= 0)
     {
@@ -879,7 +878,7 @@ void UDWCGPUResourceSubsystem::Deinitialize()
 FDWCGPUResourceSubsystemStats UDWCGPUResourceSubsystem::GetStats() const
 {
     constexpr uint64 Uint4GPUBytes = 16ull;
-    const auto GetRegistryCPUBytes = [](const FTextureArrayRegistry& Registry)
+    const auto       GetRegistryCPUBytes = [](const FTextureArrayRegistry& Registry)
     {
         uint64 Bytes = Registry.SourceTextures.GetAllocatedSize() +
                        Registry.SliceByPath.GetAllocatedSize();
@@ -1026,13 +1025,12 @@ void UDWCGPUResourceSubsystem::EnsureNeutralResources()
     {
         RebuildGlobalRenderProfileLUT();
     }
-
 }
 
 void UDWCGPUResourceSubsystem::EnsureMaskRegistryNeutral(
     FTextureArrayRegistry& Registry,
-    UTexture2D* ReferenceTexture,
-    bool& bOutChanged)
+    UTexture2D*            ReferenceTexture,
+    bool&                  bOutChanged)
 {
     if (ReferenceTexture == nullptr)
     {
@@ -1044,10 +1042,10 @@ void UDWCGPUResourceSubsystem::EnsureMaskRegistryNeutral(
 
 int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
     const FWetClothingLocalRenderProfile& LocalProfile,
-    const EDWCRenderResourceUsage Usage)
+    const EDWCRenderResourceUsage         Usage)
 {
-    const FString Key = ResolveProfileKey(LocalProfile);
-    int32 RuntimeIndex = INDEX_NONE;
+    const FString          Key = ResolveProfileKey(LocalProfile);
+    int32                  RuntimeIndex = INDEX_NONE;
     FRuntimeProfileRecord* Record = nullptr;
 
     if (const int32* ExistingIndex = RuntimeProfileIndexByKey.Find(Key))
@@ -1088,27 +1086,27 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
     if (Usage == EDWCRenderResourceUsage::FullGPU && !Record->bSurfaceResourcesResolved)
     {
         const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
-        bool bTextureArraysChanged = false;
-        const bool bDropletRequested = Surface.bEnabled;
-        const bool bFlowRequested = bDropletRequested && Surface.bUseSecondaryDroplets;
-        UTexture2D* ResolvedDropletNormal = bDropletRequested
-            ? ResolveDirectSurfaceTexture(
-                LocalProfile,
-                LocalProfile.NormalizedDropletNormal,
-                Surface.DropletNormalTexture,
-                LocalProfile.GetSourceDropletNormalPath(),
-                TEXT("DropletNormal"),
-                true)
-            : nullptr;
-        UTexture2D* ResolvedDropletMask = bDropletRequested
-            ? ResolveDirectSurfaceTexture(
-                LocalProfile,
-                LocalProfile.NormalizedDropletMask,
-                Surface.DropletMaskTexture,
-                LocalProfile.GetSourceDropletMaskPath(),
-                TEXT("DropletMask"),
-                false)
-            : nullptr;
+        bool                                  bTextureArraysChanged = false;
+        const bool                            bDropletRequested = Surface.bEnabled;
+        const bool                            bFlowRequested = bDropletRequested && Surface.bUseSecondaryDroplets;
+        UTexture2D*                           ResolvedDropletNormal = bDropletRequested
+                                                                          ? ResolveDirectSurfaceTexture(
+                                                      LocalProfile,
+                                                      LocalProfile.NormalizedDropletNormal,
+                                                      Surface.DropletNormalTexture,
+                                                      LocalProfile.GetSourceDropletNormalPath(),
+                                                      TEXT("DropletNormal"),
+                                                      true)
+                                                                          : nullptr;
+        UTexture2D*                           ResolvedDropletMask = bDropletRequested
+                                                                        ? ResolveDirectSurfaceTexture(
+                                                    LocalProfile,
+                                                    LocalProfile.NormalizedDropletMask,
+                                                    Surface.DropletMaskTexture,
+                                                    LocalProfile.GetSourceDropletMaskPath(),
+                                                    TEXT("DropletMask"),
+                                                    false)
+                                                                        : nullptr;
         // Droplet2 is independent. A missing authored Droplet2 texture must use
         // neutral slice 0 rather than silently borrowing Droplet1.
         const bool bHasAuthoredFlowNormal =
@@ -1118,39 +1116,39 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
             Surface.DropletFlowMaskTexture != nullptr ||
             LocalProfile.GetSourceDropletFlowMaskPath().IsValid();
         UTexture2D* ResolvedDropletFlowNormal = bFlowRequested && bHasAuthoredFlowNormal
-            ? ResolveDirectSurfaceTexture(
-                LocalProfile,
-                LocalProfile.NormalizedDropletFlowNormal,
-                Surface.DropletFlowNormalTexture,
-                LocalProfile.GetSourceDropletFlowNormalPath(),
-                TEXT("DropletFlowNormal"),
-                true)
-            : nullptr;
+                                                    ? ResolveDirectSurfaceTexture(
+                                                          LocalProfile,
+                                                          LocalProfile.NormalizedDropletFlowNormal,
+                                                          Surface.DropletFlowNormalTexture,
+                                                          LocalProfile.GetSourceDropletFlowNormalPath(),
+                                                          TEXT("DropletFlowNormal"),
+                                                          true)
+                                                    : nullptr;
         UTexture2D* ResolvedDropletFlowMask = bFlowRequested && bHasAuthoredFlowMask
-            ? ResolveDirectSurfaceTexture(
-                LocalProfile,
-                LocalProfile.NormalizedDropletFlowMask,
-                Surface.DropletFlowMaskTexture,
-                LocalProfile.GetSourceDropletFlowMaskPath(),
-                TEXT("DropletFlowMask"),
-                false)
-            : nullptr;
+                                                  ? ResolveDirectSurfaceTexture(
+                                                        LocalProfile,
+                                                        LocalProfile.NormalizedDropletFlowMask,
+                                                        Surface.DropletFlowMaskTexture,
+                                                        LocalProfile.GetSourceDropletFlowMaskPath(),
+                                                        TEXT("DropletFlowMask"),
+                                                        false)
+                                                  : nullptr;
         EnsureMaskRegistryNeutral(
             DropletMaskRegistry,
             ResolvedDropletMask,
             bTextureArraysChanged);
         const int32 DropletMaskSlice = bDropletRequested
-            ? DropletMaskRegistry.FindOrAdd(ResolvedDropletMask, bTextureArraysChanged)
-            : 0;
+                                           ? DropletMaskRegistry.FindOrAdd(ResolvedDropletMask, bTextureArraysChanged)
+                                           : 0;
         const int32 DropletNormalSlice = bDropletRequested
-            ? DropletNormalRegistry.FindOrAdd(ResolvedDropletNormal, bTextureArraysChanged)
-            : 0;
+                                             ? DropletNormalRegistry.FindOrAdd(ResolvedDropletNormal, bTextureArraysChanged)
+                                             : 0;
         const int32 DropletFlowMaskSlice = bFlowRequested
-            ? DropletMaskRegistry.FindOrAdd(ResolvedDropletFlowMask, bTextureArraysChanged)
-            : 0;
+                                               ? DropletMaskRegistry.FindOrAdd(ResolvedDropletFlowMask, bTextureArraysChanged)
+                                               : 0;
         const int32 DropletFlowNormalSlice = bFlowRequested
-            ? DropletNormalRegistry.FindOrAdd(ResolvedDropletFlowNormal, bTextureArraysChanged)
-            : 0;
+                                                 ? DropletNormalRegistry.FindOrAdd(ResolvedDropletFlowNormal, bTextureArraysChanged)
+                                                 : 0;
 
         Record->PackedTexels[0] = FLinearColor(
             LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
@@ -1174,12 +1172,12 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
             0.0f,
             0.0f);
         Record->PackedTexels[5] = Surface.SupportsSecondaryDroplets()
-            ? FLinearColor(
-                FMath::Clamp(Surface.DropletFlowTotalStrength, 0.0f, 1.0f),
-                FMath::Clamp(Surface.DropletFlowTargetRoughness, 0.0f, 1.0f),
-                FMath::Clamp(Surface.DropletFlowRoughnessBlend, 0.0f, 1.0f),
-                FMath::Clamp(Surface.DropletFlowSpecular, 0.0f, 1.0f))
-            : FLinearColor::Black;
+                                      ? FLinearColor(
+                                            FMath::Clamp(Surface.DropletFlowTotalStrength, 0.0f, 1.0f),
+                                            FMath::Clamp(Surface.DropletFlowTargetRoughness, 0.0f, 1.0f),
+                                            FMath::Clamp(Surface.DropletFlowRoughnessBlend, 0.0f, 1.0f),
+                                            FMath::Clamp(Surface.DropletFlowSpecular, 0.0f, 1.0f))
+                                      : FLinearColor::Black;
         Record->PackedTexels[6] = FLinearColor(
             FMath::Clamp(Surface.SurfaceWaterColorBlend, 0.0f, 1.0f),
             Surface.SupportsSecondaryDroplets()
@@ -1196,7 +1194,6 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
 
     return RuntimeIndex;
 }
-
 
 void UDWCGPUResourceSubsystem::RebuildGlobalRenderProfileLUT()
 {
@@ -1313,10 +1310,10 @@ void UDWCGPUResourceSubsystem::FlushDirtyRuntimeProfiles()
 }
 
 UTexture2DArray* UDWCGPUResourceSubsystem::BuildTextureArray(
-    const TCHAR* DebugName,
+    const TCHAR*                          DebugName,
     const TArray<TObjectPtr<UTexture2D>>& SourceTextures,
-    const int32 SliceCapacity,
-    const bool bNormalArray)
+    const int32                           SliceCapacity,
+    const bool                            bNormalArray)
 {
     UTexture2D* FirstValid = nullptr;
     for (UTexture2D* Source : SourceTextures)
@@ -1328,10 +1325,10 @@ UTexture2DArray* UDWCGPUResourceSubsystem::BuildTextureArray(
         }
     }
 
-    const int32 SizeX = FirstValid != nullptr ? FirstValid->GetSizeX() : 1;
-    const int32 SizeY = FirstValid != nullptr ? FirstValid->GetSizeY() : 1;
+    const int32        SizeX = FirstValid != nullptr ? FirstValid->GetSizeX() : 1;
+    const int32        SizeY = FirstValid != nullptr ? FirstValid->GetSizeY() : 1;
     const EPixelFormat Format = FirstValid != nullptr ? FirstValid->GetPixelFormat() : PF_B8G8R8A8;
-    const int32 SafeCapacity = FMath::Max(SliceCapacity, 1);
+    const int32        SafeCapacity = FMath::Max(SliceCapacity, 1);
 
     UTexture2DArray* Array = UTexture2DArray::CreateTransient(SizeX, SizeY, SafeCapacity, Format, FName(DebugName));
     if (Array == nullptr)
@@ -1366,9 +1363,9 @@ UTexture2DArray* UDWCGPUResourceSubsystem::BuildTextureArray(
 }
 
 void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
-    UTexture2DArray* Array,
+    UTexture2DArray*             Array,
     const FTextureArrayRegistry& Registry,
-    const TSet<int32>& SliceIndices)
+    const TSet<int32>&           SliceIndices)
 {
     if (Array == nullptr || Array->GetResource() == nullptr || SliceIndices.IsEmpty())
     {
@@ -1378,10 +1375,10 @@ void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
     struct FSliceUpload
     {
         TArray<uint8> Bytes;
-        FString SourceName;
-        int32 DestinationSliceIndex = 0;
-        uint32 SourceRowPitch = 0;
-        uint32 SourceRowCount = 0;
+        FString       SourceName;
+        int32         DestinationSliceIndex = 0;
+        uint32        SourceRowPitch = 0;
+        uint32        SourceRowCount = 0;
     };
 
     TArray<FSliceUpload> SliceUploads;
@@ -1412,12 +1409,12 @@ void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
             continue;
         }
 
-        const EPixelFormat SourceFormat = Source->GetPixelFormat();
+        const EPixelFormat      SourceFormat = Source->GetPixelFormat();
         const FPixelFormatInfo& FormatInfo = GPixelFormats[SourceFormat];
-        const uint32 BlockSizeX = FMath::Max<uint32>(FormatInfo.BlockSizeX, 1u);
-        const uint32 BlockSizeY = FMath::Max<uint32>(FormatInfo.BlockSizeY, 1u);
-        const uint32 BlockBytes = FMath::Max<uint32>(FormatInfo.BlockBytes, 1u);
-        const uint32 SourceBlockCountX = FMath::DivideAndRoundUp<uint32>(
+        const uint32            BlockSizeX = FMath::Max<uint32>(FormatInfo.BlockSizeX, 1u);
+        const uint32            BlockSizeY = FMath::Max<uint32>(FormatInfo.BlockSizeY, 1u);
+        const uint32            BlockBytes = FMath::Max<uint32>(FormatInfo.BlockBytes, 1u);
+        const uint32            SourceBlockCountX = FMath::DivideAndRoundUp<uint32>(
             static_cast<uint32>(Source->GetSizeX()),
             BlockSizeX);
         const uint32 SourceBlockCountY = FMath::DivideAndRoundUp<uint32>(
@@ -1427,7 +1424,7 @@ void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
         const uint64 ExpectedByteCount = static_cast<uint64>(SourceRowPitch) * SourceBlockCountY;
 
         FTexture2DMipMap& Mip = PlatformData->Mips[0];
-        const int64 BulkByteCount = Mip.BulkData.GetBulkDataSize();
+        const int64       BulkByteCount = Mip.BulkData.GetBulkDataSize();
         if (BulkByteCount < static_cast<int64>(ExpectedByteCount))
         {
             UE_LOG(
@@ -1479,7 +1476,7 @@ void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
                 }
 
                 uint32 DestinationStride = 0;
-                void* DestinationBytes = RHICmdList.LockTexture2DArray(
+                void*  DestinationBytes = RHICmdList.LockTexture2DArray(
                     DestinationResource->TextureRHI,
                     Upload.DestinationSliceIndex,
                     0,
@@ -1494,7 +1491,7 @@ void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
                 if (DestinationStride >= Upload.SourceRowPitch)
                 {
                     const uint8* SourceRow = Upload.Bytes.GetData();
-                    uint8* DestinationRow = static_cast<uint8*>(DestinationBytes);
+                    uint8*       DestinationRow = static_cast<uint8*>(DestinationBytes);
                     for (uint32 RowIndex = 0; RowIndex < Upload.SourceRowCount; ++RowIndex)
                     {
                         FMemory::Memcpy(DestinationRow, SourceRow, Upload.SourceRowPitch);
@@ -1513,13 +1510,13 @@ void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
 }
 
 bool UDWCGPUResourceSubsystem::EnsureTextureArray(
-    const TCHAR* DebugName,
-    FTextureArrayRegistry& Registry,
+    const TCHAR*                 DebugName,
+    FTextureArrayRegistry&       Registry,
     TObjectPtr<UTexture2DArray>& Array,
-    const bool bNormalArray)
+    const bool                   bNormalArray)
 {
     const int32 RequiredSlices = FMath::Max(Registry.SourceTextures.Num(), 1);
-    const bool bArrayFormatMismatch =
+    const bool  bArrayFormatMismatch =
         Array != nullptr &&
         Registry.SizeX > 0 &&
         Registry.SizeY > 0 &&
@@ -1574,9 +1571,8 @@ void UDWCGPUResourceSubsystem::RebindGPUTextureArrays()
     }
 }
 
-
 UTexture2D* UDWCGPUResourceSubsystem::BuildAssetRemapLUT(
-    UWetClothingAsset* Asset,
+    UWetClothingAsset*   Asset,
     const TArray<int32>& LocalToRuntimeProfileIndices)
 {
     TArray<FLinearColor> Pixels;
@@ -1596,7 +1592,7 @@ UTexture2D* UDWCGPUResourceSubsystem::BuildAssetRemapLUT(
 }
 
 const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetResources(
-    UWetClothingAsset* Asset,
+    UWetClothingAsset*            Asset,
     const EDWCRenderResourceUsage Usage)
 {
     EnsureNeutralResources();
@@ -1611,7 +1607,7 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
         MakeResolvedProfileResourceSignature(ResolvedLocalProfiles);
 
     FDWCAssetRenderProfileResources* Existing = AssetResources.Find(Asset);
-    const bool bExistingProfileSignatureValid =
+    const bool                       bExistingProfileSignatureValid =
         Existing != nullptr &&
         Existing->ResolvedProfileSignature == ResolvedProfileSignature;
     const bool bExistingMappingValid =
@@ -1627,7 +1623,7 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
     }
     if (Usage == EDWCRenderResourceUsage::FullGPU)
     {
-        bool bNeutralRegistryChanged = false;
+        bool        bNeutralRegistryChanged = false;
         UTexture2D* NeutralNormal = Asset->Derived.Inline.BakedWetPartData.NormalizedNeutralSurfaceNormal;
         DropletNormalRegistry.SetNeutral(NeutralNormal, bNeutralRegistryChanged);
         bTextureArraysDirty |= bNeutralRegistryChanged;
@@ -1712,7 +1708,6 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
     return Resources.IsValid() ? &Resources : nullptr;
 }
 
-
 void UDWCGPUResourceSubsystem::InvalidateAssetResources(const UWetClothingAsset* Asset)
 {
     if (Asset == nullptr)
@@ -1729,18 +1724,17 @@ void UDWCGPUResourceSubsystem::InvalidateAssetResources(const UWetClothingAsset*
     }
 }
 
-
 TSharedPtr<FDWCGPUStaticSlotResources, ESPMode::ThreadSafe>
 UDWCGPUResourceSubsystem::AcquireStaticSlotResources(
     const UWetClothingAsset* Asset,
-    const int32 MaterialSlotIndex,
-    const FString& BuildSignature,
-    const FIntPoint LookupExtent,
-    const uint32 TexelCount,
-    const FIntPoint SurfaceLookupExtent,
-    const uint32 SurfaceTexelCount,
-    const uint32 TriangleCount,
-    const int32 SectionCount)
+    const int32              MaterialSlotIndex,
+    const FString&           BuildSignature,
+    const FIntPoint          LookupExtent,
+    const uint32             TexelCount,
+    const FIntPoint          SurfaceLookupExtent,
+    const uint32             SurfaceTexelCount,
+    const uint32             TriangleCount,
+    const int32              SectionCount)
 {
     const bool bSurfaceMetadataValid =
         (SurfaceTexelCount == 0 && SurfaceLookupExtent == FIntPoint::ZeroValue) ||
@@ -1821,7 +1815,7 @@ void UDWCGPUResourceSubsystem::InvalidateStaticResources(const UWetClothingAsset
 }
 
 void UDWCGPUResourceSubsystem::BindGlobalResources(
-    UMaterialInstanceDynamic& MID,
+    UMaterialInstanceDynamic&     MID,
     const EDWCRenderResourceUsage Usage) const
 {
     if (GlobalRenderProfileLUT != nullptr)
@@ -1843,11 +1837,11 @@ void UDWCGPUResourceSubsystem::BindGlobalResources(
 }
 
 void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
-    UMaterialInstanceDynamic& MID,
-    const UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex,
+    UMaterialInstanceDynamic&             MID,
+    const UWetClothingAsset*              WetClothingAsset,
+    const int32                           MaterialSlotIndex,
     const FWetClothingLocalRenderProfile* CachedProfile,
-    const EDWCRenderResourceUsage Usage)
+    const EDWCRenderResourceUsage         Usage)
 {
     FWetClothingLocalRenderProfile Profile;
     if (CachedProfile != nullptr)
@@ -1879,28 +1873,28 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
     FFallbackRenderProfileSlices Slices;
     if (Usage == EDWCRenderResourceUsage::FullGPU)
     {
-        bool bTextureArraysChanged = false;
+        bool                                  bTextureArraysChanged = false;
         const FSurfaceWaterProfileParameters& Surface = Profile.Parameters.SurfaceWater;
-        const bool bDropletRequested = Surface.bEnabled;
-        const bool bFlowRequested = bDropletRequested && Surface.bUseSecondaryDroplets;
-        UTexture2D* ResolvedDropletNormal = bDropletRequested
-            ? ResolveDirectSurfaceTexture(
-                Profile,
-                Profile.NormalizedDropletNormal,
-                Surface.DropletNormalTexture,
-                Profile.GetSourceDropletNormalPath(),
-                TEXT("DropletNormal"),
-                true)
-            : nullptr;
-        UTexture2D* ResolvedDropletMask = bDropletRequested
-            ? ResolveDirectSurfaceTexture(
-                Profile,
-                Profile.NormalizedDropletMask,
-                Surface.DropletMaskTexture,
-                Profile.GetSourceDropletMaskPath(),
-                TEXT("DropletMask"),
-                false)
-            : nullptr;
+        const bool                            bDropletRequested = Surface.bEnabled;
+        const bool                            bFlowRequested = bDropletRequested && Surface.bUseSecondaryDroplets;
+        UTexture2D*                           ResolvedDropletNormal = bDropletRequested
+                                                                          ? ResolveDirectSurfaceTexture(
+                                                      Profile,
+                                                      Profile.NormalizedDropletNormal,
+                                                      Surface.DropletNormalTexture,
+                                                      Profile.GetSourceDropletNormalPath(),
+                                                      TEXT("DropletNormal"),
+                                                      true)
+                                                                          : nullptr;
+        UTexture2D*                           ResolvedDropletMask = bDropletRequested
+                                                                        ? ResolveDirectSurfaceTexture(
+                                                    Profile,
+                                                    Profile.NormalizedDropletMask,
+                                                    Surface.DropletMaskTexture,
+                                                    Profile.GetSourceDropletMaskPath(),
+                                                    TEXT("DropletMask"),
+                                                    false)
+                                                                        : nullptr;
         // Droplet2 is independent. A missing authored Droplet2 texture must use
         // neutral slice 0 rather than silently borrowing Droplet1.
         const bool bHasAuthoredFlowNormal =
@@ -1910,31 +1904,30 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
             Surface.DropletFlowMaskTexture != nullptr ||
             Profile.GetSourceDropletFlowMaskPath().IsValid();
         UTexture2D* ResolvedDropletFlowNormal = bFlowRequested && bHasAuthoredFlowNormal
-            ? ResolveDirectSurfaceTexture(
-                Profile,
-                Profile.NormalizedDropletFlowNormal,
-                Surface.DropletFlowNormalTexture,
-                Profile.GetSourceDropletFlowNormalPath(),
-                TEXT("DropletFlowNormal"),
-                true)
-            : nullptr;
+                                                    ? ResolveDirectSurfaceTexture(
+                                                          Profile,
+                                                          Profile.NormalizedDropletFlowNormal,
+                                                          Surface.DropletFlowNormalTexture,
+                                                          Profile.GetSourceDropletFlowNormalPath(),
+                                                          TEXT("DropletFlowNormal"),
+                                                          true)
+                                                    : nullptr;
         UTexture2D* ResolvedDropletFlowMask = bFlowRequested && bHasAuthoredFlowMask
-            ? ResolveDirectSurfaceTexture(
-                Profile,
-                Profile.NormalizedDropletFlowMask,
-                Surface.DropletFlowMaskTexture,
-                Profile.GetSourceDropletFlowMaskPath(),
-                TEXT("DropletFlowMask"),
-                false)
-            : nullptr;
-        const bool bEditorPreviewWorld =
+                                                  ? ResolveDirectSurfaceTexture(
+                                                        Profile,
+                                                        Profile.NormalizedDropletFlowMask,
+                                                        Surface.DropletFlowMaskTexture,
+                                                        Profile.GetSourceDropletFlowMaskPath(),
+                                                        TEXT("DropletFlowMask"),
+                                                        false)
+                                                  : nullptr;
+        const bool  bEditorPreviewWorld =
             GetWorld() != nullptr && GetWorld()->WorldType == EWorldType::EditorPreview;
-        const auto ResetMismatchedPreviewRegistry = [
-            bEditorPreviewWorld,
-            &bTextureArraysChanged](
-                FTextureArrayRegistry& Registry,
-                UTexture2D* Texture,
-                TObjectPtr<UTexture2DArray>& Array)
+        const auto ResetMismatchedPreviewRegistry = [bEditorPreviewWorld,
+                                                     &bTextureArraysChanged](
+                                                        FTextureArrayRegistry&       Registry,
+                                                        UTexture2D*                  Texture,
+                                                        TObjectPtr<UTexture2DArray>& Array)
         {
             if (!bEditorPreviewWorld || Texture == nullptr || Registry.SizeX == 0)
             {
@@ -1991,17 +1984,17 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
             ResolvedDropletFlowMask,
             bTextureArraysChanged);
         Slices.DropletMask = bDropletRequested
-            ? DropletMaskRegistry.FindOrAdd(ResolvedDropletMask, bTextureArraysChanged)
-            : 0;
+                                 ? DropletMaskRegistry.FindOrAdd(ResolvedDropletMask, bTextureArraysChanged)
+                                 : 0;
         Slices.DropletNormal = bDropletRequested
-            ? DropletNormalRegistry.FindOrAdd(ResolvedDropletNormal, bTextureArraysChanged)
-            : 0;
+                                   ? DropletNormalRegistry.FindOrAdd(ResolvedDropletNormal, bTextureArraysChanged)
+                                   : 0;
         Slices.DropletFlowMask = bFlowRequested
-            ? DropletMaskRegistry.FindOrAdd(ResolvedDropletFlowMask, bTextureArraysChanged)
-            : 0;
+                                     ? DropletMaskRegistry.FindOrAdd(ResolvedDropletFlowMask, bTextureArraysChanged)
+                                     : 0;
         Slices.DropletFlowNormal = bFlowRequested
-            ? DropletNormalRegistry.FindOrAdd(ResolvedDropletFlowNormal, bTextureArraysChanged)
-            : 0;
+                                       ? DropletNormalRegistry.FindOrAdd(ResolvedDropletFlowNormal, bTextureArraysChanged)
+                                       : 0;
 
         // Editor preview worlds may retain a registry created by a previous transient
         // profile. If a valid prepared primary texture still resolves to neutral slice 0,
@@ -2016,8 +2009,8 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
                 ResolvedDropletNormal,
                 bTextureArraysChanged);
             Slices.DropletFlowNormal = bFlowRequested
-                ? DropletNormalRegistry.FindOrAdd(ResolvedDropletFlowNormal, bTextureArraysChanged)
-                : 0;
+                                           ? DropletNormalRegistry.FindOrAdd(ResolvedDropletFlowNormal, bTextureArraysChanged)
+                                           : 0;
         }
         if (bEditorPreviewWorld && bDropletRequested &&
             ResolvedDropletMask != nullptr && Slices.DropletMask == 0)
@@ -2029,8 +2022,8 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
                 ResolvedDropletMask,
                 bTextureArraysChanged);
             Slices.DropletFlowMask = bFlowRequested
-                ? DropletMaskRegistry.FindOrAdd(ResolvedDropletFlowMask, bTextureArraysChanged)
-                : 0;
+                                         ? DropletMaskRegistry.FindOrAdd(ResolvedDropletFlowMask, bTextureArraysChanged)
+                                         : 0;
         }
 
         const FString ProfileKey = ResolveProfileKey(Profile);
@@ -2084,14 +2077,14 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
     for (int32 TexelIndex = 0; TexelIndex < UDWCGPUResourceSubsystem::TexelsPerProfile; ++TexelIndex)
     {
         const FLinearColor Texel = Usage == EDWCRenderResourceUsage::FullGPU
-            ? MakeFallbackRenderProfileTexel(Profile, Slices, TexelIndex)
-            : (TexelIndex == 0
-                ? FLinearColor(
-                    Profile.Parameters.GetAbsorbedDarkeningStrength(),
-                    Profile.Parameters.GetAbsorbedGlossinessStrength(),
-                    0.0f,
-                    0.0f)
-                : FLinearColor::Black);
+                                       ? MakeFallbackRenderProfileTexel(Profile, Slices, TexelIndex)
+                                       : (TexelIndex == 0
+                                              ? FLinearColor(
+                                                    Profile.Parameters.GetAbsorbedDarkeningStrength(),
+                                                    Profile.Parameters.GetAbsorbedGlossinessStrength(),
+                                                    0.0f,
+                                                    0.0f)
+                                              : FLinearColor::Black);
         MID.SetVectorParameterValue(
             DWCWetMaterialParameters::FallbackRenderProfileTexel(TexelIndex),
             Texel);
@@ -2099,9 +2092,9 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
 }
 
 void UDWCGPUResourceSubsystem::ApplyResourcesToMaterials(
-    UWetClothingAsset* Asset,
+    UWetClothingAsset*                                  Asset,
     const TArray<TObjectPtr<UMaterialInstanceDynamic>>& MaterialInstances,
-    const EDWCRenderResourceUsage Usage)
+    const EDWCRenderResourceUsage                       Usage)
 {
     EnsureNeutralResources();
     for (UMaterialInstanceDynamic* MID : MaterialInstances)
@@ -2160,9 +2153,9 @@ void UDWCGPUResourceSubsystem::ApplyResourcesToMaterials(
 }
 
 bool UDWCGPUResourceSubsystem::ApplyPreviewRenderProfileFallback(
-    UWetClothingAsset* Asset,
-    const int32 MaterialSlotIndex,
-    const int32 LocalProfileID,
+    UWetClothingAsset*        Asset,
+    const int32               MaterialSlotIndex,
+    const int32               LocalProfileID,
     UMaterialInstanceDynamic& MID)
 {
     EnsureNeutralResources();
@@ -2191,10 +2184,10 @@ bool UDWCGPUResourceSubsystem::ApplyPreviewRenderProfileFallback(
 }
 
 bool UDWCGPUResourceSubsystem::ApplyPreviewRenderProfileFallbackProfile(
-    const UWetClothingAsset* Asset,
-    const int32 MaterialSlotIndex,
+    const UWetClothingAsset*              Asset,
+    const int32                           MaterialSlotIndex,
     const FWetClothingLocalRenderProfile& LocalProfile,
-    UMaterialInstanceDynamic& MID)
+    UMaterialInstanceDynamic&             MID)
 {
     EnsureNeutralResources();
     if (MaterialSlotIndex == INDEX_NONE)

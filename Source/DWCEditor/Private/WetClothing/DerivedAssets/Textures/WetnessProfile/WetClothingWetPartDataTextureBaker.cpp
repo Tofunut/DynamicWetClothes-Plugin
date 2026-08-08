@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
 #include "Core/DWCGeneratedAssetPaths.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
@@ -45,20 +46,20 @@ namespace
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         return FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|")
-            TEXT("AbsorbedGlossiness=%.9g|")
-            TEXT("SurfaceEnabled=%d|SecondaryEnabled=%d|Droplet1Spawn=%.9g|Droplet1Width=%.9g|Droplet1Height=%.9g|")
-            TEXT("Droplet1Normal=%s|Droplet1Mask=%s|")
-            TEXT("Droplet2Spawn=%.9g|Droplet2Width=%.9g|Droplet2Height=%.9g|Droplet2SpawnSpread=%.9g|")
-            TEXT("Droplet2Normal=%s|Droplet2Mask=%s|")
-            TEXT("SurfaceWaterTargetRoughness=%.9g|")
-            TEXT("SurfaceWaterNormalStrength=%.9g|")
-            TEXT("SurfaceWaterRoughnessBlend=%.9g|")
-            TEXT("SurfaceWaterTotalStrength=%.9g|")
-            TEXT("SurfaceWaterColorBlend=%.9g|")
-            TEXT("SurfaceWaterSpecular=%.9g|")
-            TEXT("FlowTargetRoughness=%.9g|FlowRoughnessBlend=%.9g|")
-            TEXT("FlowTotalStrength=%.9g|FlowColorBlend=%.9g|")
-            TEXT("FlowNormalStrength=%.9g|FlowSpecular=%.9g"),
+                TEXT("AbsorbedGlossiness=%.9g|")
+                    TEXT("SurfaceEnabled=%d|SecondaryEnabled=%d|Droplet1Spawn=%.9g|Droplet1Width=%.9g|Droplet1Height=%.9g|")
+                        TEXT("Droplet1Normal=%s|Droplet1Mask=%s|")
+                            TEXT("Droplet2Spawn=%.9g|Droplet2Width=%.9g|Droplet2Height=%.9g|Droplet2SpawnSpread=%.9g|")
+                                TEXT("Droplet2Normal=%s|Droplet2Mask=%s|")
+                                    TEXT("SurfaceWaterTargetRoughness=%.9g|")
+                                        TEXT("SurfaceWaterNormalStrength=%.9g|")
+                                            TEXT("SurfaceWaterRoughnessBlend=%.9g|")
+                                                TEXT("SurfaceWaterTotalStrength=%.9g|")
+                                                    TEXT("SurfaceWaterColorBlend=%.9g|")
+                                                        TEXT("SurfaceWaterSpecular=%.9g|")
+                                                            TEXT("FlowTargetRoughness=%.9g|FlowRoughnessBlend=%.9g|")
+                                                                TEXT("FlowTotalStrength=%.9g|FlowColorBlend=%.9g|")
+                                                                    TEXT("FlowNormalStrength=%.9g|FlowSpecular=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled ? 1 : 0,
@@ -90,8 +91,8 @@ namespace
 
     struct FProfileBakeEntry
     {
-        int32 MaterialSlotIndex = INDEX_NONE;
-        const FWetClothingWetPartEntry* Entry = nullptr;
+        int32                            MaterialSlotIndex = INDEX_NONE;
+        const FWetClothingWetPartEntry*  Entry = nullptr;
         const FWetPartProfileAssignment* Profile = nullptr;
     };
 
@@ -124,20 +125,19 @@ namespace
         }
 
         OutEntries.Sort([](const FProfileBakeEntry& A, const FProfileBakeEntry& B)
-        {
+                        {
             if (A.MaterialSlotIndex != B.MaterialSlotIndex)
             {
                 return A.MaterialSlotIndex < B.MaterialSlotIndex;
             }
-            return A.Entry != nullptr && B.Entry != nullptr ? A.Entry->WetPartID < B.Entry->WetPartID : A.Entry != nullptr;
-        });
+            return A.Entry != nullptr && B.Entry != nullptr ? A.Entry->WetPartID < B.Entry->WetPartID : A.Entry != nullptr; });
     }
 
-}
+} // namespace
 
 FString FWetClothingWetPartDataTextureBaker::MakeSlotBuildSignature(
     const FString& GlobalSignature,
-    const int32 MaterialSlotIndex)
+    const int32    MaterialSlotIndex)
 {
     if (GlobalSignature.IsEmpty() || MaterialSlotIndex == INDEX_NONE)
     {
@@ -152,7 +152,7 @@ FString FWetClothingWetPartDataTextureBaker::MakeSlotBuildSignature(
 
 bool FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(
     const FWetPartProfileAssignment* ProfileAssignment,
-    FWetnessProfileParameters& OutParameters)
+    FWetnessProfileParameters&       OutParameters)
 {
     if (ProfileAssignment != nullptr && ProfileAssignment->HasSourceProfile())
     {
@@ -202,27 +202,27 @@ bool FWetClothingWetPartDataTextureBaker::IsUVPointInsideTriangle(
     const double D1 = Sign(Point, A, B);
     const double D2 = Sign(Point, B, C);
     const double D3 = Sign(Point, C, A);
-    const bool bHasNegative = D1 < 0.0 || D2 < 0.0 || D3 < 0.0;
-    const bool bHasPositive = D1 > 0.0 || D2 > 0.0 || D3 > 0.0;
+    const bool   bHasNegative = D1 < 0.0 || D2 < 0.0 || D3 < 0.0;
+    const bool   bHasPositive = D1 > 0.0 || D2 > 0.0 || D3 > 0.0;
     return !(bHasNegative && bHasPositive);
 }
 
 int32 FWetClothingWetPartDataTextureBaker::PaintTriangle(
-    TArray<FColor>& Pixels,
-    TArray<bool>& PaintedMask,
-    const int32 Width,
-    const int32 Height,
+    TArray<FColor>&                    Pixels,
+    TArray<bool>&                      PaintedMask,
+    const int32                        Width,
+    const int32                        Height,
     const FWetClothingAssetUVTriangle& Triangle,
-    const FColor& PackedPartData)
+    const FColor&                      PackedPartData)
 {
     const FVector2D& A = Triangle.UVs[0];
     const FVector2D& B = Triangle.UVs[1];
     const FVector2D& C = Triangle.UVs[2];
 
-    const int32 MinX = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X) * Width), 0, Width - 1);
-    const int32 MaxX = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.X, B.X, C.X) * Width), 0, Width - 1);
-    const int32 MinY = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y) * Height), 0, Height - 1);
-    const int32 MaxY = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Y, B.Y, C.Y) * Height), 0, Height - 1);
+    const int32 MinX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X) * Width), 0, Width - 1));
+    const int32 MaxX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.X, B.X, C.X) * Width), 0, Width - 1));
+    const int32 MinY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y) * Height), 0, Height - 1));
+    const int32 MaxY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Y, B.Y, C.Y) * Height), 0, Height - 1));
 
     int32 PaintedPixelCount = 0;
     for (int32 Y = MinY; Y <= MaxY; ++Y)
@@ -247,9 +247,9 @@ int32 FWetClothingWetPartDataTextureBaker::PaintTriangle(
     if (PaintedPixelCount == 0)
     {
         const FVector2D Center = (A + B + C) / 3.0;
-        const int32 X = FMath::Clamp(FMath::FloorToInt(Center.X * Width), 0, Width - 1);
-        const int32 Y = FMath::Clamp(FMath::FloorToInt(Center.Y * Height), 0, Height - 1);
-        const int32 PixelIndex = Y * Width + X;
+        const int32     X = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Center.X * Width), 0, Width - 1));
+        const int32     Y = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(Center.Y * Height), 0, Height - 1));
+        const int32     PixelIndex = Y * Width + X;
         PaintedPixelCount += PaintedMask[PixelIndex] ? 0 : 1;
         Pixels[PixelIndex] = PackedPartData;
         PaintedMask[PixelIndex] = true;
@@ -260,16 +260,16 @@ int32 FWetClothingWetPartDataTextureBaker::PaintTriangle(
 
 void FWetClothingWetPartDataTextureBaker::DilatePaintedPixels(
     TArray<FColor>& Pixels,
-    TArray<bool>& PaintedMask,
-    const int32 Width,
-    const int32 Height,
-    const int32 PaddingPixels)
+    TArray<bool>&   PaintedMask,
+    const int32     Width,
+    const int32     Height,
+    const int32     PaddingPixels)
 {
     for (int32 Step = 0; Step < FMath::Clamp(PaddingPixels, 0, 32); ++Step)
     {
         const TArray<FColor> PreviousPixels = Pixels;
-        const TArray<bool> PreviousMask = PaintedMask;
-        bool bChanged = false;
+        const TArray<bool>   PreviousMask = PaintedMask;
+        bool                 bChanged = false;
 
         for (int32 Y = 0; Y < Height; ++Y)
         {
@@ -315,12 +315,12 @@ void FWetClothingWetPartDataTextureBaker::DilatePaintedPixels(
 }
 
 UTexture2D* FWetClothingWetPartDataTextureBaker::CreateOrUpdateTextureAsset(
-    UWetClothingAsset& WetClothingAsset,
-    const int32 MaterialSlotIndex,
+    UWetClothingAsset&    WetClothingAsset,
+    const int32           MaterialSlotIndex,
     const TArray<FColor>& Pixels,
-    const int32 Width,
-    const int32 Height,
-    FString& OutErrorMessage)
+    const int32           Width,
+    const int32           Height,
+    FString&              OutErrorMessage)
 {
 #if WITH_EDITORONLY_DATA
     const FString WcaPackageName = WetClothingAsset.GetOutermost()->GetName();
@@ -362,7 +362,7 @@ UTexture2D* FWetClothingWetPartDataTextureBaker::CreateOrUpdateTextureAsset(
         Texture = Cast<UTexture2D>(ExistingObject);
         if (Texture != nullptr)
         {
-            FGuid ExistingOwnerGuid;
+            FGuid      ExistingOwnerGuid;
             const bool bHasOwner = WetClothingAsset.TryGetGeneratedAssetOwnerGuid(Texture, ExistingOwnerGuid);
             if (!bHasOwner)
             {
@@ -449,7 +449,7 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
         WetClothingAsset->GetDWCDataUVChannelIndex());
     FString Canonical = FString::Printf(
         TEXT("DWC.WetPartDataTexture.v9.PathIndependent|MeshContent=%s|DataUV=%d|DataUVInput=%s|DataUVOutput=%s|OriginalTopology=%s|")
-        TEXT("Resolution=%d|Padding=%d|SurfaceTextureVersion=%d|SurfaceTextureResolution=%d"),
+            TEXT("Resolution=%d|Padding=%d|SurfaceTextureVersion=%d|SurfaceTextureResolution=%d"),
         *RuntimeMeshContentSignature,
         WetClothingAsset->GetDWCDataUVChannelIndex(),
         DataUVMetadata != nullptr ? *DataUVMetadata->MeshInputSignature : TEXT("None"),
@@ -501,9 +501,9 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
 }
 
 bool FWetClothingWetPartDataTextureBaker::Bake(
-    UWetClothingAsset* WetClothingAsset,
+    UWetClothingAsset*                        WetClothingAsset,
     FWetClothingWetPartDataTextureBakeResult& OutResult,
-    FString& OutErrorMessage)
+    FString&                                  OutErrorMessage)
 {
     OutResult = FWetClothingWetPartDataTextureBakeResult();
 
@@ -528,8 +528,8 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
     }
 
     // Build deterministic WCA-wide IDs before rasterizing any slot.
-    TMap<FString, uint8> LocalIDByStableKey;
-    TArray<FWetClothingLocalRenderProfile> LocalProfiles;
+    TMap<FString, uint8>                         LocalIDByStableKey;
+    TArray<FWetClothingLocalRenderProfile>       LocalProfiles;
     TMap<const FWetClothingWetPartEntry*, uint8> LocalIDByEntry;
     for (const FProfileBakeEntry& BakeEntry : Entries)
     {
@@ -597,19 +597,19 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
     EntriesBySlot.GetKeys(MaterialSlots);
     MaterialSlots.Sort();
 
-    const int32 Width = DWCWetPartDataTextureBake::Resolution;
-    const int32 Height = DWCWetPartDataTextureBake::Resolution;
+    const int32                                     Width = DWCWetPartDataTextureBake::Resolution;
+    const int32                                     Height = DWCWetPartDataTextureBake::Resolution;
     TArray<FWetClothingBakedWetPartDataSlotTexture> BakedSlotTextures;
 
     for (const int32 MaterialSlotIndex : MaterialSlots)
     {
         const TArray<const FWetClothingWetPartEntry*>& SlotEntries = EntriesBySlot.FindChecked(MaterialSlotIndex);
-        TMap<int32, FColor> PackedPartDataByTriangleID;
+        TMap<int32, FColor>                            PackedPartDataByTriangleID;
 
         for (const FWetClothingWetPartEntry* Entry : SlotEntries)
         {
             TArray<FWetClothingAssetUVIsland> OriginalIslands;
-            FString BuildError;
+            FString                           BuildError;
             if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
                     WetClothingAsset->GetRuntimeSkeletalMesh(),
                     0,
@@ -622,7 +622,7 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
                 return false;
             }
 
-            const uint8 LocalProfileID = LocalIDByEntry.FindChecked(Entry);
+            const uint8  LocalProfileID = LocalIDByEntry.FindChecked(Entry);
             const FColor PackedPartData(
                 LocalProfileID,
                 DWCWetPartDataTextureBake::EncodeDetailSize(Entry->SurfaceWater.DropletDetailSize),
@@ -656,7 +656,7 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
         }
 
         TArray<FWetClothingAssetUVIsland> DataUVIslands;
-        FString BuildError;
+        FString                           BuildError;
         if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotDataUVIslands(
                 *WetClothingAsset,
                 0,
@@ -669,7 +669,7 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
         }
 
         TArray<FColor> Pixels;
-        TArray<bool> PaintedMask;
+        TArray<bool>   PaintedMask;
         Pixels.Init(FColor(DWCWetPartDataTextureBake::NeutralProfileID, DWCWetPartDataTextureBake::EncodeDetailSize(1.0f), DWCWetPartDataTextureBake::EncodeDetailSize(1.0f), 0), Width * Height);
         PaintedMask.Init(false, Width * Height);
         int32 SlotPaintedPixelCount = 0;

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -25,42 +26,42 @@ DECLARE_DELEGATE_RetVal(FReply, FOnWetClothingPreviewFocusClicked);
 
 struct FWCAMaterialSlotRowArgs
 {
-    const UWetClothingAsset* WetClothingAsset = nullptr;
-    USkeletalMesh* GeneratedDataUV = nullptr;
-    TSharedPtr<FAssetThumbnailPool> ThumbnailPool;
-    TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink = nullptr;
-    FText AllSlotsTitle;
-    FText AllSlotsTooltip;
-    bool bShowWettableToggle = true;
-    FOnWettableMaterialSlotClicked OnWettableSlotClicked;
-    TFunction<bool(int32)> IsWettableToggleEnabled;
-    TFunction<FText(int32)> GetMaterialSlotStatusText;
-    TFunction<FSlateColor(int32)> GetMaterialSlotStatusColor;
-    TFunction<FText(int32)> GetMaterialSlotStatusTooltip;
-    TFunction<bool(int32)> ShouldShowMaterialSlotStatusInfo;
-    TFunction<const FSlateBrush*(int32)> GetMaterialSlotStatusInfoBrush;
-    TFunction<FSlateColor(int32)> GetMaterialSlotStatusInfoColor;
-    TFunction<FReply(int32)> OnMaterialSlotStatusInfoClicked;
-    TFunction<FText(int32)> GetMaterialSlotWarningText;
-    TFunction<FSlateColor(int32)> GetMaterialSlotRowBackgroundColor;
-    TFunction<FSlateColor(int32)> GetMaterialSlotRowAccentColor;
+    const UWetClothingAsset*              WetClothingAsset = nullptr;
+    USkeletalMesh*                        GeneratedDataUV = nullptr;
+    TSharedPtr<FAssetThumbnailPool>       ThumbnailPool;
+    TArray<TSharedPtr<FAssetThumbnail>>*  ThumbnailSink = nullptr;
+    FText                                 AllSlotsTitle;
+    FText                                 AllSlotsTooltip;
+    bool                                  bShowWettableToggle = true;
+    FOnWettableMaterialSlotClicked        OnWettableSlotClicked;
+    TFunction<bool(int32)>                IsWettableToggleEnabled;
+    TFunction<FText(int32)>               GetMaterialSlotStatusText;
+    TFunction<FSlateColor(int32)>         GetMaterialSlotStatusColor;
+    TFunction<FText(int32)>               GetMaterialSlotStatusTooltip;
+    TFunction<bool(int32)>                ShouldShowMaterialSlotStatusInfo;
+    TFunction<const FSlateBrush*(int32)>  GetMaterialSlotStatusInfoBrush;
+    TFunction<FSlateColor(int32)>         GetMaterialSlotStatusInfoColor;
+    TFunction<FReply(int32)>              OnMaterialSlotStatusInfoClicked;
+    TFunction<FText(int32)>               GetMaterialSlotWarningText;
+    TFunction<FSlateColor(int32)>         GetMaterialSlotRowBackgroundColor;
+    TFunction<FSlateColor(int32)>         GetMaterialSlotRowAccentColor;
     TFunction<TSharedRef<SWidget>(int32)> BuildThumbnailWidget;
     TFunction<TSharedRef<SWidget>(int32)> BuildLeadingWidget;
-    TFunction<bool(int32)> IsMaterialSlotEnabled;
-    TFunction<FText(int32)> GetMaterialSlotTooltipText;
+    TFunction<bool(int32)>                IsMaterialSlotEnabled;
+    TFunction<FText(int32)>               GetMaterialSlotTooltipText;
     TFunction<TSharedRef<SWidget>(int32)> BuildBeforeWettableWidget;
     TFunction<TSharedRef<SWidget>(int32)> BuildTrailingWidget;
 };
 
 struct FWCARuntimeBuildMenuArgs
 {
-    FSimpleDelegate OnBuildAllRequired;
-    FSimpleDelegate OnBuildCPURuntimeData;
-    FSimpleDelegate OnBuildGPURuntimeData;
-    FSimpleDelegate OnGenerateMaterials;
-    FSimpleDelegate OnBuildRenderProfileData;
-    FSimpleDelegate OnBakeWrinkleTextures;
-    FSimpleDelegate OnBakeTransparencyTextures;
+    FSimpleDelegate   OnBuildAllRequired;
+    FSimpleDelegate   OnBuildCPURuntimeData;
+    FSimpleDelegate   OnBuildGPURuntimeData;
+    FSimpleDelegate   OnGenerateMaterials;
+    FSimpleDelegate   OnBuildRenderProfileData;
+    FSimpleDelegate   OnBakeWrinkleTextures;
+    FSimpleDelegate   OnBakeTransparencyTextures;
     FCanExecuteAction CanBuildAllRequired;
     FCanExecuteAction CanBuildCPURuntimeData;
     FCanExecuteAction CanBuildGPURuntimeData;
@@ -84,30 +85,30 @@ class FWCAEditorWidgets
 
     static TSharedRef<SWidget> BuildSectionHeader(const TAttribute<FText>& Title, const TAttribute<FText>& Detail = TAttribute<FText>());
     static TSharedRef<SWidget> BuildPreviewSection(
-        const TSharedRef<SWidget>& PreviewContent,
+        const TSharedRef<SWidget>&               PreviewContent,
         const FOnWetClothingPreviewFocusClicked& OnFocusClicked,
-        TSharedPtr<SWidget> ExtraToolbarContent = TSharedPtr<SWidget>());
+        TSharedPtr<SWidget>                      ExtraToolbarContent = TSharedPtr<SWidget>());
     static TSharedRef<SWidget> BuildRuntimeBuildMenu(const FWCARuntimeBuildMenuArgs& Args);
 
     static TSharedRef<SWidget> BuildTextureComboContent(
-        TSharedPtr<FWCATextureItem> Item,
-        float ThumbnailSize,
-        bool bCompactLayout,
-        TSharedPtr<FAssetThumbnailPool> ThumbnailPool,
+        TSharedPtr<FWCATextureItem>          Item,
+        float                                ThumbnailSize,
+        bool                                 bCompactLayout,
+        TSharedPtr<FAssetThumbnailPool>      ThumbnailPool,
         TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink);
 
     static TSharedRef<SWidget> GenerateTextureComboItem(
-        TSharedPtr<FWCATextureItem> Item,
-        TSharedPtr<FAssetThumbnailPool> ThumbnailPool,
+        TSharedPtr<FWCATextureItem>          Item,
+        TSharedPtr<FAssetThumbnailPool>      ThumbnailPool,
         TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink);
 
     static TSharedRef<SWidget> BuildUVViewTextureSelector(
-        TArray<TSharedPtr<FWCATextureItem>>* TextureItems,
-        TSharedPtr<FWCATextureItem> SelectedTextureItem,
-        TSharedPtr<FAssetThumbnailPool> ThumbnailPool,
-        TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink,
-        TSharedPtr<SComboBox<TSharedPtr<FWCATextureItem>>>* OutComboBox,
-        TSharedPtr<SBox>* OutSelectedContentBox,
+        TArray<TSharedPtr<FWCATextureItem>>*                            TextureItems,
+        TSharedPtr<FWCATextureItem>                                     SelectedTextureItem,
+        TSharedPtr<FAssetThumbnailPool>                                 ThumbnailPool,
+        TArray<TSharedPtr<FAssetThumbnail>>*                            ThumbnailSink,
+        TSharedPtr<SComboBox<TSharedPtr<FWCATextureItem>>>*             OutComboBox,
+        TSharedPtr<SBox>*                                               OutSelectedContentBox,
         TFunction<void(TSharedPtr<FWCATextureItem>, ESelectInfo::Type)> OnSelectionChanged);
 
     static TSharedRef<SWidget> BuildUVViewTextureAndViewRow(
@@ -115,38 +116,38 @@ class FWCAEditorWidgets
         const TSharedRef<SWidget>& ViewOptionsButton);
 
     static TSharedRef<SWidget> BuildUVViewOptionsButton(
-        TAttribute<float> BackgroundTextureOpacity,
+        TAttribute<float>      BackgroundTextureOpacity,
         TFunction<void(float)> OnBackgroundTextureOpacityChanged,
-        TAttribute<float> UVIslandLineOpacity,
+        TAttribute<float>      UVIslandLineOpacity,
         TFunction<void(float)> OnUVIslandLineOpacityChanged,
-        TAttribute<float> UVIslandLineThicknessScale,
+        TAttribute<float>      UVIslandLineThicknessScale,
         TFunction<void(float)> OnUVIslandLineThicknessScaleChanged,
-        bool bShowBackgroundTextureControls = true);
+        bool                   bShowBackgroundTextureControls = true);
 
     static TSharedRef<SWidget> BuildUVViewOptionsButton(
-        TArray<TSharedPtr<EWCAUVDisplayMode>>* DisplayModeItems,
-        TSharedPtr<EWCAUVDisplayMode> SelectedDisplayModeItem,
-        TAttribute<FText> SelectedDisplayModeText,
+        TArray<TSharedPtr<EWCAUVDisplayMode>>*         DisplayModeItems,
+        TSharedPtr<EWCAUVDisplayMode>                  SelectedDisplayModeItem,
+        TAttribute<FText>                              SelectedDisplayModeText,
         TFunction<void(TSharedPtr<EWCAUVDisplayMode>)> OnDisplayModeChanged,
-        TAttribute<float> BackgroundTextureOpacity,
-        TFunction<void(float)> OnBackgroundTextureOpacityChanged,
-        TAttribute<float> UVIslandLineOpacity,
-        TFunction<void(float)> OnUVIslandLineOpacityChanged,
-        TAttribute<float> UVIslandLineThicknessScale,
-        TFunction<void(float)> OnUVIslandLineThicknessScaleChanged,
-        bool bShowBackgroundTextureControls = true);
+        TAttribute<float>                              BackgroundTextureOpacity,
+        TFunction<void(float)>                         OnBackgroundTextureOpacityChanged,
+        TAttribute<float>                              UVIslandLineOpacity,
+        TFunction<void(float)>                         OnUVIslandLineOpacityChanged,
+        TAttribute<float>                              UVIslandLineThicknessScale,
+        TFunction<void(float)>                         OnUVIslandLineThicknessScaleChanged,
+        bool                                           bShowBackgroundTextureControls = true);
 
     static TSharedRef<SWidget> GenerateUVDisplayModeComboItem(TSharedPtr<EWCAUVDisplayMode> Item);
-    static FText GetUVDisplayModeLabel(EWCAUVDisplayMode DisplayMode);
+    static FText               GetUVDisplayModeLabel(EWCAUVDisplayMode DisplayMode);
 
     static TSharedRef<ITableRow> GenerateMaterialSlotRow(
-        TSharedPtr<FWCAMaterialSlotItem> Item,
+        TSharedPtr<FWCAMaterialSlotItem>  Item,
         const TSharedRef<STableViewBase>& OwnerTable,
-        const FWCAMaterialSlotRowArgs& Args);
+        const FWCAMaterialSlotRowArgs&    Args);
 
     static TSharedRef<ITableRow> GeneratePartMapRow(
         TSharedPtr<FWetClothingWetPartEntry> Item,
-        const TSharedRef<STableViewBase>& OwnerTable);
+        const TSharedRef<STableViewBase>&    OwnerTable);
 
     static bool IsMaterialSlotWettable(const UWetClothingAsset* WetClothingAsset, int32 MaterialSlotIndex);
     static void SetMaterialSlotWettable(UWetClothingAsset* WetClothingAsset, int32 MaterialSlotIndex, bool bIsWettableSlot);

@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Components/DynamicWetClothesComponentCustomization.h"
 
 #include "Async/Async.h"
@@ -104,20 +105,20 @@ namespace
 
     TSharedPtr<IPropertyHandle> GetSettingsChild(
         const TSharedRef<IPropertyHandle>& SettingsHandle,
-        const FName PropertyName)
+        const FName                        PropertyName)
     {
         return SettingsHandle->GetChildHandle(PropertyName);
     }
 
     void AddDirectProperty(
-        IDetailCategoryBuilder& Category,
+        IDetailCategoryBuilder&            Category,
         const TSharedRef<IPropertyHandle>& Handle)
     {
         Category.AddProperty(Handle);
     }
 
     void AddSettingsProperty(
-        IDetailCategoryBuilder& Category,
+        IDetailCategoryBuilder&            Category,
         const TSharedPtr<IPropertyHandle>& Handle)
     {
         if (Handle.IsValid() && Handle->IsValidHandle())
@@ -127,7 +128,7 @@ namespace
     }
 
     void AddSettingsProperty(
-        IDetailGroup& Group,
+        IDetailGroup&                      Group,
         const TSharedPtr<IPropertyHandle>& Handle)
     {
         if (Handle.IsValid() && Handle->IsValidHandle())
@@ -135,7 +136,7 @@ namespace
             Group.AddPropertyRow(Handle.ToSharedRef());
         }
     }
-}
+} // namespace
 
 TSharedRef<IDetailCustomization> FDynamicWetClothesComponentCustomization::MakeInstance()
 {
@@ -202,30 +203,11 @@ void FDynamicWetClothesComponentCustomization::CustomizeDetails(IDetailLayoutBui
     if (GetBindingWarningVisibility() == EVisibility::Visible)
     {
         SetupCategory.AddCustomRow(LOCTEXT("MeshValidationFilter", "Wet Clothing Asset Mesh Validation"))
-        .WholeRowContent()
-        [
-            SNew(SBorder)
-            .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-            .Padding(8.0f)
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Top)
-                .Padding(0.0f, 1.0f, 8.0f, 0.0f)
-                [
-                    SNew(SImage)
-                    .Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))
-                ]
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                [
-                    SNew(STextBlock)
-                    .AutoWrapText(true)
-                    .Text(this, &FDynamicWetClothesComponentCustomization::GetBindingWarningText)
-                ]
-            ]
-        ];
+            .WholeRowContent()
+                [SNew(SBorder)
+                     .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                     .Padding(8.0f)
+                         [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 1.0f, 8.0f, 0.0f)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))] + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(STextBlock).AutoWrapText(true).Text(this, &FDynamicWetClothesComponentCustomization::GetBindingWarningText)]]];
     }
 
     IDetailCategoryBuilder& SimulationCategory = DetailBuilder.EditCategory(
@@ -380,7 +362,7 @@ void FDynamicWetClothesComponentCustomization::RequestRefresh()
 }
 
 void FDynamicWetClothesComponentCustomization::HandleObjectPropertyChanged(
-    UObject* ChangedObject,
+    UObject*               ChangedObject,
     FPropertyChangedEvent& PropertyChangedEvent)
 {
     UDynamicWetClothesComponent* DWC = Component.Get();
@@ -408,12 +390,11 @@ void FDynamicWetClothesComponentCustomization::HandleObjectPropertyChanged(
     {
         const TWeakPtr<IPropertyUtilities> WeakUtilities = PropertyUtilities;
         AsyncTask(ENamedThreads::GameThread, [WeakUtilities]()
-        {
+                  {
             if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
             {
                 Utilities->ForceRefresh();
-            }
-        });
+            } });
     }
 }
 
@@ -453,8 +434,8 @@ FText FDynamicWetClothesComponentCustomization::GetBindingWarningText() const
 EVisibility FDynamicWetClothesComponentCustomization::GetBindingWarningVisibility() const
 {
     return bHasBindingStatus && CachedBindingStatus.State != EBindingState::Ready
-        ? EVisibility::Visible
-        : EVisibility::Collapsed;
+               ? EVisibility::Visible
+               : EVisibility::Collapsed;
 }
 
 #undef LOCTEXT_NAMESPACE

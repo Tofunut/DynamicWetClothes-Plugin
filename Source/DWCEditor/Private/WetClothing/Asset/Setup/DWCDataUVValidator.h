@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -7,14 +8,14 @@
 /** Final validation for packed DWC UV Channel coordinates before they are committed to the mesh. */
 class FDWCDataUVValidator
 {
-public:
+  public:
     static bool Validate(
-        const TArray<FDWCDataUVTriangle>& Triangles,
-        const TArray<FDWCDataUVChart>& Charts,
-        const TMap<int32, FVector2f>& PackedUVByVertexInstance,
-        int32 OutputResolution,
-        TSet<int32>& OutProblemMaterialSlots,
-        FString& OutError,
-        FDWCDataUVValidationFailure* OutFailure = nullptr,
+        const TArray<FDWCDataUVTriangle>&      Triangles,
+        const TArray<FDWCDataUVChart>&         Charts,
+        const TMap<int32, FVector2f>&          PackedUVByVertexInstance,
+        int32                                  OutputResolution,
+        TSet<int32>&                           OutProblemMaterialSlots,
+        FString&                               OutError,
+        FDWCDataUVValidationFailure*           OutFailure = nullptr,
         TArray<FDWCDataUVValidationExclusion>* OutDegenerateExclusions = nullptr);
 };

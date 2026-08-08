@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,9 +13,9 @@
  */
 struct FDWCTransparencyPaintIslandTriangle
 {
-    int32 TriangleID = INDEX_NONE;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    FVector Positions[3] = { FVector::ZeroVector, FVector::ZeroVector, FVector::ZeroVector };
+    int32     TriangleID = INDEX_NONE;
+    int32     MaterialSlotIndex = INDEX_NONE;
+    FVector   Positions[3] = { FVector::ZeroVector, FVector::ZeroVector, FVector::ZeroVector };
     FVector2D UVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
 };
 
@@ -24,34 +25,34 @@ namespace DWCTransparencyPaintIslandBuilderPrivate
     {
         static constexpr double PositionQuantizeScale = 1000.0;
 
-        int64 PositionX = 0;
-        int64 PositionY = 0;
-        int64 PositionZ = 0;
+        int64                PositionX = 0;
+        int64                PositionY = 0;
+        int64                PositionZ = 0;
         FDWCQuantizedUVPoint UV;
 
         FQuantizedPositionUVPoint() = default;
 
         FQuantizedPositionUVPoint(const FVector& Position, const FVector2D& InUV)
-            : PositionX(FMath::RoundToInt64(Position.X * PositionQuantizeScale))
-            , PositionY(FMath::RoundToInt64(Position.Y * PositionQuantizeScale))
-            , PositionZ(FMath::RoundToInt64(Position.Z * PositionQuantizeScale))
-            , UV(InUV)
+            : PositionX(FMath::RoundToInt64(Position.X * PositionQuantizeScale)), PositionY(FMath::RoundToInt64(Position.Y * PositionQuantizeScale)), PositionZ(FMath::RoundToInt64(Position.Z * PositionQuantizeScale)), UV(InUV)
         {
         }
 
         bool operator==(const FQuantizedPositionUVPoint& Other) const
         {
             return PositionX == Other.PositionX &&
-                PositionY == Other.PositionY &&
-                PositionZ == Other.PositionZ &&
-                UV == Other.UV;
+                   PositionY == Other.PositionY &&
+                   PositionZ == Other.PositionZ &&
+                   UV == Other.UV;
         }
 
         bool operator<(const FQuantizedPositionUVPoint& Other) const
         {
-            if (PositionX != Other.PositionX) return PositionX < Other.PositionX;
-            if (PositionY != Other.PositionY) return PositionY < Other.PositionY;
-            if (PositionZ != Other.PositionZ) return PositionZ < Other.PositionZ;
+            if (PositionX != Other.PositionX)
+                return PositionX < Other.PositionX;
+            if (PositionY != Other.PositionY)
+                return PositionY < Other.PositionY;
+            if (PositionZ != Other.PositionZ)
+                return PositionZ < Other.PositionZ;
             return UV < Other.UV;
         }
     };
@@ -79,12 +80,11 @@ namespace DWCTransparencyPaintIslandBuilderPrivate
         FMeshUVEdge() = default;
 
         FMeshUVEdge(
-            const FVector& PositionA,
+            const FVector&   PositionA,
             const FVector2D& UVA,
-            const FVector& PositionB,
+            const FVector&   PositionB,
             const FVector2D& UVB)
-            : A(PositionA, UVA)
-            , B(PositionB, UVB)
+            : A(PositionA, UVA), B(PositionB, UVB)
         {
             if (B < A)
             {
@@ -105,7 +105,7 @@ namespace DWCTransparencyPaintIslandBuilderPrivate
 
     class FDisjointSet
     {
-    public:
+      public:
         explicit FDisjointSet(const int32 Count)
         {
             Parents.SetNumUninitialized(Count);
@@ -144,18 +144,18 @@ namespace DWCTransparencyPaintIslandBuilderPrivate
             }
         }
 
-    private:
+      private:
         TArray<int32> Parents;
         TArray<uint8> Ranks;
     };
-}
+} // namespace DWCTransparencyPaintIslandBuilderPrivate
 
 class FDWCTransparencyPaintIslandBuilder
 {
-public:
+  public:
     static void Build(
         const TConstArrayView<FDWCTransparencyPaintIslandTriangle> Triangles,
-        TMap<int32, int32>& OutIslandIDByTriangleID)
+        TMap<int32, int32>&                                        OutIslandIDByTriangleID)
     {
         using namespace DWCTransparencyPaintIslandBuilderPrivate;
 
@@ -175,8 +175,8 @@ public:
 
         for (const TPair<int32, TArray<int32>>& SlotPair : TriangleIndicesByMaterialSlot)
         {
-            const TArray<int32>& SlotTriangleIndices = SlotPair.Value;
-            FDisjointSet DisjointSet(SlotTriangleIndices.Num());
+            const TArray<int32>&             SlotTriangleIndices = SlotPair.Value;
+            FDisjointSet                     DisjointSet(SlotTriangleIndices.Num());
             TMap<FMeshUVEdge, TArray<int32>> EdgeToLocalTriangles;
 
             for (int32 LocalIndex = 0; LocalIndex < SlotTriangleIndices.Num(); ++LocalIndex)
@@ -184,14 +184,17 @@ public:
                 const FDWCTransparencyPaintIslandTriangle& Triangle =
                     Triangles[SlotTriangleIndices[LocalIndex]];
                 EdgeToLocalTriangles.FindOrAdd(FMeshUVEdge(
-                    Triangle.Positions[0], Triangle.UVs[0],
-                    Triangle.Positions[1], Triangle.UVs[1])).Add(LocalIndex);
+                                                   Triangle.Positions[0], Triangle.UVs[0],
+                                                   Triangle.Positions[1], Triangle.UVs[1]))
+                    .Add(LocalIndex);
                 EdgeToLocalTriangles.FindOrAdd(FMeshUVEdge(
-                    Triangle.Positions[1], Triangle.UVs[1],
-                    Triangle.Positions[2], Triangle.UVs[2])).Add(LocalIndex);
+                                                   Triangle.Positions[1], Triangle.UVs[1],
+                                                   Triangle.Positions[2], Triangle.UVs[2]))
+                    .Add(LocalIndex);
                 EdgeToLocalTriangles.FindOrAdd(FMeshUVEdge(
-                    Triangle.Positions[2], Triangle.UVs[2],
-                    Triangle.Positions[0], Triangle.UVs[0])).Add(LocalIndex);
+                                                   Triangle.Positions[2], Triangle.UVs[2],
+                                                   Triangle.Positions[0], Triangle.UVs[0]))
+                    .Add(LocalIndex);
             }
 
             for (const TPair<FMeshUVEdge, TArray<int32>>& EdgePair : EdgeToLocalTriangles)
@@ -204,11 +207,11 @@ public:
             }
 
             TMap<int32, int32> IslandIDByRoot;
-            int32 NextIslandID = 0;
+            int32              NextIslandID = 0;
             for (int32 LocalIndex = 0; LocalIndex < SlotTriangleIndices.Num(); ++LocalIndex)
             {
                 const int32 Root = DisjointSet.Find(LocalIndex);
-                int32* IslandID = IslandIDByRoot.Find(Root);
+                int32*      IslandID = IslandIDByRoot.Find(Root);
                 if (IslandID == nullptr)
                 {
                     IslandIDByRoot.Add(Root, NextIslandID++);

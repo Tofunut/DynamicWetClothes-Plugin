@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -18,9 +19,9 @@ enum class EWetWrinkleIncrementalCommandKind : uint8
 struct FWetWrinkleIncrementalCommand
 {
     EWetWrinkleIncrementalCommandKind Kind = EWetWrinkleIncrementalCommandKind::Patch;
-    uint64 Sequence = 0;
-    FDWCEditorNormalStampCommand Patch;
-    FWetProceduralRidgeStroke Ridge;
+    uint64                            Sequence = 0;
+    FDWCEditorNormalStampCommand      Patch;
+    FWetProceduralRidgeStroke         Ridge;
 };
 
 struct FWetWrinkleIncrementalRegionPlan
@@ -32,28 +33,28 @@ struct FWetWrinkleIncrementalRegionPlan
 struct FWetWrinkleIncrementalRegionSnapshot
 {
     FWetWrinkleIncrementalRegionPlan Plan;
-    FDWCEditorNormalRasterRegion Region;
+    FDWCEditorNormalRasterRegion     Region;
 };
 
 struct FWetWrinkleIncrementalPreviewJobInput
 {
-    FIntPoint TextureSize = FIntPoint::ZeroValue;
-    FIntPoint WorkingTextureSize = FIntPoint::ZeroValue;
-    TArray<FWetWrinkleIncrementalCommand> Commands;
+    FIntPoint                                    TextureSize = FIntPoint::ZeroValue;
+    FIntPoint                                    WorkingTextureSize = FIntPoint::ZeroValue;
+    TArray<FWetWrinkleIncrementalCommand>        Commands;
     TArray<FWetWrinkleIncrementalRegionSnapshot> Regions;
-    FDWCEditorPreviewRegionTarget Target;
-    bool bClearRegionsToFlat = false;
-    uint64 FirstSequence = 0;
-    uint64 LastSequence = 0;
+    FDWCEditorPreviewRegionTarget                Target;
+    bool                                         bClearRegionsToFlat = false;
+    uint64                                       FirstSequence = 0;
+    uint64                                       LastSequence = 0;
 };
 
 struct FWetWrinkleIncrementalPreviewJobResult final : FDWCEditorWorkerJobResult
 {
     TArray<FDWCEditorNormalRegionPayload> Regions;
-    FDWCEditorPreviewRegionTarget Target;
-    uint64 FirstSequence = 0;
-    uint64 LastSequence = 0;
-    uint64 AffectedPixelCount = 0;
+    FDWCEditorPreviewRegionTarget         Target;
+    uint64                                FirstSequence = 0;
+    uint64                                LastSequence = 0;
+    uint64                                AffectedPixelCount = 0;
 };
 
 class FWetWrinkleIncrementalPreviewWorker final
@@ -61,17 +62,17 @@ class FWetWrinkleIncrementalPreviewWorker final
   public:
     static bool BuildRegionPlan(
         const TArray<FWetWrinkleIncrementalCommand>& Commands,
-        FIntPoint WorkingTextureSize,
-        FIntPoint TextureSize,
-        TArray<FWetWrinkleIncrementalRegionPlan>& OutPlan,
-        const TArray<FIntRect>* AdditionalWorkingRects = nullptr);
+        FIntPoint                                    WorkingTextureSize,
+        FIntPoint                                    TextureSize,
+        TArray<FWetWrinkleIncrementalRegionPlan>&    OutPlan,
+        const TArray<FIntRect>*                      AdditionalWorkingRects = nullptr);
 
     static FDWCEditorWorkerMemoryEstimate EstimateMemory(
-        const TArray<FWetWrinkleIncrementalCommand>& Commands,
+        const TArray<FWetWrinkleIncrementalCommand>&    Commands,
         const TArray<FWetWrinkleIncrementalRegionPlan>& Plan,
-        bool bWithCoverage);
+        bool                                            bWithCoverage);
 
     static TSharedPtr<FWetWrinkleIncrementalPreviewJobResult, ESPMode::ThreadSafe> Build(
-        FWetWrinkleIncrementalPreviewJobInput Input,
+        FWetWrinkleIncrementalPreviewJobInput                               Input,
         const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken);
 };

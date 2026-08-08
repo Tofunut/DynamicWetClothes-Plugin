@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,29 +13,29 @@ class IDWCEditorCacheValue
   public:
     virtual ~IDWCEditorCacheValue() = default;
 
-    virtual FName GetCacheTypeName() const = 0;
+    virtual FName  GetCacheTypeName() const = 0;
     virtual uint64 GetAllocatedSizeBytes() const = 0;
 };
 
 struct FDWCEditorCacheKey
 {
-    FName Namespace;
-    FObjectKey Owner;
+    FName       Namespace;
+    FObjectKey  Owner;
     const void* ResourceIdentity = nullptr;
-    int32 LODIndex = 0;
-    int32 UVChannelIndex = INDEX_NONE;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    FString Signature;
+    int32       LODIndex = 0;
+    int32       UVChannelIndex = INDEX_NONE;
+    int32       MaterialSlotIndex = INDEX_NONE;
+    FString     Signature;
 
     bool operator==(const FDWCEditorCacheKey& Other) const
     {
         return Namespace == Other.Namespace &&
-            Owner == Other.Owner &&
-            ResourceIdentity == Other.ResourceIdentity &&
-            LODIndex == Other.LODIndex &&
-            UVChannelIndex == Other.UVChannelIndex &&
-            MaterialSlotIndex == Other.MaterialSlotIndex &&
-            Signature == Other.Signature;
+               Owner == Other.Owner &&
+               ResourceIdentity == Other.ResourceIdentity &&
+               LODIndex == Other.LODIndex &&
+               UVChannelIndex == Other.UVChannelIndex &&
+               MaterialSlotIndex == Other.MaterialSlotIndex &&
+               Signature == Other.Signature;
     }
 
     friend uint32 GetTypeHash(const FDWCEditorCacheKey& Key)
@@ -58,10 +59,10 @@ struct FDWCEditorCacheKey
 struct FDWCEditorCacheEntry final
 {
     TSharedPtr<const IDWCEditorCacheValue, ESPMode::ThreadSafe> Value;
-    uint64 PayloadBytes = 0;
-    uint64 ResidentBytes = 0;
-    uint64 LastUsedSerial = 0;
-    FThreadSafeCounter ActiveLeaseCount;
+    uint64                                                      PayloadBytes = 0;
+    uint64                                                      ResidentBytes = 0;
+    uint64                                                      LastUsedSerial = 0;
+    FThreadSafeCounter                                          ActiveLeaseCount;
 };
 
 /** Move-only lifetime token for an actively used cache entry. */
@@ -89,7 +90,7 @@ class FDWCEditorCacheLease final
         return *this;
     }
 
-    bool IsValid() const { return Entry.IsValid() && Entry->Value.IsValid(); }
+    bool     IsValid() const { return Entry.IsValid() && Entry->Value.IsValid(); }
     explicit operator bool() const { return IsValid(); }
 
     const IDWCEditorCacheValue* GetValue() const
@@ -107,9 +108,9 @@ class FDWCEditorCacheLease final
     {
         const IDWCEditorCacheValue* BaseValue = GetValue();
         return BaseValue != nullptr &&
-                BaseValue->GetCacheTypeName() == TValue::StaticCacheTypeName()
-            ? static_cast<const TValue*>(BaseValue)
-            : nullptr;
+                       BaseValue->GetCacheTypeName() == TValue::StaticCacheTypeName()
+                   ? static_cast<const TValue*>(BaseValue)
+                   : nullptr;
     }
 
     uint64 GetAllocatedSizeBytes() const
@@ -120,8 +121,8 @@ class FDWCEditorCacheLease final
     uint32 GetActiveLeaseCount() const
     {
         return Entry.IsValid()
-            ? static_cast<uint32>(FMath::Max(Entry->ActiveLeaseCount.GetValue(), 0))
-            : 0;
+                   ? static_cast<uint32>(FMath::Max(Entry->ActiveLeaseCount.GetValue(), 0))
+                   : 0;
     }
 
     void Reset()
@@ -194,7 +195,7 @@ class FDWCEditorCacheStore final
     }
 
     void Put(
-        const FDWCEditorCacheKey& Key,
+        const FDWCEditorCacheKey&                                   Key,
         TSharedRef<const IDWCEditorCacheValue, ESPMode::ThreadSafe> Value);
     void InvalidateOwner(const UObject* Owner);
     void InvalidateNamespace(FName Namespace);
@@ -206,24 +207,24 @@ class FDWCEditorCacheStore final
     uint64 GetPayloadBytes() const;
     uint64 GetRetiredBytes() const;
     uint64 GetBudgetBytes() const { return BudgetBytes; }
-    int32 GetEntryCount() const { return Entries.Num(); }
-    int32 GetRetiredEntryCount() const;
-    int32 GetActiveLeaseCount() const;
-    void AppendDiagnosticMemoryBucket(TArray<FDWCEditorPreviewMemoryBucket>& OutBuckets) const;
-    void ResetDiagnosticCounters();
+    int32  GetEntryCount() const { return Entries.Num(); }
+    int32  GetRetiredEntryCount() const;
+    int32  GetActiveLeaseCount() const;
+    void   AppendDiagnosticMemoryBucket(TArray<FDWCEditorPreviewMemoryBucket>& OutBuckets) const;
+    void   ResetDiagnosticCounters();
 
   private:
-    void CleanupRetiredEntries();
-    void TrackRetiredEntry(const TSharedPtr<FDWCEditorCacheEntry>& Entry);
+    void   CleanupRetiredEntries();
+    void   TrackRetiredEntry(const TSharedPtr<FDWCEditorCacheEntry>& Entry);
     uint64 GetTrackedBytes() const { return UsedBytes + GetRetiredBytes(); }
-    void RemoveEntry(const FDWCEditorCacheKey& Key, bool bCountEviction);
+    void   RemoveEntry(const FDWCEditorCacheKey& Key, bool bCountEviction);
 
     TMap<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>> Entries;
-    TArray<TWeakPtr<FDWCEditorCacheEntry>> RetiredEntries;
-    uint64 BudgetBytes = DefaultBudgetBytes;
-    uint64 UsedBytes = 0;
-    uint64 UseSerial = 0;
-    uint64 HitCount = 0;
-    uint64 MissCount = 0;
-    uint64 EvictionCount = 0;
+    TArray<TWeakPtr<FDWCEditorCacheEntry>>                     RetiredEntries;
+    uint64                                                     BudgetBytes = DefaultBudgetBytes;
+    uint64                                                     UsedBytes = 0;
+    uint64                                                     UseSerial = 0;
+    uint64                                                     HitCount = 0;
+    uint64                                                     MissCount = 0;
+    uint64                                                     EvictionCount = 0;
 };

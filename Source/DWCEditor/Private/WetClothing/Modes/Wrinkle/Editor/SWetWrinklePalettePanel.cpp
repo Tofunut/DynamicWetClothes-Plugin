@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinklePalettePanel.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
@@ -12,12 +13,12 @@ void SWetWrinklePalettePanel::Construct(const FArguments& InArgs)
 {
     OnGenerateTile = InArgs._OnGenerateTile;
     ButtonStyle = FButtonStyle()
-        .SetNormal(FSlateRoundedBoxBrush(FLinearColor::White, 6.0f))
-        .SetHovered(FSlateRoundedBoxBrush(FLinearColor(1.15f, 1.15f, 1.15f, 1.0f), 6.0f))
-        .SetPressed(FSlateRoundedBoxBrush(FLinearColor(0.85f, 0.85f, 0.85f, 1.0f), 6.0f))
-        .SetDisabled(FSlateRoundedBoxBrush(FLinearColor::White, 6.0f))
-        .SetNormalPadding(FMargin(0.0f))
-        .SetPressedPadding(FMargin(0.0f));
+                      .SetNormal(FSlateRoundedBoxBrush(FLinearColor::White, 6.0f))
+                      .SetHovered(FSlateRoundedBoxBrush(FLinearColor(1.15f, 1.15f, 1.15f, 1.0f), 6.0f))
+                      .SetPressed(FSlateRoundedBoxBrush(FLinearColor(0.85f, 0.85f, 0.85f, 1.0f), 6.0f))
+                      .SetDisabled(FSlateRoundedBoxBrush(FLinearColor::White, 6.0f))
+                      .SetNormalPadding(FMargin(0.0f))
+                      .SetPressedPadding(FMargin(0.0f));
 
     ChildSlot
         [SNew(SBox)
@@ -42,11 +43,9 @@ void SWetWrinklePalettePanel::Construct(const FArguments& InArgs)
                                      "NoPaletteItems",
                                      "No wrinkle normal textures were found in the configured paths."))
                                  .Visibility_Lambda([this]()
-                                 {
-                                     return AllItems.IsEmpty()
-                                         ? EVisibility::HitTestInvisible
-                                         : EVisibility::Collapsed;
-                                 })]]];
+                                                    { return AllItems.IsEmpty()
+                                                                 ? EVisibility::HitTestInvisible
+                                                                 : EVisibility::Collapsed; })]]];
 }
 
 void SWetWrinklePalettePanel::RequestRefresh()
@@ -58,7 +57,7 @@ void SWetWrinklePalettePanel::RequestRefresh()
 }
 
 TSharedRef<ITableRow> SWetWrinklePalettePanel::GenerateTile(
-    FWetWrinkleTexturePaletteItemPtr Item,
+    FWetWrinkleTexturePaletteItemPtr  Item,
     const TSharedRef<STableViewBase>& OwnerTable) const
 {
     check(OnGenerateTile.IsBound());

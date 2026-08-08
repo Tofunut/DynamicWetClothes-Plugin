@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringDocument.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -13,7 +14,7 @@ namespace
 
     void ModifyAssetForAuthoringTransaction(
         UWetClothingAsset& Asset,
-        const FText& TransactionText)
+        const FText&       TransactionText)
     {
         const double StartSeconds = FPlatformTime::Seconds();
         Asset.Modify();
@@ -45,7 +46,7 @@ namespace
                 ModifyMilliseconds);
         }
     }
-}
+} // namespace
 
 FDWCEditorAuthoringDocument::FDWCEditorAuthoringDocument(UWetClothingAsset* InAsset)
     : Asset(InAsset)
@@ -82,8 +83,8 @@ bool FDWCEditorAuthoringDocument::HasInteractiveEdit() const
 }
 
 FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::Edit(
-    const FText& TransactionText,
-    FDWCEditorAuthoringChange Change,
+    const FText&                           TransactionText,
+    FDWCEditorAuthoringChange              Change,
     TFunctionRef<bool(UWetClothingAsset&)> Mutation)
 {
     FString Error;
@@ -119,9 +120,9 @@ FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::Edit(
 }
 
 bool FDWCEditorAuthoringDocument::BeginInteractiveEdit(
-    const FText& TransactionText,
+    const FText&              TransactionText,
     FDWCEditorAuthoringChange Change,
-    FString* OutError)
+    FString*                  OutError)
 {
     if (!IsOnGameThread(OutError))
     {
@@ -163,7 +164,7 @@ bool FDWCEditorAuthoringDocument::BeginInteractiveEdit(
 }
 
 FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::UpdateInteractiveEdit(
-    FDWCEditorAuthoringChange Change,
+    FDWCEditorAuthoringChange              Change,
     TFunctionRef<bool(UWetClothingAsset&)> Mutation)
 {
     FString Error;
@@ -248,7 +249,7 @@ FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::CommitInteractiveEdit(
 }
 
 void FDWCEditorAuthoringDocument::CancelInteractiveEdit(
-    FDWCEditorAuthoringChange Change,
+    FDWCEditorAuthoringChange              Change,
     TFunctionRef<void(UWetClothingAsset&)> RestoreMutation)
 {
     if (!HasInteractiveEdit())
@@ -302,7 +303,7 @@ bool FDWCEditorAuthoringDocument::IsOnGameThread(FString* OutError)
 
 bool FDWCEditorAuthoringDocument::ValidateMutationChange(
     const FDWCEditorAuthoringChange& Change,
-    FString* OutError)
+    FString*                         OutError)
 {
     auto Fail = [OutError](const TCHAR* Message)
     {
@@ -341,7 +342,7 @@ bool FDWCEditorAuthoringDocument::ValidateMutationChange(
 }
 
 void FDWCEditorAuthoringDocument::ApplyCommittedImpact(
-    UWetClothingAsset& MutableAsset,
+    UWetClothingAsset&               MutableAsset,
     const FDWCEditorAuthoringChange& Change) const
 {
     if (EnumHasAnyFlags(Change.Impact, EDWCEditorAuthoringImpact::WrinkleBake))
@@ -350,17 +351,17 @@ void FDWCEditorAuthoringDocument::ApplyCommittedImpact(
     }
 
     FWetClothingTransparencyData& TransparencyData = MutableAsset.Authored.TransparencyData;
-    const auto ApplyToTransparencyLayers =
+    const auto                    ApplyToTransparencyLayers =
         [&Change, &TransparencyData](TFunctionRef<void(FWetClothingTransparencyLayerData&)> Visitor)
+    {
+        for (FWetClothingTransparencyLayerData& Layer : TransparencyData.TransparencyLayers)
         {
-            for (FWetClothingTransparencyLayerData& Layer : TransparencyData.TransparencyLayers)
+            if (!Change.LayerGuid.IsValid() || Layer.LayerGuid == Change.LayerGuid)
             {
-                if (!Change.LayerGuid.IsValid() || Layer.LayerGuid == Change.LayerGuid)
-                {
-                    Visitor(Layer);
-                }
+                Visitor(Layer);
             }
-        };
+        }
+    };
 
     if (EnumHasAnyFlags(Change.Impact, EDWCEditorAuthoringImpact::TransparencyAutoBake))
     {
@@ -387,7 +388,7 @@ void FDWCEditorAuthoringDocument::ApplyCommittedImpact(
 
 FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::MakeFailure(
     FDWCEditorAuthoringChange Change,
-    FString Error) const
+    FString                   Error) const
 {
     FDWCEditorAuthoringResult Result;
     Result.Error = MoveTemp(Error);

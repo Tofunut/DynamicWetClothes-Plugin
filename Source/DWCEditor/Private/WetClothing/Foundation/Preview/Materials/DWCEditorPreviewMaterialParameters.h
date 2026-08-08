@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,4 +11,4 @@ namespace DWCEditorPreviewMaterialParameters
         static const FName Name(TEXT("DWC_PreviewWetness"));
         return Name;
     }
-}
+} // namespace DWCEditorPreviewMaterialParameters

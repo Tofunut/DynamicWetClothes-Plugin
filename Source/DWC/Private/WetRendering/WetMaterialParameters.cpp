@@ -1,14 +1,15 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetRendering/WetMaterialParameters.h"
 
 namespace DWCWetMaterialParameters
 {
-    #define DWC_DEFINE_MATERIAL_PARAMETER(Name, TextValue) \
-        const FName& Name() \
-        { \
-            static const FName ParameterName(TEXT(TextValue)); \
-            return ParameterName; \
-        }
+#define DWC_DEFINE_MATERIAL_PARAMETER(Name, TextValue)     \
+    const FName& Name()                                    \
+    {                                                      \
+        static const FName ParameterName(TEXT(TextValue)); \
+        return ParameterName;                              \
+    }
 
     DWC_DEFINE_MATERIAL_PARAMETER(WetnessMap, "DWC_WetnessMap")
     DWC_DEFINE_MATERIAL_PARAMETER(WetPartDataTexture, "DWC_WetPartDataTexture")
@@ -33,7 +34,7 @@ namespace DWCWetMaterialParameters
     DWC_DEFINE_MATERIAL_PARAMETER(Droplet2RenderingEnabled, "DWC_Droplet2RenderingEnabled")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterTexelSize, "DWC_SurfaceWaterTexelSize")
 
-    #undef DWC_DEFINE_MATERIAL_PARAMETER
+#undef DWC_DEFINE_MATERIAL_PARAMETER
 
     FName FallbackRenderProfileTexel(const int32 TexelIndex)
     {
@@ -130,4 +131,4 @@ namespace DWCWetMaterialParameters
     {
         return 1.0f;
     }
-}
+} // namespace DWCWetMaterialParameters

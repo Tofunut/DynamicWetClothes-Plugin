@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 /*
  * Implements Wet Part editing operations, including default-part creation, island mapping, and display metadata updates.
  */
@@ -19,7 +20,7 @@ bool FWetPartEditingService::EnsureDefaultWetPartForScope(UWetClothingAsset* Wet
         return false;
     }
 
-    FWetClothingEditableWetPartData& EditableData = WetClothingAsset->Authored.PartData.EditableWetPartData;
+    FWetClothingEditableWetPartData&  EditableData = WetClothingAsset->Authored.PartData.EditableWetPartData;
     FWetClothingAuthoredMaterialSlot& SlotData = EditableData.FindOrAddMaterialSlot(Scope.MaterialSlotIndex);
     if (SlotData.FindPart(0) != nullptr)
     {
@@ -90,12 +91,12 @@ const FWetClothingWetPartEntry* FWetPartEditingService::FindEntryForUVIsland(con
 
     const FWetClothingAuthoredMaterialSlot* SlotData = WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(Scope.MaterialSlotIndex);
     return SlotData != nullptr
-        ? SlotData->WetPartEntries.FindByPredicate(
-              [UVIslandID](const FWetClothingWetPartEntry& Entry)
-              {
-                  return Entry.AssignedUVIslandIDs.Contains(UVIslandID);
-              })
-        : nullptr;
+               ? SlotData->WetPartEntries.FindByPredicate(
+                     [UVIslandID](const FWetClothingWetPartEntry& Entry)
+                     {
+                         return Entry.AssignedUVIslandIDs.Contains(UVIslandID);
+                     })
+               : nullptr;
 }
 
 const FWetClothingWetPartEntry* FWetPartEditingService::FindEffectiveEntryForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID)
@@ -108,8 +109,8 @@ const FWetClothingWetPartEntry* FWetPartEditingService::FindEffectiveEntryForUVI
 }
 
 void FWetPartEditingService::BuildWetPartItemsForScope(
-    const UWetClothingAsset* WetClothingAsset,
-    const FWetPartScope& Scope,
+    const UWetClothingAsset*                      WetClothingAsset,
+    const FWetPartScope&                          Scope,
     TArray<TSharedPtr<FWetClothingWetPartEntry>>& OutItems)
 {
     OutItems.Reset();
@@ -128,9 +129,7 @@ void FWetPartEditingService::BuildWetPartItemsForScope(
     }
 
     OutItems.Sort([](const TSharedPtr<FWetClothingWetPartEntry>& A, const TSharedPtr<FWetClothingWetPartEntry>& B)
-    {
-        return A.IsValid() && B.IsValid() ? A->WetPartID < B->WetPartID : A.IsValid();
-    });
+                  { return A.IsValid() && B.IsValid() ? A->WetPartID < B->WetPartID : A.IsValid(); });
 }
 
 TSet<int32> FWetPartEditingService::GetUVIslandIDsForWetPart(

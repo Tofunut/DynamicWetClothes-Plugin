@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,26 +13,25 @@ class USkeletalMesh;
  */
 class FDWCPreparedMeshEditTransaction
 {
-public:
+  public:
     explicit FDWCPreparedMeshEditTransaction(USkeletalMesh* InMesh);
     ~FDWCPreparedMeshEditTransaction();
 
     bool CaptureEditableLOD(int32 LODIndex, FString* OutErrorMessage = nullptr);
 
-
     void Commit();
     void Rollback(bool bDeferMeshCommit = false);
 
-private:
+  private:
     struct FLODBackup
     {
-        int32 LODIndex = INDEX_NONE;
+        int32            LODIndex = INDEX_NONE;
         FMeshDescription MeshDescription;
-        bool bHadMeshDescriptionBeforeCapture = false;
+        bool             bHadMeshDescriptionBeforeCapture = false;
     };
 
-    USkeletalMesh* Mesh = nullptr;
+    USkeletalMesh*     Mesh = nullptr;
     TArray<FLODBackup> Backups;
-    bool bCommitted = false;
-    bool bRolledBack = false;
+    bool               bCommitted = false;
+    bool               bRolledBack = false;
 };

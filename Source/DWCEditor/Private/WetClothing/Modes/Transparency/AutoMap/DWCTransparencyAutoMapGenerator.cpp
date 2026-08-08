@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 
 #include "DataAssets/DWCBakeLayer.h"
@@ -18,9 +19,9 @@ namespace
 {
     FDWCBakeResolvedLayer MakeResolvedLayer(
         USkeletalMesh* Mesh,
-        const FName LayerId,
-        const int32 LayerOrder,
-        const float MaxRevealDistance)
+        const FName    LayerId,
+        const int32    LayerOrder,
+        const float    MaxRevealDistance)
     {
         FDWCBakeResolvedLayer Result;
         Result.LayerId = LayerId;
@@ -49,12 +50,12 @@ namespace
     }
 
     FString MakeSameMeshBuildSignature(
-        const UWetClothingAsset& WetClothingAsset,
+        const UWetClothingAsset&                 WetClothingAsset,
         const FWetClothingTransparencyLayerData& Layer,
-        const USkeletalMesh* RuntimeMesh,
-        const int32 Resolution,
-        const int32 DataUVChannelIndex,
-        const int32 LODIndex)
+        const USkeletalMesh*                     RuntimeMesh,
+        const int32                              Resolution,
+        const int32                              DataUVChannelIndex,
+        const int32                              LODIndex)
     {
         const FDWCDataUVLODMetadata* DataUVMetadata =
             WetClothingAsset.FindDataUVMetadataForLOD(LODIndex);
@@ -94,17 +95,17 @@ namespace
     }
 
     FString MakeBaseRevealColorBuildSignature(
-        const UWetClothingAsset& WetClothingAsset,
+        const UWetClothingAsset&                 WetClothingAsset,
         const FWetClothingTransparencyLayerData& Layer,
-        const USkeletalMesh* RuntimeMesh,
-        const int32 Resolution,
-        const int32 DataUVChannelIndex,
-        const int32 LODIndex)
+        const USkeletalMesh*                     RuntimeMesh,
+        const int32                              Resolution,
+        const int32                              DataUVChannelIndex,
+        const int32                              LODIndex)
     {
         const FDWCDataUVLODMetadata* DataUVMetadata =
             WetClothingAsset.FindDataUVMetadataForLOD(LODIndex);
         const FLinearColor& Color = Layer.ManualColorSource.BaseRevealColor;
-        FString SignatureSource = FString::Printf(
+        FString             SignatureSource = FString::Printf(
             TEXT("DWCTransparencyBaseRevealColor_v5|Mesh=%s|Layer=%s|Slot=%d|UV=%d|LOD=%d|Resolution=%d|Address=%d|Color=%.9g,%.9g,%.9g|Alpha=%.9g|DataUV=%s"),
             *GetPathNameSafe(RuntimeMesh),
             *Layer.LayerGuid.ToString(EGuidFormats::DigitsWithHyphens),
@@ -150,17 +151,16 @@ namespace
     {
       public:
         FSameMeshSurfaceCache(USkeletalMesh* InMesh, const int32 InLODIndex)
-            : Mesh(InMesh)
-            , LODIndex(InLODIndex)
+            : Mesh(InMesh), LODIndex(InLODIndex)
         {
         }
 
         bool BuildSlotSurface(
             const FDWCBakeResolvedLayer& Layer,
-            const int32 UVChannelIndex,
-            const int32 MaterialSlotIndex,
-            FDWCRevealBakeSurface& OutSurface,
-            FString& OutErrorMessage)
+            const int32                  UVChannelIndex,
+            const int32                  MaterialSlotIndex,
+            FDWCRevealBakeSurface&       OutSurface,
+            FString&                     OutErrorMessage)
         {
             const FDWCRevealBakeSurface* BaseSurface =
                 FindOrBuildBaseSurface(UVChannelIndex, OutErrorMessage);
@@ -208,7 +208,7 @@ namespace
       private:
         const FDWCRevealBakeSurface* FindOrBuildBaseSurface(
             const int32 UVChannelIndex,
-            FString& OutErrorMessage)
+            FString&    OutErrorMessage)
         {
             if (const FDWCRevealBakeSurface* CachedSurface =
                     BaseSurfacesByUVChannel.Find(UVChannelIndex))
@@ -235,8 +235,8 @@ namespace
         }
 
         const TArray<int32>& FindOrBuildSlotTriangleIndices(
-            const int32 UVChannelIndex,
-            const int32 MaterialSlotIndex,
+            const int32                  UVChannelIndex,
+            const int32                  MaterialSlotIndex,
             const FDWCRevealBakeSurface& BaseSurface)
         {
             const FIntPoint Key(UVChannelIndex, MaterialSlotIndex);
@@ -260,10 +260,10 @@ namespace
             return SlotTriangleIndicesByUVAndSlot.Add(Key, MoveTemp(TriangleIndices));
         }
 
-        USkeletalMesh* Mesh = nullptr;
-        int32 LODIndex = 0;
+        USkeletalMesh*                     Mesh = nullptr;
+        int32                              LODIndex = 0;
         TMap<int32, FDWCRevealBakeSurface> BaseSurfacesByUVChannel;
-        TMap<FIntPoint, TArray<int32>> SlotTriangleIndicesByUVAndSlot;
+        TMap<FIntPoint, TArray<int32>>     SlotTriangleIndicesByUVAndSlot;
     };
 
     float ApplyTextureAddress(const float Coordinate, const TextureAddress AddressMode)
@@ -290,16 +290,16 @@ namespace
             return FLinearColor::White;
         }
 
-        const float U = ApplyTextureAddress(static_cast<float>(UV.X), TextureData.AddressX);
-        const float V = ApplyTextureAddress(static_cast<float>(UV.Y), TextureData.AddressY);
-        const float X = U * static_cast<float>(TextureData.Width - 1);
-        const float Y = V * static_cast<float>(TextureData.Height - 1);
-        const int32 X0 = FMath::FloorToInt(X);
-        const int32 Y0 = FMath::FloorToInt(Y);
-        const int32 X1 = FMath::Min(X0 + 1, TextureData.Width - 1);
-        const int32 Y1 = FMath::Min(Y0 + 1, TextureData.Height - 1);
-        const float AlphaX = X - static_cast<float>(X0);
-        const float AlphaY = Y - static_cast<float>(Y0);
+        const float        U = ApplyTextureAddress(static_cast<float>(UV.X), TextureData.AddressX);
+        const float        V = ApplyTextureAddress(static_cast<float>(UV.Y), TextureData.AddressY);
+        const float        X = U * static_cast<float>(TextureData.Width - 1);
+        const float        Y = V * static_cast<float>(TextureData.Height - 1);
+        const int32        X0 = FMath::FloorToInt(X);
+        const int32        Y0 = FMath::FloorToInt(Y);
+        const int32        X1 = FMath::Min(X0 + 1, TextureData.Width - 1);
+        const int32        Y1 = FMath::Min(Y0 + 1, TextureData.Height - 1);
+        const float        AlphaX = X - static_cast<float>(X0);
+        const float        AlphaY = Y - static_cast<float>(Y0);
         const FLinearColor C0 = FMath::Lerp(TextureData.GetLinearColor(X0, Y0), TextureData.GetLinearColor(X1, Y0), AlphaX);
         const FLinearColor C1 = FMath::Lerp(TextureData.GetLinearColor(X0, Y1), TextureData.GetLinearColor(X1, Y1), AlphaX);
         return FMath::Lerp(C0, C1, AlphaY);
@@ -310,14 +310,14 @@ namespace
         const float FullDistance = FMath::Max(Settings.FullTransparencyDistance, 0.0f);
         const float NoTransparencyDistance = FMath::Max(Settings.NoTransparencyDistance, FullDistance + UE_SMALL_NUMBER);
         const float DistanceAlpha = 1.0f - FMath::Clamp(
-            (Hit.Distance - FullDistance) / (NoTransparencyDistance - FullDistance),
-            0.0f,
-            1.0f);
+                                               (Hit.Distance - FullDistance) / (NoTransparencyDistance - FullDistance),
+                                               0.0f,
+                                               1.0f);
         return FMath::Clamp(DistanceAlpha * Hit.Confidence, 0.0f, 1.0f);
     }
 
     int32 ResolveOuterSampleUVIslandID(
-        const FDWCDataUVLODMetadata* DataUVMetadata,
+        const FDWCDataUVLODMetadata*     DataUVMetadata,
         const FDWCRevealBakeTexelSample& Sample)
     {
         if (Sample.UVIslandID != INDEX_NONE)
@@ -333,10 +333,10 @@ namespace
     }
 
     bool TryEncodeOuterSampleUVIslandID(
-        const FDWCDataUVLODMetadata* DataUVMetadata,
+        const FDWCDataUVLODMetadata*     DataUVMetadata,
         const FDWCRevealBakeTexelSample& Sample,
-        uint16& OutEncodedIslandID,
-        FString& OutErrorMessage)
+        uint16&                          OutEncodedIslandID,
+        FString&                         OutErrorMessage)
     {
         const int32 IslandID = ResolveOuterSampleUVIslandID(DataUVMetadata, Sample);
         if (IslandID != INDEX_NONE && !FDWCTransparencyAutoBakeResult::CanEncodeOuterIslandID(IslandID))
@@ -353,25 +353,25 @@ namespace
 
     bool PassesTransparencyIslandClip(
         const FDWCTransparencyAutoBakeResult& Result,
-        const int32 PixelIndex,
-        const int32 UVIslandID)
+        const int32                           PixelIndex,
+        const int32                           UVIslandID)
     {
         if (UVIslandID == INDEX_NONE)
         {
             return true;
         }
         return Result.OuterIslandIDBuffer.IsValidIndex(PixelIndex) &&
-            FDWCTransparencyAutoBakeResult::MatchesOuterIslandID(
-                Result.OuterIslandIDBuffer[PixelIndex],
-                UVIslandID);
+               FDWCTransparencyAutoBakeResult::MatchesOuterIslandID(
+                   Result.OuterIslandIDBuffer[PixelIndex],
+                   UVIslandID);
     }
 
-}
+} // namespace
 
 int32 FDWCTransparencyAutoBakeResult::ResolveOuterIslandIDAtUV(
     const FVector2D& PositionUV,
-    const int32 FallbackUVIslandID,
-    const bool bWrap) const
+    const int32      FallbackUVIslandID,
+    const bool       bWrap) const
 {
     const int32 Width = Resolution.X;
     const int32 Height = Resolution.Y;
@@ -380,8 +380,8 @@ int32 FDWCTransparencyAutoBakeResult::ResolveOuterIslandIDAtUV(
         return FallbackUVIslandID;
     }
 
-    int32 X = FMath::FloorToInt(PositionUV.X * Width);
-    int32 Y = FMath::FloorToInt(PositionUV.Y * Height);
+    int32 X = IntCastChecked<int32>(FMath::FloorToInt(PositionUV.X * Width));
+    int32 Y = IntCastChecked<int32>(FMath::FloorToInt(PositionUV.Y * Height));
     if (bWrap)
     {
         X = (X % Width + Width) % Width;
@@ -399,15 +399,15 @@ int32 FDWCTransparencyAutoBakeResult::ResolveOuterIslandIDAtUV(
 }
 
 bool FDWCTransparencyAutoMapGenerator::BuildTargetSurfaceBuffers(
-    const UWetClothingAsset& WetClothingAsset,
+    const UWetClothingAsset&                     WetClothingAsset,
     const FWetClothingTransparencyTargetSurface& TargetSurface,
-    const int32 LODIndex,
-    const FIntPoint Resolution,
-    TArray<uint8>& OutCoverageBuffer,
-    TArray<uint16>& OutIslandIDBuffer,
-    int32* OutOuterSampleCount,
-    int32* OutOverlappedPixelCount,
-    FString& OutErrorMessage)
+    const int32                                  LODIndex,
+    const FIntPoint                              Resolution,
+    TArray<uint8>&                               OutCoverageBuffer,
+    TArray<uint16>&                              OutIslandIDBuffer,
+    int32*                                       OutOuterSampleCount,
+    int32*                                       OutOverlappedPixelCount,
+    FString&                                     OutErrorMessage)
 {
     OutCoverageBuffer.Reset();
     OutIslandIDBuffer.Reset();
@@ -440,12 +440,12 @@ bool FDWCTransparencyAutoMapGenerator::BuildTargetSurfaceBuffers(
 
     const FDWCBakeResolvedLayer OuterLayer = MakeResolvedLayer(
         RuntimeMesh,
-        FName(TEXT("DWCTransparencyTargetSurface")) ,
+        FName(TEXT("DWCTransparencyTargetSurface")),
         MAX_int32 / 2,
         0.0f);
     FSameMeshSurfaceCache SurfaceCache(RuntimeMesh, LODIndex);
     FDWCRevealBakeSurface OuterSurface;
-    const int32 DataUVChannelIndex = WetClothingAsset.GetDWCDataUVChannelIndex();
+    const int32           DataUVChannelIndex = WetClothingAsset.GetDWCDataUVChannelIndex();
     if (!SurfaceCache.BuildSlotSurface(
             OuterLayer,
             DataUVChannelIndex,
@@ -463,7 +463,7 @@ bool FDWCTransparencyAutoMapGenerator::BuildTargetSurfaceBuffers(
     SamplingSettings.Resolution = Resolution;
     SamplingSettings.MaterialSlotIndex = TargetSurface.OuterMaterialSlotIndex;
     TArray<FDWCRevealBakeTexelSample> OuterSamples;
-    int32 OverlappedPixelCount = 0;
+    int32                             OverlappedPixelCount = 0;
     if (!FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
             OuterSurface,
             SamplingSettings,
@@ -523,11 +523,11 @@ bool FDWCTransparencyAutoMapGenerator::BuildTargetSurfaceBuffers(
 }
 
 void FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
-    const FDWCTransparencyAutoBakeResult& AutoResult,
+    const FDWCTransparencyAutoBakeResult&            AutoResult,
     const TArray<FDWCTransparencyRevealColorStroke>& Strokes,
-    const int32 MaterialSlotIndex,
-    const FLinearColor& BaseRevealColor,
-    TArray<FColor>& InOutRevealColorBuffer)
+    const int32                                      MaterialSlotIndex,
+    const FLinearColor&                              BaseRevealColor,
+    TArray<FColor>&                                  InOutRevealColorBuffer)
 {
     const int32 Width = AutoResult.Resolution.X;
     const int32 Height = AutoResult.Resolution.Y;
@@ -536,7 +536,8 @@ void FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
         return;
     }
 
-    const auto WrapIndex = [](int32 Value, int32 Size) { return (Value % Size + Size) % Size; };
+    const auto WrapIndex = [](int32 Value, int32 Size)
+    { return (Value % Size + Size) % Size; };
     for (const FDWCTransparencyRevealColorStroke& Stroke : Strokes)
     {
         if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != MaterialSlotIndex)
@@ -544,28 +545,28 @@ void FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
             continue;
         }
 
-        const bool bWrap = Stroke.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap;
-    const FLinearColor BaseColor = BaseRevealColor.CopyWithNewOpacity(1.0f);
+        const bool         bWrap = Stroke.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap;
+        const FLinearColor BaseColor = BaseRevealColor.CopyWithNewOpacity(1.0f);
         const FLinearColor PaintColor = Stroke.PaintColor.CopyWithNewOpacity(1.0f);
         for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
         {
-            const float RadiusX = FMath::Max(Sample.RadiusUV * Width, 1.0f);
-            const float RadiusY = FMath::Max(Sample.RadiusUV * Height, 1.0f);
+            const float     RadiusX = FMath::Max(Sample.RadiusUV * Width, 1.0f);
+            const float     RadiusY = FMath::Max(Sample.RadiusUV * Height, 1.0f);
             const FVector2D Center(Sample.PositionUV.X * Width, Sample.PositionUV.Y * Height);
-            const int32 MinX = FMath::FloorToInt(Center.X - RadiusX - 1.0f);
-            const int32 MaxX = FMath::CeilToInt(Center.X + RadiusX + 1.0f);
-            const int32 MinY = FMath::FloorToInt(Center.Y - RadiusY - 1.0f);
-            const int32 MaxY = FMath::CeilToInt(Center.Y + RadiusY + 1.0f);
-            const int32 ClipUVIslandID = AutoResult.ResolveOuterIslandIDAtUV(
+            const int32     MinX = IntCastChecked<int32>(FMath::FloorToInt(Center.X - RadiusX - 1.0f));
+            const int32     MaxX = IntCastChecked<int32>(FMath::CeilToInt(Center.X + RadiusX + 1.0f));
+            const int32     MinY = IntCastChecked<int32>(FMath::FloorToInt(Center.Y - RadiusY - 1.0f));
+            const int32     MaxY = IntCastChecked<int32>(FMath::CeilToInt(Center.Y + RadiusY + 1.0f));
+            const int32     ClipUVIslandID = AutoResult.ResolveOuterIslandIDAtUV(
                 Sample.PositionUV,
                 Sample.UVIslandID,
                 bWrap);
-            const float InnerRadius = 1.0f - FMath::Clamp(Stroke.Falloff, 0.0f, 1.0f);
-            const bool bSmooth = Stroke.BrushMode == EDWCTransparencyRevealColorBrushMode::Smooth;
-            const int32 SnapshotMinX = MinX - 1;
-            const int32 SnapshotMinY = MinY - 1;
-            const int32 SnapshotWidth = MaxX - MinX + 3;
-            const int32 SnapshotHeight = MaxY - MinY + 3;
+            const float    InnerRadius = 1.0f - FMath::Clamp(Stroke.Falloff, 0.0f, 1.0f);
+            const bool     bSmooth = Stroke.BrushMode == EDWCTransparencyRevealColorBrushMode::Smooth;
+            const int32    SnapshotMinX = MinX - 1;
+            const int32    SnapshotMinY = MinY - 1;
+            const int32    SnapshotWidth = MaxX - MinX + 3;
+            const int32    SnapshotHeight = MaxY - MinY + 3;
             TArray<FColor> SmoothSnapshot;
             if (bSmooth)
             {
@@ -615,20 +616,26 @@ void FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
             {
                 for (int32 RawX = MinX; RawX <= MaxX; ++RawX)
                 {
-                    if (!bWrap && (RawX < 0 || RawX >= Width || RawY < 0 || RawY >= Height)) continue;
-                    const float DX = (RawX + 0.5f - Center.X) / RadiusX;
-                    const float DY = (RawY + 0.5f - Center.Y) / RadiusY;
+                    if (!bWrap && (RawX < 0 || RawX >= Width || RawY < 0 || RawY >= Height))
+                        continue;
+                    const float DX = static_cast<float>((RawX + 0.5f - Center.X) / RadiusX);
+                    const float DY = static_cast<float>((RawY + 0.5f - Center.Y) / RadiusY);
                     const float Distance = FMath::Sqrt(DX * DX + DY * DY);
-                    if (Distance > 1.0f) continue;
+                    if (Distance > 1.0f)
+                        continue;
                     const float RadialWeight = Distance <= InnerRadius || Stroke.Falloff <= KINDA_SMALL_NUMBER
-                        ? 1.0f : 1.0f - FMath::SmoothStep(InnerRadius, 1.0f, Distance);
+                                                   ? 1.0f
+                                                   : 1.0f - FMath::SmoothStep(InnerRadius, 1.0f, Distance);
                     const float Weight = FMath::Clamp(RadialWeight * Sample.Strength, 0.0f, 1.0f);
-                    if (Weight <= 0.0f) continue;
+                    if (Weight <= 0.0f)
+                        continue;
                     const int32 X = bWrap ? WrapIndex(RawX, Width) : RawX;
                     const int32 Y = bWrap ? WrapIndex(RawY, Height) : RawY;
                     const int32 PixelIndex = Y * Width + X;
-                    if (!AutoResult.OuterCoverageBuffer.IsValidIndex(PixelIndex) || AutoResult.OuterCoverageBuffer[PixelIndex] == 0) continue;
-                    if (!PassesTransparencyIslandClip(AutoResult, PixelIndex, ClipUVIslandID)) continue;
+                    if (!AutoResult.OuterCoverageBuffer.IsValidIndex(PixelIndex) || AutoResult.OuterCoverageBuffer[PixelIndex] == 0)
+                        continue;
+                    if (!PassesTransparencyIslandClip(AutoResult, PixelIndex, ClipUVIslandID))
+                        continue;
                     FLinearColor TargetColor = PaintColor;
                     if (Stroke.BrushMode == EDWCTransparencyRevealColorBrushMode::EraseToBase)
                     {
@@ -668,20 +675,21 @@ void FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
                         TargetColor.A = 1.0f;
                     }
                     InOutRevealColorBuffer[PixelIndex] = FMath::Lerp(
-                        FLinearColor(InOutRevealColorBuffer[PixelIndex]),
-                        TargetColor.CopyWithNewOpacity(1.0f),
-                        Weight).ToFColor(true);
+                                                             FLinearColor(InOutRevealColorBuffer[PixelIndex]),
+                                                             TargetColor.CopyWithNewOpacity(1.0f),
+                                                             Weight)
+                                                             .ToFColor(true);
                 }
             }
         }
     }
 }
 bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
-    const UWetClothingAsset& WetClothingAsset,
+    const UWetClothingAsset&                 WetClothingAsset,
     const FWetClothingTransparencyLayerData& Layer,
-    FDWCTransparencyAutoBakeResult& OutResult,
-    FString& OutSummary,
-    TArray<FString>& OutWarnings)
+    FDWCTransparencyAutoBakeResult&          OutResult,
+    FString&                                 OutSummary,
+    TArray<FString>&                         OutWarnings)
 {
     OutResult = FDWCTransparencyAutoBakeResult();
     OutSummary.Reset();
@@ -710,9 +718,9 @@ bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
         16,
         4096);
     constexpr int32 LODIndex = 0;
-    const int32 DataUVChannelIndex = WetClothingAsset.GetDWCDataUVChannelIndex();
+    const int32     DataUVChannelIndex = WetClothingAsset.GetDWCDataUVChannelIndex();
     const FIntPoint BakeResolution(Resolution, Resolution);
-    const int32 PixelCount = Resolution * Resolution;
+    const int32     PixelCount = Resolution * Resolution;
 
     const FDWCBakeResolvedLayer OuterLayer = MakeResolvedLayer(
         RuntimeMesh,
@@ -721,7 +729,7 @@ bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
         0.0f);
     FSameMeshSurfaceCache SurfaceCache(RuntimeMesh, LODIndex);
     FDWCRevealBakeSurface OuterSurface;
-    FString BuildError;
+    FString               BuildError;
     if (!SurfaceCache.BuildSlotSurface(
             OuterLayer,
             DataUVChannelIndex,
@@ -739,7 +747,7 @@ bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
     SamplingSettings.Resolution = BakeResolution;
     SamplingSettings.MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
     TArray<FDWCRevealBakeTexelSample> OuterSamples;
-    int32 OverlappedPixelCount = 0;
+    int32                             OverlappedPixelCount = 0;
     if (!FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
             OuterSurface,
             SamplingSettings,
@@ -776,8 +784,8 @@ bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
     const FDWCDataUVLODMetadata* DataUVMetadata =
         WetClothingAsset.FindDataUVMetadataForLOD(LODIndex);
     const FColor BaseRevealColor = Layer.ManualColorSource.BaseRevealColor
-        .CopyWithNewOpacity(1.0f)
-        .ToFColor(true);
+                                       .CopyWithNewOpacity(1.0f)
+                                       .ToFColor(true);
     const uint8 InitialAlpha = static_cast<uint8>(FMath::RoundToInt(
         FMath::Clamp(Layer.ManualColorSource.InitialTransparencyAlpha, 0.0f, 1.0f) * 255.0f));
     for (const FDWCRevealBakeTexelSample& Sample : OuterSamples)
@@ -790,7 +798,7 @@ bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
 
         const int32 PixelIndex = Sample.Pixel.Y * Resolution + Sample.Pixel.X;
         OutResult.OuterCoverageBuffer[PixelIndex] = 1;
-        uint16 EncodedIslandID = FDWCTransparencyAutoBakeResult::InvalidOuterIslandID;
+        uint16  EncodedIslandID = FDWCTransparencyAutoBakeResult::InvalidOuterIslandID;
         FString IslandError;
         if (!TryEncodeOuterSampleUVIslandID(
                 DataUVMetadata,
@@ -830,18 +838,18 @@ bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
 }
 
 bool FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
-    const UWetClothingAsset& WetClothingAsset,
+    const UWetClothingAsset&                 WetClothingAsset,
     const FWetClothingTransparencyLayerData& Layer,
-    FDWCTransparencyAutoBakeResult& OutResult,
-    FString& OutSummary,
-    TArray<FString>& OutWarnings)
+    FDWCTransparencyAutoBakeResult&          OutResult,
+    FString&                                 OutSummary,
+    TArray<FString>&                         OutWarnings)
 {
     OutResult = FDWCTransparencyAutoBakeResult();
     OutSummary.Reset();
     OutWarnings.Reset();
 
     FDWCTransparencyAutoMapSnapshot Snapshot;
-    FString SnapshotError;
+    FString                         SnapshotError;
     if (!BuildSameMeshSnapshot(WetClothingAsset, Layer, Snapshot, SnapshotError))
     {
         OutSummary = MoveTemp(SnapshotError);
@@ -853,8 +861,8 @@ bool FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
     if (!Computed.bSucceeded)
     {
         OutSummary = Computed.Error.IsEmpty()
-            ? TEXT("Transparency ray projection failed.")
-            : MoveTemp(Computed.Error);
+                         ? TEXT("Transparency ray projection failed.")
+                         : MoveTemp(Computed.Error);
         return false;
     }
 
@@ -864,10 +872,10 @@ bool FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
 }
 
 bool FDWCTransparencyAutoMapGenerator::BuildSignatureOnlyResult(
-    const UWetClothingAsset& WetClothingAsset,
+    const UWetClothingAsset&                 WetClothingAsset,
     const FWetClothingTransparencyLayerData& Layer,
-    FDWCTransparencyAutoBakeResult& OutResult,
-    FString& OutErrorMessage)
+    FDWCTransparencyAutoBakeResult&          OutResult,
+    FString&                                 OutErrorMessage)
 {
     check(IsInGameThread());
     OutResult = FDWCTransparencyAutoBakeResult();
@@ -891,8 +899,8 @@ bool FDWCTransparencyAutoMapGenerator::BuildSignatureOnlyResult(
         return false;
     }
 
-    constexpr int32 LODIndex = 0;
-    const int32 DataUVChannelIndex = WetClothingAsset.GetDWCDataUVChannelIndex();
+    constexpr int32              LODIndex = 0;
+    const int32                  DataUVChannelIndex = WetClothingAsset.GetDWCDataUVChannelIndex();
     const FDWCDataUVLODMetadata* DataUVMetadata = WetClothingAsset.FindDataUVMetadataForLOD(LODIndex);
     if (DataUVChannelIndex == INDEX_NONE || DataUVMetadata == nullptr ||
         DataUVMetadata->DataUVOutputSignature.IsEmpty())
@@ -911,37 +919,37 @@ bool FDWCTransparencyAutoMapGenerator::BuildSignatureOnlyResult(
     OutResult.LODIndex = LODIndex;
     OutResult.Resolution = FIntPoint(Resolution, Resolution);
     OutResult.BuildSignature = Layer.SourceType == EDWCTransparencySourceType::ManualColorOrTexture
-        ? MakeBaseRevealColorBuildSignature(
-            WetClothingAsset,
-            Layer,
-            RuntimeMesh,
-            Resolution,
-            DataUVChannelIndex,
-            LODIndex)
-        : MakeSameMeshBuildSignature(
-            WetClothingAsset,
-            Layer,
-            RuntimeMesh,
-            Resolution,
-            DataUVChannelIndex,
-            LODIndex);
+                                   ? MakeBaseRevealColorBuildSignature(
+                                         WetClothingAsset,
+                                         Layer,
+                                         RuntimeMesh,
+                                         Resolution,
+                                         DataUVChannelIndex,
+                                         LODIndex)
+                                   : MakeSameMeshBuildSignature(
+                                         WetClothingAsset,
+                                         Layer,
+                                         RuntimeMesh,
+                                         Resolution,
+                                         DataUVChannelIndex,
+                                         LODIndex);
     return true;
 }
 
 struct FDWCTransparencyAutoMapSnapshot::FImpl
 {
-    FDWCRevealBakeSurface OuterSurface;
-    TArray<FDWCRevealBakeSurface> SourceSurfaces;
-    TArray<FDWCRevealBakeTexelSample> OuterSamples;
-    FDWCRevealBakeRayProjectionSettings ProjectionSettings;
-    FWetClothingTransparencyRaySettings RaySettings;
-    TMap<FName, int32> PriorityBySourceLayerId;
-    TMap<FName, int32> StatsIndexBySourceLayerId;
+    FDWCRevealBakeSurface                    OuterSurface;
+    TArray<FDWCRevealBakeSurface>            SourceSurfaces;
+    TArray<FDWCRevealBakeTexelSample>        OuterSamples;
+    FDWCRevealBakeRayProjectionSettings      ProjectionSettings;
+    FWetClothingTransparencyRaySettings      RaySettings;
+    TMap<FName, int32>                       PriorityBySourceLayerId;
+    TMap<FName, int32>                       StatsIndexBySourceLayerId;
     TMap<FName, FWetClothingTextureReadback> SourceTextureDataByLayerId;
-    FDWCTransparencyAutoBakeResult SeedResult;
-    TArray<FString> Warnings;
-    uint64 EstimatedBytes = 0;
-    bool bValid = false;
+    FDWCTransparencyAutoBakeResult           SeedResult;
+    TArray<FString>                          Warnings;
+    uint64                                   EstimatedBytes = 0;
+    bool                                     bValid = false;
 };
 
 FDWCTransparencyAutoMapSnapshot::FDWCTransparencyAutoMapSnapshot()
@@ -974,10 +982,10 @@ uint64 FDWCTransparencyAutoMapSnapshot::GetEstimatedBytes() const
 }
 
 bool FDWCTransparencyAutoMapGenerator::BuildSameMeshSnapshot(
-    const UWetClothingAsset& WetClothingAsset,
+    const UWetClothingAsset&                 WetClothingAsset,
     const FWetClothingTransparencyLayerData& Layer,
-    FDWCTransparencyAutoMapSnapshot& OutSnapshot,
-    FString& OutErrorMessage)
+    FDWCTransparencyAutoMapSnapshot&         OutSnapshot,
+    FString&                                 OutErrorMessage)
 {
     check(IsInGameThread());
     OutSnapshot = FDWCTransparencyAutoMapSnapshot();
@@ -1006,9 +1014,9 @@ bool FDWCTransparencyAutoMapGenerator::BuildSameMeshSnapshot(
         16,
         4096);
     constexpr int32 LODIndex = 0;
-    const int32 DataUVChannelIndex = WetClothingAsset.GetDWCDataUVChannelIndex();
+    const int32     DataUVChannelIndex = WetClothingAsset.GetDWCDataUVChannelIndex();
     const FIntPoint BakeResolution(Resolution, Resolution);
-    const int32 PixelCount = Resolution * Resolution;
+    const int32     PixelCount = Resolution * Resolution;
 
     const FDWCBakeResolvedLayer OuterLayer = MakeResolvedLayer(
         RuntimeMesh,
@@ -1016,7 +1024,7 @@ bool FDWCTransparencyAutoMapGenerator::BuildSameMeshSnapshot(
         MAX_int32 / 2,
         Layer.RaySettings.MaxRayDistance);
     FSameMeshSurfaceCache SurfaceCache(RuntimeMesh, LODIndex);
-    FString BuildError;
+    FString               BuildError;
     if (!SurfaceCache.BuildSlotSurface(
             OuterLayer,
             DataUVChannelIndex,
@@ -1069,7 +1077,7 @@ bool FDWCTransparencyAutoMapGenerator::BuildSameMeshSnapshot(
             continue;
         }
 
-        const FName SourceLayerId = MakeInnerSourceLayerId(PriorityIndex);
+        const FName                 SourceLayerId = MakeInnerSourceLayerId(PriorityIndex);
         const FDWCBakeResolvedLayer SourceLayer = MakeResolvedLayer(
             RuntimeMesh,
             SourceLayerId,
@@ -1104,7 +1112,7 @@ bool FDWCTransparencyAutoMapGenerator::BuildSameMeshSnapshot(
                     FDWCRevealBakeSourceResolver::ResolveRevealSourceBaseColorTexture(SourceMaterial))
             {
                 FWetClothingTextureReadback TextureData;
-                FString TextureError;
+                FString                     TextureError;
                 if (FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
                         SourceTexture,
                         TextureData,
@@ -1224,7 +1232,7 @@ bool FDWCTransparencyAutoMapGenerator::BuildSameMeshSnapshot(
 }
 
 FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeSameMeshSnapshot(
-    FDWCTransparencyAutoMapSnapshot& SnapshotHandle,
+    FDWCTransparencyAutoMapSnapshot&   SnapshotHandle,
     const FDWCEditorCancellationToken* CancellationToken)
 {
     FDWCTransparencyAutoMapComputedResult Result;
@@ -1247,7 +1255,7 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
             return;
         }
         FDWCTransparencyAutoBakeResult& AutoResult = Result.AutoResult;
-        const int32 PixelIndex = Hit.Pixel.Y * Resolution + Hit.Pixel.X;
+        const int32                     PixelIndex = Hit.Pixel.Y * Resolution + Hit.Pixel.X;
         if (!Hit.bHit)
         {
             ++AutoResult.NoHitCount;

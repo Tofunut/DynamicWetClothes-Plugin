@@ -1,6 +1,8 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
+#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "EditorViewportClient.h"
@@ -15,7 +17,7 @@ class FDWCPartViewportClient : public FEditorViewportClient
 {
   public:
     FDWCPartViewportClient(
-        FAdvancedPreviewScene*                       InPreviewScene,
+        FAdvancedPreviewScene*              InPreviewScene,
         const TSharedRef<SDWCPartViewport>& InViewportWidget);
 
     virtual void Tick(float DeltaSeconds) override;
@@ -33,13 +35,13 @@ class FDWCPartViewportClient : public FEditorViewportClient
     {
         FVector Positions[3] = { FVector::ZeroVector, FVector::ZeroVector, FVector::ZeroVector };
         FVector Centroid = FVector::ZeroVector;
-        FBox Bounds = FBox(ForceInit);
-        int32 UVIslandID = INDEX_NONE;
+        FBox    Bounds = FBox(ForceInit);
+        int32   UVIslandID = INDEX_NONE;
     };
 
     struct FPickBVHNode
     {
-        FBox Bounds = FBox(ForceInit);
+        FBox  Bounds = FBox(ForceInit);
         int32 LeftChild = INDEX_NONE;
         int32 RightChild = INDEX_NONE;
         int32 FirstTriangle = 0;
@@ -51,15 +53,15 @@ class FDWCPartViewportClient : public FEditorViewportClient
     struct FPickBVHCacheEntry
     {
         TArray<FPickTriangle> Triangles;
-        TArray<int32> TriangleIndices;
-        TArray<FPickBVHNode> Nodes;
+        TArray<int32>         TriangleIndices;
+        TArray<FPickBVHNode>  Nodes;
     };
 
     int32 BuildPickBVHNode(int32 FirstTriangle, int32 TriangleCount);
-    void RebuildPickBVH(const TArray<FWetClothingAssetUVIsland>& InIslands);
+    void  RebuildPickBVH(const TArray<FWetClothingAssetUVIsland>& InIslands);
 
     FAdvancedPreviewScene*                       PreviewScene = nullptr;
-    TWeakPtr<SDWCPartViewport>                    ViewportWidget;
+    TWeakPtr<SDWCPartViewport>                   ViewportWidget;
     TWeakObjectPtr<const USkeletalMeshComponent> PreviewMeshComponent;
     TWeakObjectPtr<const USkeletalMeshComponent> PendingFocusMeshComponent;
     bool                                         bFocusPreviewMeshOnNextTick = false;

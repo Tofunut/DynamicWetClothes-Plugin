@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "Modules/ModuleManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
@@ -9,11 +10,12 @@
 
 class FDWCModule : public IModuleInterface
 {
-public:
+  public:
     virtual void StartupModule() override
     {
         const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("DynamicWetClothes"));
-        if (Plugin.IsValid()) AddShaderSourceDirectoryMapping(TEXT("/DynamicWetClothes"), FPaths::Combine(Plugin->GetBaseDir(), TEXT("Shaders")));
+        if (Plugin.IsValid())
+            AddShaderSourceDirectoryMapping(TEXT("/DynamicWetClothes"), FPaths::Combine(Plugin->GetBaseDir(), TEXT("Shaders")));
 
         RegisterDWCStatCommands();
         PostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FDWCModule::HandlePostEngineInit);
@@ -30,7 +32,7 @@ public:
         DWCStats::UnregisterStatCommands();
     }
 
-private:
+  private:
     void HandlePostEngineInit()
     {
         RegisterDWCStatCommands();

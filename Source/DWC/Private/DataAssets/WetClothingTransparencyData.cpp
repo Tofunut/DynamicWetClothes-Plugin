@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DataAssets/WetClothingTransparencyData.h"
 
 #include "Engine/SkeletalMesh.h"
@@ -6,21 +7,21 @@
 
 namespace
 {
-bool IsUsableBakedMap(const FWetClothingBakedTransparencyMap& Candidate)
-{
-    return Candidate.TransparencyMap != nullptr;
-}
+    bool IsUsableBakedMap(const FWetClothingBakedTransparencyMap& Candidate)
+    {
+        return Candidate.TransparencyMap != nullptr;
+    }
 
-bool IsMaterialSlotValid(const USkeletalMesh& TargetMesh, int32 MaterialSlotIndex)
-{
-    return TargetMesh.GetMaterials().IsValidIndex(MaterialSlotIndex);
-}
+    bool IsMaterialSlotValid(const USkeletalMesh& TargetMesh, int32 MaterialSlotIndex)
+    {
+        return TargetMesh.GetMaterials().IsValidIndex(MaterialSlotIndex);
+    }
 
-bool DoesStoredSlotNameMatch(const USkeletalMesh& TargetMesh, int32 MaterialSlotIndex, FName StoredSlotName)
-{
-    return StoredSlotName.IsNone() ||
-           TargetMesh.GetMaterials()[MaterialSlotIndex].MaterialSlotName == StoredSlotName;
-}
+    bool DoesStoredSlotNameMatch(const USkeletalMesh& TargetMesh, int32 MaterialSlotIndex, FName StoredSlotName)
+    {
+        return StoredSlotName.IsNone() ||
+               TargetMesh.GetMaterials()[MaterialSlotIndex].MaterialSlotName == StoredSlotName;
+    }
 } // namespace
 
 void FWetClothingTransparencyLayerData::MarkAutoBakeStale()
@@ -104,15 +105,15 @@ UTexture2D* FWetClothingTransparencyData::ResolveBakedTransparencyMap(int32 Mate
 }
 
 bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
-    const USkeletalMesh* TargetMesh,
+    const USkeletalMesh*                     TargetMesh,
     const FWetClothingTransparencyLayerData& Layer,
-    TArray<FString>& OutErrors,
-    int32 DWCDataUVChannelIndex)
+    TArray<FString>&                         OutErrors,
+    int32                                    DWCDataUVChannelIndex)
 {
     constexpr int32 LODIndex = 0;
     OutErrors.Reset();
     const FWetClothingTransparencyTargetSurface& TargetSurface = Layer.TargetSurface;
-    const FWetClothingTransparencyRaySettings& RaySettings = Layer.RaySettings;
+    const FWetClothingTransparencyRaySettings&   RaySettings = Layer.RaySettings;
 
     if (TargetMesh == nullptr)
     {
@@ -133,7 +134,7 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
     }
 
     const FSkeletalMeshRenderData* RenderData = TargetMesh->GetResourceForRendering();
-    int32 NumTexCoords = 0;
+    int32                          NumTexCoords = 0;
     if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(LODIndex))
     {
         OutErrors.Add(FString::Printf(TEXT("LOD %d render data is not available on the target mesh."), LODIndex));
@@ -167,7 +168,7 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
     }
 
     TSet<int32> SeenInnerSlots;
-    int32 InnerSlotCount = 0;
+    int32       InnerSlotCount = 0;
 
     const TArray<FWetClothingTransparencyInnerSlot>& InnerSlotPriority = Layer.SameMeshSource.InnerSlotPriority;
     for (int32 PriorityIndex = 0; PriorityIndex < InnerSlotPriority.Num(); ++PriorityIndex)
@@ -214,7 +215,6 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
                 InnerSlot.SourceUVChannel,
                 LODIndex));
         }
-
     }
 
     if (InnerSlotCount == 0)

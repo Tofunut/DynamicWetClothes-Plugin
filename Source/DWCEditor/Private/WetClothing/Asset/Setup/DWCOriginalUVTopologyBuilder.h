@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,12 +11,12 @@ class UWetClothingAsset;
 /** Builds WCA-owned persistent Editor-only Original UV topology from the DWC Prepared Skeletal Mesh. */
 class FDWCOriginalUVTopologyBuilder
 {
-public:
+  public:
     static bool BuildLOD(
-        const UWetClothingAsset& Asset,
-        USkeletalMesh* PreparedMesh,
-        int32 LODIndex,
+        const UWetClothingAsset&  Asset,
+        USkeletalMesh*            PreparedMesh,
+        int32                     LODIndex,
         FDWCEditorUVTopologyData& OutTopology,
-        FString* OutErrorMessage = nullptr,
-        const TSet<int32>* TargetMaterialSlotIndices = nullptr);
+        FString*                  OutErrorMessage = nullptr,
+        const TSet<int32>*        TargetMaterialSlotIndices = nullptr);
 };

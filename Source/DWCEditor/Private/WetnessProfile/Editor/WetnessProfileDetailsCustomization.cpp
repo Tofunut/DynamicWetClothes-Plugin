@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetnessProfile/Editor/WetnessProfileDetailsCustomization.h"
 
 #include "DataAssets/WetnessProfile.h"
@@ -29,10 +30,8 @@ namespace
     bool ReadBoolProperty(const TWeakPtr<IPropertyHandle> WeakHandle)
     {
         const TSharedPtr<IPropertyHandle> Handle = WeakHandle.Pin();
-        bool bValue = false;
-        return Handle.IsValid()
-            && Handle->GetValue(bValue) == FPropertyAccess::Success
-            && bValue;
+        bool                              bValue = false;
+        return Handle.IsValid() && Handle->GetValue(bValue) == FPropertyAccess::Success && bValue;
     }
 
     TAttribute<bool> EnabledWhen(const TSharedPtr<IPropertyHandle>& Handle)
@@ -154,8 +153,8 @@ namespace
     ECheckBoxState GetBoolCheckState(const TWeakPtr<IPropertyHandle> WeakHandle)
     {
         return ReadBoolProperty(WeakHandle)
-            ? ECheckBoxState::Checked
-            : ECheckBoxState::Unchecked;
+                   ? ECheckBoxState::Checked
+                   : ECheckBoxState::Unchecked;
     }
 
     void SetBoolProperty(const TWeakPtr<IPropertyHandle> WeakHandle, const ECheckBoxState NewState)
@@ -178,65 +177,23 @@ namespace
 #endif
 
     void ConfigureSurfaceTypeGroupHeader(
-        IDetailGroup& Group,
+        IDetailGroup&                      Group,
         const TSharedPtr<IPropertyHandle>& EnabledHandle,
-        const FText& Title,
-        const FText& Description,
-        const TAttribute<bool>& ParentEnabled,
-        const FLinearColor& HeaderTint)
+        const FText&                       Title,
+        const FText&                       Description,
+        const TAttribute<bool>&            ParentEnabled,
+        const FLinearColor&                HeaderTint)
     {
         Group.HeaderRow()
             .WholeRowContent()
-            [
-                SNew(SBorder)
-                .Padding(FMargin(8.0f, 5.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-                .BorderBackgroundColor(HeaderTint)
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .FillWidth(1.0f)
-                    .VAlign(VAlign_Center)
-                    [
-                        SNew(SVerticalBox)
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        [
-                            SNew(STextBlock)
-                            .Text(Title)
-                            .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))
-                        ]
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        .Padding(0.0f, 2.0f, 0.0f, 0.0f)
-                        [
-                            SNew(STextBlock)
-                            .Text(Description)
-                            .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                        ]
-                    ]
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    .Padding(12.0f, 0.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SCheckBox)
-                        .IsEnabled(ParentEnabled)
-                        .IsChecked_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(EnabledHandle)]()
-                        {
-                            return GetBoolCheckState(WeakHandle);
-                        })
-                        .OnCheckStateChanged_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(EnabledHandle)](const ECheckBoxState NewState)
-                        {
-                            SetBoolProperty(WeakHandle, NewState);
-                        })
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("SurfaceTypeEnabled", "Enabled"))
-                        ]
-                    ]
-                ]
-            ];
+                [SNew(SBorder)
+                     .Padding(FMargin(8.0f, 5.0f))
+                     .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                     .BorderBackgroundColor(HeaderTint)
+                         [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(Title).Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)[SNew(STextBlock).Text(Description).ColorAndOpacity(FSlateColor::UseSubduedForeground())]] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(12.0f, 0.0f, 0.0f, 0.0f)[SNew(SCheckBox).IsEnabled(ParentEnabled).IsChecked_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(EnabledHandle)]()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      { return GetBoolCheckState(WeakHandle); })
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .OnCheckStateChanged_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(EnabledHandle)](const ECheckBoxState NewState)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            { SetBoolProperty(WeakHandle, NewState); })[SNew(STextBlock).Text(LOCTEXT("SurfaceTypeEnabled", "Enabled"))]]]];
     }
 
 } // namespace
@@ -327,42 +284,10 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
     ValidationCategory.SetCategoryVisibility(!ValidationIssues.IsEmpty());
     ValidationCategory.AddCustomRow(LOCTEXT("InvalidValuesFilter", "Invalid out of range values"))
         .WholeRowContent()
-        [
-            SNew(SBorder)
-            .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-            .Padding(FMargin(6.0f, 4.0f))
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Top)
-                .Padding(0.0f, 1.0f, 8.0f, 0.0f)
-                [
-                    SNew(SImage)
-                    .Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))
-                ]
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                .VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock)
-                    .AutoWrapText(true)
-                    .Text(this, &FWetnessProfileDetailsCustomization::GetValidationText)
-                ]
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(10.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    SNew(SButton)
-                    .Text(LOCTEXT("ClampValues", "Fix Values"))
-                    .ToolTipText(LOCTEXT(
-                        "ClampValuesTooltip",
-                        "Clamp invalid values to the safe range before previewing, baking, or saving the profile."))
-                    .OnClicked(this, &FWetnessProfileDetailsCustomization::HandleClampValuesClicked)
-                ]
-            ]
-        ];
+            [SNew(SBorder)
+                 .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                 .Padding(FMargin(6.0f, 4.0f))
+                     [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 1.0f, 8.0f, 0.0f)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))] + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).AutoWrapText(true).Text(this, &FWetnessProfileDetailsCustomization::GetValidationText)] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10.0f, 0.0f, 0.0f, 0.0f)[SNew(SButton).Text(LOCTEXT("ClampValues", "Fix Values")).ToolTipText(LOCTEXT("ClampValuesTooltip", "Clamp invalid values to the safe range before previewing, baking, or saving the profile.")).OnClicked(this, &FWetnessProfileDetailsCustomization::HandleClampValuesClicked)]]];
 
     const TSharedPtr<IPropertyHandle> AbsorbedEnabled =
         FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.bEnabled"));
@@ -470,7 +395,7 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
 
     if (bShowSurface)
     {
-        const int32 BaseSortOrder = bSingleChannel ? 5 : 30;
+        const int32                       BaseSortOrder = bSingleChannel ? 5 : 30;
         const TSharedPtr<IPropertyHandle> SecondaryEnabled =
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.bUseSecondaryDroplets"));
 #if WITH_EDITORONLY_DATA
@@ -501,37 +426,17 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
 #if WITH_EDITORONLY_DATA
         GeneralCategory.AddCustomRow(LOCTEXT("SurfaceLayerSelectorFilter", "Primary Secondary Enabled"))
             .WholeRowContent()
-            [
-                SNew(SBorder)
-                .Padding(FMargin(8.0f, 6.0f))
-                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    .Padding(0.0f, 0.0f, 14.0f, 0.0f)
-                    [
-                        SNew(STextBlock)
-                        .Text(LOCTEXT("SurfaceLayerLabel", "Layer"))
-                        .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))
-                    ]
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    [
-                        SNew(SCheckBox)
-                        .Style(FAppStyle::Get(), TEXT("RadioButton"))
-                        .IsChecked_Lambda([WeakProfile = Profile]()
-                        {
+                [SNew(SBorder)
+                     .Padding(FMargin(8.0f, 6.0f))
+                     .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                         [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 14.0f, 0.0f)[SNew(STextBlock).Text(LOCTEXT("SurfaceLayerLabel", "Layer")).Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SCheckBox).Style(FAppStyle::Get(), TEXT("RadioButton")).IsChecked_Lambda([WeakProfile = Profile]()
+                                                                                                                                                                                                                                                                                                                                                                                                                 {
                             const UWetnessProfile* CurrentProfile = WeakProfile.Get();
                             return CurrentProfile == nullptr || CurrentProfile->EditorActiveDropletLayer == 0u
                                 ? ECheckBoxState::Checked
-                                : ECheckBoxState::Unchecked;
-                        })
-                        .OnCheckStateChanged_Lambda(
-                            [WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
-                            {
+                                : ECheckBoxState::Unchecked; })
+                                                                                                                                                                                                                                                                                                                                       .OnCheckStateChanged_Lambda([WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
+                                                                                                                                                                                                                                                                                                                                                                   {
                                 if (NewState != ECheckBoxState::Checked)
                                 {
                                     return;
@@ -546,118 +451,89 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
                                 if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
                                 {
                                     Utilities->ForceRefresh();
-                                }
-                            })
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("PrimaryLayer", "Primary"))
-                        ]
-                    ]
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    .Padding(14.0f, 0.0f, 0.0f, 0.0f)
-                    [
-                        SNew(SCheckBox)
-                        .Style(FAppStyle::Get(), TEXT("RadioButton"))
-                        .IsChecked_Lambda([WeakProfile = Profile]()
-                        {
+                                } })[SNew(STextBlock).Text(LOCTEXT("PrimaryLayer", "Primary"))]] +
+                          SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                              .Padding(14.0f, 0.0f, 0.0f, 0.0f)
+                                  [SNew(SCheckBox)
+                                       .Style(FAppStyle::Get(), TEXT("RadioButton"))
+                                       .IsChecked_Lambda([WeakProfile = Profile]()
+                                                         {
                             const UWetnessProfile* CurrentProfile = WeakProfile.Get();
                             return CurrentProfile != nullptr && CurrentProfile->EditorActiveDropletLayer == 1u
                                 ? ECheckBoxState::Checked
-                                : ECheckBoxState::Unchecked;
-                        })
-                        .OnCheckStateChanged_Lambda(
-                            [WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
-                            {
-                                if (NewState != ECheckBoxState::Checked)
-                                {
-                                    return;
-                                }
-                                if (UWetnessProfile* MutableProfile = WeakProfile.Get())
-                                {
-                                    MutableProfile->EditorActiveDropletLayer = 1u;
-                                    NotifyDetailsPreviewDisplayFilterChanged(
-                                        *MutableProfile,
-                                        GET_MEMBER_NAME_CHECKED(UWetnessProfile, EditorActiveDropletLayer));
-                                }
-                                if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
-                                {
-                                    Utilities->ForceRefresh();
-                                }
-                            })
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("SecondaryLayer", "Secondary"))
-                        ]
-                    ]
-                    + SHorizontalBox::Slot()
-                    .FillWidth(1.0f)
-                    [
-                        SNew(SSpacer)
-                    ]
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    [
-                        SNew(SCheckBox)
-                        .Visibility_Lambda([WeakProfile = Profile]()
-                        {
+                                : ECheckBoxState::Unchecked; })
+                                       .OnCheckStateChanged_Lambda(
+                                           [WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
+                                           {
+                                               if (NewState != ECheckBoxState::Checked)
+                                               {
+                                                   return;
+                                               }
+                                               if (UWetnessProfile* MutableProfile = WeakProfile.Get())
+                                               {
+                                                   MutableProfile->EditorActiveDropletLayer = 1u;
+                                                   NotifyDetailsPreviewDisplayFilterChanged(
+                                                       *MutableProfile,
+                                                       GET_MEMBER_NAME_CHECKED(UWetnessProfile, EditorActiveDropletLayer));
+                                               }
+                                               if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+                                               {
+                                                   Utilities->ForceRefresh();
+                                               }
+                                           })
+                                           [SNew(STextBlock)
+                                                .Text(LOCTEXT("SecondaryLayer", "Secondary"))]] +
+                          SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                                  [SNew(SSpacer)] +
+                          SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                                  [SNew(SCheckBox)
+                                       .Visibility_Lambda([WeakProfile = Profile]()
+                                                          {
                             const UWetnessProfile* CurrentProfile = WeakProfile.Get();
                             return CurrentProfile != nullptr && CurrentProfile->EditorActiveDropletLayer == 1u
                                 ? EVisibility::Visible
-                                : EVisibility::Collapsed;
-                        })
-                        .IsEnabled(SurfaceSettingsEnabled)
-                        .IsChecked_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(SecondaryEnabled)]()
-                        {
-                            return GetBoolCheckState(WeakHandle);
-                        })
-                        .OnCheckStateChanged_Lambda(
-                            [WeakHandle = TWeakPtr<IPropertyHandle>(SecondaryEnabled),
-                             WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
-                            {
-                                SetBoolProperty(WeakHandle, NewState);
-                                if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
-                                {
-                                    Utilities->ForceRefresh();
-                                }
-                            })
-                        .ToolTipText(LOCTEXT(
-                            "SecondaryRuntimeEnabledTooltip",
-                            "Enable or disable the Secondary droplet layer in the saved Wetness Profile and at runtime."))
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("SecondaryRuntimeEnabled", "Enabled"))
-                            .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))
-                        ]
-                    ]
-                ]
-            ];
+                                : EVisibility::Collapsed; })
+                                       .IsEnabled(SurfaceSettingsEnabled)
+                                       .IsChecked_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(SecondaryEnabled)]()
+                                                         { return GetBoolCheckState(WeakHandle); })
+                                       .OnCheckStateChanged_Lambda(
+                                           [WeakHandle = TWeakPtr<IPropertyHandle>(SecondaryEnabled),
+                                            WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
+                                           {
+                                               SetBoolProperty(WeakHandle, NewState);
+                                               if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+                                               {
+                                                   Utilities->ForceRefresh();
+                                               }
+                                           })
+                                       .ToolTipText(LOCTEXT(
+                                           "SecondaryRuntimeEnabledTooltip",
+                                           "Enable or disable the Secondary droplet layer in the saved Wetness Profile and at runtime."))
+                                           [SNew(STextBlock)
+                                                .Text(LOCTEXT("SecondaryRuntimeEnabled", "Enabled"))
+                                                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))]]]];
 
         GeneralCategory.AddCustomRow(LOCTEXT("SecondaryRuntimeStateFilter", "Secondary runtime state"))
             .WholeRowContent()
-            [
-                SNew(SBox)
-                .Visibility_Lambda([WeakProfile = Profile]()
-                {
+                [SNew(SBox)
+                     .Visibility_Lambda([WeakProfile = Profile]()
+                                        {
                     const UWetnessProfile* CurrentProfile = WeakProfile.Get();
                     return CurrentProfile != nullptr && CurrentProfile->EditorActiveDropletLayer == 1u
                         ? EVisibility::Visible
-                        : EVisibility::Collapsed;
-                })
-                [
-                    SNew(STextBlock)
-                    .Text_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(SecondaryEnabled)]()
-                    {
-                        return ReadBoolProperty(WeakHandle)
-                            ? LOCTEXT("SecondaryRuntimeEnabledState", "Secondary droplets are enabled at runtime.")
-                            : LOCTEXT("SecondaryRuntimeDisabledState", "Secondary droplets are disabled at runtime.");
-                    })
-                    .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
-                    .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                ]
-            ];
+                        : EVisibility::Collapsed; })
+                         [SNew(STextBlock)
+                              .Text_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(SecondaryEnabled)]()
+                                           { return ReadBoolProperty(WeakHandle)
+                                                        ? LOCTEXT("SecondaryRuntimeEnabledState", "Secondary droplets are enabled at runtime.")
+                                                        : LOCTEXT("SecondaryRuntimeDisabledState", "Secondary droplets are disabled at runtime."); })
+                              .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+                              .ColorAndOpacity(FSlateColor::UseSubduedForeground())]];
 #endif
 
         IDetailCategoryBuilder& SimulationCategory = DetailBuilder.EditCategory(
@@ -809,7 +685,7 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
 
 void FWetnessProfileDetailsCustomization::CollectPropertiesRecursive(
     const TSharedPtr<IPropertyHandle>& Parent,
-    const FString& ParentPath)
+    const FString&                     ParentPath)
 {
     if (!Parent.IsValid())
     {
@@ -858,12 +734,12 @@ TSharedPtr<IPropertyHandle> FWetnessProfileDetailsCustomization::FindPropertyByP
 }
 
 void FWetnessProfileDetailsCustomization::AddDefaultProperty(
-    IDetailCategoryBuilder& Category,
+    IDetailCategoryBuilder&            Category,
     const TSharedPtr<IPropertyHandle>& Handle,
-    const FText& DisplayName,
-    const FText& Tooltip,
-    const TAttribute<bool> IsEnabled,
-    const float NameIndent)
+    const FText&                       DisplayName,
+    const FText&                       Tooltip,
+    const TAttribute<bool>             IsEnabled,
+    const float                        NameIndent)
 {
     if (!Handle.IsValid() || !Handle->IsValidHandle())
     {
@@ -876,19 +752,12 @@ void FWetnessProfileDetailsCustomization::AddDefaultProperty(
             .FilterString(DisplayName)
             .IsEnabled(IsEnabled)
             .NameContent()
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                .Padding(NameIndent, 0.0f, 0.0f, 0.0f)
-                [
-                    Handle->CreatePropertyNameWidget(DisplayName, Tooltip)
-                ]
-            ]
+                [SNew(SHorizontalBox) + SHorizontalBox::Slot()
+                                            .FillWidth(1.0f)
+                                            .Padding(NameIndent, 0.0f, 0.0f, 0.0f)
+                                                [Handle->CreatePropertyNameWidget(DisplayName, Tooltip)]]
             .ValueContent()
-            [
-                Handle->CreatePropertyValueWidget()
-            ];
+                [Handle->CreatePropertyValueWidget()];
         return;
     }
 
@@ -899,11 +768,11 @@ void FWetnessProfileDetailsCustomization::AddDefaultProperty(
 }
 
 void FWetnessProfileDetailsCustomization::AddDefaultProperty(
-    IDetailGroup& Group,
+    IDetailGroup&                      Group,
     const TSharedPtr<IPropertyHandle>& Handle,
-    const FText& DisplayName,
-    const FText& Tooltip,
-    const TAttribute<bool> IsEnabled)
+    const FText&                       DisplayName,
+    const FText&                       Tooltip,
+    const TAttribute<bool>             IsEnabled)
 {
     if (!Handle.IsValid() || !Handle->IsValidHandle())
     {
@@ -917,19 +786,19 @@ void FWetnessProfileDetailsCustomization::AddDefaultProperty(
 }
 
 void FWetnessProfileDetailsCustomization::AddFloatProperty(
-    IDetailCategoryBuilder& Category,
+    IDetailCategoryBuilder&            Category,
     const TSharedPtr<IPropertyHandle>& Handle,
-    const FText& DisplayName,
-    const FText& Tooltip,
-    const float HardMin,
-    const float HardMax,
-    const float SliderMin,
-    const float SliderMax,
-    const float Delta,
-    const float DisplayScale,
-    const int32 MaxFractionalDigits,
-    const FText& Suffix,
-    const TAttribute<bool> IsEnabled)
+    const FText&                       DisplayName,
+    const FText&                       Tooltip,
+    const float                        HardMin,
+    const float                        HardMax,
+    const float                        SliderMin,
+    const float                        SliderMax,
+    const float                        Delta,
+    const float                        DisplayScale,
+    const int32                        MaxFractionalDigits,
+    const FText&                       Suffix,
+    const TAttribute<bool>             IsEnabled)
 {
     if (!Handle.IsValid() || !Handle->IsValidHandle() || DisplayScale <= 0.0f)
     {
@@ -940,65 +809,39 @@ void FWetnessProfileDetailsCustomization::AddFloatProperty(
         .FilterString(DisplayName)
         .IsEnabled(IsEnabled)
         .NameContent()
-        [
-            Handle->CreatePropertyNameWidget(DisplayName, Tooltip)
-        ]
+            [Handle->CreatePropertyNameWidget(DisplayName, Tooltip)]
         .ValueContent()
         .MinDesiredWidth(190.0f)
         .MaxDesiredWidth(420.0f)
-        [
-            SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
-            [
-                SNew(SNumericEntryBox<float>)
-                .MinValue(HardMin * DisplayScale)
-                .MaxValue(HardMax * DisplayScale)
-                .MinSliderValue(SliderMin * DisplayScale)
-                .MaxSliderValue(SliderMax * DisplayScale)
-                .Delta(Delta * DisplayScale)
-                .MinFractionalDigits(0)
-                .MaxFractionalDigits(MaxFractionalDigits)
-                .AllowSpin(true)
-                .Value_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayScale]()
-                {
-                    return GetDisplayedFloatValue(WeakHandle, DisplayScale);
-                })
-                .OnValueChanged_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), HardMin, HardMax, DisplayScale](float NewValue)
-                {
-                    SetDisplayedFloatValue(NewValue, WeakHandle, HardMin, HardMax, DisplayScale);
-                })
-                .OnValueCommitted_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), HardMin, HardMax, DisplayScale](float NewValue, ETextCommit::Type)
-                {
-                    SetDisplayedFloatValue(NewValue, WeakHandle, HardMin, HardMax, DisplayScale);
-                })
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(Suffix)
-                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-            ]
-        ];
+            [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SNumericEntryBox<float>).MinValue(HardMin * DisplayScale).MaxValue(HardMax * DisplayScale).MinSliderValue(SliderMin * DisplayScale).MaxSliderValue(SliderMax * DisplayScale).Delta(Delta * DisplayScale).MinFractionalDigits(0).MaxFractionalDigits(MaxFractionalDigits).AllowSpin(true).Value_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayScale]()
+                                                                                                                                                                                                                                                                                                                                                                                      { return GetDisplayedFloatValue(WeakHandle, DisplayScale); })
+                                                                               .OnValueChanged_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), HardMin, HardMax, DisplayScale](float NewValue)
+                                                                                                      { SetDisplayedFloatValue(NewValue, WeakHandle, HardMin, HardMax, DisplayScale); })
+                                                                               .OnValueCommitted_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), HardMin, HardMax, DisplayScale](float NewValue, ETextCommit::Type)
+                                                                                                        { SetDisplayedFloatValue(NewValue, WeakHandle, HardMin, HardMax, DisplayScale); })] +
+             SHorizontalBox::Slot()
+                 .AutoWidth()
+                 .VAlign(VAlign_Center)
+                 .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                     [SNew(STextBlock)
+                          .Text(Suffix)
+                          .ColorAndOpacity(FSlateColor::UseSubduedForeground())]];
 }
 
 void FWetnessProfileDetailsCustomization::AddFloatProperty(
-    IDetailGroup& Group,
+    IDetailGroup&                      Group,
     const TSharedPtr<IPropertyHandle>& Handle,
-    const FText& DisplayName,
-    const FText& Tooltip,
-    const float HardMin,
-    const float HardMax,
-    const float SliderMin,
-    const float SliderMax,
-    const float Delta,
-    const float DisplayScale,
-    const int32 MaxFractionalDigits,
-    const FText& Suffix,
-    const TAttribute<bool> IsEnabled)
+    const FText&                       DisplayName,
+    const FText&                       Tooltip,
+    const float                        HardMin,
+    const float                        HardMax,
+    const float                        SliderMin,
+    const float                        SliderMax,
+    const float                        Delta,
+    const float                        DisplayScale,
+    const int32                        MaxFractionalDigits,
+    const FText&                       Suffix,
+    const TAttribute<bool>             IsEnabled)
 {
     if (!Handle.IsValid() || !Handle->IsValidHandle() || DisplayScale <= 0.0f)
     {
@@ -1009,68 +852,42 @@ void FWetnessProfileDetailsCustomization::AddFloatProperty(
         .FilterString(DisplayName)
         .IsEnabled(IsEnabled)
         .NameContent()
-        [
-            Handle->CreatePropertyNameWidget(DisplayName, Tooltip)
-        ]
+            [Handle->CreatePropertyNameWidget(DisplayName, Tooltip)]
         .ValueContent()
         .MinDesiredWidth(190.0f)
         .MaxDesiredWidth(420.0f)
-        [
-            SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
-            [
-                SNew(SNumericEntryBox<float>)
-                .MinValue(HardMin * DisplayScale)
-                .MaxValue(HardMax * DisplayScale)
-                .MinSliderValue(SliderMin * DisplayScale)
-                .MaxSliderValue(SliderMax * DisplayScale)
-                .Delta(Delta * DisplayScale)
-                .MinFractionalDigits(0)
-                .MaxFractionalDigits(MaxFractionalDigits)
-                .AllowSpin(true)
-                .Value_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayScale]()
-                {
-                    return GetDisplayedFloatValue(WeakHandle, DisplayScale);
-                })
-                .OnValueChanged_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), HardMin, HardMax, DisplayScale](float NewValue)
-                {
-                    SetDisplayedFloatValue(NewValue, WeakHandle, HardMin, HardMax, DisplayScale);
-                })
-                .OnValueCommitted_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), HardMin, HardMax, DisplayScale](float NewValue, ETextCommit::Type)
-                {
-                    SetDisplayedFloatValue(NewValue, WeakHandle, HardMin, HardMax, DisplayScale);
-                })
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(Suffix)
-                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-            ]
-        ];
+            [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SNumericEntryBox<float>).MinValue(HardMin * DisplayScale).MaxValue(HardMax * DisplayScale).MinSliderValue(SliderMin * DisplayScale).MaxSliderValue(SliderMax * DisplayScale).Delta(Delta * DisplayScale).MinFractionalDigits(0).MaxFractionalDigits(MaxFractionalDigits).AllowSpin(true).Value_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayScale]()
+                                                                                                                                                                                                                                                                                                                                                                                      { return GetDisplayedFloatValue(WeakHandle, DisplayScale); })
+                                                                               .OnValueChanged_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), HardMin, HardMax, DisplayScale](float NewValue)
+                                                                                                      { SetDisplayedFloatValue(NewValue, WeakHandle, HardMin, HardMax, DisplayScale); })
+                                                                               .OnValueCommitted_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), HardMin, HardMax, DisplayScale](float NewValue, ETextCommit::Type)
+                                                                                                        { SetDisplayedFloatValue(NewValue, WeakHandle, HardMin, HardMax, DisplayScale); })] +
+             SHorizontalBox::Slot()
+                 .AutoWidth()
+                 .VAlign(VAlign_Center)
+                 .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                     [SNew(STextBlock)
+                          .Text(Suffix)
+                          .ColorAndOpacity(FSlateColor::UseSubduedForeground())]];
 }
 
 void FWetnessProfileDetailsCustomization::AddMappedFloatProperty(
-    IDetailCategoryBuilder& Category,
+    IDetailCategoryBuilder&            Category,
     const TSharedPtr<IPropertyHandle>& Handle,
-    const FText& DisplayName,
-    const FText& Tooltip,
-    const float HardDisplayMin,
-    const float HardDisplayMax,
-    const float SliderDisplayMin,
-    const float SliderDisplayMax,
-    const float DisplayDelta,
-    const int32 MaxFractionalDigits,
-    const FText& Suffix,
-    TFunction<float(float)> RawToDisplay,
-    TFunction<float(float)> DisplayToRaw,
-    const float RawHardMin,
-    const float RawHardMax,
-    const TAttribute<bool> IsEnabled)
+    const FText&                       DisplayName,
+    const FText&                       Tooltip,
+    const float                        HardDisplayMin,
+    const float                        HardDisplayMax,
+    const float                        SliderDisplayMin,
+    const float                        SliderDisplayMax,
+    const float                        DisplayDelta,
+    const int32                        MaxFractionalDigits,
+    const FText&                       Suffix,
+    TFunction<float(float)>            RawToDisplay,
+    TFunction<float(float)>            DisplayToRaw,
+    const float                        RawHardMin,
+    const float                        RawHardMax,
+    const TAttribute<bool>             IsEnabled)
 {
     if (!Handle.IsValid() || !Handle->IsValidHandle() || !RawToDisplay || !DisplayToRaw)
     {
@@ -1081,73 +898,42 @@ void FWetnessProfileDetailsCustomization::AddMappedFloatProperty(
         .FilterString(DisplayName)
         .IsEnabled(IsEnabled)
         .NameContent()
-        [
-            Handle->CreatePropertyNameWidget(DisplayName, Tooltip)
-        ]
+            [Handle->CreatePropertyNameWidget(DisplayName, Tooltip)]
         .ValueContent()
         .MinDesiredWidth(190.0f)
         .MaxDesiredWidth(420.0f)
-        [
-            SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
-            [
-                SNew(SNumericEntryBox<float>)
-                .MinValue(HardDisplayMin)
-                .MaxValue(HardDisplayMax)
-                .MinSliderValue(SliderDisplayMin)
-                .MaxSliderValue(SliderDisplayMax)
-                .Delta(DisplayDelta)
-                .MinFractionalDigits(0)
-                .MaxFractionalDigits(MaxFractionalDigits)
-                .AllowSpin(true)
-                .Value_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), RawToDisplay]()
-                {
-                    return GetMappedDisplayedFloatValue(WeakHandle, RawToDisplay);
-                })
-                .OnValueChanged_Lambda(
-                    [this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayToRaw, RawHardMin, RawHardMax](
-                        float NewValue)
-                    {
-                        SetMappedDisplayedFloatValue(NewValue, WeakHandle, DisplayToRaw, RawHardMin, RawHardMax);
-                    })
-                .OnValueCommitted_Lambda(
-                    [this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayToRaw, RawHardMin, RawHardMax](
-                        float NewValue,
-                        ETextCommit::Type)
-                    {
-                        SetMappedDisplayedFloatValue(NewValue, WeakHandle, DisplayToRaw, RawHardMin, RawHardMax);
-                    })
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(Suffix)
-                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-            ]
-        ];
+            [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SNumericEntryBox<float>).MinValue(HardDisplayMin).MaxValue(HardDisplayMax).MinSliderValue(SliderDisplayMin).MaxSliderValue(SliderDisplayMax).Delta(DisplayDelta).MinFractionalDigits(0).MaxFractionalDigits(MaxFractionalDigits).AllowSpin(true).Value_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), RawToDisplay]()
+                                                                                                                                                                                                                                                                                                                                              { return GetMappedDisplayedFloatValue(WeakHandle, RawToDisplay); })
+                                                                               .OnValueChanged_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayToRaw, RawHardMin, RawHardMax](float NewValue)
+                                                                                                      { SetMappedDisplayedFloatValue(NewValue, WeakHandle, DisplayToRaw, RawHardMin, RawHardMax); })
+                                                                               .OnValueCommitted_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayToRaw, RawHardMin, RawHardMax](float NewValue, ETextCommit::Type)
+                                                                                                        { SetMappedDisplayedFloatValue(NewValue, WeakHandle, DisplayToRaw, RawHardMin, RawHardMax); })] +
+             SHorizontalBox::Slot()
+                 .AutoWidth()
+                 .VAlign(VAlign_Center)
+                 .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                     [SNew(STextBlock)
+                          .Text(Suffix)
+                          .ColorAndOpacity(FSlateColor::UseSubduedForeground())]];
 }
 
 void FWetnessProfileDetailsCustomization::AddMappedFloatProperty(
-    IDetailGroup& Group,
+    IDetailGroup&                      Group,
     const TSharedPtr<IPropertyHandle>& Handle,
-    const FText& DisplayName,
-    const FText& Tooltip,
-    const float HardDisplayMin,
-    const float HardDisplayMax,
-    const float SliderDisplayMin,
-    const float SliderDisplayMax,
-    const float DisplayDelta,
-    const int32 MaxFractionalDigits,
-    const FText& Suffix,
-    TFunction<float(float)> RawToDisplay,
-    TFunction<float(float)> DisplayToRaw,
-    const float RawHardMin,
-    const float RawHardMax,
-    const TAttribute<bool> IsEnabled)
+    const FText&                       DisplayName,
+    const FText&                       Tooltip,
+    const float                        HardDisplayMin,
+    const float                        HardDisplayMax,
+    const float                        SliderDisplayMin,
+    const float                        SliderDisplayMax,
+    const float                        DisplayDelta,
+    const int32                        MaxFractionalDigits,
+    const FText&                       Suffix,
+    TFunction<float(float)>            RawToDisplay,
+    TFunction<float(float)>            DisplayToRaw,
+    const float                        RawHardMin,
+    const float                        RawHardMax,
+    const TAttribute<bool>             IsEnabled)
 {
     if (!Handle.IsValid() || !Handle->IsValidHandle() || !RawToDisplay || !DisplayToRaw)
     {
@@ -1158,62 +944,31 @@ void FWetnessProfileDetailsCustomization::AddMappedFloatProperty(
         .FilterString(DisplayName)
         .IsEnabled(IsEnabled)
         .NameContent()
-        [
-            Handle->CreatePropertyNameWidget(DisplayName, Tooltip)
-        ]
+            [Handle->CreatePropertyNameWidget(DisplayName, Tooltip)]
         .ValueContent()
         .MinDesiredWidth(190.0f)
         .MaxDesiredWidth(420.0f)
-        [
-            SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
-            [
-                SNew(SNumericEntryBox<float>)
-                .MinValue(HardDisplayMin)
-                .MaxValue(HardDisplayMax)
-                .MinSliderValue(SliderDisplayMin)
-                .MaxSliderValue(SliderDisplayMax)
-                .Delta(DisplayDelta)
-                .MinFractionalDigits(0)
-                .MaxFractionalDigits(MaxFractionalDigits)
-                .AllowSpin(true)
-                .Value_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), RawToDisplay]()
-                {
-                    return GetMappedDisplayedFloatValue(WeakHandle, RawToDisplay);
-                })
-                .OnValueChanged_Lambda(
-                    [this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayToRaw, RawHardMin, RawHardMax](
-                        float NewValue)
-                    {
-                        SetMappedDisplayedFloatValue(NewValue, WeakHandle, DisplayToRaw, RawHardMin, RawHardMax);
-                    })
-                .OnValueCommitted_Lambda(
-                    [this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayToRaw, RawHardMin, RawHardMax](
-                        float NewValue,
-                        ETextCommit::Type)
-                    {
-                        SetMappedDisplayedFloatValue(NewValue, WeakHandle, DisplayToRaw, RawHardMin, RawHardMax);
-                    })
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(Suffix)
-                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-            ]
-        ];
+            [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SNumericEntryBox<float>).MinValue(HardDisplayMin).MaxValue(HardDisplayMax).MinSliderValue(SliderDisplayMin).MaxSliderValue(SliderDisplayMax).Delta(DisplayDelta).MinFractionalDigits(0).MaxFractionalDigits(MaxFractionalDigits).AllowSpin(true).Value_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), RawToDisplay]()
+                                                                                                                                                                                                                                                                                                                                              { return GetMappedDisplayedFloatValue(WeakHandle, RawToDisplay); })
+                                                                               .OnValueChanged_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayToRaw, RawHardMin, RawHardMax](float NewValue)
+                                                                                                      { SetMappedDisplayedFloatValue(NewValue, WeakHandle, DisplayToRaw, RawHardMin, RawHardMax); })
+                                                                               .OnValueCommitted_Lambda([this, WeakHandle = TWeakPtr<IPropertyHandle>(Handle), DisplayToRaw, RawHardMin, RawHardMax](float NewValue, ETextCommit::Type)
+                                                                                                        { SetMappedDisplayedFloatValue(NewValue, WeakHandle, DisplayToRaw, RawHardMin, RawHardMax); })] +
+             SHorizontalBox::Slot()
+                 .AutoWidth()
+                 .VAlign(VAlign_Center)
+                 .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                     [SNew(STextBlock)
+                          .Text(Suffix)
+                          .ColorAndOpacity(FSlateColor::UseSubduedForeground())]];
 }
 
 void FWetnessProfileDetailsCustomization::AddStampSizeProperty(
-    IDetailCategoryBuilder& Category,
+    IDetailCategoryBuilder&            Category,
     const TSharedPtr<IPropertyHandle>& WidthHandle,
     const TSharedPtr<IPropertyHandle>& HeightHandle,
-    const FText& Tooltip,
-    const TAttribute<bool> IsEnabled)
+    const FText&                       Tooltip,
+    const TAttribute<bool>             IsEnabled)
 {
     if (!WidthHandle.IsValid() || !WidthHandle->IsValidHandle() ||
         !HeightHandle.IsValid() || !HeightHandle->IsValidHandle())
@@ -1226,38 +981,19 @@ void FWetnessProfileDetailsCustomization::AddStampSizeProperty(
         .FilterString(DisplayName)
         .IsEnabled(IsEnabled)
         .NameContent()
-        [
-            WidthHandle->CreatePropertyNameWidget(DisplayName, Tooltip)
-        ]
+            [WidthHandle->CreatePropertyNameWidget(DisplayName, Tooltip)]
         .ValueContent()
         .MinDesiredWidth(190.0f)
         .MaxDesiredWidth(420.0f)
-        [
-            SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
-            [
-                SNew(SNumericEntryBox<float>)
-                .MinValue(0.0f)
-                .MaxValue(256.0f)
-                .MinSliderValue(0.0f)
-                .MaxSliderValue(128.0f)
-                .Delta(1.0f)
-                .MinFractionalDigits(0)
-                .MaxFractionalDigits(0)
-                .AllowSpin(true)
-                .Value_Lambda([WeakWidth = TWeakPtr<IPropertyHandle>(WidthHandle)]() -> TOptional<float>
-                {
+            [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(256.0f).MinSliderValue(0.0f).MaxSliderValue(128.0f).Delta(1.0f).MinFractionalDigits(0).MaxFractionalDigits(0).AllowSpin(true).Value_Lambda([WeakWidth = TWeakPtr<IPropertyHandle>(WidthHandle)]() -> TOptional<float>
+                                                                                                                                                                                                                                                                            {
                     const TSharedPtr<IPropertyHandle> Handle = WeakWidth.Pin();
                     float Value = 0.0f;
                     return Handle.IsValid() && Handle->GetValue(Value) == FPropertyAccess::Success
                         ? TOptional<float>(Value)
-                        : TOptional<float>();
-                })
-                .OnValueChanged_Lambda(
-                    [WeakWidth = TWeakPtr<IPropertyHandle>(WidthHandle),
-                     WeakHeight = TWeakPtr<IPropertyHandle>(HeightHandle)](const float NewValue)
-                    {
+                        : TOptional<float>(); })
+                                                                               .OnValueChanged_Lambda([WeakWidth = TWeakPtr<IPropertyHandle>(WidthHandle), WeakHeight = TWeakPtr<IPropertyHandle>(HeightHandle)](const float NewValue)
+                                                                                                      {
                         const float Radius = FMath::Clamp(NewValue, 0.0f, 256.0f);
                         if (const TSharedPtr<IPropertyHandle> Width = WeakWidth.Pin())
                         {
@@ -1266,12 +1002,9 @@ void FWetnessProfileDetailsCustomization::AddStampSizeProperty(
                         if (const TSharedPtr<IPropertyHandle> Height = WeakHeight.Pin())
                         {
                             Height->SetValue(Radius);
-                        }
-                    })
-                .OnValueCommitted_Lambda(
-                    [WeakWidth = TWeakPtr<IPropertyHandle>(WidthHandle),
-                     WeakHeight = TWeakPtr<IPropertyHandle>(HeightHandle)](const float NewValue, ETextCommit::Type)
-                    {
+                        } })
+                                                                               .OnValueCommitted_Lambda([WeakWidth = TWeakPtr<IPropertyHandle>(WidthHandle), WeakHeight = TWeakPtr<IPropertyHandle>(HeightHandle)](const float NewValue, ETextCommit::Type)
+                                                                                                        {
                         const float Radius = FMath::Clamp(NewValue, 0.0f, 256.0f);
                         if (const TSharedPtr<IPropertyHandle> Width = WeakWidth.Pin())
                         {
@@ -1280,24 +1013,19 @@ void FWetnessProfileDetailsCustomization::AddStampSizeProperty(
                         if (const TSharedPtr<IPropertyHandle> Height = WeakHeight.Pin())
                         {
                             Height->SetValue(Radius);
-                        }
-                    })
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("PixelSuffixCircularStamp", "px"))
-                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-            ]
-        ];
+                        } })] +
+             SHorizontalBox::Slot()
+                 .AutoWidth()
+                 .VAlign(VAlign_Center)
+                 .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                     [SNew(STextBlock)
+                          .Text(LOCTEXT("PixelSuffixCircularStamp", "px"))
+                          .ColorAndOpacity(FSlateColor::UseSubduedForeground())]];
 }
 
 TOptional<float> FWetnessProfileDetailsCustomization::GetDisplayedFloatValue(
     const TWeakPtr<IPropertyHandle> WeakHandle,
-    const float DisplayScale) const
+    const float                     DisplayScale) const
 {
     const TSharedPtr<IPropertyHandle> Handle = WeakHandle.Pin();
     if (!Handle.IsValid())
@@ -1314,11 +1042,11 @@ TOptional<float> FWetnessProfileDetailsCustomization::GetDisplayedFloatValue(
 }
 
 void FWetnessProfileDetailsCustomization::SetDisplayedFloatValue(
-    const float DisplayValue,
+    const float                     DisplayValue,
     const TWeakPtr<IPropertyHandle> WeakHandle,
-    const float HardMin,
-    const float HardMax,
-    const float DisplayScale)
+    const float                     HardMin,
+    const float                     HardMax,
+    const float                     DisplayScale)
 {
     const TSharedPtr<IPropertyHandle> Handle = WeakHandle.Pin();
     if (!Handle.IsValid() || DisplayScale <= 0.0f)
@@ -1333,7 +1061,7 @@ void FWetnessProfileDetailsCustomization::SetDisplayedFloatValue(
 
 TOptional<float> FWetnessProfileDetailsCustomization::GetMappedDisplayedFloatValue(
     const TWeakPtr<IPropertyHandle> WeakHandle,
-    const TFunction<float(float)>& RawToDisplay) const
+    const TFunction<float(float)>&  RawToDisplay) const
 {
     const TSharedPtr<IPropertyHandle> Handle = WeakHandle.Pin();
     if (!Handle.IsValid() || !RawToDisplay)
@@ -1350,11 +1078,11 @@ TOptional<float> FWetnessProfileDetailsCustomization::GetMappedDisplayedFloatVal
 }
 
 void FWetnessProfileDetailsCustomization::SetMappedDisplayedFloatValue(
-    const float DisplayValue,
+    const float                     DisplayValue,
     const TWeakPtr<IPropertyHandle> WeakHandle,
-    const TFunction<float(float)>& DisplayToRaw,
-    const float RawHardMin,
-    const float RawHardMax)
+    const TFunction<float(float)>&  DisplayToRaw,
+    const float                     RawHardMin,
+    const float                     RawHardMax)
 {
     const TSharedPtr<IPropertyHandle> Handle = WeakHandle.Pin();
     if (!Handle.IsValid() || !DisplayToRaw)
@@ -1373,7 +1101,7 @@ FText FWetnessProfileDetailsCustomization::GetValidationText() const
         return FText::GetEmpty();
     }
 
-    FString Message = TEXT("This profile contains unsupported values that should be repaired before previewing, baking, or saving.\n");
+    FString     Message = TEXT("This profile contains unsupported values that should be repaired before previewing, baking, or saving.\n");
     const int32 MaxDisplayedIssues = 5;
     for (int32 IssueIndex = 0; IssueIndex < FMath::Min(ValidationIssues.Num(), MaxDisplayedIssues); ++IssueIndex)
     {

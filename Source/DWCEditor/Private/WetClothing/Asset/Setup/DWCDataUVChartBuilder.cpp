@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "DWCDataUVChartBuilder.h"
 
 #include "WetClothing/Foundation/UV/DWCUVEdgeKey.h"
@@ -13,7 +14,7 @@ namespace DWCDataUVChartBuilderPrivate
 
     class FDisjointSet
     {
-    public:
+      public:
         explicit FDisjointSet(const int32 Count)
         {
             Parents.SetNumUninitialized(Count);
@@ -54,7 +55,7 @@ namespace DWCDataUVChartBuilderPrivate
             }
         }
 
-    private:
+      private:
         TArray<int32> Parents;
         TArray<uint8> Ranks;
     };
@@ -96,20 +97,20 @@ namespace DWCDataUVChartBuilderPrivate
 
     struct FSourceMeshEdgeOccurrence
     {
-        int32 LocalTriangleIndex = INDEX_NONE;
+        int32                LocalTriangleIndex = INDEX_NONE;
         FDWCQuantizedUVPoint UVA;
         FDWCQuantizedUVPoint UVB;
     };
 
     struct FSweepTriangle
     {
-        int32 LocalTriangleIndex = INDEX_NONE;
+        int32  LocalTriangleIndex = INDEX_NONE;
         FBox2D Bounds = FBox2D(ForceInit);
     };
 
     FDWCDataUVSlotWarning& FindOrAddSlotWarning(
         TArray<FDWCDataUVSlotWarning>& SlotWarnings,
-        const int32 MaterialSlotIndex)
+        const int32                    MaterialSlotIndex)
     {
         for (FDWCDataUVSlotWarning& SlotWarning : SlotWarnings)
         {
@@ -126,8 +127,8 @@ namespace DWCDataUVChartBuilderPrivate
 
     void BuildSourceMeshTriangleAdjacency(
         const TArray<FDWCDataUVTriangle>& Triangles,
-        const TArray<int32>& TriangleIndices,
-        TArray<TSet<int32>>& OutAdjacency)
+        const TArray<int32>&              TriangleIndices,
+        TArray<TSet<int32>>&              OutAdjacency)
     {
         OutAdjacency.Reset();
         OutAdjacency.SetNum(TriangleIndices.Num());
@@ -144,9 +145,9 @@ namespace DWCDataUVChartBuilderPrivate
             const FDWCDataUVTriangle& Triangle = Triangles[TriangleIndex];
             for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
             {
-                const int32 NextEdgeIndex = (EdgeIndex + 1) % 3;
-                const FVertexID StartVertex = Triangle.Vertices[EdgeIndex];
-                const FVertexID EndVertex = Triangle.Vertices[NextEdgeIndex];
+                const int32              NextEdgeIndex = (EdgeIndex + 1) % 3;
+                const FVertexID          StartVertex = Triangle.Vertices[EdgeIndex];
+                const FVertexID          EndVertex = Triangle.Vertices[NextEdgeIndex];
                 const FSourceMeshEdgeKey Edge(StartVertex, EndVertex);
 
                 FSourceMeshEdgeOccurrence& Occurrence =
@@ -200,11 +201,11 @@ namespace DWCDataUVChartBuilderPrivate
 
     bool ChartsHaveCrossConflict(
         const TArray<FDWCDataUVChart>& Charts,
-        const int32 ChartA,
-        const int32 ChartB,
-        const TMap<int32, int32>& LocalIndexByTriangleIndex,
-        const TArray<TSet<int32>>& Conflicts,
-        const TArray<int32>& ChartByLocalTriangle)
+        const int32                    ChartA,
+        const int32                    ChartB,
+        const TMap<int32, int32>&      LocalIndexByTriangleIndex,
+        const TArray<TSet<int32>>&     Conflicts,
+        const TArray<int32>&           ChartByLocalTriangle)
     {
         if (!Charts.IsValidIndex(ChartA) || !Charts.IsValidIndex(ChartB))
         {
@@ -212,8 +213,8 @@ namespace DWCDataUVChartBuilderPrivate
         }
 
         const int32 SmallerChart = Charts[ChartA].TriangleIndices.Num() <= Charts[ChartB].TriangleIndices.Num()
-            ? ChartA
-            : ChartB;
+                                       ? ChartA
+                                       : ChartB;
         const int32 OtherChart = SmallerChart == ChartA ? ChartB : ChartA;
 
         for (const int32 TriangleIndex : Charts[SmallerChart].TriangleIndices)
@@ -238,9 +239,9 @@ namespace DWCDataUVChartBuilderPrivate
 
     void MergeAdjacentConflictFreeCharts(
         const TArray<FDWCDataUVTriangle>& Triangles,
-        const FDWCDataUVChart& SourceUVShell,
-        const TArray<TSet<int32>>& Conflicts,
-        TArray<FDWCDataUVChart>& InOutCharts)
+        const FDWCDataUVChart&            SourceUVShell,
+        const TArray<TSet<int32>>&        Conflicts,
+        TArray<FDWCDataUVChart>&          InOutCharts)
     {
         if (InOutCharts.Num() < 2)
         {
@@ -279,8 +280,8 @@ namespace DWCDataUVChartBuilderPrivate
             for (int32 LocalIndex = 0; LocalIndex < TriangleAdjacency.Num(); ++LocalIndex)
             {
                 const int32 ChartA = ChartByLocalTriangle.IsValidIndex(LocalIndex)
-                    ? ChartByLocalTriangle[LocalIndex]
-                    : INDEX_NONE;
+                                         ? ChartByLocalTriangle[LocalIndex]
+                                         : INDEX_NONE;
                 if (ChartA == INDEX_NONE)
                 {
                     continue;
@@ -354,12 +355,12 @@ namespace DWCDataUVChartBuilderPrivate
         }
     }
 
-}
+} // namespace DWCDataUVChartBuilderPrivate
 
 void FDWCDataUVChartBuilder::BuildOriginalUVIslands(
     const TArray<FDWCDataUVTriangle>& Triangles,
     const TMap<int32, TArray<int32>>& TriangleIndicesByMaterialSlot,
-    TArray<FDWCDataUVChart>& OutOriginalUVIslands)
+    TArray<FDWCDataUVChart>&          OutOriginalUVIslands)
 {
     OutOriginalUVIslands.Reset();
 
@@ -378,8 +379,8 @@ void FDWCDataUVChartBuilder::BuildOriginalUVIslands(
 
 void FDWCDataUVChartBuilder::BuildOriginalUVIslandsForSlot(
     const TArray<FDWCDataUVTriangle>& Triangles,
-    const TArray<int32>& SlotTriangleIndices,
-    TArray<FDWCDataUVChart>& OutOriginalUVIslands)
+    const TArray<int32>&              SlotTriangleIndices,
+    TArray<FDWCDataUVChart>&          OutOriginalUVIslands)
 {
     if (SlotTriangleIndices.IsEmpty())
     {
@@ -397,7 +398,7 @@ void FDWCDataUVChartBuilder::BuildOriginalUVIslandsForSlot(
             continue;
         }
 
-        const FDWCDataUVTriangle& Triangle = Triangles[TriangleArrayIndex];
+        const FDWCDataUVTriangle&  Triangle = Triangles[TriangleArrayIndex];
         FDWCUVIslandBuildTriangle& BuildTriangle = BuildTriangles.AddDefaulted_GetRef();
         BuildTriangle.TriangleID = TriangleArrayIndex;
         BuildTriangle.MaterialSlotIndex = Triangle.MaterialSlotIndex;
@@ -426,8 +427,8 @@ void FDWCDataUVChartBuilder::BuildOriginalUVIslandsForSlot(
 
 void FDWCDataUVChartBuilder::BuildSourceUVShellsForSlot(
     const TArray<FDWCDataUVTriangle>& Triangles,
-    const TArray<int32>& SlotTriangleIndices,
-    TArray<FDWCDataUVChart>& OutSourceShells)
+    const TArray<int32>&              SlotTriangleIndices,
+    TArray<FDWCDataUVChart>&          OutSourceShells)
 {
     using namespace DWCDataUVChartBuilderPrivate;
 
@@ -436,7 +437,7 @@ void FDWCDataUVChartBuilder::BuildSourceUVShellsForSlot(
         return;
     }
 
-    FDisjointSet DisjointSet(SlotTriangleIndices.Num());
+    FDisjointSet                                                DisjointSet(SlotTriangleIndices.Num());
     TMap<FSourceMeshEdgeKey, TArray<FSourceMeshEdgeOccurrence>> EdgeOccurrences;
 
     for (int32 LocalTriangleIndex = 0; LocalTriangleIndex < SlotTriangleIndices.Num(); ++LocalTriangleIndex)
@@ -450,9 +451,9 @@ void FDWCDataUVChartBuilder::BuildSourceUVShellsForSlot(
         const FDWCDataUVTriangle& Triangle = Triangles[TriangleIndex];
         for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
         {
-            const int32 NextEdgeIndex = (EdgeIndex + 1) % 3;
-            const FVertexID StartVertex = Triangle.Vertices[EdgeIndex];
-            const FVertexID EndVertex = Triangle.Vertices[NextEdgeIndex];
+            const int32              NextEdgeIndex = (EdgeIndex + 1) % 3;
+            const FVertexID          StartVertex = Triangle.Vertices[EdgeIndex];
+            const FVertexID          EndVertex = Triangle.Vertices[NextEdgeIndex];
             const FSourceMeshEdgeKey Edge(StartVertex, EndVertex);
 
             FSourceMeshEdgeOccurrence& Occurrence =
@@ -504,7 +505,7 @@ void FDWCDataUVChartBuilder::BuildSourceUVShellsForSlot(
         }
 
         const int32 Root = DisjointSet.Find(LocalTriangleIndex);
-        int32* OutputIndex = RootToOutputIndex.Find(Root);
+        int32*      OutputIndex = RootToOutputIndex.Find(Root);
         if (OutputIndex == nullptr)
         {
             FDWCDataUVChart& NewShell = OutSourceShells.AddDefaulted_GetRef();
@@ -520,10 +521,10 @@ void FDWCDataUVChartBuilder::BuildSourceUVShellsForSlot(
 
 bool FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
     const TArray<FDWCDataUVTriangle>& Triangles,
-    const FDWCDataUVChart& SourceUVShell,
-    TArray<TSet<int32>>& OutConflicts,
-    int32& OutOverlapPairCount,
-    int64& OutTestedCandidatePairCount)
+    const FDWCDataUVChart&            SourceUVShell,
+    TArray<TSet<int32>>&              OutConflicts,
+    int32&                            OutOverlapPairCount,
+    int64&                            OutTestedCandidatePairCount)
 {
     using namespace DWCDataUVChartBuilderPrivate;
 
@@ -551,7 +552,7 @@ bool FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
         }
 
         const FDWCDataUVTriangle& Triangle = Triangles[TriangleIndex];
-        FBox2D& TriangleBox = TriangleBounds[LocalIndex];
+        FBox2D&                   TriangleBox = TriangleBounds[LocalIndex];
         TriangleBox = FBox2D(ForceInit);
         TriangleBox += Triangle.SourceUVs[0];
         TriangleBox += Triangle.SourceUVs[1];
@@ -644,12 +645,12 @@ bool FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
 
 bool FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
     const TArray<FDWCDataUVTriangle>& Triangles,
-    const TArray<FDWCDataUVChart>& OriginalUVIslands,
-    TArray<FDWCDataUVChart>& OutCharts,
-    int32& OutSplitOriginalUVIslandCount,
-    int32& OutOverlapPairCount,
-    TArray<FDWCDataUVSlotWarning>& InOutSlotWarnings,
-    FDWCDataUVChartBuildFailure* OutFailure)
+    const TArray<FDWCDataUVChart>&    OriginalUVIslands,
+    TArray<FDWCDataUVChart>&          OutCharts,
+    int32&                            OutSplitOriginalUVIslandCount,
+    int32&                            OutOverlapPairCount,
+    TArray<FDWCDataUVSlotWarning>&    InOutSlotWarnings,
+    FDWCDataUVChartBuildFailure*      OutFailure)
 {
     using namespace DWCDataUVChartBuilderPrivate;
 
@@ -688,9 +689,9 @@ bool FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
         for (const FDWCDataUVChart& SourceUVShell : SourceUVShells)
         {
             TArray<TSet<int32>> Conflicts;
-            int32 ShellOverlapPairCount = 0;
-            int64 TestedCandidatePairCount = 0;
-            const bool bWithinBudget = BuildOverlapConflictGraph(
+            int32               ShellOverlapPairCount = 0;
+            int64               TestedCandidatePairCount = 0;
+            const bool          bWithinBudget = BuildOverlapConflictGraph(
                 Triangles,
                 SourceUVShell,
                 Conflicts,

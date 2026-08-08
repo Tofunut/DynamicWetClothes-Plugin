@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #include "WetClothing/Modes/Transparency/Authoring/DWCTransparencyAuthoringController.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -14,11 +15,16 @@ namespace
     {
         switch (Mode)
         {
-        case EDWCTransparencyBrushMode::Erase: return TEXT("Erase");
-        case EDWCTransparencyBrushMode::SetValue: return TEXT("Set Value");
-        case EDWCTransparencyBrushMode::Smooth: return TEXT("Smooth");
-        case EDWCTransparencyBrushMode::ResetToAuto: return TEXT("Reset To Auto");
-        default: return TEXT("Apply");
+        case EDWCTransparencyBrushMode::Erase:
+            return TEXT("Erase");
+        case EDWCTransparencyBrushMode::SetValue:
+            return TEXT("Set Value");
+        case EDWCTransparencyBrushMode::Smooth:
+            return TEXT("Smooth");
+        case EDWCTransparencyBrushMode::ResetToAuto:
+            return TEXT("Reset To Auto");
+        default:
+            return TEXT("Apply");
         }
     }
 
@@ -27,29 +33,27 @@ namespace
         const FDWCTransparencyEditContext& B)
     {
         return A.LayerGuid == B.LayerGuid &&
-            A.MaterialSlotIndex == B.MaterialSlotIndex &&
-            A.UVChannelIndex == B.UVChannelIndex &&
-            A.AddressMode == B.AddressMode &&
-            A.PaintTarget == B.PaintTarget;
+               A.MaterialSlotIndex == B.MaterialSlotIndex &&
+               A.UVChannelIndex == B.UVChannelIndex &&
+               A.AddressMode == B.AddressMode &&
+               A.PaintTarget == B.PaintTarget;
     }
 
     EDWCEditorAuthoringImpact GetInteractiveImpact(const EDWCTransparencyPaintTarget Target)
     {
         return EDWCEditorAuthoringImpact::AssetDirty |
-            EDWCEditorAuthoringImpact::PreviewIncremental |
-            (Target == EDWCTransparencyPaintTarget::RevealColor
-                 ? EDWCEditorAuthoringImpact::TransparencyAutoBake
-                 : EDWCEditorAuthoringImpact::TransparencyFinalBake);
+               EDWCEditorAuthoringImpact::PreviewIncremental |
+               (Target == EDWCTransparencyPaintTarget::RevealColor
+                    ? EDWCEditorAuthoringImpact::TransparencyAutoBake
+                    : EDWCEditorAuthoringImpact::TransparencyFinalBake);
     }
-}
+} // namespace
 
 FDWCTransparencyAuthoringController::FDWCTransparencyAuthoringController(
-    UWetClothingAsset* InAsset,
+    UWetClothingAsset*                      InAsset,
     TSharedPtr<FDWCEditorAuthoringDocument> InAuthoringDocument,
-    TSharedPtr<FDWCEditorSessionStore> InSessionStore)
-    : Asset(InAsset)
-    , AuthoringDocument(MoveTemp(InAuthoringDocument))
-    , SessionStore(MoveTemp(InSessionStore))
+    TSharedPtr<FDWCEditorSessionStore>      InSessionStore)
+    : Asset(InAsset), AuthoringDocument(MoveTemp(InAuthoringDocument)), SessionStore(MoveTemp(InSessionStore))
 {
 }
 
@@ -97,17 +101,17 @@ bool FDWCTransparencyAuthoringController::CanBeginSurfaceInteraction(
     const FDWCEditorSurfaceHit& SurfaceHit) const
 {
     const FDWCEditorTransparencySessionState& State = GetTransparencyState();
-    const FDWCTransparencyEditContext& Context = State.EditContext;
-    const FDWCTransparencyPaintSettings& Paint =
+    const FDWCTransparencyEditContext&        Context = State.EditContext;
+    const FDWCTransparencyPaintSettings&      Paint =
         Context.PaintTarget == EDWCTransparencyPaintTarget::RevealColor
-        ? State.RevealPaint
-        : State.Paint;
+                 ? State.RevealPaint
+                 : State.Paint;
     return Asset.IsValid() && AuthoringDocument.IsValid() && SurfaceHit.bHit &&
-        Context.PaintTarget != EDWCTransparencyPaintTarget::None && Paint.bEnabled &&
-        Context.LayerGuid.IsValid() && Context.MaterialSlotIndex != INDEX_NONE &&
-        Context.UVChannelIndex != INDEX_NONE &&
-        SurfaceHit.MaterialSlotIndex == Context.MaterialSlotIndex &&
-        SurfaceHit.UVChannelIndex == Context.UVChannelIndex;
+           Context.PaintTarget != EDWCTransparencyPaintTarget::None && Paint.bEnabled &&
+           Context.LayerGuid.IsValid() && Context.MaterialSlotIndex != INDEX_NONE &&
+           Context.UVChannelIndex != INDEX_NONE &&
+           SurfaceHit.MaterialSlotIndex == Context.MaterialSlotIndex &&
+           SurfaceHit.UVChannelIndex == Context.UVChannelIndex;
 }
 
 void FDWCTransparencyAuthoringController::HandleSurfaceHitChanged(const FDWCEditorSurfaceHit&)
@@ -125,8 +129,8 @@ void FDWCTransparencyAuthoringController::BeginSurfaceInteraction(
     const FDWCEditorTransparencySessionState& State = GetTransparencyState();
     ActiveContext = State.EditContext;
     ActivePaintSettings = ActiveContext.PaintTarget == EDWCTransparencyPaintTarget::RevealColor
-        ? State.RevealPaint
-        : State.Paint;
+                              ? State.RevealPaint
+                              : State.Paint;
     ActiveStrokeGuid = FGuid::NewGuid();
     bCommitMutationApplied = false;
 
@@ -206,11 +210,11 @@ void FDWCTransparencyAuthoringController::UpdateSurfaceInteraction(
         return;
     }
 
-    float RemainingDistance = Delta.Size();
-    FVector2D SegmentStart = LastPointerUV;
+    float           RemainingDistance = static_cast<float>(Delta.Size());
+    FVector2D       SegmentStart = LastPointerUV;
     const FVector2D Direction = RemainingDistance > UE_SMALL_NUMBER
-        ? Delta / RemainingDistance
-        : FVector2D::ZeroVector;
+                                    ? Delta / RemainingDistance
+                                    : FVector2D::ZeroVector;
     while (RemainingDistance + UE_SMALL_NUMBER >= DistanceToNextStamp)
     {
         SegmentStart += Direction * DistanceToNextStamp;
@@ -230,7 +234,7 @@ void FDWCTransparencyAuthoringController::UpdateSurfaceInteraction(
 
 bool FDWCTransparencyAuthoringController::AppendPaintSample(
     const FVector2D& PositionUV,
-    const int32 UVIslandID)
+    const int32      UVIslandID)
 {
     if (!IsInteracting() || !AuthoringDocument.IsValid())
     {
@@ -276,13 +280,13 @@ void FDWCTransparencyAuthoringController::EndSurfaceInteraction()
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::ElementList |
-        EDWCEditorAuthoringImpact::PreviewIncremental;
+                    EDWCEditorAuthoringImpact::PreviewIncremental;
     Change.MaterialSlotIndex = ActiveContext.MaterialSlotIndex;
     Change.LayerGuid = ActiveContext.LayerGuid;
     Change.ElementGuid = ActiveStrokeGuid;
     Change.Impact |= GetInteractiveImpact(ActiveContext.PaintTarget);
-    const FGuid LayerGuid = ActiveContext.LayerGuid;
-    const TOptional<FDWCTransparencyBrushStroke> BrushStroke = ActiveBrushStroke;
+    const FGuid                                        LayerGuid = ActiveContext.LayerGuid;
+    const TOptional<FDWCTransparencyBrushStroke>       BrushStroke = ActiveBrushStroke;
     const TOptional<FDWCTransparencyRevealColorStroke> RevealStroke = ActiveRevealColorStroke;
     if ((!BrushStroke.IsSet() || BrushStroke->Samples.IsEmpty()) &&
         (!RevealStroke.IsSet() || RevealStroke->Samples.IsEmpty()))
@@ -358,8 +362,8 @@ bool FDWCTransparencyAuthoringController::CancelActiveInteraction(const bool bRe
     {
         return false;
     }
-    const FGuid LayerGuid = ActiveContext.LayerGuid;
-    const FGuid StrokeGuid = ActiveStrokeGuid;
+    const FGuid               LayerGuid = ActiveContext.LayerGuid;
+    const FGuid               StrokeGuid = ActiveStrokeGuid;
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::ElementList | EDWCEditorAuthoringImpact::Preview;

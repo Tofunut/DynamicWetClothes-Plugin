@@ -1,4 +1,5 @@
-//Copyright 2026 Team Tofunut. All Rights Reserved.
+// Copyright 2026 Team Tofunut. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -20,31 +21,31 @@ namespace DWCSurfaceTextureSharedAsset
 
     DWC_API FString MakeNormalizedTextureObjectName(
         const FString& SourceTexturePath,
-        const TCHAR* TextureRole,
-        bool bNormalMap);
+        const TCHAR*   TextureRole,
+        bool           bNormalMap);
 
     DWC_API FString MakeNormalizedTextureObjectName(
         const UTexture2D* SourceTexture,
-        const TCHAR* TextureRole,
-        bool bNormalMap);
+        const TCHAR*      TextureRole,
+        bool              bNormalMap);
 
     DWC_API FString MakeNormalizedTexturePackageName(
         const FString& SourceTexturePath,
-        const TCHAR* TextureRole,
-        bool bNormalMap);
+        const TCHAR*   TextureRole,
+        bool           bNormalMap);
 
     DWC_API FString MakeNormalizedTexturePackageName(
         const UTexture2D* SourceTexture,
-        const TCHAR* TextureRole,
-        bool bNormalMap);
+        const TCHAR*      TextureRole,
+        bool              bNormalMap);
 
     DWC_API FString MakeNormalizedTextureObjectPath(
         const FString& SourceTexturePath,
-        const TCHAR* TextureRole,
-        bool bNormalMap);
+        const TCHAR*   TextureRole,
+        bool           bNormalMap);
 
     DWC_API FString MakeNormalizedTextureObjectPath(
         const UTexture2D* SourceTexture,
-        const TCHAR* TextureRole,
-        bool bNormalMap);
-}
+        const TCHAR*      TextureRole,
+        bool              bNormalMap);
+} // namespace DWCSurfaceTextureSharedAsset

@@ -6,7 +6,7 @@
 
 /**
  * Pure workflow policy shared by the Transparency panel and its regression
- * tests. Keeping this independent from Slate makes Stage 1/2/3 input routing
+ * tests. Keeping this independent from Slate makes Stage 1/2/3/4 input routing
  * deterministic and prevents deferred widget refreshes from owning tool state.
  */
 namespace DWCTransparencyWorkflow
@@ -42,17 +42,15 @@ namespace DWCTransparencyWorkflow
         const EDWCTransparencyEditorStage Stage,
         const EDWCTransparencySourceType  SourceType)
     {
-        // Stage 2 manual-color authoring always owns a reveal-color target so
-        // its surface hit/cursor context is available immediately. The
-        // The separate bEnabled setting gates whether a left click writes a
+        // Stage 3 edits the reveal-color result produced by Stage 2. The
+        // separate bEnabled setting gates whether a left click writes a
         // stroke; it must not make hover and target preview disappear.
-        if (Stage == EDWCTransparencyEditorStage::MapGeneration &&
-            SourceType == EDWCTransparencySourceType::ManualColorOrTexture)
+        if (Stage == EDWCTransparencyEditorStage::FinalEditing)
         {
             return EDWCTransparencyPaintTarget::RevealColor;
         }
 
-        return Stage == EDWCTransparencyEditorStage::FinalEditing
+        return Stage == EDWCTransparencyEditorStage::BakeOutput
                    ? EDWCTransparencyPaintTarget::FinalAlpha
                    : EDWCTransparencyPaintTarget::None;
     }

@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -40,7 +39,7 @@ enum class EDWCEditorResourcePool : uint8
 {
     WorkerPrivateCPU,
     PreviewWorkspaceCPU,
-    SpatialCacheCPU,
+    SharedCacheCPU,
     UploadStagingCPU,
     PreviewGPU
 };
@@ -63,8 +62,8 @@ struct FDWCEditorAsyncOperationKey
     bool operator==(const FDWCEditorAsyncOperationKey& Other) const
     {
         return Namespace == Other.Namespace &&
-               MaterialSlotIndex == Other.MaterialSlotIndex &&
-               ResourceGuid == Other.ResourceGuid;
+            MaterialSlotIndex == Other.MaterialSlotIndex &&
+            ResourceGuid == Other.ResourceGuid;
     }
 
     friend uint32 GetTypeHash(const FDWCEditorAsyncOperationKey& Key)
@@ -78,11 +77,11 @@ struct FDWCEditorAsyncOperationKey
 struct FDWCEditorAsyncOperationIdentity
 {
     FDWCEditorAsyncOperationKey Key;
-    FGuid                       SessionEpoch;
-    uint64                      OperationId = 0;
-    uint64                      Generation = 0;
-    EDWCEditorAuthoringDomain   Domain = EDWCEditorAuthoringDomain::None;
-    uint64                      DomainRevision = 0;
+    FGuid SessionEpoch;
+    uint64 OperationId = 0;
+    uint64 Generation = 0;
+    EDWCEditorAuthoringDomain Domain = EDWCEditorAuthoringDomain::None;
+    uint64 DomainRevision = 0;
 
     bool IsValid() const
     {
@@ -111,50 +110,50 @@ struct FDWCEditorMemoryBreakdown
 
 struct FDWCEditorResourceReservationRequest
 {
-    EDWCEditorResourcePool           Pool = EDWCEditorResourcePool::WorkerPrivateCPU;
-    uint64                           Bytes = 0;
+    EDWCEditorResourcePool Pool = EDWCEditorResourcePool::WorkerPrivateCPU;
+    uint64 Bytes = 0;
     FDWCEditorAsyncOperationIdentity Owner;
-    FString                          DebugName;
+    FString DebugName;
 };
 
 struct FDWCEditorResourcePoolDiagnostics
 {
     EDWCEditorResourcePool Pool = EDWCEditorResourcePool::WorkerPrivateCPU;
-    uint64                 UsedBytes = 0;
-    uint64                 BudgetBytes = 0;
-    uint64                 HighWaterBytes = 0;
-    uint64                 RejectionCount = 0;
+    uint64 UsedBytes = 0;
+    uint64 BudgetBytes = 0;
+    uint64 HighWaterBytes = 0;
+    uint64 RejectionCount = 0;
 };
 
 struct FDWCEditorResourceReservationDiagnostic
 {
-    uint64                           ReservationId = 0;
-    EDWCEditorResourcePool           Pool = EDWCEditorResourcePool::WorkerPrivateCPU;
-    uint64                           ReservedBytes = 0;
+    uint64 ReservationId = 0;
+    EDWCEditorResourcePool Pool = EDWCEditorResourcePool::WorkerPrivateCPU;
+    uint64 ReservedBytes = 0;
     FDWCEditorAsyncOperationIdentity Owner;
-    FString                          DebugName;
-    double                           AcquiredSeconds = 0.0;
+    FString DebugName;
+    double AcquiredSeconds = 0.0;
 };
 
 struct FDWCEditorAsyncOperationDiagnostic
 {
     FDWCEditorAsyncOperationIdentity Identity;
-    EDWCEditorAsyncRequestPolicy     RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
-    EDWCEditorAsyncOperationState    State = EDWCEditorAsyncOperationState::Pending;
+    EDWCEditorAsyncRequestPolicy RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
+    EDWCEditorAsyncOperationState State = EDWCEditorAsyncOperationState::Pending;
     EDWCEditorAsyncCancellationState CancellationState = EDWCEditorAsyncCancellationState::None;
-    FDWCEditorMemoryBreakdown        Memory;
-    uint64                           ReservedBytes = 0;
-    double                           SubmittedSeconds = 0.0;
-    double                           StateEnteredSeconds = 0.0;
-    double                           CancelRequestedSeconds = 0.0;
+    FDWCEditorMemoryBreakdown Memory;
+    uint64 ReservedBytes = 0;
+    double SubmittedSeconds = 0.0;
+    double StateEnteredSeconds = 0.0;
+    double CancelRequestedSeconds = 0.0;
 };
 
 struct FDWCEditorResourceGovernorDiagnostics
 {
-    uint64                                          GlobalCPUUsedBytes = 0;
-    uint64                                          GlobalCPUBudgetBytes = 0;
-    uint64                                          GlobalCPUHighWaterBytes = 0;
-    uint64                                          GlobalCPURejectionCount = 0;
-    TArray<FDWCEditorResourcePoolDiagnostics>       Pools;
+    uint64 GlobalCPUUsedBytes = 0;
+    uint64 GlobalCPUBudgetBytes = 0;
+    uint64 GlobalCPUHighWaterBytes = 0;
+    uint64 GlobalCPURejectionCount = 0;
+    TArray<FDWCEditorResourcePoolDiagnostics> Pools;
     TArray<FDWCEditorResourceReservationDiagnostic> Reservations;
 };

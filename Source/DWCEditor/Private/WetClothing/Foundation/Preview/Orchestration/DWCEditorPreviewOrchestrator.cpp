@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Preview/Orchestration/DWCEditorPreviewOrchestrator.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -9,9 +8,9 @@
 #include "WetRendering/WetMaterialParameters.h"
 
 void FDWCEditorPreviewOrchestrator::Initialize(
-    UWetClothingAsset*                 WetClothingAssetIn,
-    FDWCEditorPreviewSession*          PreviewSessionIn,
-    const EDWCEditorAuthoringDomain    ActiveDomainIn,
+    UWetClothingAsset* WetClothingAssetIn,
+    FDWCEditorPreviewSession* PreviewSessionIn,
+    const EDWCEditorAuthoringDomain ActiveDomainIn,
     TSharedPtr<FDWCEditorSessionStore> SessionStoreIn)
 {
     Shutdown();
@@ -67,21 +66,8 @@ void FDWCEditorPreviewOrchestrator::SetPreviewWetness(const float PreviewWetness
     }
 }
 
-void FDWCEditorPreviewOrchestrator::SetLiveLayers(
-    const int32                    MaterialSlotIndex,
-    TArray<FDWCEditorPreviewLayer> Layers)
-{
-    Layers.RemoveAll(
-        [MaterialSlotIndex](const FDWCEditorPreviewLayer& Layer)
-        {
-            return Layer.MaterialSlotIndex != MaterialSlotIndex;
-        });
-    LiveLayersBySlot.Add(MaterialSlotIndex, MoveTemp(Layers));
-    RecomposeSlot(MaterialSlotIndex);
-}
-
 void FDWCEditorPreviewOrchestrator::SetLiveLayer(
-    const int32            MaterialSlotIndex,
+    const int32 MaterialSlotIndex,
     FDWCEditorPreviewLayer Layer)
 {
     if (Layer.MaterialSlotIndex != MaterialSlotIndex)
@@ -106,7 +92,7 @@ void FDWCEditorPreviewOrchestrator::SetLiveLayer(
 }
 
 void FDWCEditorPreviewOrchestrator::ClearLiveLayer(
-    const int32                      MaterialSlotIndex,
+    const int32 MaterialSlotIndex,
     const EDWCEditorPreviewLayerKind LayerKind)
 {
     TArray<FDWCEditorPreviewLayer>* Layers = LiveLayersBySlot.Find(MaterialSlotIndex);
@@ -237,7 +223,7 @@ FDWCEditorPreviewLayer FDWCEditorPreviewOrchestrator::BuildSavedCrossLayer(
 void FDWCEditorPreviewOrchestrator::HandleSessionStateChanged(
     const FDWCEditorSessionState& State,
     const EDWCEditorSessionEffect Effects,
-    const uint64                  SessionRevision)
+    const uint64 SessionRevision)
 {
     (void)SessionRevision;
     bool bSavedCrossLayerChanged = false;

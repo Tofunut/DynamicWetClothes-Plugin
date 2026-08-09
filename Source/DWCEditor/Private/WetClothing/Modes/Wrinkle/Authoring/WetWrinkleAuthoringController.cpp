@@ -1,6 +1,6 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Wrinkle/Authoring/WetWrinkleAuthoringController.h"
+#include "WetClothing/Modes/Wrinkle/Authoring/WetWrinkleBrushConstants.h"
 
 #include "DataAssets/WetClothingAsset.h"
 #include "Framework/Application/SlateApplication.h"
@@ -8,14 +8,16 @@
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringDocument.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionAction.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionStore.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleViewport.h"
+#include "WetClothing/Modes/Wrinkle/Authoring/WetWrinklePatchDescriptor.h"
 
 #define LOCTEXT_NAMESPACE "WetWrinkleAuthoringController"
 
 namespace
 {
-    constexpr float DefaultBrushSizeCm = 8.0f;
+    constexpr float DefaultBrushSizeCm = WetWrinkleBrushConstants::DefaultSizeCm;
 
     float WrapDelta(const float Delta)
     {
@@ -31,25 +33,27 @@ namespace
     EDWCEditorAuthoringImpact MakeCreateImpact()
     {
         return EDWCEditorAuthoringImpact::AssetDirty |
-               EDWCEditorAuthoringImpact::ElementList |
-               EDWCEditorAuthoringImpact::PreviewIncremental |
-               EDWCEditorAuthoringImpact::WrinkleBake;
+            EDWCEditorAuthoringImpact::ElementList |
+            EDWCEditorAuthoringImpact::PreviewIncremental |
+            EDWCEditorAuthoringImpact::WrinkleBake;
     }
 
     EDWCEditorAuthoringImpact MakeEditImpact()
     {
         return EDWCEditorAuthoringImpact::AssetDirty |
-               EDWCEditorAuthoringImpact::ElementList |
-               EDWCEditorAuthoringImpact::Preview |
-               EDWCEditorAuthoringImpact::WrinkleBake;
+            EDWCEditorAuthoringImpact::ElementList |
+            EDWCEditorAuthoringImpact::Preview |
+            EDWCEditorAuthoringImpact::WrinkleBake;
     }
-} // namespace
+}
 
 FWetWrinkleAuthoringController::FWetWrinkleAuthoringController(
-    UWetClothingAsset*                      InAsset,
+    UWetClothingAsset* InAsset,
     TSharedPtr<FDWCEditorAuthoringDocument> InAuthoringDocument,
-    TSharedPtr<FDWCEditorSessionStore>      InSessionStore)
-    : Asset(InAsset), AuthoringDocument(MoveTemp(InAuthoringDocument)), SessionStore(MoveTemp(InSessionStore))
+    TSharedPtr<FDWCEditorSessionStore> InSessionStore)
+    : Asset(InAsset)
+    , AuthoringDocument(MoveTemp(InAuthoringDocument))
+    , SessionStore(MoveTemp(InSessionStore))
 {
 }
 
@@ -79,15 +83,15 @@ bool FWetWrinkleAuthoringController::CanAuthorWithCurrentSettings() const
 {
     const FWetWrinkleBrushSettings& Brush = GetBrushSettings();
     return Asset.IsValid() && AuthoringDocument.IsValid() &&
-           Brush.MaterialSlotIndex != INDEX_NONE && Brush.UVChannelIndex != INDEX_NONE &&
-           !IsUsingCustomWrinkleMap(Brush.MaterialSlotIndex);
+        Brush.MaterialSlotIndex != INDEX_NONE && Brush.UVChannelIndex != INDEX_NONE &&
+        !IsUsingCustomWrinkleMap(Brush.MaterialSlotIndex);
 }
 
 bool FWetWrinkleAuthoringController::IsUsingCustomWrinkleMap(const int32 MaterialSlotIndex) const
 {
     const UWetClothingAsset* CurrentAsset = Asset.Get();
     return CurrentAsset != nullptr && MaterialSlotIndex != INDEX_NONE &&
-           CurrentAsset->Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(MaterialSlotIndex);
+        CurrentAsset->Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(MaterialSlotIndex);
 }
 
 void FWetWrinkleAuthoringController::HandleSurfaceHitChanged(const FWetWrinkleSurfaceHit& SurfaceHit)
@@ -119,7 +123,9 @@ void FWetWrinkleAuthoringController::BeginSurfaceInteraction(const FWetWrinkleSu
         return;
     }
 
-    PlacePatch(SurfaceHit);
+    // Patch placement is WYSIWYG: only the immutable descriptor presented by
+    // the viewport may be committed. Rebuilding from the click hit would use a
+    // new seam tangent frame and can rotate the authored Patch.
 }
 
 void FWetWrinkleAuthoringController::UpdateSurfaceInteraction(const FWetWrinkleSurfaceHit& SurfaceHit)
@@ -174,16 +180,11 @@ bool FWetWrinkleAuthoringController::IsInteracting() const
     return bCapturingRidgeStroke || bEditingRidgePoint;
 }
 
-bool FWetWrinkleAuthoringController::IsEditingRidgePoint() const
-{
-    return bEditingRidgePoint;
-}
-
 bool FWetWrinkleAuthoringController::EditWrinkleData(
-    const FText&                                 TransactionText,
-    const EDWCEditorAuthoringImpact              Impact,
-    const int32                                  MaterialSlotIndex,
-    const FGuid&                                 ElementGuid,
+    const FText& TransactionText,
+    const EDWCEditorAuthoringImpact Impact,
+    const int32 MaterialSlotIndex,
+    const FGuid& ElementGuid,
     TFunctionRef<bool(FWetClothingWrinkleData&)> Mutation) const
 {
     if (!AuthoringDocument.IsValid())
@@ -196,19 +197,18 @@ bool FWetWrinkleAuthoringController::EditWrinkleData(
     Change.MaterialSlotIndex = MaterialSlotIndex;
     Change.ElementGuid = ElementGuid;
     return AuthoringDocument->Edit(
-                                TransactionText,
-                                Change,
-                                [&Mutation](UWetClothingAsset& MutableAsset)
-                                {
-                                    return Mutation(MutableAsset.Authored.WrinkleData);
-                                })
-        .bChanged;
+        TransactionText,
+        Change,
+        [&Mutation](UWetClothingAsset& MutableAsset)
+        {
+            return Mutation(MutableAsset.Authored.WrinkleData);
+        }).bChanged;
 }
 
 void FWetWrinkleAuthoringController::SelectElement(
     const EWetWrinkleElementType ElementType,
-    const FGuid&                 ElementGuid,
-    const int32                  RidgePointIndex) const
+    const FGuid& ElementGuid,
+    const int32 RidgePointIndex) const
 {
     if (!SessionStore.IsValid())
     {
@@ -221,25 +221,6 @@ void FWetWrinkleAuthoringController::SelectElement(
     SessionStore->Dispatch(Action);
 }
 
-FWetWrinklePatchPlacement FWetWrinkleAuthoringController::MakePatchFromHit(
-    const FWetWrinkleSurfaceHit& SurfaceHit) const
-{
-    const FWetWrinkleBrushSettings& Brush = GetBrushSettings();
-    FWetWrinklePatchPlacement       Patch;
-    Patch.PatchGuid = FGuid::NewGuid();
-    Patch.MaterialSlotIndex = SurfaceHit.MaterialSlotIndex;
-    Patch.SourceTexture = FWetClothingMaterialTextureResolver::ResolveOrSaveTextureSelection(
-        Asset.Get(), SurfaceHit.MaterialSlotIndex);
-    Patch.PositionUV = SurfaceHit.UV;
-    Patch.BrushRadiusUV = Brush.BrushRadiusUV;
-    Patch.RotationRadians = Brush.RotationRadians;
-    Patch.Scale = FVector2D(1.0f, 1.0f);
-    Patch.Strength = Brush.Strength;
-    Patch.Falloff = Brush.Falloff;
-    Patch.WrinkleNormalTexture = Brush.WrinkleNormalTexture;
-    return Patch;
-}
-
 FWetProceduralRidgeStrokePoint FWetWrinkleAuthoringController::MakeRidgePointFromHit(
     const FWetWrinkleSurfaceHit& SurfaceHit) const
 {
@@ -250,25 +231,51 @@ FWetProceduralRidgeStrokePoint FWetWrinkleAuthoringController::MakeRidgePointFro
     return Point;
 }
 
-void FWetWrinkleAuthoringController::PlacePatch(const FWetWrinkleSurfaceHit& SurfaceHit)
+FWetWrinklePatchCommitResult FWetWrinkleAuthoringController::CommitPresentedPatch(
+    const FDWCEditorWrinklePatchDescriptor& Descriptor)
 {
+    FWetWrinklePatchCommitResult Result;
     const FWetWrinkleBrushSettings& Brush = GetBrushSettings();
-    UWetClothingAsset*              CurrentAsset = Asset.Get();
-    if (CurrentAsset == nullptr || !SurfaceHit.bHit ||
-        SurfaceHit.MaterialSlotIndex != Brush.MaterialSlotIndex ||
-        SurfaceHit.UVChannelIndex != Brush.UVChannelIndex)
+    UWetClothingAsset* CurrentAsset = Asset.Get();
+    if (CurrentAsset == nullptr)
     {
-        return;
+        Result.FailureReason = TEXT("The Wet Clothing Asset is no longer available.");
+        return Result;
     }
-    if (Brush.WrinkleNormalTexture == nullptr)
+    if (Brush.ToolMode != EWetWrinkleToolMode::Patch)
+    {
+        Result.FailureReason = TEXT("Patch placement is no longer the active wrinkle tool.");
+        return Result;
+    }
+    if (Descriptor.MaterialSlotIndex != Brush.MaterialSlotIndex ||
+        Descriptor.UVChannelIndex != Brush.UVChannelIndex)
+    {
+        Result.FailureReason = TEXT("The visible Patch belongs to a different material slot or Data UV.");
+        return Result;
+    }
+    if (IsUsingCustomWrinkleMap(Descriptor.MaterialSlotIndex))
+    {
+        Result.FailureReason = TEXT("The selected slot uses a custom wrinkle normal map.");
+        return Result;
+    }
+
+    FWetWrinklePatchPlacement NewPatch;
+    FString DescriptorError;
+    UTexture* SourceTexture = FWetClothingMaterialTextureResolver::ResolveOrSaveTextureSelection(
+        CurrentAsset, Descriptor.MaterialSlotIndex);
+    if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildPlacement(
+            Descriptor, SourceTexture, NewPatch, &DescriptorError))
     {
         FMessageDialog::Open(
             EAppMsgType::Ok,
-            LOCTEXT("MissingWrinkleTexture", "Select a wrinkle normal texture before placing a wrinkle patch."));
-        return;
+            FText::FromString(DescriptorError.IsEmpty()
+                ? TEXT("The visible wrinkle preview is no longer valid. Move the cursor and try again.")
+                : DescriptorError));
+        Result.FailureReason = DescriptorError.IsEmpty()
+            ? TEXT("The visible wrinkle preview is no longer valid.")
+            : DescriptorError;
+        return Result;
     }
-
-    FWetWrinklePatchPlacement NewPatch = MakePatchFromHit(SurfaceHit);
     NewPatch.DisplayName = FString::Printf(
         TEXT("Patch %03d"),
         CurrentAsset->Authored.WrinkleData.EditablePatches.Num() + 1);
@@ -284,7 +291,8 @@ void FWetWrinkleAuthoringController::PlacePatch(const FWetWrinkleSurfaceHit& Sur
                 return true;
             }))
     {
-        return;
+        Result.FailureReason = TEXT("The Patch could not be committed to the Wet Clothing Asset.");
+        return Result;
     }
 
     SelectElement(EWetWrinkleElementType::Patch, NewPatch.PatchGuid);
@@ -292,6 +300,9 @@ void FWetWrinkleAuthoringController::PlacePatch(const FWetWrinkleSurfaceHit& Sur
     {
         PinnedViewport->AppendAccumulatedPreviewStamp(NewPatch);
     }
+    Result.bSucceeded = true;
+    Result.PatchGuid = NewPatch.PatchGuid;
+    return Result;
 }
 
 const FWetProceduralRidgeStroke* FWetWrinkleAuthoringController::FindProceduralRidgeStroke(
@@ -299,12 +310,12 @@ const FWetProceduralRidgeStroke* FWetWrinkleAuthoringController::FindProceduralR
 {
     const UWetClothingAsset* CurrentAsset = Asset.Get();
     return CurrentAsset != nullptr && StrokeGuid.IsValid()
-               ? CurrentAsset->Authored.WrinkleData.EditableProceduralRidgeStrokes.FindByPredicate(
-                     [StrokeGuid](const FWetProceduralRidgeStroke& Stroke)
-                     {
-                         return Stroke.StrokeGuid == StrokeGuid;
-                     })
-               : nullptr;
+        ? CurrentAsset->Authored.WrinkleData.EditableProceduralRidgeStrokes.FindByPredicate(
+              [StrokeGuid](const FWetProceduralRidgeStroke& Stroke)
+              {
+                  return Stroke.StrokeGuid == StrokeGuid;
+              })
+        : nullptr;
 }
 
 void FWetWrinkleAuthoringController::BeginRidgeStroke(const FWetWrinkleSurfaceHit& SurfaceHit)
@@ -396,13 +407,13 @@ void FWetWrinkleAuthoringController::AppendRidgeStrokePoint(const FWetWrinkleSur
     if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = Viewport.Pin())
     {
         TArray<FWetWrinkleSurfaceHit> PreviewHits = BuildSmoothedRidgeHits();
-        bool                          bEndJunction = false;
+        bool bEndJunction = false;
         if (PreviewHits.Num() >= 2)
         {
             FWetWrinkleSurfaceHit SnappedEndHit;
-            FGuid                 ConnectedStrokeGuid;
-            int32                 SegmentIndex = INDEX_NONE;
-            float                 SegmentT = 0.0f;
+            FGuid ConnectedStrokeGuid;
+            int32 SegmentIndex = INDEX_NONE;
+            float SegmentT = 0.0f;
             bEndJunction = FindRidgeJunctionSnap(
                 PreviewHits.Last(), FGuid(), SnappedEndHit, ConnectedStrokeGuid, SegmentIndex, SegmentT);
             if (bEndJunction)
@@ -419,7 +430,7 @@ void FWetWrinkleAuthoringController::AppendRidgeStrokePoint(const FWetWrinkleSur
 
 void FWetWrinkleAuthoringController::CommitRidgeStroke()
 {
-    UWetClothingAsset*            CurrentAsset = Asset.Get();
+    UWetClothingAsset* CurrentAsset = Asset.Get();
     TArray<FWetWrinkleSurfaceHit> FinalHits = BuildSmoothedRidgeHits();
     if (CurrentAsset == nullptr || FinalHits.Num() < 2)
     {
@@ -427,9 +438,9 @@ void FWetWrinkleAuthoringController::CommitRidgeStroke()
         return;
     }
 
-    FGuid                 EndConnectionGuid;
-    int32                 EndConnectionSegment = INDEX_NONE;
-    float                 EndConnectionT = 0.0f;
+    FGuid EndConnectionGuid;
+    int32 EndConnectionSegment = INDEX_NONE;
+    float EndConnectionT = 0.0f;
     FWetWrinkleSurfaceHit SnappedEndHit;
     if (FindRidgeJunctionSnap(
             FinalHits.Last(), FGuid(), SnappedEndHit,
@@ -439,7 +450,7 @@ void FWetWrinkleAuthoringController::CommitRidgeStroke()
     }
 
     const FWetWrinkleBrushSettings Brush = GetBrushSettings();
-    FWetProceduralRidgeStroke      NewStroke;
+    FWetProceduralRidgeStroke NewStroke;
     NewStroke.StrokeGuid = FGuid::NewGuid();
     NewStroke.DisplayName = FString::Printf(
         TEXT("Ridge %03d"),
@@ -525,15 +536,15 @@ bool FWetWrinkleAuthoringController::ShouldAddRidgePoint(const FWetWrinkleSurfac
         return true;
     }
     const FWetWrinkleBrushSettings& Brush = GetBrushSettings();
-    const float                     SpacingScale = FMath::Clamp(Brush.RidgePointSpacingScale, 0.05f, 1.0f);
-    const double                    SizeCm = SessionStore.IsValid()
-                                                 ? SessionStore->GetState().Wrinkle.BrushSizeCm
-                                                 : DefaultBrushSizeCm;
-    const double                    MinSurfaceSpacing = FMath::Max(SizeCm * SpacingScale, 0.1);
-    const double                    MinUVSpacing = FMath::Max(static_cast<double>(Brush.BrushRadiusUV * SpacingScale), 0.00025);
-    const FWetWrinkleSurfaceHit&    LastHit = CapturedRidgeHits.Last();
+    const float SpacingScale = FMath::Clamp(Brush.RidgePointSpacingScale, 0.05f, 1.0f);
+    const double SizeCm = SessionStore.IsValid()
+        ? SessionStore->GetState().Wrinkle.BrushSizeCm
+        : DefaultBrushSizeCm;
+    const double MinSurfaceSpacing = FMath::Max(SizeCm * SpacingScale, 0.1);
+    const double MinUVSpacing = FMath::Max(static_cast<double>(Brush.BrushRadiusUV * SpacingScale), 0.00025);
+    const FWetWrinkleSurfaceHit& LastHit = CapturedRidgeHits.Last();
     return FVector::Distance(LastHit.WorldPosition, SurfaceHit.WorldPosition) >= MinSurfaceSpacing ||
-           FVector2D::Distance(LastHit.UV, SurfaceHit.UV) >= MinUVSpacing;
+        FVector2D::Distance(LastHit.UV, SurfaceHit.UV) >= MinUVSpacing;
 }
 
 TArray<FWetWrinkleSurfaceHit> FWetWrinkleAuthoringController::BuildSmoothedRidgeHits() const
@@ -570,7 +581,7 @@ bool FWetWrinkleAuthoringController::TrySmoothRidgeInteriorHit(
     const FWetWrinkleSurfaceHit& Previous,
     const FWetWrinkleSurfaceHit& Current,
     const FWetWrinkleSurfaceHit& Next,
-    FWetWrinkleSurfaceHit&       OutSmoothedHit) const
+    FWetWrinkleSurfaceHit& OutSmoothedHit) const
 {
     const TSharedPtr<SWetWrinkleViewport> PinnedViewport = Viewport.Pin();
     if (!PinnedViewport.IsValid())
@@ -578,42 +589,42 @@ bool FWetWrinkleAuthoringController::TrySmoothRidgeInteriorHit(
         return false;
     }
     constexpr double SmoothingAlpha = 0.25;
-    const double     SizeCm = SessionStore.IsValid()
-                                  ? SessionStore->GetState().Wrinkle.BrushSizeCm
-                                  : DefaultBrushSizeCm;
-    const double     MaxProjectionDistance = FMath::Max(SizeCm * 0.5, 0.5);
-    const FVector2D  SmoothedUV = FMath::Lerp(Current.UV, (Previous.UV + Next.UV) * 0.5, SmoothingAlpha);
+    const double SizeCm = SessionStore.IsValid()
+        ? SessionStore->GetState().Wrinkle.BrushSizeCm
+        : DefaultBrushSizeCm;
+    const double MaxProjectionDistance = FMath::Max(SizeCm * 0.5, 0.5);
+    const FVector2D SmoothedUV = FMath::Lerp(Current.UV, (Previous.UV + Next.UV) * 0.5, SmoothingAlpha);
     return PinnedViewport->TryBuildSurfaceHitAtUVNearWorldPosition(
                ActiveRidgeMaterialSlotIndex,
                ActiveRidgeUVChannelIndex,
                SmoothedUV,
                Current.WorldPosition,
                OutSmoothedHit) &&
-           OutSmoothedHit.UVIslandID == ActiveRidgeUVIslandID &&
-           FVector::Distance(OutSmoothedHit.WorldPosition, Current.WorldPosition) <= MaxProjectionDistance;
+        OutSmoothedHit.UVIslandID == ActiveRidgeUVIslandID &&
+        FVector::Distance(OutSmoothedHit.WorldPosition, Current.WorldPosition) <= MaxProjectionDistance;
 }
 
 int32 FWetWrinkleAuthoringController::FindNearestRidgeSegment(
     const FWetProceduralRidgeStroke& Stroke,
-    const FVector2D&                 UV,
-    float&                           OutSegmentT) const
+    const FVector2D& UV,
+    float& OutSegmentT) const
 {
-    int32  NearestIndex = INDEX_NONE;
+    int32 NearestIndex = INDEX_NONE;
     double NearestDistanceSq = TNumericLimits<double>::Max();
     OutSegmentT = 0.0f;
     for (int32 Index = 0; Index + 1 < Stroke.Points.Num(); ++Index)
     {
         const FVector2D Start = Stroke.Points[Index].PositionUV;
         const FVector2D Delta(
-            WrapDelta(static_cast<float>(Stroke.Points[Index + 1].PositionUV.X - Start.X)),
-            WrapDelta(static_cast<float>(Stroke.Points[Index + 1].PositionUV.Y - Start.Y)));
+            WrapDelta(Stroke.Points[Index + 1].PositionUV.X - Start.X),
+            WrapDelta(Stroke.Points[Index + 1].PositionUV.Y - Start.Y));
         const FVector2D WrappedUV(
-            Start.X + WrapDelta(static_cast<float>(UV.X - Start.X)),
-            Start.Y + WrapDelta(static_cast<float>(UV.Y - Start.Y)));
+            Start.X + WrapDelta(UV.X - Start.X),
+            Start.Y + WrapDelta(UV.Y - Start.Y));
         const double LengthSq = Delta.SizeSquared();
-        const float  SegmentT = LengthSq > UE_SMALL_NUMBER
-                                    ? FMath::Clamp(static_cast<float>(FVector2D::DotProduct(WrappedUV - Start, Delta) / LengthSq), 0.0f, 1.0f)
-                                    : 0.0f;
+        const float SegmentT = LengthSq > UE_SMALL_NUMBER
+            ? FMath::Clamp(static_cast<float>(FVector2D::DotProduct(WrappedUV - Start, Delta) / LengthSq), 0.0f, 1.0f)
+            : 0.0f;
         const double DistanceSq = FVector2D::DistSquared(WrappedUV, Start + Delta * SegmentT);
         if (DistanceSq < NearestDistanceSq)
         {
@@ -627,17 +638,17 @@ int32 FWetWrinkleAuthoringController::FindNearestRidgeSegment(
 
 bool FWetWrinkleAuthoringController::FindRidgeJunctionSnap(
     const FWetWrinkleSurfaceHit& SurfaceHit,
-    const FGuid&                 ExcludedStrokeGuid,
-    FWetWrinkleSurfaceHit&       OutSnappedHit,
-    FGuid&                       OutConnectedStrokeGuid,
-    int32&                       OutConnectedSegmentIndex,
-    float&                       OutConnectedSegmentT) const
+    const FGuid& ExcludedStrokeGuid,
+    FWetWrinkleSurfaceHit& OutSnappedHit,
+    FGuid& OutConnectedStrokeGuid,
+    int32& OutConnectedSegmentIndex,
+    float& OutConnectedSegmentT) const
 {
     OutConnectedStrokeGuid.Invalidate();
     OutConnectedSegmentIndex = INDEX_NONE;
     OutConnectedSegmentT = 0.0f;
-    const FWetWrinkleBrushSettings&       Brush = GetBrushSettings();
-    const UWetClothingAsset*              CurrentAsset = Asset.Get();
+    const FWetWrinkleBrushSettings& Brush = GetBrushSettings();
+    const UWetClothingAsset* CurrentAsset = Asset.Get();
     const TSharedPtr<SWetWrinkleViewport> PinnedViewport = Viewport.Pin();
     if (!Brush.bRidgeJunctionModeEnabled || CurrentAsset == nullptr || !PinnedViewport.IsValid() || !SurfaceHit.bHit)
     {
@@ -645,9 +656,9 @@ bool FWetWrinkleAuthoringController::FindRidgeJunctionSnap(
     }
 
     const double SizeCm = SessionStore.IsValid()
-                              ? SessionStore->GetState().Wrinkle.BrushSizeCm
-                              : DefaultBrushSizeCm;
-    double       BestDistanceSq = FMath::Square(FMath::Max(SizeCm * 0.75, 1.0));
+        ? SessionStore->GetState().Wrinkle.BrushSizeCm
+        : DefaultBrushSizeCm;
+    double BestDistanceSq = FMath::Square(FMath::Max(SizeCm * 0.75, 1.0));
     for (const FWetProceduralRidgeStroke& Candidate : CurrentAsset->Authored.WrinkleData.EditableProceduralRidgeStrokes)
     {
         if (!Candidate.bEnabled || Candidate.StrokeGuid == ExcludedStrokeGuid || Candidate.Points.Num() < 2 ||
@@ -698,25 +709,25 @@ bool FWetWrinkleAuthoringController::FindRidgeJunctionSnap(
                 continue;
             }
             const FVector Delta = EndWorld - StartWorld;
-            const double  LengthSq = Delta.SizeSquared();
-            const float   SegmentT = LengthSq > UE_SMALL_NUMBER
-                                         ? FMath::Clamp(static_cast<float>(FVector::DotProduct(SurfaceHit.WorldPosition - StartWorld, Delta) / LengthSq), 0.0f, 1.0f)
-                                         : 0.0f;
+            const double LengthSq = Delta.SizeSquared();
+            const float SegmentT = LengthSq > UE_SMALL_NUMBER
+                ? FMath::Clamp(static_cast<float>(FVector::DotProduct(SurfaceHit.WorldPosition - StartWorld, Delta) / LengthSq), 0.0f, 1.0f)
+                : 0.0f;
             const FVector ClosestWorld = StartWorld + Delta * SegmentT;
-            const double  DistanceSq = FVector::DistSquared(ClosestWorld, SurfaceHit.WorldPosition);
+            const double DistanceSq = FVector::DistSquared(ClosestWorld, SurfaceHit.WorldPosition);
             if (DistanceSq > BestDistanceSq)
             {
                 continue;
             }
             const FVector2D StartUV = Candidate.Points[SegmentIndex].PositionUV;
             const FVector2D UVDelta(
-                WrapDelta(static_cast<float>(Candidate.Points[SegmentIndex + 1].PositionUV.X - StartUV.X)),
-                WrapDelta(static_cast<float>(Candidate.Points[SegmentIndex + 1].PositionUV.Y - StartUV.Y)));
+                WrapDelta(Candidate.Points[SegmentIndex + 1].PositionUV.X - StartUV.X),
+                WrapDelta(Candidate.Points[SegmentIndex + 1].PositionUV.Y - StartUV.Y));
             FWetWrinkleSurfaceHit CandidateHit;
             if (!PinnedViewport->TryBuildSurfaceHitAtUVNearWorldPosition(
                     SurfaceHit.MaterialSlotIndex,
                     SurfaceHit.UVChannelIndex,
-                    FVector2D(WrapUnit(static_cast<float>(StartUV.X + UVDelta.X * SegmentT)), WrapUnit(static_cast<float>(StartUV.Y + UVDelta.Y * SegmentT))),
+                    FVector2D(WrapUnit(StartUV.X + UVDelta.X * SegmentT), WrapUnit(StartUV.Y + UVDelta.Y * SegmentT)),
                     ClosestWorld,
                     CandidateHit))
             {
@@ -739,10 +750,10 @@ void FWetWrinkleAuthoringController::BeginRidgePointEdit(const FWetWrinkleSurfac
         return;
     }
     const FDWCEditorWrinkleSessionState& State = SessionStore->GetState().Wrinkle;
-    const FWetProceduralRidgeStroke*     AuthoredStroke =
+    const FWetProceduralRidgeStroke* AuthoredStroke =
         State.SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke
-                ? FindProceduralRidgeStroke(State.SelectedElementGuid)
-                : nullptr;
+        ? FindProceduralRidgeStroke(State.SelectedElementGuid)
+        : nullptr;
     const TSharedPtr<SWetWrinkleViewport> PinnedViewport = Viewport.Pin();
     if (AuthoredStroke == nullptr || !PinnedViewport.IsValid() || !SurfaceHit.bHit ||
         SurfaceHit.MaterialSlotIndex != AuthoredStroke->MaterialSlotIndex)
@@ -751,10 +762,10 @@ void FWetWrinkleAuthoringController::BeginRidgePointEdit(const FWetWrinkleSurfac
     }
 
     const bool bInsertPoint = FSlateApplication::Get().GetModifierKeys().IsShiftDown();
-    int32      PointIndex = INDEX_NONE;
+    int32 PointIndex = INDEX_NONE;
     if (bInsertPoint)
     {
-        float       SegmentT = 0.0f;
+        float SegmentT = 0.0f;
         const int32 SegmentIndex = FindNearestRidgeSegment(*AuthoredStroke, SurfaceHit.UV, SegmentT);
         PointIndex = SegmentIndex != INDEX_NONE ? SegmentIndex + 1 : INDEX_NONE;
     }
@@ -795,10 +806,10 @@ void FWetWrinkleAuthoringController::UpdateRidgePointEdit(const FWetWrinkleSurfa
     }
 
     FWetWrinkleSurfaceHit FinalHit = SurfaceHit;
-    const bool            bEndpoint = EditingRidgePointIndex == 0 || EditingRidgePointIndex == EditedRidgeStroke->Points.Num() - 1;
-    FGuid                 ConnectedGuid;
-    int32                 ConnectedSegment = INDEX_NONE;
-    float                 ConnectedT = 0.0f;
+    const bool bEndpoint = EditingRidgePointIndex == 0 || EditingRidgePointIndex == EditedRidgeStroke->Points.Num() - 1;
+    FGuid ConnectedGuid;
+    int32 ConnectedSegment = INDEX_NONE;
+    float ConnectedT = 0.0f;
     if (bEndpoint)
     {
         FindRidgeJunctionSnap(
@@ -809,8 +820,8 @@ void FWetWrinkleAuthoringController::UpdateRidgePointEdit(const FWetWrinkleSurfa
     if (EditingRidgePointIndex == 0)
     {
         EditedRidgeStroke->StartEndpoint.Mode = ConnectedGuid.IsValid()
-                                                    ? EWetProceduralRidgeEndpointMode::Junction
-                                                    : EWetProceduralRidgeEndpointMode::Pointed;
+            ? EWetProceduralRidgeEndpointMode::Junction
+            : EWetProceduralRidgeEndpointMode::Pointed;
         EditedRidgeStroke->StartEndpoint.ConnectedStrokeGuid = ConnectedGuid;
         EditedRidgeStroke->StartEndpoint.ConnectedSegmentIndex = ConnectedSegment;
         EditedRidgeStroke->StartEndpoint.ConnectedSegmentT = ConnectedT;
@@ -818,8 +829,8 @@ void FWetWrinkleAuthoringController::UpdateRidgePointEdit(const FWetWrinkleSurfa
     else if (EditingRidgePointIndex == EditedRidgeStroke->Points.Num() - 1)
     {
         EditedRidgeStroke->EndEndpoint.Mode = ConnectedGuid.IsValid()
-                                                  ? EWetProceduralRidgeEndpointMode::Junction
-                                                  : EWetProceduralRidgeEndpointMode::Pointed;
+            ? EWetProceduralRidgeEndpointMode::Junction
+            : EWetProceduralRidgeEndpointMode::Pointed;
         EditedRidgeStroke->EndEndpoint.ConnectedStrokeGuid = ConnectedGuid;
         EditedRidgeStroke->EndEndpoint.ConnectedSegmentIndex = ConnectedSegment;
         EditedRidgeStroke->EndEndpoint.ConnectedSegmentT = ConnectedT;
@@ -838,8 +849,8 @@ void FWetWrinkleAuthoringController::EndRidgePointEdit(const bool bCancel, const
     if (!bCancel && EditedRidgeStroke.IsSet())
     {
         FWetProceduralRidgeStroke EditedStroke = MoveTemp(EditedRidgeStroke.GetValue());
-        const FGuid               StrokeGuid = EditedStroke.StrokeGuid;
-        const int32               MaterialSlotIndex = EditedStroke.MaterialSlotIndex;
+        const FGuid StrokeGuid = EditedStroke.StrokeGuid;
+        const int32 MaterialSlotIndex = EditedStroke.MaterialSlotIndex;
         EditWrinkleData(
             LOCTEXT("EditRidgePointTransaction", "Edit Procedural Ridge Point"),
             MakeEditImpact(),

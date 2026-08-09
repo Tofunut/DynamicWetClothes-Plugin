@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "DataAssets/WetClothingTransparencyData.h"
 
 #include "Engine/SkeletalMesh.h"
@@ -7,22 +6,46 @@
 
 namespace
 {
-    bool IsUsableBakedMap(const FWetClothingBakedTransparencyMap& Candidate)
-    {
-        return Candidate.TransparencyMap != nullptr;
-    }
+bool IsUsableBakedMap(const FWetClothingBakedTransparencyMap& Candidate)
+{
+    return Candidate.TransparencyMap != nullptr;
+}
 
-    bool IsMaterialSlotValid(const USkeletalMesh& TargetMesh, int32 MaterialSlotIndex)
-    {
-        return TargetMesh.GetMaterials().IsValidIndex(MaterialSlotIndex);
-    }
+bool IsMaterialSlotValid(const USkeletalMesh& TargetMesh, int32 MaterialSlotIndex)
+{
+    return TargetMesh.GetMaterials().IsValidIndex(MaterialSlotIndex);
+}
 
-    bool DoesStoredSlotNameMatch(const USkeletalMesh& TargetMesh, int32 MaterialSlotIndex, FName StoredSlotName)
-    {
-        return StoredSlotName.IsNone() ||
-               TargetMesh.GetMaterials()[MaterialSlotIndex].MaterialSlotName == StoredSlotName;
-    }
+bool DoesStoredSlotNameMatch(const USkeletalMesh& TargetMesh, int32 MaterialSlotIndex, FName StoredSlotName)
+{
+    return StoredSlotName.IsNone() ||
+           TargetMesh.GetMaterials()[MaterialSlotIndex].MaterialSlotName == StoredSlotName;
+}
 } // namespace
+
+void FDWCTransparencyEditorStageCacheMetadata::MarkRevealStale()
+{
+    RevealSignature.Reset();
+    bRevealReviewed = false;
+    for (FDWCTransparencyTempArtifactReference& Artifact : Artifacts)
+    {
+        if (Artifact.Kind == EDWCTransparencyTempArtifactKind::CorrectedRevealColor)
+        {
+            Artifact.bObsolete = true;
+        }
+    }
+}
+
+void FDWCTransparencyEditorStageCacheMetadata::MarkSourceStale()
+{
+    SourceSignature.Reset();
+    bSourceGenerated = false;
+    for (FDWCTransparencyTempArtifactReference& Artifact : Artifacts)
+    {
+        Artifact.bObsolete = true;
+    }
+    MarkRevealStale();
+}
 
 void FWetClothingTransparencyLayerData::MarkAutoBakeStale()
 {
@@ -30,6 +53,9 @@ void FWetClothingTransparencyLayerData::MarkAutoBakeStale()
     AutoBakeMetadata.BuildSignature.Reset();
     AutoBakeMetadata.ValidHitCount = 0;
     AutoBakeMetadata.NoHitCount = 0;
+#if WITH_EDITORONLY_DATA
+    EditorStageCache.MarkSourceStale();
+#endif
     MarkFinalBakeStale();
 }
 
@@ -105,15 +131,15 @@ UTexture2D* FWetClothingTransparencyData::ResolveBakedTransparencyMap(int32 Mate
 }
 
 bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
-    const USkeletalMesh*                     TargetMesh,
+    const USkeletalMesh* TargetMesh,
     const FWetClothingTransparencyLayerData& Layer,
-    TArray<FString>&                         OutErrors,
-    int32                                    DWCDataUVChannelIndex)
+    TArray<FString>& OutErrors,
+    int32 DWCDataUVChannelIndex)
 {
     constexpr int32 LODIndex = 0;
     OutErrors.Reset();
     const FWetClothingTransparencyTargetSurface& TargetSurface = Layer.TargetSurface;
-    const FWetClothingTransparencyRaySettings&   RaySettings = Layer.RaySettings;
+    const FWetClothingTransparencyRaySettings& RaySettings = Layer.RaySettings;
 
     if (TargetMesh == nullptr)
     {
@@ -134,7 +160,7 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
     }
 
     const FSkeletalMeshRenderData* RenderData = TargetMesh->GetResourceForRendering();
-    int32                          NumTexCoords = 0;
+    int32 NumTexCoords = 0;
     if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(LODIndex))
     {
         OutErrors.Add(FString::Printf(TEXT("LOD %d render data is not available on the target mesh."), LODIndex));
@@ -152,7 +178,7 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
         }
     }
 
-    if (Layer.SourceType != EDWCTransparencySourceType::SameMeshMaterialSlots)
+    if (Layer.SourceType == EDWCTransparencySourceType::ManualColorOrTexture)
     {
         return OutErrors.IsEmpty();
     }
@@ -167,8 +193,45 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
         OutErrors.Add(TEXT("Full Transparency Distance must not exceed No Transparency Distance."));
     }
 
+    if (Layer.SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents)
+    {
+        return OutErrors.IsEmpty();
+    }
+
+    if (Layer.SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh)
+    {
+        const USkeletalMesh* ExternalMesh = Layer.ExternalMeshSource.SkeletalMesh;
+        if (ExternalMesh == nullptr)
+        {
+            OutErrors.Add(TEXT("External Skeletal Mesh is not set."));
+            return false;
+        }
+        const FSkeletalMeshRenderData* ExternalRenderData = ExternalMesh->GetResourceForRendering();
+        const int32 ExternalUVCount = ExternalRenderData != nullptr &&
+            ExternalRenderData->LODRenderData.IsValidIndex(LODIndex)
+                ? ExternalRenderData->LODRenderData[LODIndex].StaticVertexBuffers.StaticMeshVertexBuffer.GetNumTexCoords()
+                : 0;
+        for (const FWetClothingTransparencyInnerSlot& SourceSlot :
+             Layer.ExternalMeshSource.SourceSlotPriority)
+        {
+            if (!IsMaterialSlotValid(*ExternalMesh, SourceSlot.MaterialSlotIndex))
+            {
+                OutErrors.Add(FString::Printf(
+                    TEXT("External source material slot %d is unavailable."),
+                    SourceSlot.MaterialSlotIndex));
+            }
+            if (SourceSlot.SourceUVChannel < 0 || SourceSlot.SourceUVChannel >= ExternalUVCount)
+            {
+                OutErrors.Add(FString::Printf(
+                    TEXT("External source slot %d uses unavailable UV channel %d."),
+                    SourceSlot.MaterialSlotIndex, SourceSlot.SourceUVChannel));
+            }
+        }
+        return OutErrors.IsEmpty();
+    }
+
     TSet<int32> SeenInnerSlots;
-    int32       InnerSlotCount = 0;
+    int32 InnerSlotCount = 0;
 
     const TArray<FWetClothingTransparencyInnerSlot>& InnerSlotPriority = Layer.SameMeshSource.InnerSlotPriority;
     for (int32 PriorityIndex = 0; PriorityIndex < InnerSlotPriority.Num(); ++PriorityIndex)
@@ -215,6 +278,7 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
                 InnerSlot.SourceUVChannel,
                 LODIndex));
         }
+
     }
 
     if (InnerSlotCount == 0)

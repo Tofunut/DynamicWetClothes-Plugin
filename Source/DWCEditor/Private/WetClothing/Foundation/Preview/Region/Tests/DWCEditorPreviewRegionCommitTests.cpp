@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -13,9 +12,9 @@
 namespace
 {
     FDWCEditorTextureKey MakeRegionKey(
-        UTexture2D*                    Owner,
+        UTexture2D* Owner,
         const EDWCEditorTexturePurpose Purpose,
-        const int32                    SlotIndex)
+        const int32 SlotIndex)
     {
         FDWCEditorTextureKey Key;
         Key.Owner = FObjectKey(Owner);
@@ -26,7 +25,7 @@ namespace
 
     FDWCEditorTextureDescriptor MakeRegionDescriptor(
         const EPixelFormat PixelFormat,
-        const FIntPoint    Size = FIntPoint(4, 4))
+        const FIntPoint Size = FIntPoint(4, 4))
     {
         FDWCEditorTextureDescriptor Descriptor;
         Descriptor.Size = Size;
@@ -36,9 +35,9 @@ namespace
     }
 
     FDWCEditorPreviewRegionTarget MakeRegionTarget(
-        const FDWCEditorTextureKey&        Key,
+        const FDWCEditorTextureKey& Key,
         const FDWCEditorTextureDescriptor& Descriptor,
-        const FDWCEditorTextureLease&      Lease)
+        const FDWCEditorTextureLease& Lease)
     {
         FDWCEditorPreviewRegionTarget Target;
         Target.Key = Key;
@@ -49,7 +48,7 @@ namespace
     }
 
     void ShutdownRegionWorkspace(
-        FDWCEditorTextureWorkspace&                    Workspace,
+        FDWCEditorTextureWorkspace& Workspace,
         const TSharedRef<FDWCEditorRenderUploadQueue>& UploadQueue)
     {
         Workspace.Reset();
@@ -57,7 +56,28 @@ namespace
         Workspace.ProcessRetiredGPUResources();
         UploadQueue->Shutdown();
     }
-} // namespace
+
+    TArray<FColor> ApplyUploadRegions(
+        const TArray<FColor>& PreviousPixels,
+        const TArray<FColor>& LatestPixels,
+        const FIntPoint Size,
+        const TArray<FIntRect>& Regions)
+    {
+        TArray<FColor> Result = PreviousPixels;
+        for (const FIntRect& Rect : Regions)
+        {
+            for (int32 Y = Rect.Min.Y; Y < Rect.Max.Y; ++Y)
+            {
+                const int32 RowStart = Y * Size.X;
+                for (int32 X = Rect.Min.X; X < Rect.Max.X; ++X)
+                {
+                    Result[RowStart + X] = LatestPixels[RowStart + X];
+                }
+            }
+        }
+        return Result;
+    }
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorPreviewRegionScalarCommitTest,
@@ -69,10 +89,10 @@ bool FDWCEditorPreviewRegionScalarCommitTest::RunTest(const FString&)
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
     FDWCEditorTextureWorkspace Workspace(UploadQueue);
-    UTexture2D*                Owner = NewObject<UTexture2D>();
+    UTexture2D* Owner = NewObject<UTexture2D>();
 
     const FDWCEditorTextureDescriptor BGRA8Descriptor = MakeRegionDescriptor(PF_B8G8R8A8);
-    const FDWCEditorTextureKey        BGRA8Key = MakeRegionKey(
+    const FDWCEditorTextureKey BGRA8Key = MakeRegionKey(
         Owner,
         EDWCEditorTexturePurpose::WrinkleAccumulated,
         1);
@@ -84,15 +104,15 @@ bool FDWCEditorPreviewRegionScalarCommitTest::RunTest(const FString&)
         MoveTemp(InitialColors));
     TestTrue(TEXT("BGRA8 working texture has an active lease"), BGRA8Lease.IsValid());
 
-    const uint64                 InitialDataRevision = BGRA8Lease->GetDataRevision();
-    const uint64                 InitialContentRevision = BGRA8Lease->GetContentRevision();
+    const uint64 InitialDataRevision = BGRA8Lease->GetDataRevision();
+    const uint64 InitialContentRevision = BGRA8Lease->GetContentRevision();
     FDWCEditorBGRA8RegionPayload ColorRegion;
     ColorRegion.Rect = FIntRect(1, 1, 3, 3);
     ColorRegion.Pixels.Init(FColor::Red, 4);
     const FDWCEditorPreviewRegionCommitOutcome ColorOutcome = Workspace.CommitBGRA8Regions(
         BGRA8Lease,
         MakeRegionTarget(BGRA8Key, BGRA8Descriptor, BGRA8Lease),
-        { ColorRegion });
+        {ColorRegion});
     TestEqual(TEXT("BGRA8 region commit is applied"), ColorOutcome.Result, EDWCEditorPreviewRegionCommitResult::Applied);
     TestEqual(TEXT("BGRA8 commit advances data once"), BGRA8Lease->GetDataRevision(), InitialDataRevision + 1);
     TestEqual(TEXT("BGRA8 commit advances content once"), BGRA8Lease->GetContentRevision(), InitialContentRevision + 1);
@@ -107,7 +127,7 @@ bool FDWCEditorPreviewRegionScalarCommitTest::RunTest(const FString&)
     TestEqual(TEXT("Presentation upload advances content revision"), BGRA8Lease->GetContentRevision(), ContentBeforePresentation + 1);
 
     const FDWCEditorTextureDescriptor G8Descriptor = MakeRegionDescriptor(PF_G8);
-    const FDWCEditorTextureKey        G8Key = MakeRegionKey(
+    const FDWCEditorTextureKey G8Key = MakeRegionKey(
         Owner,
         EDWCEditorTexturePurpose::TransparencyVisualization,
         2);
@@ -123,7 +143,7 @@ bool FDWCEditorPreviewRegionScalarCommitTest::RunTest(const FString&)
     const FDWCEditorPreviewRegionCommitOutcome ScalarOutcome = Workspace.CommitG8Regions(
         G8Lease,
         MakeRegionTarget(G8Key, G8Descriptor, G8Lease),
-        { ScalarRegion });
+        {ScalarRegion});
     TestEqual(TEXT("G8 region commit is applied"), ScalarOutcome.Result, EDWCEditorPreviewRegionCommitResult::Applied);
     TestEqual(TEXT("G8 region changes its first pixel"), G8Lease->GetG8Pixels()[2], static_cast<uint8>(200));
     TestEqual(TEXT("G8 region leaves an exterior pixel unchanged"), G8Lease->GetG8Pixels()[0], static_cast<uint8>(0));
@@ -143,8 +163,8 @@ bool FDWCEditorPreviewNormalRegionAtomicityTest::RunTest(const FString&)
 {
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
-    FDWCEditorTextureWorkspace  Workspace(UploadQueue);
-    UTexture2D*                 Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
     FDWCEditorTextureDescriptor Descriptor = MakeRegionDescriptor(PF_B8G8R8A8);
     Descriptor.WorkingSize = FIntPoint(4, 4);
     const FDWCEditorTextureKey Key = MakeRegionKey(
@@ -179,22 +199,22 @@ bool FDWCEditorPreviewNormalRegionAtomicityTest::RunTest(const FString&)
     const FDWCEditorPreviewRegionCommitOutcome Applied = Workspace.CommitNormalRegions(
         Lease,
         MakeRegionTarget(Key, Descriptor, Lease),
-        { Region });
+        {Region});
     TestEqual(TEXT("Normal region atomically commits both surfaces"), Applied.Result, EDWCEditorPreviewRegionCommitResult::Applied);
     TestEqual(TEXT("Normal working data changed"), Lease->GetWorkingNormalSurface().PackedNormalXY[5], Region.PackedNormalXY[0]);
     TestEqual(TEXT("Normal coverage changed"), Lease->GetWorkingNormalSurface().Coverage[5], 0.75f);
     TestEqual(TEXT("Encoded output changed"), Lease->GetBGRA8Pixels()[5], Region.EncodedPixels[0]);
 
-    const TArray<uint32>          PackedBeforeReject = Lease->GetWorkingNormalSurface().PackedNormalXY;
-    const TArray<float>           CoverageBeforeReject = Lease->GetWorkingNormalSurface().Coverage;
-    const TArray<FColor>          PixelsBeforeReject = Lease->GetBGRA8Pixels();
-    const uint64                  RevisionBeforeReject = Lease->GetDataRevision();
+    const TArray<uint32> PackedBeforeReject = Lease->GetWorkingNormalSurface().PackedNormalXY;
+    const TArray<float> CoverageBeforeReject = Lease->GetWorkingNormalSurface().Coverage;
+    const TArray<FColor> PixelsBeforeReject = Lease->GetBGRA8Pixels();
+    const uint64 RevisionBeforeReject = Lease->GetDataRevision();
     FDWCEditorNormalRegionPayload InvalidRegion = Region;
     InvalidRegion.EncodedPixels.SetNum(3);
     const FDWCEditorPreviewRegionCommitOutcome Rejected = Workspace.CommitNormalRegions(
         Lease,
         MakeRegionTarget(Key, Descriptor, Lease),
-        { InvalidRegion });
+        {InvalidRegion});
     TestEqual(TEXT("Invalid normal payload is rejected"), Rejected.Result, EDWCEditorPreviewRegionCommitResult::InvalidPayload);
     TestEqual(TEXT("Rejected normal payload preserves revision"), Lease->GetDataRevision(), RevisionBeforeReject);
     TestTrue(TEXT("Rejected normal payload preserves packed normals"), Lease->GetWorkingNormalSurface().PackedNormalXY == PackedBeforeReject);
@@ -217,9 +237,9 @@ bool FDWCEditorPreviewRegionFreshnessTest::RunTest(const FString&)
         MakeShared<FDWCEditorRenderUploadQueue>();
     const TSharedRef<FDWCEditorTextureWorkspace> Workspace =
         MakeShared<FDWCEditorTextureWorkspace>(UploadQueue);
-    UTexture2D*                       Owner = NewObject<UTexture2D>();
+    UTexture2D* Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeRegionDescriptor(PF_B8G8R8A8);
-    const FDWCEditorTextureKey        Key = MakeRegionKey(
+    const FDWCEditorTextureKey Key = MakeRegionKey(
         Owner,
         EDWCEditorTexturePurpose::WrinkleProcedural,
         4);
@@ -231,43 +251,42 @@ bool FDWCEditorPreviewRegionFreshnessTest::RunTest(const FString&)
         MoveTemp(InitialPixels));
     FDWCEditorBGRA8RegionPayload Region;
     Region.Rect = FIntRect(0, 0, 1, 1);
-    Region.Pixels = { FColor::Green };
+    Region.Pixels = {FColor::Green};
 
     FDWCEditorPreviewRegionTarget StaleData = MakeRegionTarget(Key, Descriptor, Lease);
     ++StaleData.ExpectedDataRevision;
     TestEqual(
         TEXT("A stale data revision is rejected explicitly"),
-        Workspace->CommitBGRA8Regions(Lease, StaleData, { Region }).Result,
+        Workspace->CommitBGRA8Regions(Lease, StaleData, {Region}).Result,
         EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch);
 
     FDWCEditorPreviewRegionTarget StaleResource = MakeRegionTarget(Key, Descriptor, Lease);
     ++StaleResource.ExpectedResourceGeneration;
     TestEqual(
         TEXT("A stale resource generation is rejected explicitly"),
-        Workspace->CommitBGRA8Regions(Lease, StaleResource, { Region }).Result,
+        Workspace->CommitBGRA8Regions(Lease, StaleResource, {Region}).Result,
         EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch);
 
     FDWCEditorPreviewRegionTarget WrongDescriptor = MakeRegionTarget(Key, Descriptor, Lease);
     WrongDescriptor.Descriptor.Filter = TF_Nearest;
     TestEqual(
         TEXT("A mismatched descriptor is rejected explicitly"),
-        Workspace->CommitBGRA8Regions(Lease, WrongDescriptor, { Region }).Result,
+        Workspace->CommitBGRA8Regions(Lease, WrongDescriptor, {Region}).Result,
         EDWCEditorPreviewRegionCommitResult::DescriptorMismatch);
 
-    const FGuid                        SessionEpoch = FGuid::NewGuid();
+    const FGuid SessionEpoch = FGuid::NewGuid();
     FDWCEditorPreviewCommitCoordinator Coordinator(Workspace, SessionEpoch);
-    FDWCEditorPreviewConsumerLifetime  Lifetime;
-    FDWCEditorPreviewCommitContext     Context;
+    FDWCEditorPreviewConsumerLifetime Lifetime;
+    FDWCEditorPreviewCommitContext Context;
     Context.ConsumerToken = Lifetime.CaptureToken();
     Context.ProducerSessionEpoch = SessionEpoch;
-    Context.IsCurrent = []()
-    { return true; };
+    Context.IsCurrent = []() { return true; };
     FDWCEditorPreviewRegionCommitOutcome CoordinatorOutcome;
-    const EDWCEditorPreviewCommitResult  CoordinatorResult = Coordinator.CommitBGRA8Regions(
+    const EDWCEditorPreviewCommitResult CoordinatorResult = Coordinator.CommitBGRA8Regions(
         Context,
         Lease,
         MakeRegionTarget(Key, Descriptor, Lease),
-        { Region },
+        {Region},
         CoordinatorOutcome);
     TestEqual(TEXT("Coordinator forwards an active region commit"), CoordinatorResult, EDWCEditorPreviewCommitResult::Applied);
 
@@ -279,7 +298,7 @@ bool FDWCEditorPreviewRegionFreshnessTest::RunTest(const FString&)
             Context,
             Lease,
             MakeRegionTarget(Key, Descriptor, Lease),
-            { Region },
+            {Region},
             CoordinatorOutcome),
         EDWCEditorPreviewCommitResult::ConsumerSuspended);
 
@@ -291,10 +310,9 @@ bool FDWCEditorPreviewRegionFreshnessTest::RunTest(const FString&)
     TestEqual(
         TEXT("A retired entry cannot accept a late region result"),
         Workspace->CommitBGRA8Regions(
-                     Lease,
-                     MakeRegionTarget(Key, Descriptor, Lease),
-                     { Region })
-            .Result,
+            Lease,
+            MakeRegionTarget(Key, Descriptor, Lease),
+            {Region}).Result,
         EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing);
 
     Lease.Reset();
@@ -319,13 +337,13 @@ bool FDWCEditorPreviewRegionMemoryEstimateTest::RunTest(const FString&)
     FDWCEditorPreviewRegionMemoryEstimate Estimate;
     TestTrue(
         TEXT("Valid BGRA8 region memory can be estimated"),
-        FDWCEditorPreviewRegionMemory::TryEstimateBGRA8({ ValidRegion }, Estimate));
+        FDWCEditorPreviewRegionMemory::TryEstimateBGRA8({ValidRegion}, Estimate));
     TestEqual(TEXT("BGRA8 estimate includes only region bytes"), Estimate.ResultBytes, 16ull);
 
     ValidRegion.Pixels.SetNum(3);
     TestFalse(
         TEXT("Mismatched region payload is not admitted by the estimator"),
-        FDWCEditorPreviewRegionMemory::TryEstimateBGRA8({ ValidRegion }, Estimate));
+        FDWCEditorPreviewRegionMemory::TryEstimateBGRA8({ValidRegion}, Estimate));
     return true;
 }
 
@@ -340,9 +358,9 @@ bool FDWCEditorIncrementalCommitRecoveryLifecycleTest::RunTest(const FString&)
         MakeShared<FDWCEditorRenderUploadQueue>();
     const TSharedRef<FDWCEditorTextureWorkspace> Workspace =
         MakeShared<FDWCEditorTextureWorkspace>(UploadQueue);
-    UTexture2D*                       Owner = NewObject<UTexture2D>();
+    UTexture2D* Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeRegionDescriptor(PF_B8G8R8A8);
-    const FDWCEditorTextureKey        Key = MakeRegionKey(
+    const FDWCEditorTextureKey Key = MakeRegionKey(
         Owner,
         EDWCEditorTexturePurpose::TransparencyVisualization,
         7);
@@ -353,10 +371,10 @@ bool FDWCEditorIncrementalCommitRecoveryLifecycleTest::RunTest(const FString&)
         Descriptor,
         MoveTemp(InitialPixels));
 
-    const FGuid                        SessionEpoch = FGuid::NewGuid();
+    const FGuid SessionEpoch = FGuid::NewGuid();
     FDWCEditorPreviewCommitCoordinator Coordinator(Workspace, SessionEpoch);
-    FDWCEditorPreviewConsumerLifetime  Lifetime;
-    FDWCEditorPreviewRecoveryPolicy    Policy;
+    FDWCEditorPreviewConsumerLifetime Lifetime;
+    FDWCEditorPreviewRecoveryPolicy Policy;
     Policy.WorkspaceRetryLimit = 2;
     FDWCEditorPreviewRecoveryController Recovery(Policy);
 
@@ -366,19 +384,18 @@ bool FDWCEditorIncrementalCommitRecoveryLifecycleTest::RunTest(const FString&)
     FDWCEditorPreviewCommitContext Context;
     Context.ConsumerToken = Lifetime.CaptureToken();
     Context.ProducerSessionEpoch = SessionEpoch;
-    Context.IsCurrent = []()
-    { return true; };
+    Context.IsCurrent = []() { return true; };
     FDWCEditorPreviewRegionCommitOutcome Outcome;
-    const EDWCEditorPreviewCommitResult  Applied = Coordinator.CommitBGRA8Regions(
+    const EDWCEditorPreviewCommitResult Applied = Coordinator.CommitBGRA8Regions(
         Context,
         Lease,
         MakeRegionTarget(Key, Descriptor, Lease),
-        { Region },
+        {Region},
         Outcome);
     TestEqual(TEXT("The current incremental result commits"), Applied, EDWCEditorPreviewCommitResult::Applied);
     Recovery.MarkIncrementalSucceeded();
     const TArray<FColor> LastKnownGoodPixels = Lease->GetBGRA8Pixels();
-    const uint64         LastKnownGoodRevision = Lease->GetDataRevision();
+    const uint64 LastKnownGoodRevision = Lease->GetDataRevision();
 
     FDWCEditorPreviewRegionTarget StaleTarget = MakeRegionTarget(Key, Descriptor, Lease);
     ++StaleTarget.ExpectedDataRevision;
@@ -387,7 +404,7 @@ bool FDWCEditorIncrementalCommitRecoveryLifecycleTest::RunTest(const FString&)
         Context,
         Lease,
         StaleTarget,
-        { Region },
+        {Region},
         Outcome);
     TestEqual(
         TEXT("A stale incremental result is rejected"),
@@ -413,7 +430,7 @@ bool FDWCEditorIncrementalCommitRecoveryLifecycleTest::RunTest(const FString&)
         Context,
         Lease,
         MakeRegionTarget(Key, Descriptor, Lease),
-        { Region },
+        {Region},
         Outcome);
     TestEqual(
         TEXT("A suspended preview consumer rejects late incremental data"),
@@ -438,6 +455,106 @@ bool FDWCEditorIncrementalCommitRecoveryLifecycleTest::RunTest(const FString&)
     FlushRenderingCommands();
     Workspace->ProcessRetiredGPUResources();
     UploadQueue->Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSparseUploadPolicyTest,
+    "DWC.Editor.Foundation.PreviewRegion.SparseUploadPolicy",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSparseUploadPolicyTest::RunTest(const FString&)
+{
+    const TArray<FIntRect> AdjacentTiles = {
+        FIntRect(0, 0, 128, 128), FIntRect(128, 0, 256, 128),
+        FIntRect(0, 128, 128, 256), FIntRect(128, 128, 256, 256)};
+    const FDWCEditorSparseUploadDecision Merged = FDWCEditorSparseUploadPolicy::Choose(
+        AdjacentTiles,
+        {FIntRect(0, 0, 1024, 1024)},
+        FIntPoint(1024, 1024));
+    TestEqual(TEXT("Adjacent sparse tiles use one merged upload"),
+        Merged.Plan, EDWCEditorSparseUploadPlan::MergedSparse);
+    TestEqual(TEXT("Merged sparse upload has one region"), Merged.Regions.Num(), 1);
+    TestEqual(TEXT("Merging adjacent tiles adds no pixels"),
+        Merged.PlannedPixelCount, Merged.SourcePixelCount);
+
+    FDWCEditorSparseUploadPolicyConfig StrictConfig;
+    StrictConfig.MaxRegions = 1;
+    const TArray<FIntRect> DistantTiles = {
+        FIntRect(0, 0, 64, 64), FIntRect(960, 960, 1024, 1024)};
+    const FDWCEditorSparseUploadDecision Bounded = FDWCEditorSparseUploadPolicy::Choose(
+        DistantTiles,
+        {FIntRect(0, 0, 1024, 1024)},
+        FIntPoint(1024, 1024),
+        StrictConfig);
+    TestEqual(TEXT("An equally expensive sparse merge selects the bounded fallback"),
+        Bounded.Plan, EDWCEditorSparseUploadPlan::Bounded);
+    TestEqual(TEXT("Bounded fallback remains deterministic"), Bounded.Regions.Num(), 1);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSparseUploadPolicyPixelParityTest,
+    "DWC.Editor.Regression.HoverUpload.Parity.RegionPlans",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSparseUploadPolicyPixelParityTest::RunTest(const FString&)
+{
+    const FIntPoint Size(16, 16);
+    TArray<FColor> PreviousPixels;
+    PreviousPixels.Init(FColor(8, 16, 24, 255), Size.X * Size.Y);
+    TArray<FColor> LatestPixels = PreviousPixels;
+    const TArray<FIntRect> DirtyRegions = {
+        FIntRect(1, 1, 4, 4),
+        FIntRect(5, 1, 8, 4),
+        FIntRect(11, 11, 15, 15)};
+    for (const FIntRect& Rect : DirtyRegions)
+    {
+        for (int32 Y = Rect.Min.Y; Y < Rect.Max.Y; ++Y)
+        {
+            for (int32 X = Rect.Min.X; X < Rect.Max.X; ++X)
+            {
+                LatestPixels[Y * Size.X + X] = FColor(X * 11, Y * 13, X + Y, 255);
+            }
+        }
+    }
+    const TArray<FIntRect> BoundedRegions = {FIntRect(1, 1, 15, 15)};
+
+    FDWCEditorSparseUploadPolicyConfig SparseConfig;
+    SparseConfig.MaxRegions = 8;
+    SparseConfig.RegionSubmissionPenaltyPixels = 0;
+    const FDWCEditorSparseUploadDecision Sparse = FDWCEditorSparseUploadPolicy::Choose(
+        DirtyRegions, BoundedRegions, Size, SparseConfig);
+    TestEqual(TEXT("Separated regions can retain a sparse upload plan"),
+        Sparse.Plan, EDWCEditorSparseUploadPlan::Sparse);
+
+    const TArray<FIntRect> TouchingRegions = {
+        FIntRect(1, 1, 4, 4), FIntRect(4, 1, 8, 4), FIntRect(11, 11, 15, 15)};
+    const FDWCEditorSparseUploadDecision Merged = FDWCEditorSparseUploadPolicy::Choose(
+        TouchingRegions, BoundedRegions, Size, SparseConfig);
+    TestEqual(TEXT("Touching regions select merged sparse presentation"),
+        Merged.Plan, EDWCEditorSparseUploadPlan::MergedSparse);
+
+    FDWCEditorSparseUploadPolicyConfig BoundedConfig;
+    BoundedConfig.MaxRegions = 1;
+    BoundedConfig.RegionSubmissionPenaltyPixels = 4096;
+    const FDWCEditorSparseUploadDecision Bounded = FDWCEditorSparseUploadPolicy::Choose(
+        DirtyRegions, BoundedRegions, Size, BoundedConfig);
+    TestEqual(TEXT("A strict region budget selects bounded presentation"),
+        Bounded.Plan, EDWCEditorSparseUploadPlan::Bounded);
+
+    const TArray<FColor> SparseResult = ApplyUploadRegions(
+        PreviousPixels, LatestPixels, Size, Sparse.Regions);
+    const TArray<FColor> MergedResult = ApplyUploadRegions(
+        PreviousPixels, LatestPixels, Size, Merged.Regions);
+    const TArray<FColor> BoundedResult = ApplyUploadRegions(
+        PreviousPixels, LatestPixels, Size, Bounded.Regions);
+    TestEqual(TEXT("Sparse presentation reproduces the latest hover pixels"),
+        SparseResult, LatestPixels);
+    TestEqual(TEXT("Merged sparse presentation reproduces the latest hover pixels"),
+        MergedResult, LatestPixels);
+    TestEqual(TEXT("Bounded presentation reproduces the latest hover pixels"),
+        BoundedResult, LatestPixels);
     return true;
 }
 

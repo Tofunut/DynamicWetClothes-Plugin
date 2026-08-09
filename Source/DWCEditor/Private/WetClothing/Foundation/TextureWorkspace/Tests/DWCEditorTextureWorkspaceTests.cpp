@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -14,9 +13,9 @@
 namespace
 {
     FDWCEditorTextureKey MakeTextureKey(
-        UTexture2D*                    Owner,
+        UTexture2D* Owner,
         const EDWCEditorTexturePurpose Purpose,
-        const int32                    MaterialSlotIndex)
+        const int32 MaterialSlotIndex)
     {
         FDWCEditorTextureKey Key;
         Key.Owner = FObjectKey(Owner);
@@ -45,7 +44,7 @@ namespace
 
     const FDWCEditorPreviewMemoryBucket* FindMemoryBucket(
         const TArray<FDWCEditorPreviewMemoryBucket>& Buckets,
-        const TCHAR*                                 Name)
+        const TCHAR* Name)
     {
         return Buckets.FindByPredicate(
             [Name](const FDWCEditorPreviewMemoryBucket& Bucket)
@@ -69,7 +68,7 @@ namespace
 
     const FDWCEditorPreviewOperationCounter* FindOperationCounter(
         const TArray<FDWCEditorPreviewOperationCounter>& Counters,
-        const TCHAR*                                     Name)
+        const TCHAR* Name)
     {
         return Counters.FindByPredicate(
             [Name](const FDWCEditorPreviewOperationCounter& Counter)
@@ -78,8 +77,19 @@ namespace
             });
     }
 
+    const FDWCEditorResourcePoolDiagnostics* FindGovernorPool(
+        const FDWCEditorResourceGovernorDiagnostics& Diagnostics,
+        const EDWCEditorResourcePool Pool)
+    {
+        return Diagnostics.Pools.FindByPredicate(
+            [Pool](const FDWCEditorResourcePoolDiagnostics& Candidate)
+            {
+                return Candidate.Pool == Pool;
+            });
+    }
+
     void ShutdownWorkspaceAfterRenderFence(
-        FDWCEditorTextureWorkspace&                    Workspace,
+        FDWCEditorTextureWorkspace& Workspace,
         const TSharedRef<FDWCEditorRenderUploadQueue>& UploadQueue)
     {
         Workspace.Reset();
@@ -87,7 +97,7 @@ namespace
         Workspace.ProcessRetiredGPUResources();
         UploadQueue->Shutdown();
     }
-} // namespace
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorDirtyRegionSetTest,
@@ -120,7 +130,7 @@ bool FDWCEditorTextureWorkspaceReuseTest::RunTest(const FString&)
         MakeShared<FDWCEditorRenderUploadQueue>();
     FDWCEditorTextureWorkspace Workspace(UploadQueue);
 
-    UTexture2D*          Owner = NewObject<UTexture2D>();
+    UTexture2D* Owner = NewObject<UTexture2D>();
     FDWCEditorTextureKey Key;
     Key.Owner = FObjectKey(Owner);
     Key.Purpose = EDWCEditorTexturePurpose::WrinkleAccumulated;
@@ -163,7 +173,7 @@ bool FDWCEditorTextureWorkspaceLeaseTest::RunTest(const FString&)
         MakeShared<FDWCEditorRenderUploadQueue>();
     FDWCEditorTextureWorkspace Workspace(UploadQueue, 1);
 
-    UTexture2D*          Owner = NewObject<UTexture2D>();
+    UTexture2D* Owner = NewObject<UTexture2D>();
     FDWCEditorTextureKey Key;
     Key.Owner = FObjectKey(Owner);
     Key.Purpose = EDWCEditorTexturePurpose::WrinkleAccumulated;
@@ -176,8 +186,8 @@ bool FDWCEditorTextureWorkspaceLeaseTest::RunTest(const FString&)
 
     TArray<FColor> Pixels;
     Pixels.Init(Descriptor.InitialBGRA8, 16);
-    FDWCEditorTextureHandle                         Handle = Workspace.PublishBGRA8(Key, Descriptor, MoveTemp(Pixels));
-    FDWCEditorTextureLease                          Lease = Workspace.AcquireLease(Handle);
+    FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(Key, Descriptor, MoveTemp(Pixels));
+    FDWCEditorTextureLease Lease = Workspace.AcquireLease(Handle);
     const TWeakPtr<FDWCEditorTextureWorkspaceEntry> WeakLeasedEntry = Lease.GetHandle();
     Handle.Reset();
 
@@ -192,8 +202,8 @@ bool FDWCEditorTextureWorkspaceLeaseTest::RunTest(const FString&)
     // longer be retained as the cache entry for this key, however.
     const FDWCEditorTextureHandle Reacquired = Workspace.Acquire(Key, Descriptor);
     TestTrue(TEXT("Released lease allows a new retained entry to be acquired"),
-             Reacquired.IsValid() && Reacquired != WeakLeasedEntry.Pin() &&
-                 Reacquired->GetActiveLeaseCount() == 0);
+        Reacquired.IsValid() && Reacquired != WeakLeasedEntry.Pin() &&
+        Reacquired->GetActiveLeaseCount() == 0);
 
     ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
     return true;
@@ -210,7 +220,7 @@ bool FDWCEditorTextureWorkspaceDiscardLeaseTest::RunTest(const FString&)
         MakeShared<FDWCEditorRenderUploadQueue>();
     FDWCEditorTextureWorkspace Workspace(UploadQueue);
 
-    UTexture2D*          Owner = NewObject<UTexture2D>();
+    UTexture2D* Owner = NewObject<UTexture2D>();
     FDWCEditorTextureKey Key;
     Key.Owner = FObjectKey(Owner);
     Key.Purpose = EDWCEditorTexturePurpose::WrinkleProcedural;
@@ -223,8 +233,8 @@ bool FDWCEditorTextureWorkspaceDiscardLeaseTest::RunTest(const FString&)
 
     TArray<FColor> Pixels;
     Pixels.Init(Descriptor.InitialBGRA8, 16);
-    FDWCEditorTextureHandle                         Handle = Workspace.PublishBGRA8(Key, Descriptor, MoveTemp(Pixels));
-    FDWCEditorTextureLease                          Lease = Workspace.AcquireLease(Handle);
+    FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(Key, Descriptor, MoveTemp(Pixels));
+    FDWCEditorTextureLease Lease = Workspace.AcquireLease(Handle);
     const TWeakPtr<FDWCEditorTextureWorkspaceEntry> WeakEntry = Lease.GetHandle();
     Handle.Reset();
 
@@ -246,7 +256,7 @@ bool FDWCEditorTextureWorkspaceDiscardLeaseTest::RunTest(const FString&)
     Lease.Reset();
     Workspace.ProcessRetiredGPUResources();
     TestFalse(TEXT("Discarded transient entry no longer has an active lease"),
-              WeakEntry.IsValid() && WeakEntry.Pin()->GetActiveLeaseCount() > 0);
+        WeakEntry.IsValid() && WeakEntry.Pin()->GetActiveLeaseCount() > 0);
 
     ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
     return true;
@@ -261,8 +271,8 @@ bool FDWCEditorTextureWorkspaceGPUResidencyDiagnosticsTest::RunTest(const FStrin
 {
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
-    FDWCEditorTextureWorkspace        Workspace(UploadQueue);
-    UTexture2D*                       Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
 
     const FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(
@@ -306,8 +316,8 @@ bool FDWCEditorTextureWorkspaceGPUBudgetRejectTest::RunTest(const FString&)
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
     // A 4x4 BGRA8 resource needs 64 bytes, so this workspace must reject it.
-    FDWCEditorTextureWorkspace        Workspace(UploadQueue, 1024, 1);
-    UTexture2D*                       Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace Workspace(UploadQueue, 1024, 1);
+    UTexture2D* Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
 
     const FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(
@@ -350,10 +360,10 @@ bool FDWCEditorTextureWorkspaceGPURetireDiagnosticsTest::RunTest(const FString&)
 {
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
-    FDWCEditorTextureWorkspace        Workspace(UploadQueue);
-    UTexture2D*                       Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
-    const FDWCEditorTextureHandle     Handle = Workspace.PublishBGRA8(
+    const FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(
         MakeTextureKey(Owner, EDWCEditorTexturePurpose::WrinkleProcedural, 22),
         Descriptor,
         MakeFlatNormalPixels(Descriptor));
@@ -398,8 +408,8 @@ bool FDWCEditorTextureWorkspaceGPUHighWaterResetTest::RunTest(const FString&)
 {
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
-    FDWCEditorTextureWorkspace        Workspace(UploadQueue);
-    UTexture2D*                       Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor SmallDescriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
 
     Workspace.PublishBGRA8(
@@ -449,7 +459,7 @@ bool FDWCEditorTextureWorkspaceFourKPIERetirementTest::RunTest(const FString&)
         UploadQueue,
         FourKBGRA8Bytes * 3,
         FourKBGRA8Bytes * 3);
-    UTexture2D*                       Owner = NewObject<UTexture2D>();
+    UTexture2D* Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4096, 4096));
 
     const FDWCEditorTextureHandle Accumulated = Workspace.PublishBGRA8(
@@ -465,11 +475,11 @@ bool FDWCEditorTextureWorkspaceFourKPIERetirementTest::RunTest(const FString&)
         Descriptor,
         MakeFlatNormalPixels(Descriptor));
     TestTrue(TEXT("4K accumulated preview texture is resident"),
-             Accumulated.IsValid() && Accumulated->IsGPUResident());
+        Accumulated.IsValid() && Accumulated->IsGPUResident());
     TestTrue(TEXT("4K procedural preview texture is resident"),
-             Procedural.IsValid() && Procedural->IsGPUResident());
+        Procedural.IsValid() && Procedural->IsGPUResident());
     TestTrue(TEXT("4K transparency preview texture is resident"),
-             Transparency.IsValid() && Transparency->IsGPUResident());
+        Transparency.IsValid() && Transparency->IsGPUResident());
 
     TArray<FDWCEditorPreviewMemoryBucket> Buckets;
     Workspace.AppendDiagnosticMemoryBucket(Buckets);
@@ -481,8 +491,8 @@ bool FDWCEditorTextureWorkspaceFourKPIERetirementTest::RunTest(const FString&)
     {
         TestEqual(TEXT("Three 4K preview layers are resident"), Resident->EntryCount, 3);
         TestEqual(TEXT("4K resident bytes match the preview layers"),
-                  Resident->UsedBytes,
-                  FourKBGRA8Bytes * 3);
+            Resident->UsedBytes,
+            FourKBGRA8Bytes * 3);
     }
 
     // Preview viewports own leases. PIE suspension discards their workspace
@@ -507,12 +517,12 @@ bool FDWCEditorTextureWorkspaceFourKPIERetirementTest::RunTest(const FString&)
     {
         TestEqual(TEXT("All 4K preview layers begin GPU retirement"), Retiring->EntryCount, 3);
         TestEqual(TEXT("Retiring bytes remain visible until the render fence completes"),
-                  Retiring->UsedBytes,
-                  FourKBGRA8Bytes * 3);
+            Retiring->UsedBytes,
+            FourKBGRA8Bytes * 3);
     }
 
     TestTrue(TEXT("4K preview resources are released after the PIE retire fence"),
-             WaitForGPUResourceRetire(Workspace));
+        WaitForGPUResourceRetire(Workspace));
     ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
     return true;
 }
@@ -524,8 +534,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorPreviewSessionPIESuspendResumeTest::RunTest(const FString&)
 {
-    UWetClothingAsset*             Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
-    FDWCEditorPreviewSession       Session;
+    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    FDWCEditorPreviewSession Session;
     FDWCEditorPreviewSessionConfig Config;
     Config.bObserveRelevantObjectChanges = false;
     Session.Initialize(Asset, nullptr, Config);
@@ -533,11 +543,11 @@ bool FDWCEditorPreviewSessionPIESuspendResumeTest::RunTest(const FString&)
     TestTrue(TEXT("Preview session initializes for an editor-owned WCA"), Session.IsInitialized());
     Session.Suspend(EDWCEditorPreviewSuspendReason::BeginPIE);
     TestTrue(TEXT("PreBeginPIE preview suspension is idempotently represented by the session"),
-             Session.IsSuspended());
+        Session.IsSuspended());
 
     Session.Suspend(EDWCEditorPreviewSuspendReason::BeginPIE);
     TestTrue(TEXT("Repeated PreBeginPIE notifications keep the session suspended"),
-             Session.IsSuspended());
+        Session.IsSuspended());
 
     Session.Resume();
     TestFalse(TEXT("Preview session resumes lazily after EndPIE"), Session.IsSuspended());
@@ -556,8 +566,8 @@ bool FDWCEditorRenderUploadQueuePriorityDiagnosticsTest::RunTest(const FString&)
 {
     const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
         MakeShared<FDWCEditorRenderUploadQueue>();
-    FDWCEditorTextureWorkspace        Workspace(UploadQueue);
-    UTexture2D*                       Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
     const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
 
     const FDWCEditorTextureHandle Background = Workspace.PublishBGRA8(
@@ -573,7 +583,7 @@ bool FDWCEditorRenderUploadQueuePriorityDiagnosticsTest::RunTest(const FString&)
         Descriptor,
         MakeFlatNormalPixels(Descriptor));
     TestTrue(TEXT("Upload priority diagnostics fixtures publish textures"),
-             Background.IsValid() && Normal.IsValid() && Interactive.IsValid());
+        Background.IsValid() && Normal.IsValid() && Interactive.IsValid());
 
     const FIntRect DirtyRect(0, 0, 2, 2);
     Workspace.MarkDirty(Background, DirtyRect, false, EDWCEditorTextureUploadPriority::Background);
@@ -597,10 +607,713 @@ bool FDWCEditorRenderUploadQueuePriorityDiagnosticsTest::RunTest(const FString&)
         TestEqual(TEXT("One normal upload is pending"), PendingNormal->Count, 1ull);
         TestEqual(TEXT("One interactive upload is pending"), PendingInteractive->Count, 1ull);
         TestTrue(TEXT("Pending upload byte estimates are reported"),
-                 PendingBackground->Bytes > 0 && PendingNormal->Bytes > 0 && PendingInteractive->Bytes > 0);
+            PendingBackground->Bytes > 0 && PendingNormal->Bytes > 0 && PendingInteractive->Bytes > 0);
     }
 
     ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorRenderUploadQueueSubmissionTicketTest,
+    "DWC.Editor.Foundation.TextureWorkspace.UploadQueue.SubmissionTicket",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorRenderUploadQueueSubmissionTicketTest::RunTest(const FString&)
+{
+    constexpr uint64 RowBytes = 8ull * sizeof(FColor);
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>(1024ull, RowBytes * 2ull);
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(8, 8));
+    const FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(
+        MakeTextureKey(Owner, EDWCEditorTexturePurpose::WrinkleHover, 28),
+        Descriptor,
+        MakeFlatNormalPixels(Descriptor));
+    TestTrue(TEXT("Submission ticket fixture publishes a texture"), Handle.IsValid());
+    if (!Handle.IsValid())
+    {
+        UploadQueue->Shutdown();
+        return false;
+    }
+
+    Workspace.MarkDirty(Handle, FIntRect(0, 0, 8, 8), false,
+        EDWCEditorTextureUploadPriority::Interactive);
+    const FDWCEditorTextureUploadTicket Ticket = UploadQueue->CaptureTicket(Handle);
+    TestTrue(TEXT("A queued content revision produces a valid ticket"), Ticket.IsValid());
+    TestEqual(TEXT("The ticket starts queued"), UploadQueue->GetStatus(Ticket),
+        EDWCEditorTextureUploadStatus::Queued);
+    FDWCEditorTextureUploadTiming QueuedTiming;
+    TestTrue(TEXT("A pending ticket exposes upload timing"),
+        UploadQueue->GetTiming(Ticket, QueuedTiming));
+    TestTrue(TEXT("The queued timestamp is recorded"), QueuedTiming.QueuedSeconds > 0.0);
+    TestFalse(TEXT("The upload has not been selected before flush"), QueuedTiming.WasSelected());
+    TestEqual(TEXT("One dirty request is attributed to the ticket"),
+        QueuedTiming.RequestedRegionCount, 1u);
+    TestTrue(TEXT("A full dirty request is identified"), QueuedTiming.bFullTextureUpload);
+
+    int32 RenderEnqueuedNotifications = 0;
+    FDWCEditorTextureUploadObserverHandle ObserverHandle = UploadQueue->Observe(
+        Ticket,
+        [&RenderEnqueuedNotifications](const EDWCEditorTextureUploadStatus Status)
+        {
+            if (Status == EDWCEditorTextureUploadStatus::RenderEnqueued)
+            {
+                ++RenderEnqueuedNotifications;
+            }
+        });
+    TestTrue(TEXT("A queued ticket accepts a state observer"), ObserverHandle.IsValid());
+
+    const EDWCEditorTextureUploadStatus FirstFlushStatus =
+        UploadQueue->TrySubmitInteractive(Ticket, RowBytes * 2ull, 100.0);
+    TestEqual(TEXT("A sliced interactive upload is not presented after its first submit"),
+        static_cast<uint8>(FirstFlushStatus),
+        static_cast<uint8>(EDWCEditorTextureUploadStatus::Queued));
+    FDWCEditorTextureUploadTiming FirstFlushTiming;
+    TestTrue(TEXT("The first flush retains timing telemetry"),
+        UploadQueue->GetTiming(Ticket, FirstFlushTiming));
+    TestTrue(TEXT("The first flush records queue selection"), FirstFlushTiming.WasSelected());
+    TestTrue(TEXT("Queue selection does not precede enqueue"),
+        FirstFlushTiming.SelectedSeconds >= FirstFlushTiming.QueuedSeconds);
+    if (FirstFlushTiming.SubmittedRegionCount > 0)
+    {
+        TestTrue(TEXT("Scheduled byte accounting is bounded by the source texture"),
+            FirstFlushTiming.SubmittedBytes > 0 &&
+            FirstFlushTiming.SubmittedBytes <= 8ull * 8ull * sizeof(FColor));
+    }
+    else
+    {
+        TestEqual(TEXT("A missing RHI resource keeps all upload bytes pending"),
+            FirstFlushTiming.SubmittedBytes, 0ull);
+        TestEqual(TEXT("A missing RHI resource does not make the ticket presentable"),
+            static_cast<uint8>(FirstFlushStatus),
+            static_cast<uint8>(EDWCEditorTextureUploadStatus::Queued));
+    }
+    UploadQueue->Flush();
+    UploadQueue->Flush();
+    UploadQueue->Flush();
+    const EDWCEditorTextureUploadStatus FinalFlushStatus = UploadQueue->GetStatus(Ticket);
+    TestTrue(TEXT("Repeated flushes either finish the upload or retain it for a resource retry"),
+        FinalFlushStatus == EDWCEditorTextureUploadStatus::RenderEnqueued ||
+        FinalFlushStatus == EDWCEditorTextureUploadStatus::Queued);
+    FDWCEditorTextureUploadTiming FinalTiming;
+    TestTrue(TEXT("The final flush retains timing telemetry"),
+        UploadQueue->GetTiming(Ticket, FinalTiming));
+    TestTrue(TEXT("Timing durations never become negative"),
+        FinalTiming.QueueWaitMs >= 0.0 && FinalTiming.SliceDelayMs >= 0.0 &&
+        FinalTiming.StagingCopyMs >= 0.0 &&
+        FinalTiming.SubmitCallMs >= 0.0 && FinalTiming.SubmittedToObservedMs >= 0.0);
+    if (FinalFlushStatus == EDWCEditorTextureUploadStatus::RenderEnqueued)
+    {
+        TestEqual(TEXT("Render enqueue notifies the observer exactly once"),
+            RenderEnqueuedNotifications, 1);
+        TestTrue(TEXT("A render-enqueued ticket records its submit timestamp"), FinalTiming.WasSubmitted());
+        TestTrue(TEXT("Submission does not precede selection"),
+            FinalTiming.SubmittedSeconds >= FinalTiming.SelectedSeconds);
+        TestTrue(TEXT("Status observation is recorded separately"), FinalTiming.WasObserved());
+        TestTrue(TEXT("Observation does not precede submission"),
+            FinalTiming.ObservedSeconds >= FinalTiming.SubmittedSeconds);
+        TestEqual(TEXT("The complete sliced upload accounts for every source byte"),
+            FinalTiming.SubmittedBytes, 8ull * 8ull * sizeof(FColor));
+
+        int32 LateObserverNotifications = 0;
+        const FDWCEditorTextureUploadObserverHandle LateObserver = UploadQueue->Observe(
+            Ticket,
+            [&LateObserverNotifications](const EDWCEditorTextureUploadStatus Status)
+            {
+                if (Status == EDWCEditorTextureUploadStatus::RenderEnqueued)
+                {
+                    ++LateObserverNotifications;
+                }
+            });
+        TestFalse(TEXT("A terminal ticket does not retain a late observer"), LateObserver.IsValid());
+        TestEqual(TEXT("A late observer sees the terminal state immediately"),
+            LateObserverNotifications, 1);
+    }
+
+    FlushRenderingCommands();
+    FDWCEditorTextureUploadTiming RenderTiming;
+    TestTrue(TEXT("Render callback telemetry remains queryable"),
+        UploadQueue->GetTiming(Ticket, RenderTiming));
+    if (FinalFlushStatus == EDWCEditorTextureUploadStatus::RenderEnqueued)
+    {
+        TestEqual(TEXT("Every submitted slice reaches its render cleanup callback"),
+            RenderTiming.CompletedRegionCount, RenderTiming.SubmittedRegionCount);
+        TestTrue(TEXT("The final render callback timestamp is recorded"),
+            RenderTiming.RenderCallbackSeconds > 0.0);
+    }
+
+    Workspace.MarkDirty(Handle, FIntRect(0, 0, 8, 8), false,
+        EDWCEditorTextureUploadPriority::Interactive);
+    const FDWCEditorTextureUploadTicket CanceledTicket = UploadQueue->CaptureTicket(Handle);
+    int32 StaleNotifications = 0;
+    FDWCEditorTextureUploadObserverHandle CanceledObserver = UploadQueue->Observe(
+        CanceledTicket,
+        [&StaleNotifications](const EDWCEditorTextureUploadStatus Status)
+        {
+            if (Status == EDWCEditorTextureUploadStatus::Stale)
+            {
+                ++StaleNotifications;
+            }
+        });
+    UploadQueue->Cancel(Handle->GetKey());
+    TestEqual(TEXT("Canceling an unsent revision makes its ticket stale"),
+        UploadQueue->GetStatus(CanceledTicket), EDWCEditorTextureUploadStatus::Stale);
+    TestEqual(TEXT("Canceling an unsent revision notifies its observer once"),
+        StaleNotifications, 1);
+    FDWCEditorTextureUploadTiming CanceledTiming;
+    TestTrue(TEXT("Canceled upload timing remains queryable"),
+        UploadQueue->GetTiming(CanceledTicket, CanceledTiming));
+    TestTrue(TEXT("Canceled upload timing records stale state"),
+        CanceledTiming.bStale && CanceledTiming.bCanceled);
+
+    Workspace.MarkDirty(Handle, FIntRect(0, 0, 8, 8), false,
+        EDWCEditorTextureUploadPriority::Interactive);
+    const FDWCEditorTextureUploadTicket RemovedObserverTicket =
+        UploadQueue->CaptureTicket(Handle);
+    int32 RemovedObserverNotifications = 0;
+    FDWCEditorTextureUploadObserverHandle RemovedObserver = UploadQueue->Observe(
+        RemovedObserverTicket,
+        [&RemovedObserverNotifications](const EDWCEditorTextureUploadStatus)
+        {
+            ++RemovedObserverNotifications;
+        });
+    UploadQueue->RemoveObserver(RemovedObserver);
+    TestFalse(TEXT("Removing an observer invalidates its registration handle"),
+        RemovedObserver.IsValid());
+    UploadQueue->Cancel(Handle->GetKey());
+    TestEqual(TEXT("A removed observer is not called when its ticket becomes stale"),
+        RemovedObserverNotifications, 0);
+
+    Workspace.MarkDirty(Handle, FIntRect(0, 0, 8, 8), false,
+        EDWCEditorTextureUploadPriority::Interactive);
+    const FDWCEditorTextureUploadTicket ShutdownTicket = UploadQueue->CaptureTicket(Handle);
+    int32 ShutdownStaleNotifications = 0;
+    UploadQueue->Observe(
+        ShutdownTicket,
+        [&ShutdownStaleNotifications](const EDWCEditorTextureUploadStatus Status)
+        {
+            if (Status == EDWCEditorTextureUploadStatus::Stale)
+            {
+                ++ShutdownStaleNotifications;
+            }
+        });
+    UploadQueue->Shutdown();
+    TestEqual(TEXT("Queue shutdown invalidates and notifies a pending ticket once"),
+        ShutdownStaleNotifications, 1);
+
+    ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorTextureWorkspacePreparedNormalUploadTest,
+    "DWC.Editor.Foundation.TextureWorkspace.UploadQueue.PreparedNormalPayload",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorTextureWorkspacePreparedNormalUploadTest::RunTest(const FString&)
+{
+    constexpr uint64 TwoRowsBytes = 4ull * 2ull * sizeof(FColor);
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>(1024ull, TwoRowsBytes);
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+
+    FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(8, 8));
+    Descriptor.WorkingSize = Descriptor.Size;
+    const FDWCEditorTextureKey Key = MakeTextureKey(
+        Owner,
+        EDWCEditorTexturePurpose::WrinkleHover,
+        29);
+    FDWCEditorNormalRasterSurface Surface;
+    Surface.Initialize(Descriptor.WorkingSize, true);
+    FDWCEditorTextureLease Lease = Workspace.TransferNormalBGRA8AndAcquireLease(
+        Key,
+        Descriptor,
+        MakeFlatNormalPixels(Descriptor),
+        MoveTemp(Surface),
+        EDWCEditorTextureUploadPriority::Interactive);
+    TestTrue(TEXT("Prepared upload fixture has an active normal texture lease"), Lease.IsValid());
+    if (!Lease.IsValid())
+    {
+        UploadQueue->Shutdown();
+        return false;
+    }
+    FlushRenderingCommands();
+
+    FDWCEditorNormalRegionPayload Region;
+    Region.WorkingRect = FIntRect(2, 2, 6, 6);
+    Region.OutputRect = Region.WorkingRect;
+    Region.PackedNormalXY.Init(0, 16);
+    Region.Coverage.Init(0.75f, 16);
+    Region.EncodedPixels.Init(FColor(64, 192, 240, 255), 16);
+    TArray<FDWCEditorNormalRegionPayload> Regions;
+    Regions.Add(MoveTemp(Region));
+
+    FDWCEditorPreviewRegionTarget Target;
+    Target.Key = Key;
+    Target.Descriptor = Descriptor;
+    Target.ExpectedDataRevision = Lease->GetDataRevision();
+    Target.ExpectedResourceGeneration = Lease->GetResourceGeneration();
+    const FDWCEditorPreviewRegionCommitOutcome Outcome = Workspace.CommitInteractiveNormalRegions(
+        Lease,
+        Target,
+        MoveTemp(Regions));
+    TestEqual(TEXT("Interactive normal region commit succeeds"),
+        Outcome.Result, EDWCEditorPreviewRegionCommitResult::Applied);
+    TestTrue(TEXT("Encoded region storage transfers out of the worker result"),
+        Regions.Num() == 1 && Regions[0].EncodedPixels.IsEmpty());
+    TestEqual(TEXT("Canonical CPU mirror receives the encoded normal"),
+        Lease->GetBGRA8Pixels()[2 + 2 * Descriptor.Size.X], FColor(64, 192, 240, 255));
+
+    FDWCEditorTextureUploadTiming QueuedTiming;
+    TestTrue(TEXT("Prepared upload exposes timing telemetry"),
+        UploadQueue->GetTiming(Outcome.UploadTicket, QueuedTiming));
+    TestTrue(TEXT("Prepared upload fast path is selected"), QueuedTiming.bUsedPreparedPayload);
+    TestEqual(TEXT("Prepared payload owns the exact encoded region bytes"),
+        QueuedTiming.PreparedPayloadBytes, 16ull * sizeof(FColor));
+    TestEqual(TEXT("No legacy staging copy occurs before submission"),
+        QueuedTiming.StagingCopyMs, 0.0);
+    TArray<FDWCEditorPreviewMemoryBucket> QueuedBuckets;
+    UploadQueue->AppendDiagnosticMemoryBucket(QueuedBuckets);
+    const FDWCEditorPreviewMemoryBucket* QueuedStaging = FindMemoryBucket(
+        QueuedBuckets,
+        TEXT("Render upload staging (in-flight)"));
+    TestNotNull(TEXT("Prepared payload staging diagnostics exist"), QueuedStaging);
+    if (QueuedStaging != nullptr)
+    {
+        TestEqual(TEXT("Prepared payload reserves its physical bytes once"),
+            QueuedStaging->UsedBytes, 16ull * sizeof(FColor));
+    }
+
+    UploadQueue->TrySubmitInteractive(Outcome.UploadTicket, TwoRowsBytes, 100.0);
+    UploadQueue->Flush();
+    FlushRenderingCommands();
+    FDWCEditorTextureUploadTiming SubmittedTiming;
+    TestTrue(TEXT("Prepared upload timing survives render completion"),
+        UploadQueue->GetTiming(Outcome.UploadTicket, SubmittedTiming));
+    TestEqual(TEXT("Prepared upload never performs a workspace-to-staging copy"),
+        SubmittedTiming.StagingCopyMs, 0.0);
+    if (SubmittedTiming.WasSubmitted())
+    {
+        TestEqual(TEXT("Every submitted byte bypasses the legacy staging copy"),
+            SubmittedTiming.AvoidedStagingCopyBytes, SubmittedTiming.SubmittedBytes);
+    }
+    TArray<FDWCEditorPreviewMemoryBucket> CompletedBuckets;
+    UploadQueue->AppendDiagnosticMemoryBucket(CompletedBuckets);
+    const FDWCEditorPreviewMemoryBucket* CompletedStaging = FindMemoryBucket(
+        CompletedBuckets,
+        TEXT("Render upload staging (in-flight)"));
+    TestNotNull(TEXT("Completed prepared payload staging diagnostics exist"), CompletedStaging);
+    if (CompletedStaging != nullptr && SubmittedTiming.WasSubmitted())
+    {
+        TestEqual(TEXT("Render completion releases the prepared payload reservation"),
+            CompletedStaging->UsedBytes, 0ull);
+    }
+
+    Lease.Reset();
+    ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorTextureWorkspacePreparedLatestMailboxTest,
+    "DWC.Editor.Foundation.TextureWorkspace.UploadQueue.PreparedLatestMailbox",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorTextureWorkspacePreparedLatestMailboxTest::RunTest(const FString&)
+{
+    constexpr uint64 PayloadBytes = 4ull * 4ull * sizeof(FColor);
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>(PayloadBytes, PayloadBytes);
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(8, 8));
+    Descriptor.WorkingSize = Descriptor.Size;
+    const FDWCEditorTextureKey Key = MakeTextureKey(
+        Owner, EDWCEditorTexturePurpose::WrinkleHover, 31);
+    FDWCEditorNormalRasterSurface Surface;
+    Surface.Initialize(Descriptor.WorkingSize, true);
+    FDWCEditorTextureLease Lease = Workspace.TransferNormalBGRA8AndAcquireLease(
+        Key,
+        Descriptor,
+        MakeFlatNormalPixels(Descriptor),
+        MoveTemp(Surface),
+        EDWCEditorTextureUploadPriority::Interactive);
+    TestTrue(TEXT("Latest mailbox fixture owns a texture lease"), Lease.IsValid());
+
+    const auto MakeRegion = [](const FColor Color)
+    {
+        FDWCEditorNormalRegionPayload Region;
+        Region.WorkingRect = FIntRect(2, 2, 6, 6);
+        Region.OutputRect = Region.WorkingRect;
+        Region.PackedNormalXY.Init(0, 16);
+        Region.Coverage.Init(1.0f, 16);
+        Region.EncodedPixels.Init(Color, 16);
+        TArray<FDWCEditorNormalRegionPayload> Regions;
+        Regions.Add(MoveTemp(Region));
+        return Regions;
+    };
+    const auto MakeTarget = [&Key, &Descriptor](const FDWCEditorTextureLease& CurrentLease)
+    {
+        FDWCEditorPreviewRegionTarget Target;
+        Target.Key = Key;
+        Target.Descriptor = Descriptor;
+        Target.ExpectedDataRevision = CurrentLease->GetDataRevision();
+        Target.ExpectedResourceGeneration = CurrentLease->GetResourceGeneration();
+        return Target;
+    };
+
+    TArray<FDWCEditorNormalRegionPayload> FirstRegions = MakeRegion(FColor::Red);
+    const FDWCEditorPreviewRegionCommitOutcome First = Workspace.CommitInteractiveNormalRegions(
+        Lease, MakeTarget(Lease), MoveTemp(FirstRegions));
+    TArray<FDWCEditorNormalRegionPayload> LatestRegions = MakeRegion(FColor::Green);
+    const FDWCEditorPreviewRegionCommitOutcome Latest = Workspace.CommitInteractiveNormalRegions(
+        Lease, MakeTarget(Lease), MoveTemp(LatestRegions));
+
+    TestEqual(TEXT("The older unsent prepared payload becomes stale"),
+        UploadQueue->GetStatus(First.UploadTicket), EDWCEditorTextureUploadStatus::Stale);
+    FDWCEditorTextureUploadTiming LatestTiming;
+    TestTrue(TEXT("The latest prepared payload remains queryable"),
+        UploadQueue->GetTiming(Latest.UploadTicket, LatestTiming));
+    TestTrue(TEXT("Replacing an equally-sized payload stays on the prepared path"),
+        LatestTiming.bUsedPreparedPayload);
+
+    TArray<FDWCEditorPreviewMemoryBucket> Buckets;
+    UploadQueue->AppendDiagnosticMemoryBucket(Buckets);
+    const FDWCEditorPreviewMemoryBucket* Staging = FindMemoryBucket(
+        Buckets, TEXT("Render upload staging (in-flight)"));
+    TestNotNull(TEXT("Latest mailbox staging diagnostics exist"), Staging);
+    if (Staging != nullptr)
+    {
+        TestEqual(TEXT("Only the latest unsent payload reserves staging memory"),
+            Staging->UsedBytes, PayloadBytes);
+    }
+    TArray<FDWCEditorPreviewOperationCounter> Counters;
+    UploadQueue->AppendDiagnosticOperationCounters(Counters);
+    const FDWCEditorPreviewOperationCounter* Replacements = FindOperationCounter(
+        Counters, TEXT("Superseded prepared upload payloads"));
+    TestNotNull(TEXT("Prepared mailbox replacement diagnostics exist"), Replacements);
+    if (Replacements != nullptr)
+    {
+        TestEqual(TEXT("One prepared payload was superseded"), Replacements->Count, 1ull);
+        TestEqual(TEXT("Superseded payload bytes are reported"), Replacements->Bytes, PayloadBytes);
+    }
+
+    Lease.Reset();
+    ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorTextureWorkspaceHoverUploadLatestOnlyWorkTest,
+    "DWC.Editor.Regression.HoverUpload.Latency.LatestOnlyWork",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorTextureWorkspaceHoverUploadLatestOnlyWorkTest::RunTest(const FString&)
+{
+    constexpr int32 RevisionCount = 16;
+    constexpr int32 RegionPixelCount = 4 * 4;
+    constexpr uint64 PayloadBytes = RegionPixelCount * sizeof(FColor);
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>(PayloadBytes, PayloadBytes);
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(8, 8));
+    Descriptor.WorkingSize = Descriptor.Size;
+    const FDWCEditorTextureKey Key = MakeTextureKey(
+        Owner, EDWCEditorTexturePurpose::WrinkleHover, 32);
+    FDWCEditorNormalRasterSurface Surface;
+    Surface.Initialize(Descriptor.WorkingSize, true);
+    FDWCEditorTextureLease Lease = Workspace.TransferNormalBGRA8AndAcquireLease(
+        Key,
+        Descriptor,
+        MakeFlatNormalPixels(Descriptor),
+        MoveTemp(Surface),
+        EDWCEditorTextureUploadPriority::Interactive);
+    TestTrue(TEXT("Hover latency fixture owns a texture lease"), Lease.IsValid());
+    if (!Lease.IsValid())
+    {
+        UploadQueue->Shutdown();
+        return false;
+    }
+
+    FDWCEditorTextureUploadTicket PreviousTicket;
+    FDWCEditorTextureUploadTicket LatestTicket;
+    for (int32 RevisionIndex = 0; RevisionIndex < RevisionCount; ++RevisionIndex)
+    {
+        FDWCEditorNormalRegionPayload Region;
+        Region.WorkingRect = FIntRect(2, 2, 6, 6);
+        Region.OutputRect = Region.WorkingRect;
+        Region.PackedNormalXY.Init(0, RegionPixelCount);
+        Region.Coverage.Init(1.0f, RegionPixelCount);
+        Region.EncodedPixels.Init(FColor(RevisionIndex, 255 - RevisionIndex, 192, 255), RegionPixelCount);
+        TArray<FDWCEditorNormalRegionPayload> Regions;
+        Regions.Add(MoveTemp(Region));
+
+        FDWCEditorPreviewRegionTarget Target;
+        Target.Key = Key;
+        Target.Descriptor = Descriptor;
+        Target.ExpectedDataRevision = Lease->GetDataRevision();
+        Target.ExpectedResourceGeneration = Lease->GetResourceGeneration();
+        const FDWCEditorPreviewRegionCommitOutcome Outcome = Workspace.CommitInteractiveNormalRegions(
+            Lease,
+            Target,
+            MoveTemp(Regions));
+        TestEqual(TEXT("Every hover revision commits to the CPU mirror"),
+            Outcome.Result, EDWCEditorPreviewRegionCommitResult::Applied);
+        if (PreviousTicket.IsValid())
+        {
+            TestEqual(TEXT("Each older unsent hover revision is retired immediately"),
+                UploadQueue->GetStatus(PreviousTicket), EDWCEditorTextureUploadStatus::Stale);
+        }
+        PreviousTicket = Outcome.UploadTicket;
+        LatestTicket = Outcome.UploadTicket;
+    }
+
+    FDWCEditorTextureUploadTiming Timing;
+    TestTrue(TEXT("The latest hover revision keeps timing telemetry"),
+        UploadQueue->GetTiming(LatestTicket, Timing));
+    TestTrue(TEXT("Repeated hover commits stay on the prepared zero-copy path"),
+        Timing.bUsedPreparedPayload);
+    TestEqual(TEXT("Repeated hover commits perform no legacy staging copy"),
+        Timing.StagingCopyMs, 0.0);
+    TestEqual(TEXT("Only one hover region is pending for the latest revision"),
+        Timing.RequestedRegionCount, 1u);
+
+    TArray<FDWCEditorPreviewMemoryBucket> Buckets;
+    UploadQueue->AppendDiagnosticMemoryBucket(Buckets);
+    const FDWCEditorPreviewMemoryBucket* Staging = FindMemoryBucket(
+        Buckets, TEXT("Render upload staging (in-flight)"));
+    TestNotNull(TEXT("Hover staging diagnostics exist"), Staging);
+    if (Staging != nullptr)
+    {
+        TestEqual(TEXT("A hover burst retains only one unsent payload"),
+            Staging->UsedBytes, PayloadBytes);
+    }
+
+    TArray<FDWCEditorPreviewOperationCounter> Counters;
+    UploadQueue->AppendDiagnosticOperationCounters(Counters);
+    const FDWCEditorPreviewOperationCounter* Replacements = FindOperationCounter(
+        Counters, TEXT("Superseded prepared upload payloads"));
+    TestNotNull(TEXT("Hover mailbox replacement diagnostics exist"), Replacements);
+    if (Replacements != nullptr)
+    {
+        TestEqual(TEXT("Every obsolete hover payload is counted once"),
+            Replacements->Count, static_cast<uint64>(RevisionCount - 1));
+        TestEqual(TEXT("Superseded hover bytes remain bounded and exact"),
+            Replacements->Bytes, PayloadBytes * (RevisionCount - 1));
+    }
+
+    Lease.Reset();
+    ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorTextureWorkspaceHoverUploadReplacementShutdownLifetimeTest,
+    "DWC.Editor.Regression.HoverUpload.Lifetime.ReplacementShutdown",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorTextureWorkspaceHoverUploadReplacementShutdownLifetimeTest::RunTest(const FString&)
+{
+    constexpr int32 RegionPixelCount = 4 * 4;
+    constexpr uint64 PayloadBytes = RegionPixelCount * sizeof(FColor);
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>(PayloadBytes, PayloadBytes);
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(8, 8));
+    Descriptor.WorkingSize = Descriptor.Size;
+    const FDWCEditorTextureKey Key = MakeTextureKey(
+        Owner, EDWCEditorTexturePurpose::WrinkleHover, 33);
+    FDWCEditorNormalRasterSurface Surface;
+    Surface.Initialize(Descriptor.WorkingSize, true);
+    FDWCEditorTextureLease Lease = Workspace.TransferNormalBGRA8AndAcquireLease(
+        Key,
+        Descriptor,
+        MakeFlatNormalPixels(Descriptor),
+        MoveTemp(Surface),
+        EDWCEditorTextureUploadPriority::Interactive);
+    TestTrue(TEXT("Replacement lifetime fixture owns a texture lease"), Lease.IsValid());
+    if (!Lease.IsValid())
+    {
+        UploadQueue->Shutdown();
+        return false;
+    }
+    const auto CommitColor = [&Workspace, &Lease, &Key, &Descriptor](const FColor Color)
+    {
+        FDWCEditorNormalRegionPayload Region;
+        Region.WorkingRect = FIntRect(2, 2, 6, 6);
+        Region.OutputRect = Region.WorkingRect;
+        Region.PackedNormalXY.Init(0, RegionPixelCount);
+        Region.Coverage.Init(1.0f, RegionPixelCount);
+        Region.EncodedPixels.Init(Color, RegionPixelCount);
+        TArray<FDWCEditorNormalRegionPayload> Regions;
+        Regions.Add(MoveTemp(Region));
+        FDWCEditorPreviewRegionTarget Target;
+        Target.Key = Key;
+        Target.Descriptor = Descriptor;
+        Target.ExpectedDataRevision = Lease->GetDataRevision();
+        Target.ExpectedResourceGeneration = Lease->GetResourceGeneration();
+        return Workspace.CommitInteractiveNormalRegions(Lease, Target, MoveTemp(Regions));
+    };
+
+    const FDWCEditorPreviewRegionCommitOutcome First = CommitColor(FColor::Red);
+    int32 FirstStaleNotifications = 0;
+    UploadQueue->Observe(
+        First.UploadTicket,
+        [&FirstStaleNotifications](const EDWCEditorTextureUploadStatus Status)
+        {
+            if (Status == EDWCEditorTextureUploadStatus::Stale)
+            {
+                ++FirstStaleNotifications;
+            }
+        });
+
+    const FDWCEditorPreviewRegionCommitOutcome Latest = CommitColor(FColor::Green);
+    TestEqual(TEXT("Replacing an unsent hover revision retires its ticket"),
+        UploadQueue->GetStatus(First.UploadTicket), EDWCEditorTextureUploadStatus::Stale);
+    TestEqual(TEXT("A replaced hover observer receives one terminal notification"),
+        FirstStaleNotifications, 1);
+    TestEqual(TEXT("The replacement remains queued"),
+        UploadQueue->GetStatus(Latest.UploadTicket), EDWCEditorTextureUploadStatus::Queued);
+
+    TArray<FDWCEditorPreviewMemoryBucket> ReplacementBuckets;
+    UploadQueue->AppendDiagnosticMemoryBucket(ReplacementBuckets);
+    const FDWCEditorPreviewMemoryBucket* ReplacementStaging = FindMemoryBucket(
+        ReplacementBuckets, TEXT("Render upload staging (in-flight)"));
+    TestNotNull(TEXT("Replacement staging diagnostics exist"), ReplacementStaging);
+    if (ReplacementStaging != nullptr)
+    {
+        TestEqual(TEXT("Replacing an unsent hover payload releases it before reserving the latest one"),
+            ReplacementStaging->UsedBytes, PayloadBytes);
+    }
+
+    int32 LatestStaleNotifications = 0;
+    UploadQueue->Observe(
+        Latest.UploadTicket,
+        [&LatestStaleNotifications](const EDWCEditorTextureUploadStatus Status)
+        {
+            if (Status == EDWCEditorTextureUploadStatus::Stale)
+            {
+                ++LatestStaleNotifications;
+            }
+        });
+
+    UploadQueue->Shutdown();
+    TArray<FDWCEditorPreviewMemoryBucket> ShutdownBuckets;
+    UploadQueue->AppendDiagnosticMemoryBucket(ShutdownBuckets);
+    const FDWCEditorPreviewMemoryBucket* ShutdownStaging = FindMemoryBucket(
+        ShutdownBuckets, TEXT("Render upload staging (in-flight)"));
+    TestNotNull(TEXT("Shutdown staging diagnostics exist"), ShutdownStaging);
+    if (ShutdownStaging != nullptr)
+    {
+        TestEqual(TEXT("Shutdown releases the final unsent hover payload"),
+            ShutdownStaging->UsedBytes, 0ull);
+    }
+    TestEqual(TEXT("Shutdown makes the latest hover ticket stale"),
+        UploadQueue->GetStatus(Latest.UploadTicket), EDWCEditorTextureUploadStatus::Stale);
+    TestEqual(TEXT("Shutdown notifies the latest hover observer once"),
+        LatestStaleNotifications, 1);
+
+    Lease.Reset();
+    ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorTextureWorkspaceGovernorResidencyLifetimeTest,
+    "DWC.Editor.Foundation.TextureWorkspace.ResourceGovernor.ResidencyLifetime",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorTextureWorkspaceGovernorResidencyLifetimeTest::RunTest(const FString&)
+{
+    constexpr uint64 BudgetBytes = 1024ull * 1024ull;
+    FDWCEditorResourceBudgetConfig Config;
+    Config.GlobalEditorCPUBytes = BudgetBytes;
+    Config.WorkerPrivateCPUBytes = BudgetBytes;
+    Config.PreviewWorkspaceCPUBytes = BudgetBytes;
+    Config.SharedCacheCPUBytes = BudgetBytes;
+    Config.UploadStagingCPUBytes = BudgetBytes;
+    Config.PreviewGPUBytes = BudgetBytes;
+
+    const TSharedRef<FDWCEditorResourceGovernor> Governor =
+        MakeShared<FDWCEditorResourceGovernor>(Config);
+    const FGuid SessionEpoch = FGuid::NewGuid();
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>(
+            Governor,
+            SessionEpoch,
+            BudgetBytes,
+            BudgetBytes);
+    FDWCEditorTextureWorkspace Workspace(
+        UploadQueue,
+        Governor,
+        SessionEpoch,
+        BudgetBytes,
+        BudgetBytes);
+
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
+    FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(
+        MakeTextureKey(Owner, EDWCEditorTexturePurpose::TransparencyVisualization, 40),
+        Descriptor,
+        MakeFlatNormalPixels(Descriptor));
+    TestTrue(TEXT("Governor-backed workspace publishes a GPU resource"),
+        Handle.IsValid() && Handle->IsGPUResident());
+
+    FDWCEditorResourceGovernorDiagnostics Diagnostics = Governor->GetDiagnostics();
+    const FDWCEditorResourcePoolDiagnostics* WorkspaceCPU = FindGovernorPool(
+        Diagnostics,
+        EDWCEditorResourcePool::PreviewWorkspaceCPU);
+    const FDWCEditorResourcePoolDiagnostics* PreviewGPU = FindGovernorPool(
+        Diagnostics,
+        EDWCEditorResourcePool::PreviewGPU);
+    TestNotNull(TEXT("Workspace CPU pool diagnostics exist"), WorkspaceCPU);
+    TestNotNull(TEXT("Preview GPU pool diagnostics exist"), PreviewGPU);
+    if (WorkspaceCPU != nullptr && PreviewGPU != nullptr)
+    {
+        TestTrue(TEXT("Workspace CPU pixels own a reservation"), WorkspaceCPU->UsedBytes > 0);
+        TestEqual(TEXT("A 4x4 BGRA8 GPU texture reserves its exact payload"),
+            PreviewGPU->UsedBytes, 64ull);
+    }
+
+    FDWCEditorTextureLease Lease = Workspace.AcquireLease(Handle);
+    TestTrue(TEXT("The published workspace resource can be leased"), Lease.IsValid());
+    Workspace.Discard(Lease);
+    Handle.Reset();
+
+    Diagnostics = Governor->GetDiagnostics();
+    PreviewGPU = FindGovernorPool(Diagnostics, EDWCEditorResourcePool::PreviewGPU);
+    TestNotNull(TEXT("GPU diagnostics remain available while retiring"), PreviewGPU);
+    if (PreviewGPU != nullptr)
+    {
+        TestEqual(TEXT("A retiring GPU resource retains its reservation until fence completion"),
+            PreviewGPU->UsedBytes, 64ull);
+    }
+
+    Lease.Reset();
+    UploadQueue->Shutdown();
+    FlushRenderingCommands();
+    Workspace.ProcessRetiredGPUResources();
+    Workspace.Reset();
+    FlushRenderingCommands();
+    Workspace.ProcessRetiredGPUResources();
+
+    Diagnostics = Governor->GetDiagnostics();
+    WorkspaceCPU = FindGovernorPool(Diagnostics, EDWCEditorResourcePool::PreviewWorkspaceCPU);
+    PreviewGPU = FindGovernorPool(Diagnostics, EDWCEditorResourcePool::PreviewGPU);
+    TestNotNull(TEXT("Workspace CPU diagnostics remain after teardown"), WorkspaceCPU);
+    TestNotNull(TEXT("Preview GPU diagnostics remain after teardown"), PreviewGPU);
+    if (WorkspaceCPU != nullptr && PreviewGPU != nullptr)
+    {
+        TestEqual(TEXT("Workspace teardown returns all CPU reservations"), WorkspaceCPU->UsedBytes, 0ull);
+        TestEqual(TEXT("Render-fence retirement returns all GPU reservations"), PreviewGPU->UsedBytes, 0ull);
+    }
+    TestEqual(TEXT("No governor reservation survives workspace teardown"),
+        Diagnostics.Reservations.Num(), 0);
     return true;
 }
 

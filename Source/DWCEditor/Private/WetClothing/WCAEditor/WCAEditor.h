@@ -1,11 +1,10 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #pragma once
 
-#include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "Core/DWCSimulationMode.h"
 #include "Toolkits/AssetEditorToolkit.h"
+#include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
 #include "WetClothing/WCAEditor/WCAEditorMode.h"
 
 struct FPropertyChangedEvent;
@@ -55,34 +54,31 @@ class FWCAEditor : public FAssetEditorToolkit
     FReply               HandleValidationRefreshClicked(TWeakPtr<SWindow> DialogWindow);
     FReply               HandleValidationResolveClicked(TWeakPtr<SWindow> DialogWindow);
     TSharedRef<SWidget>  BuildRuntimeBuildMenu();
+    FDWCEditorBuildStatusSnapshot BuildBuildStatusSnapshot(bool bDeepValidation = false) const;
+    bool                 CanExecuteBuildAction(EDWCEditorBuildAction Action) const;
+    void                 ExecuteBuildAction(EDWCEditorBuildAction Action);
+    TSharedRef<SWidget>  BuildPreviewDiagnosticsMenu();
+    void                 HandleDumpPreviewDiagnostics();
+    void                 HandleResetPreviewDiagnostics();
     FReply               HandleBuildAllRequiredClicked();
     FReply               HandleBuildCPURuntimeDataClicked();
     FReply               HandleBuildGPURuntimeDataClicked();
     FReply               HandleBakeRenderProfileDataClicked();
     FReply               HandleBakeWrinkleNormalMapClicked();
     FReply               HandleBakeTransparencyMapsClicked();
+    FReply               HandleRebakeAffectedTransparencyMapsClicked();
     FReply               HandleGenerateMaterialsClicked();
     FReply               GenerateWetMaterials();
-    bool                 HasMaterialGenerationPrerequisites(FText* OutFailureReason = nullptr) const;
-    bool                 IsMaterialGenerationRequired() const;
-    bool                 CanGenerateMaterials() const;
-    FText                GetGenerateMaterialsTooltip() const;
-    bool                 CanBuildAllRequired() const;
-    bool                 CanBuildCPURuntimeData() const;
-    bool                 CanBuildGPURuntimeData() const;
-    bool                 CanBakeRenderProfileData() const;
-    bool                 CanBakeWrinkleMaps() const;
-    bool                 CanBakeTransparencyMaps() const;
     bool                 ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSummary = nullptr);
     void                 RefreshAssetStateAndEditor(
-                        bool bRunDeepValidation = false,
-                        bool bRebuildActiveModePreview = true);
-    TSharedRef<SWidget> BuildModeToolbarWidget();
-    TSharedRef<SWidget> BuildModeToggleButton(EWCAEditorMode Mode, FName IconName, const FText& ToolTipText);
-    void                SetEditorMode(EWCAEditorMode NewMode);
-    ECheckBoxState      IsModeChecked(EWCAEditorMode Mode) const;
-    void                HandleModeCheckStateChanged(ECheckBoxState NewState, EWCAEditorMode Mode);
-    FSlateColor         GetModeIconColor(EWCAEditorMode Mode) const;
+        bool bRunDeepValidation = false,
+        bool bRebuildActiveModePreview = true);
+    TSharedRef<SWidget>  BuildModeToolbarWidget();
+    TSharedRef<SWidget>  BuildModeToggleButton(EWCAEditorMode Mode, FName IconName, const FText& ToolTipText);
+    void                 SetEditorMode(EWCAEditorMode NewMode);
+    ECheckBoxState       IsModeChecked(EWCAEditorMode Mode) const;
+    void                 HandleModeCheckStateChanged(ECheckBoxState NewState, EWCAEditorMode Mode);
+    FSlateColor          GetModeIconColor(EWCAEditorMode Mode) const;
 
   private:
     enum class ECloseConfirmationState : uint8
@@ -95,13 +91,13 @@ class FWCAEditor : public FAssetEditorToolkit
     static const FName EditorAppDisplayName;
     static const FName MainTabId;
 
-    TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
-    TSharedPtr<IDetailsView>          DetailsView;
-    TSharedPtr<SWCAEditorPanel>       EditorPanel;
-    TSharedPtr<FWorkspaceItem>        WorkspaceMenuCategory;
-    FDelegateHandle                   ObjectPropertyChangedHandle;
-    FDelegateHandle                   AssetSavedHandle;
-    TSharedPtr<FExtender>             ToolbarExtender;
-    EWCAEditorMode                    CurrentMode = EWCAEditorMode::PartEdit;
-    ECloseConfirmationState           CloseConfirmationState = ECloseConfirmationState::Idle;
+    TWeakObjectPtr<UWetClothingAsset>        WetClothingAsset;
+    TSharedPtr<IDetailsView>                 DetailsView;
+    TSharedPtr<SWCAEditorPanel> EditorPanel;
+    TSharedPtr<FWorkspaceItem>               WorkspaceMenuCategory;
+    FDelegateHandle                          ObjectPropertyChangedHandle;
+    FDelegateHandle                          AssetSavedHandle;
+    TSharedPtr<FExtender>                    ToolbarExtender;
+    EWCAEditorMode                           CurrentMode = EWCAEditorMode::PartEdit;
+    ECloseConfirmationState                  CloseConfirmationState = ECloseConfirmationState::Idle;
 };

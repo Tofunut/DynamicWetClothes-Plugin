@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
 
 #include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
@@ -7,6 +6,19 @@
 FDWCEditorCacheStore::FDWCEditorCacheStore(const uint64 InBudgetBytes)
     : BudgetBytes(FMath::Max<uint64>(InBudgetBytes, 1))
 {
+}
+
+FDWCEditorCacheStore::FDWCEditorCacheStore(
+    TSharedRef<FDWCEditorResourceGovernor> InResourceGovernor,
+    const FGuid& InSessionEpoch,
+    const uint64 InBudgetBytes)
+    : ResourceGovernor(MoveTemp(InResourceGovernor))
+    , BudgetBytes(FMath::Max<uint64>(InBudgetBytes, 1))
+{
+    MemoryOwner.Key.Namespace = TEXT("DWC.SharedCache");
+    MemoryOwner.SessionEpoch = InSessionEpoch.IsValid() ? InSessionEpoch : FGuid::NewGuid();
+    MemoryOwner.OperationId = 1;
+    MemoryOwner.Generation = 1;
 }
 
 FDWCEditorCacheLease FDWCEditorCacheStore::AcquireLease(const FDWCEditorCacheKey& Key)
@@ -27,8 +39,8 @@ FDWCEditorCacheLease FDWCEditorCacheStore::AcquireLease(const FDWCEditorCacheKey
     return FDWCEditorCacheLease(MoveTemp(Entry));
 }
 
-void FDWCEditorCacheStore::Put(
-    const FDWCEditorCacheKey&                                   Key,
+bool FDWCEditorCacheStore::Put(
+    const FDWCEditorCacheKey& Key,
     TSharedRef<const IDWCEditorCacheValue, ESPMode::ThreadSafe> Value)
 {
     check(IsInGameThread());
@@ -38,6 +50,7 @@ void FDWCEditorCacheStore::Put(
     {
         TrackRetiredEntry(*Existing);
         UsedBytes -= (*Existing)->ResidentBytes;
+        Entries.Remove(Key);
     }
 
     TSharedPtr<FDWCEditorCacheEntry> Entry = MakeShared<FDWCEditorCacheEntry>();
@@ -48,10 +61,40 @@ void FDWCEditorCacheStore::Put(
         static_cast<uint64>(sizeof(FDWCEditorCacheKey)) +
         static_cast<uint64>(Key.Signature.GetAllocatedSize()) +
         Entry->PayloadBytes;
+
+    while (GetTrackedBytes() + Entry->ResidentBytes > BudgetBytes && EvictOldestUnleased())
+    {
+    }
+    if (GetTrackedBytes() + Entry->ResidentBytes > BudgetBytes)
+    {
+        ++AdmissionRejectCount;
+        return false;
+    }
+
+    if (ResourceGovernor.IsValid())
+    {
+        FDWCEditorResourceReservationRequest Request;
+        Request.Pool = EDWCEditorResourcePool::SharedCacheCPU;
+        Request.Bytes = Entry->ResidentBytes;
+        Request.Owner = MemoryOwner;
+        Request.DebugName = FString::Printf(TEXT("Shared cache: %s"), *Key.Namespace.ToString());
+        Entry->MemoryLease = ResourceGovernor->TryAcquire(Request);
+        while (!Entry->MemoryLease.IsValid() && EvictOldestUnleased())
+        {
+            Entry->MemoryLease = ResourceGovernor->TryAcquire(Request);
+        }
+        if (!Entry->MemoryLease.IsValid())
+        {
+            ++AdmissionRejectCount;
+            return false;
+        }
+    }
+
     Entry->LastUsedSerial = ++UseSerial;
     Entries.Add(Key, Entry);
     UsedBytes += Entry->ResidentBytes;
     TrimToBudget();
+    return true;
 }
 
 void FDWCEditorCacheStore::InvalidateOwner(const UObject* Owner)
@@ -63,11 +106,40 @@ void FDWCEditorCacheStore::InvalidateOwner(const UObject* Owner)
         return;
     }
 
-    const FObjectKey           OwnerKey(Owner);
+    const FObjectKey OwnerKey(Owner);
     TArray<FDWCEditorCacheKey> KeysToRemove;
     for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
     {
         if (Pair.Key.Owner == OwnerKey)
+        {
+            KeysToRemove.Add(Pair.Key);
+        }
+    }
+    for (const FDWCEditorCacheKey& Key : KeysToRemove)
+    {
+        RemoveEntry(Key, false);
+    }
+}
+
+void FDWCEditorCacheStore::InvalidateOwnerNamespace(
+    const UObject* Owner,
+    const FName Namespace,
+    const int32 MaterialSlotIndex)
+{
+    check(IsInGameThread());
+    CleanupRetiredEntries();
+    if (Owner == nullptr || Namespace.IsNone())
+    {
+        return;
+    }
+
+    const FObjectKey OwnerKey(Owner);
+    TArray<FDWCEditorCacheKey> KeysToRemove;
+    for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
+    {
+        if (Pair.Key.Owner == OwnerKey && Pair.Key.Namespace == Namespace &&
+            (MaterialSlotIndex == INDEX_NONE ||
+             Pair.Key.MaterialSlotIndex == MaterialSlotIndex))
         {
             KeysToRemove.Add(Pair.Key);
         }
@@ -118,7 +190,7 @@ void FDWCEditorCacheStore::TrimToBudget()
     while (GetTrackedBytes() > BudgetBytes && !Entries.IsEmpty())
     {
         const FDWCEditorCacheKey* OldestKey = nullptr;
-        uint64                    OldestSerial = TNumericLimits<uint64>::Max();
+        uint64 OldestSerial = TNumericLimits<uint64>::Max();
         for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
         {
             if (!Pair.Value.IsValid() || Pair.Value->ActiveLeaseCount.GetValue() > 0)
@@ -160,26 +232,6 @@ int32 FDWCEditorCacheStore::GetActiveLeaseCount() const
         }
     }
     return ActiveLeaseCount;
-}
-
-uint64 FDWCEditorCacheStore::GetPayloadBytes() const
-{
-    uint64 PayloadBytes = 0;
-    for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
-    {
-        if (Pair.Value.IsValid())
-        {
-            PayloadBytes += Pair.Value->PayloadBytes;
-        }
-    }
-    for (const TWeakPtr<FDWCEditorCacheEntry>& RetiredEntry : RetiredEntries)
-    {
-        if (const TSharedPtr<FDWCEditorCacheEntry> Entry = RetiredEntry.Pin())
-        {
-            PayloadBytes += Entry->PayloadBytes;
-        }
-    }
-    return PayloadBytes;
 }
 
 uint64 FDWCEditorCacheStore::GetRetiredBytes() const
@@ -230,11 +282,37 @@ void FDWCEditorCacheStore::ResetDiagnosticCounters()
     HitCount = 0;
     MissCount = 0;
     EvictionCount = 0;
+    AdmissionRejectCount = 0;
+}
+
+bool FDWCEditorCacheStore::EvictOldestUnleased()
+{
+    const FDWCEditorCacheKey* OldestKey = nullptr;
+    uint64 OldestSerial = TNumericLimits<uint64>::Max();
+    for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
+    {
+        if (!Pair.Value.IsValid() || Pair.Value->ActiveLeaseCount.GetValue() > 0)
+        {
+            continue;
+        }
+        if (Pair.Value->LastUsedSerial < OldestSerial)
+        {
+            OldestSerial = Pair.Value->LastUsedSerial;
+            OldestKey = &Pair.Key;
+        }
+    }
+    if (OldestKey == nullptr)
+    {
+        return false;
+    }
+    const FDWCEditorCacheKey KeyCopy = *OldestKey;
+    RemoveEntry(KeyCopy, true);
+    return true;
 }
 
 void FDWCEditorCacheStore::RemoveEntry(
     const FDWCEditorCacheKey& Key,
-    const bool                bCountEviction)
+    const bool bCountEviction)
 {
     if (const TSharedPtr<FDWCEditorCacheEntry>* Entry = Entries.Find(Key))
     {
@@ -251,9 +329,10 @@ void FDWCEditorCacheStore::RemoveEntry(
 void FDWCEditorCacheStore::CleanupRetiredEntries()
 {
     RetiredEntries.RemoveAll([](const TWeakPtr<FDWCEditorCacheEntry>& RetiredEntry)
-                             {
+    {
         const TSharedPtr<FDWCEditorCacheEntry> Entry = RetiredEntry.Pin();
-        return !Entry.IsValid() || Entry->ActiveLeaseCount.GetValue() <= 0; });
+        return !Entry.IsValid() || Entry->ActiveLeaseCount.GetValue() <= 0;
+    });
 }
 
 void FDWCEditorCacheStore::TrackRetiredEntry(const TSharedPtr<FDWCEditorCacheEntry>& Entry)

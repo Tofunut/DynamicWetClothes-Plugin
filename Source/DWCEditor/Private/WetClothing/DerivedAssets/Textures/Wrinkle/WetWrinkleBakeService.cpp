@@ -1,9 +1,10 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
 
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionCacheService.h"
 
 namespace
 {
@@ -54,11 +55,11 @@ namespace
             &Asset,
             MaterialSlotIndex);
     }
-} // namespace
+}
 
 void FWetWrinkleBakeService::CollectBakeMaterialSlots(
     const UWetClothingAsset& WetClothingAsset,
-    TArray<int32>&           OutMaterialSlots)
+    TArray<int32>& OutMaterialSlots)
 {
     TSet<int32> MaterialSlots;
     CollectAuthoredWrinkleMaterialSlots(WetClothingAsset, MaterialSlots);
@@ -68,7 +69,7 @@ void FWetWrinkleBakeService::CollectBakeMaterialSlots(
 
 void FWetWrinkleBakeService::RefreshBakeStatusFromCurrentOutputs(
     UWetClothingAsset* WetClothingAsset,
-    const FString&     Failure)
+    const FString& Failure)
 {
     if (WetClothingAsset == nullptr)
     {
@@ -111,7 +112,12 @@ void FWetWrinkleBakeService::RefreshBakeStatusFromCurrentOutputs(
     WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Required);
 }
 
-bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAsset, FString& OutSummary, bool* OutHadWarnings)
+bool FWetWrinkleBakeService::BakeAllWrinkleMaps(
+    UWetClothingAsset* WetClothingAsset,
+    TSharedRef<FDWCEditorSpatialQueryService> SpatialQueryService,
+    TSharedRef<FDWCEditorSurfacePatchProjectionCacheService> SurfacePatchProjectionCache,
+    FString& OutSummary,
+    bool* OutHadWarnings)
 {
     if (OutHadWarnings != nullptr)
     {
@@ -139,18 +145,21 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
     Settings.PaddingPixels = WetClothingAsset->Authored.WrinkleData.BakeSettings.PaddingPixels;
     Settings.bIncludeDisabledPatches = WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches;
 
-    int32           TotalMapCount = 0;
-    int32           TotalStampCount = 0;
-    int32           TotalProceduralStrokeCount = 0;
+    int32 TotalMapCount = 0;
+    int32 TotalStampCount = 0;
+    int32 TotalProceduralStrokeCount = 0;
+    TArray<FWetWrinkleInvalidatedTransparencyOutput> InvalidatedTransparencyOutputs;
     TArray<FString> Failures;
-    TArray<int32>   SortedSlots = AuthoredMaterialSlots.Array();
+    TArray<int32> SortedSlots = AuthoredMaterialSlots.Array();
     SortedSlots.Sort();
-    FWetWrinkleNormalMapBakeSession BakeSession;
+    FWetWrinkleNormalMapBakeSession BakeSession(
+        SpatialQueryService,
+        SurfacePatchProjectionCache);
 
     for (const int32 MaterialSlotIndex : SortedSlots)
     {
         FWetWrinkleNormalMapBakeResult Result;
-        FString                        ErrorMessage;
+        FString ErrorMessage;
         if (!FWetWrinkleNormalMapBaker::BakeMaterialSlot(
                 WetClothingAsset,
                 MaterialSlotIndex,
@@ -165,6 +174,18 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
         TotalMapCount += Result.BakedMapCount;
         TotalStampCount += Result.BakedStampCount;
         TotalProceduralStrokeCount += Result.BakedProceduralStrokeCount;
+        for (FWetWrinkleInvalidatedTransparencyOutput& Invalidated :
+             Result.InvalidatedTransparencyOutputs)
+        {
+            if (!InvalidatedTransparencyOutputs.ContainsByPredicate(
+                    [&Invalidated](const FWetWrinkleInvalidatedTransparencyOutput& Existing)
+                    {
+                        return Existing.MaterialSlotIndex == Invalidated.MaterialSlotIndex;
+                    }))
+            {
+                InvalidatedTransparencyOutputs.Add(MoveTemp(Invalidated));
+            }
+        }
     }
 
     if (!Failures.IsEmpty())
@@ -191,5 +212,30 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
         TotalStampCount,
         TotalProceduralStrokeCount,
         SortedSlots.Num());
+    if (!InvalidatedTransparencyOutputs.IsEmpty())
+    {
+        InvalidatedTransparencyOutputs.Sort(
+            [](const FWetWrinkleInvalidatedTransparencyOutput& Left,
+               const FWetWrinkleInvalidatedTransparencyOutput& Right)
+            {
+                return Left.MaterialSlotIndex < Right.MaterialSlotIndex;
+            });
+        TArray<FString> SlotDescriptions;
+        SlotDescriptions.Reserve(InvalidatedTransparencyOutputs.Num());
+        for (const FWetWrinkleInvalidatedTransparencyOutput& Invalidated : InvalidatedTransparencyOutputs)
+        {
+            SlotDescriptions.Add(Invalidated.MaterialSlotName.IsEmpty()
+                ? FString::Printf(TEXT("Slot %d"), Invalidated.MaterialSlotIndex)
+                : FString::Printf(
+                    TEXT("%s (Slot %d)"),
+                    *Invalidated.MaterialSlotName,
+                    Invalidated.MaterialSlotIndex));
+        }
+        OutSummary += FString::Printf(
+            TEXT("\n\nTransparency Maps now out of date:\n- %s")
+            TEXT("\n\nThe previous maps remain visible in editor preview. ")
+            TEXT("Rebake them in Transparency Editor before runtime use."),
+            *FString::Join(SlotDescriptions, TEXT("\n- ")));
+    }
     return true;
 }

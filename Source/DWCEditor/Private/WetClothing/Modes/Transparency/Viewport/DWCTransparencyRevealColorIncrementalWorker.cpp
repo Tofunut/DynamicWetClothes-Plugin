@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyRevealColorIncrementalWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -7,9 +6,9 @@
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 
 FDWCEditorWorkerMemoryEstimate FDWCTransparencyRevealColorIncrementalWorker::EstimateMemory(
-    const TArray<FDWCTransparencyRevealColorTilePayload>&         SnapshotTiles,
+    const TArray<FDWCTransparencyRevealColorTilePayload>& SnapshotTiles,
     const TArray<FDWCTransparencyRevealColorComposeTileSnapshot>& ComposeTiles,
-    const int32                                                   OutputTileCount)
+    const int32 OutputTileCount)
 {
     FDWCEditorWorkerMemoryEstimate Estimate;
     for (const FDWCTransparencyRevealColorTilePayload& Tile : SnapshotTiles)
@@ -33,14 +32,14 @@ FDWCEditorWorkerMemoryEstimate FDWCTransparencyRevealColorIncrementalWorker::Est
 
 TSharedPtr<FDWCTransparencyRevealColorIncrementalJobResult, ESPMode::ThreadSafe>
 FDWCTransparencyRevealColorIncrementalWorker::Build(
-    FDWCTransparencyRevealColorIncrementalJobInput&&                    Input,
+    FDWCTransparencyRevealColorIncrementalJobInput&& Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FDWCTransparencyRevealColorIncrementalJobResult, ESPMode::ThreadSafe> Output =
         MakeShared<FDWCTransparencyRevealColorIncrementalJobResult, ESPMode::ThreadSafe>();
     Output->ExpectedRevealRevision = Input.ExpectedRevealRevision;
     Output->PreviewTarget = Input.PreviewTarget;
-    if (!Input.AutoResult.IsValid() || CancellationToken->IsCanceled())
+    if (!Input.SourcePayload.IsValid() || CancellationToken->IsCanceled())
     {
         Output->bSucceeded = false;
         Output->Error = TEXT("The transparency reveal-color incremental snapshot is unavailable.");
@@ -49,7 +48,7 @@ FDWCTransparencyRevealColorIncrementalWorker::Build(
 
     TArray<FDWCTransparencyRevealColorTilePayload> WorkingTiles = MoveTemp(Input.SnapshotTiles);
     Output->bHasChanges = FDWCTransparencyBrushRasterizer::RasterizeRevealColorSamplesToTiles(
-        *Input.AutoResult,
+        *Input.SourcePayload,
         Input.Stroke,
         Input.Samples,
         Input.BaseRevealColor,
@@ -68,11 +67,11 @@ FDWCTransparencyRevealColorIncrementalWorker::Build(
     }
 
     FDWCTransparencyRevealColorTileStore RevealStore;
-    RevealStore.Initialize(Input.AutoResult->Resolution);
+    RevealStore.Initialize(Input.SourcePayload->Resolution);
     if (!RevealStore.Commit(
             RevealStore.GetRevision(),
             WorkingTiles,
-            MakeArrayView(Input.AutoResult->InnerColorBuffer)))
+            MakeArrayView(Input.SourcePayload->InnerColorBuffer)))
     {
         Output->bSucceeded = false;
         Output->Error = TEXT("The transparency reveal-color incremental tile payload is invalid.");
@@ -80,7 +79,7 @@ FDWCTransparencyRevealColorIncrementalWorker::Build(
     }
 
     FDWCTransparencyAlphaTileStore AlphaStore;
-    AlphaStore.Initialize(Input.AutoResult->Resolution);
+    AlphaStore.Initialize(Input.SourcePayload->Resolution);
     TArray<FDWCTransparencyAlphaTilePayload> AlphaPayloads;
     AlphaPayloads.Reserve(Input.ComposeTiles.Num());
     for (const FDWCTransparencyRevealColorComposeTileSnapshot& Tile : Input.ComposeTiles)
@@ -99,14 +98,14 @@ FDWCTransparencyRevealColorIncrementalWorker::Build(
     }
 
     FDWCTransparencyPixelComposeContext Context;
-    Context.AutoResult = Input.AutoResult.Get();
+    Context.SourcePayload = Input.SourcePayload.Get();
     Context.RevealColorTileStore = &RevealStore;
     Context.ManualAlphaTileStore = &AlphaStore;
     Context.VisualizationMode = Input.VisualizationMode;
     Context.bDeferPresentationToMaterial = true;
     Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
-                                     ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
-                                     : KINDA_SMALL_NUMBER;
+        ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.SourcePayload)
+        : KINDA_SMALL_NUMBER;
 
     Output->RevealTiles = MoveTemp(WorkingTiles);
     for (const FDWCTransparencyRevealColorComposeTileSnapshot& Tile : Input.ComposeTiles)
@@ -139,7 +138,7 @@ FDWCTransparencyRevealColorIncrementalWorker::Build(
             for (int32 X = Tile.Rect.Min.X; X < Tile.Rect.Max.X; ++X)
             {
                 const int32 LocalIndex = (Y - Tile.Rect.Min.Y) * Tile.Rect.Width() + X - Tile.Rect.Min.X;
-                const int32 PixelIndex = Y * Input.AutoResult->Resolution.X + X;
+                const int32 PixelIndex = Y * Input.SourcePayload->Resolution.X + X;
                 Region.Pixels[LocalIndex] = FDWCTransparencyComposite::ComposeVisualizationPixel(
                     Context,
                     PixelIndex,

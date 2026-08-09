@@ -12,6 +12,7 @@
 #include "Styling/CoreStyle.h"
 #include "Styling/StyleColors.h"
 #include "WetClothing/Asset/Setup/DWCDataUVBuildService.h"
+#include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -2026,6 +2027,113 @@ namespace WCAReportDialogs
                                                                                                                                                                                                                             {
                         DialogWindow->RequestDestroyWindow();
                         return FReply::Handled(); })]]);
+
+        FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
+    }
+
+    void OpenBakeResultDialog(
+        const FDWCEditorBakeBatchResult& Result,
+        const FText& SuccessTitle)
+    {
+        const bool bNeedsAttention = !Result.AttentionSummary.IsEmpty();
+        const bool bWarning = Result.bHadWarnings || bNeedsAttention || !Result.bSucceeded;
+        const FText WindowTitle = bNeedsAttention
+            ? LOCTEXT("BakeResultFollowUpTitle", "Wrinkle Textures Baked - Transparency Rebuild Required")
+            : Result.bSucceeded
+                ? SuccessTitle
+                : LOCTEXT("BakeResultFailedTitle", "Bake Did Not Complete");
+
+        TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
+        Body->AddSlot().AutoHeight()
+        [
+            SNew(STextBlock)
+            .Text(FText::FromString(Result.Summary))
+            .AutoWrapText(true)
+            .Font(MakeReportFont())
+            .ColorAndOpacity(FSlateColor(FStyleColors::Foreground))
+        ];
+
+        if (bNeedsAttention)
+        {
+            Body->AddSlot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f)
+            [
+                SNew(SBorder)
+                .Padding(FMargin(12.0f, 10.0f))
+                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+                .BorderBackgroundColor(WarningBackground())
+                [
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot().AutoHeight()
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("BakeResultActionRequired", "Action Required"))
+                        .Font(MakeReportFont(10, true))
+                        .ColorAndOpacity(WarningColor())
+                    ]
+                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                    [
+                        SNew(STextBlock)
+                        .Text(FText::FromString(Result.AttentionSummary))
+                        .AutoWrapText(true)
+                        .Font(MakeReportFont())
+                        .ColorAndOpacity(WarningColor())
+                    ]
+                ]
+            ];
+        }
+
+        TSharedRef<SWindow> DialogWindow = SNew(SWindow)
+            .Title(WindowTitle)
+            .ClientSize(FVector2D(620.0f, bNeedsAttention ? 440.0f : 340.0f))
+            .SizingRule(ESizingRule::UserSized)
+            .SupportsMaximize(false)
+            .SupportsMinimize(false);
+
+        DialogWindow->SetContent(
+            SNew(SBorder)
+            .Padding(0.0f)
+            .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+            [
+                SNew(SVerticalBox)
+                + SVerticalBox::Slot().AutoHeight().Padding(16.0f, 14.0f, 16.0f, 12.0f)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 10.0f, 0.0f)
+                    [
+                        SNew(SImage)
+                        .Image(FAppStyle::GetBrush(bWarning
+                            ? TEXT("Icons.WarningWithColor")
+                            : TEXT("Icons.SuccessWithColor")))
+                        .ColorAndOpacity(ColoredStatusIconTint())
+                    ]
+                    + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+                    [
+                        SNew(STextBlock)
+                        .Text(WindowTitle)
+                        .Font(MakeReportFont(10, true))
+                        .ColorAndOpacity(bWarning ? WarningColor() : DataUVReadyColor())
+                    ]
+                ]
+                + SVerticalBox::Slot().FillHeight(1.0f).Padding(16.0f, 0.0f, 16.0f, 0.0f)
+                [
+                    SNew(SScrollBox)
+                    + SScrollBox::Slot().Padding(0.0f, 0.0f, 12.0f, 0.0f)
+                    [
+                        Body
+                    ]
+                ]
+                + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(16.0f, 12.0f, 16.0f, 16.0f)
+                [
+                    SNew(SButton)
+                    .ContentPadding(FMargin(14.0f, 5.0f))
+                    .Text(LOCTEXT("BakeResultClose", "Close"))
+                    .OnClicked_Lambda([DialogWindow]()
+                    {
+                        DialogWindow->RequestDestroyWindow();
+                        return FReply::Handled();
+                    })
+                ]
+            ]);
 
         FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
     }

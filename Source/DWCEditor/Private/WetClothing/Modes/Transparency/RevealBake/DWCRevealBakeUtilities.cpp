@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeUtilities.h"
 #include "Core/DWCGeneratedAssetPaths.h"
 
@@ -23,14 +22,9 @@ FString FDWCRevealBakeUtilities::GetGeneratedPackagePath(const UObject& OwningAs
     return Result;
 }
 
-double FDWCRevealBakeUtilities::GetElapsedMilliseconds(const double StartTimeSeconds)
-{
-    return (FPlatformTime::Seconds() - StartTimeSeconds) * 1000.0;
-}
-
 FString FDWCRevealBakeUtilities::SanitizeAssetToken(const FString& InToken)
 {
-    FString      Result = InToken;
+    FString Result = InToken;
     const TCHAR* InvalidChars = INVALID_OBJECTNAME_CHARACTERS;
     while (*InvalidChars)
     {

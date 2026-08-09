@@ -7,6 +7,7 @@
 class USkeletalMesh;
 class UWetClothingAsset;
 struct FDWCDataUVBuildResult;
+struct FDWCEditorBakeBatchResult;
 
 struct FDWCLODRangeUpdateLODDetail
 {
@@ -82,4 +83,8 @@ namespace WCAReportDialogs
         const FString&           LastFailureMessage);
 
     void OpenLODRangeUpdateDialog(const FDWCLODRangeUpdateReport& Report);
+
+    void OpenBakeResultDialog(
+        const FDWCEditorBakeBatchResult& Result,
+        const FText& SuccessTitle);
 } // namespace WCAReportDialogs

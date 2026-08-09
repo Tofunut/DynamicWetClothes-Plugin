@@ -1,24 +1,23 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
 
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
-#include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyAlphaTileStore.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyBrushRasterizer.h"
 
 namespace
 {
-    FDWCTransparencyAutoBakeResult BuildAlphaTestResult(const FIntPoint Resolution)
+    FDWCTransparencySourcePayload BuildAlphaTestResult(const FIntPoint Resolution)
     {
-        FDWCTransparencyAutoBakeResult Result;
+        FDWCTransparencySourcePayload Result;
         Result.Resolution = Resolution;
         const int32 PixelCount = Resolution.X * Resolution.Y;
         Result.AutoAlphaBuffer.SetNumUninitialized(PixelCount);
         Result.OuterIslandIDBuffer.Init(
-            FDWCTransparencyAutoBakeResult::EncodeOuterIslandID(7),
+            FDWCTransparencySourcePayload::EncodeOuterIslandID(7),
             PixelCount);
         for (int32 Index = 0; Index < PixelCount; ++Index)
         {
@@ -28,22 +27,22 @@ namespace
     }
 
     bool RasterizeIncrementally(
-        const FDWCTransparencyAutoBakeResult& AutoResult,
-        const FDWCTransparencyBrushStroke&    Stroke,
-        FDWCTransparencyAlphaTileStore&       InOutStore)
+        const FDWCTransparencySourcePayload& SourcePayload,
+        const FDWCTransparencyBrushStroke& Stroke,
+        FDWCTransparencyAlphaTileStore& InOutStore)
     {
-        TArray<FIntRect>         SampleRegions;
+        TArray<FIntRect> SampleRegions;
         FDWCEditorDirtyRegionSet DirtyRegions;
         for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
         {
             FDWCTransparencyBrushRasterizer::BuildSampleRegions(
                 Sample,
-                AutoResult.Resolution,
+                SourcePayload.Resolution,
                 Stroke.UVAddressMode,
                 SampleRegions);
             for (const FIntRect& Region : SampleRegions)
             {
-                DirtyRegions.Add(Region, AutoResult.Resolution, false);
+                DirtyRegions.Add(Region, SourcePayload.Resolution, false);
             }
         }
 
@@ -58,7 +57,7 @@ namespace
         TArray<FDWCTransparencyAlphaTilePayload> Payloads;
         InOutStore.SnapshotTiles(SnapshotTiles, Payloads);
         if (!FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
-                AutoResult,
+                SourcePayload,
                 Stroke,
                 Stroke.Samples,
                 OutputTiles,
@@ -73,10 +72,12 @@ namespace
             OutputTileSet.Add(Coordinate);
         }
         Payloads.RemoveAll([&OutputTileSet](const FDWCTransparencyAlphaTilePayload& Payload)
-                           { return !OutputTileSet.Contains(Payload.TileCoordinate); });
+        {
+            return !OutputTileSet.Contains(Payload.TileCoordinate);
+        });
         return InOutStore.Commit(InOutStore.GetRevision(), Payloads);
     }
-} // namespace
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyAlphaTileParityTest,
@@ -85,8 +86,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCTransparencyAlphaTileParityTest::RunTest(const FString& Parameters)
 {
-    const FIntPoint                      Resolution(512, 384);
-    const FDWCTransparencyAutoBakeResult AutoResult = BuildAlphaTestResult(Resolution);
+    const FIntPoint Resolution(512, 384);
+    const FDWCTransparencySourcePayload SourcePayload = BuildAlphaTestResult(Resolution);
 
     FDWCTransparencyBrushStroke Stroke;
     Stroke.StrokeGuid = FGuid::NewGuid();
@@ -124,8 +125,8 @@ bool FDWCTransparencyAlphaTileParityTest::RunTest(const FString& Parameters)
     TArray<uint8> DensePremultiplied;
     TArray<uint8> DenseWeight;
     FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
-        AutoResult,
-        { Stroke, SmoothStroke },
+        SourcePayload,
+        {Stroke, SmoothStroke},
         0,
         Stroke.MaterialSlotIndex,
         0,
@@ -134,10 +135,10 @@ bool FDWCTransparencyAlphaTileParityTest::RunTest(const FString& Parameters)
 
     FDWCTransparencyAlphaTileStore TileStore;
     TileStore.Initialize(Resolution);
-    TestTrue(TEXT("Incremental tile raster accepts the stroke"), RasterizeIncrementally(AutoResult, Stroke, TileStore));
+    TestTrue(TEXT("Incremental tile raster accepts the stroke"), RasterizeIncrementally(SourcePayload, Stroke, TileStore));
     TestTrue(
         TEXT("Incremental alpha smoothing reuses the prior sparse tile state"),
-        RasterizeIncrementally(AutoResult, SmoothStroke, TileStore));
+        RasterizeIncrementally(SourcePayload, SmoothStroke, TileStore));
 
     TArray<uint8> TilePremultiplied;
     TArray<uint8> TileWeight;
@@ -161,7 +162,7 @@ bool FDWCTransparencyAlphaTileRevisionTest::RunTest(const FString& Parameters)
     FDWCTransparencyAlphaTileStore Store;
     Store.Initialize(FIntPoint(256, 256));
     TArray<FDWCTransparencyAlphaTilePayload> Payloads;
-    Store.SnapshotTiles({ FIntPoint(0, 0) }, Payloads);
+    Store.SnapshotTiles({FIntPoint(0, 0)}, Payloads);
     const uint64 SnapshotRevision = Store.GetRevision();
     TestTrue(TEXT("A current snapshot is committable"), Store.CanCommit(SnapshotRevision, Payloads));
     TestTrue(TEXT("The current snapshot commits"), Store.Commit(SnapshotRevision, Payloads));

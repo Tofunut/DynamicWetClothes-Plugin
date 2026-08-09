@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -44,16 +43,16 @@ struct FDWCEditorPreviewCommitDiagnostics
 
 struct FDWCEditorPreviewConsumerLifetimeState
 {
-    FGuid                          ConsumerEpoch = FGuid::NewGuid();
-    uint64                         Generation = 1;
+    FGuid ConsumerEpoch = FGuid::NewGuid();
+    uint64 Generation = 1;
     EDWCEditorPreviewConsumerState State = EDWCEditorPreviewConsumerState::Active;
 };
 
 struct FDWCEditorPreviewConsumerToken
 {
     TWeakPtr<FDWCEditorPreviewConsumerLifetimeState> State;
-    FGuid                                            ConsumerEpoch;
-    uint64                                           Generation = 0;
+    FGuid ConsumerEpoch;
+    uint64 Generation = 0;
 
     bool IsValid() const
     {
@@ -68,11 +67,10 @@ class FDWCEditorPreviewConsumerLifetime final
     FDWCEditorPreviewConsumerLifetime();
 
     FDWCEditorPreviewConsumerToken CaptureToken() const;
-    void                           AdvanceGeneration();
-    void                           Suspend();
-    void                           Resume();
-    void                           Revoke();
-    bool                           IsActive() const;
+    void Suspend();
+    void Resume();
+    void Revoke();
+    bool IsActive() const;
 
   private:
     TSharedRef<FDWCEditorPreviewConsumerLifetimeState> State;
@@ -81,7 +79,7 @@ class FDWCEditorPreviewConsumerLifetime final
 struct FDWCEditorPreviewCommitContext
 {
     FDWCEditorPreviewConsumerToken ConsumerToken;
-    FGuid                          ProducerSessionEpoch;
-    TFunction<bool()>              IsCurrent;
-    FString                        DebugName;
+    FGuid ProducerSessionEpoch;
+    TFunction<bool()> IsCurrent;
+    FString DebugName;
 };

@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitTypes.h"
 
 FDWCEditorPreviewConsumerLifetime::FDWCEditorPreviewConsumerLifetime()
@@ -15,12 +14,6 @@ FDWCEditorPreviewConsumerToken FDWCEditorPreviewConsumerLifetime::CaptureToken()
     Token.ConsumerEpoch = State->ConsumerEpoch;
     Token.Generation = State->Generation;
     return Token;
-}
-
-void FDWCEditorPreviewConsumerLifetime::AdvanceGeneration()
-{
-    check(IsInGameThread());
-    ++State->Generation;
 }
 
 void FDWCEditorPreviewConsumerLifetime::Suspend()

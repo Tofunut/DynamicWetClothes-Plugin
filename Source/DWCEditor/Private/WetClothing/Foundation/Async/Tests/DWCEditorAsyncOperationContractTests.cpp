@@ -1,11 +1,10 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
 
 #include "WetClothing/Foundation/Async/DWCEditorAsyncOperationContract.h"
-#include "WetClothing/Foundation/Jobs/DWCEditorWorkerAsyncCompatibility.h"
+#include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobTypes.h"
 
 namespace
 {
@@ -21,7 +20,7 @@ namespace
         Identity.DomainRevision = 5;
         return Identity;
     }
-} // namespace
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorAsyncOperationStateContractTest,
@@ -31,41 +30,41 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorAsyncOperationStateContractTest::RunTest(const FString&)
 {
     TestTrue(TEXT("Pending work can be admitted"),
-             FDWCEditorAsyncOperationContract::CanTransition(
-                 EDWCEditorAsyncOperationState::Pending,
-                 EDWCEditorAsyncOperationState::Admitted));
+        FDWCEditorAsyncOperationContract::CanTransition(
+            EDWCEditorAsyncOperationState::Pending,
+            EDWCEditorAsyncOperationState::Admitted));
     TestTrue(TEXT("Running work can wait for commit"),
-             FDWCEditorAsyncOperationContract::CanTransition(
-                 EDWCEditorAsyncOperationState::Running,
-                 EDWCEditorAsyncOperationState::CommitPending));
+        FDWCEditorAsyncOperationContract::CanTransition(
+            EDWCEditorAsyncOperationState::Running,
+            EDWCEditorAsyncOperationState::CommitPending));
     TestTrue(TEXT("Prepared work becomes ready before running"),
-             FDWCEditorAsyncOperationContract::CanTransition(
-                 EDWCEditorAsyncOperationState::Preparing,
-                 EDWCEditorAsyncOperationState::Ready));
+        FDWCEditorAsyncOperationContract::CanTransition(
+            EDWCEditorAsyncOperationState::Preparing,
+            EDWCEditorAsyncOperationState::Ready));
     TestTrue(TEXT("Ready work can start running"),
-             FDWCEditorAsyncOperationContract::CanTransition(
-                 EDWCEditorAsyncOperationState::Ready,
-                 EDWCEditorAsyncOperationState::Running));
+        FDWCEditorAsyncOperationContract::CanTransition(
+            EDWCEditorAsyncOperationState::Ready,
+            EDWCEditorAsyncOperationState::Running));
     TestTrue(TEXT("Committing work can transfer to retirement"),
-             FDWCEditorAsyncOperationContract::CanTransition(
-                 EDWCEditorAsyncOperationState::Committing,
-                 EDWCEditorAsyncOperationState::Retiring));
+        FDWCEditorAsyncOperationContract::CanTransition(
+            EDWCEditorAsyncOperationState::Committing,
+            EDWCEditorAsyncOperationState::Retiring));
     TestFalse(TEXT("Pending work cannot skip directly to running"),
-              FDWCEditorAsyncOperationContract::CanTransition(
-                  EDWCEditorAsyncOperationState::Pending,
-                  EDWCEditorAsyncOperationState::Running));
+        FDWCEditorAsyncOperationContract::CanTransition(
+            EDWCEditorAsyncOperationState::Pending,
+            EDWCEditorAsyncOperationState::Running));
     TestFalse(TEXT("Completed work cannot transition again"),
-              FDWCEditorAsyncOperationContract::CanTransition(
-                  EDWCEditorAsyncOperationState::Completed,
-                  EDWCEditorAsyncOperationState::Pending));
+        FDWCEditorAsyncOperationContract::CanTransition(
+            EDWCEditorAsyncOperationState::Completed,
+            EDWCEditorAsyncOperationState::Pending));
     TestTrue(TEXT("Cancellation is requested before it is acknowledged"),
-             FDWCEditorAsyncOperationContract::CanTransitionCancellation(
-                 EDWCEditorAsyncCancellationState::None,
-                 EDWCEditorAsyncCancellationState::CancelRequested));
+        FDWCEditorAsyncOperationContract::CanTransitionCancellation(
+            EDWCEditorAsyncCancellationState::None,
+            EDWCEditorAsyncCancellationState::CancelRequested));
     TestFalse(TEXT("Cancellation acknowledgment cannot skip the request"),
-              FDWCEditorAsyncOperationContract::CanTransitionCancellation(
-                  EDWCEditorAsyncCancellationState::None,
-                  EDWCEditorAsyncCancellationState::CancelAcknowledged));
+        FDWCEditorAsyncOperationContract::CanTransitionCancellation(
+            EDWCEditorAsyncCancellationState::None,
+            EDWCEditorAsyncCancellationState::CancelAcknowledged));
     return true;
 }
 
@@ -78,29 +77,29 @@ bool FDWCEditorAsyncOperationCommitContractTest::RunTest(const FString&)
 {
     const FDWCEditorAsyncOperationIdentity Identity = MakeValidIdentity();
     TestTrue(TEXT("Current identity can commit"),
-             FDWCEditorAsyncOperationContract::CanCommit(
-                 Identity,
-                 Identity.SessionEpoch,
-                 Identity.Generation,
-                 Identity.DomainRevision));
+        FDWCEditorAsyncOperationContract::CanCommit(
+            Identity,
+            Identity.SessionEpoch,
+            Identity.Generation,
+            Identity.DomainRevision));
     TestFalse(TEXT("A previous editor session cannot commit"),
-              FDWCEditorAsyncOperationContract::CanCommit(
-                  Identity,
-                  FGuid::NewGuid(),
-                  Identity.Generation,
-                  Identity.DomainRevision));
+        FDWCEditorAsyncOperationContract::CanCommit(
+            Identity,
+            FGuid::NewGuid(),
+            Identity.Generation,
+            Identity.DomainRevision));
     TestFalse(TEXT("A superseded generation cannot commit"),
-              FDWCEditorAsyncOperationContract::CanCommit(
-                  Identity,
-                  Identity.SessionEpoch,
-                  Identity.Generation + 1,
-                  Identity.DomainRevision));
+        FDWCEditorAsyncOperationContract::CanCommit(
+            Identity,
+            Identity.SessionEpoch,
+            Identity.Generation + 1,
+            Identity.DomainRevision));
     TestFalse(TEXT("A stale authoring revision cannot commit"),
-              FDWCEditorAsyncOperationContract::CanCommit(
-                  Identity,
-                  Identity.SessionEpoch,
-                  Identity.Generation,
-                  Identity.DomainRevision + 1));
+        FDWCEditorAsyncOperationContract::CanCommit(
+            Identity,
+            Identity.SessionEpoch,
+            Identity.Generation,
+            Identity.DomainRevision + 1));
     return true;
 }
 
@@ -121,24 +120,24 @@ bool FDWCEditorAsyncOperationMemoryContractTest::RunTest(const FString&)
 
     uint64 Bytes = 0;
     TestTrue(TEXT("Private memory total is representable"),
-             Breakdown.TryGetOperationPrivateBytes(Bytes));
+        Breakdown.TryGetOperationPrivateBytes(Bytes));
     TestEqual(TEXT("Private memory excludes shared and staging resources"), Bytes, 140ull);
     TestTrue(TEXT("Described memory total is representable"),
-             Breakdown.TryGetTotalDescribedBytes(Bytes));
+        Breakdown.TryGetTotalDescribedBytes(Bytes));
     TestEqual(TEXT("Described memory includes every category"), Bytes, 210ull);
 
     Breakdown.SnapshotBytes = MAX_uint64;
     TestFalse(TEXT("Memory arithmetic rejects overflow"),
-              Breakdown.TryGetOperationPrivateBytes(Bytes));
+        Breakdown.TryGetOperationPrivateBytes(Bytes));
     return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FDWCEditorWorkerAsyncCompatibilityTest,
-    "DWC.Editor.Foundation.Async.Operation.WorkerCompatibility",
+    FDWCEditorWorkerCanonicalIdentityTest,
+    "DWC.Editor.Foundation.Async.Operation.WorkerCanonicalIdentity",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FDWCEditorWorkerAsyncCompatibilityTest::RunTest(const FString&)
+bool FDWCEditorWorkerCanonicalIdentityTest::RunTest(const FString&)
 {
     FDWCEditorWorkerJobTicket Ticket;
     Ticket.Key.Kind = EDWCEditorWorkerJobKind::TransparencyVisualization;
@@ -148,12 +147,11 @@ bool FDWCEditorWorkerAsyncCompatibilityTest::RunTest(const FString&)
     Ticket.Generation = 4;
     Ticket.Domain = EDWCEditorAuthoringDomain::Transparency;
     Ticket.DomainRevision = 8;
-    const FGuid SessionEpoch = FGuid::NewGuid();
+    Ticket.SessionEpoch = FGuid::NewGuid();
 
-    const FDWCEditorAsyncOperationIdentity Identity =
-        DWCEditorWorkerAsyncCompatibility::MakeOperationIdentity(Ticket, SessionEpoch);
+    const FDWCEditorAsyncOperationIdentity Identity = Ticket.ToOperationIdentity();
     TestEqual(TEXT("Worker kind maps to a stable operation namespace"),
-              Identity.Key.Namespace, FName(TEXT("TransparencyVisualization")));
+        Identity.Key.Namespace, FName(TEXT("TransparencyVisualization")));
     TestEqual(TEXT("Worker slot is preserved"), Identity.Key.MaterialSlotIndex, 9);
     TestEqual(TEXT("Worker layer is preserved"), Identity.Key.ResourceGuid, Ticket.Key.LayerGuid);
     TestEqual(TEXT("Worker job id becomes the operation id"), Identity.OperationId, 12ull);
@@ -162,9 +160,9 @@ bool FDWCEditorWorkerAsyncCompatibilityTest::RunTest(const FString&)
     FDWCEditorWorkerJobDescriptor BakeDescriptor;
     BakeDescriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
     TestTrue(TEXT("Visualization policy is explicit on its descriptor"),
-             VisualizationDescriptor.GetRequestPolicy() == EDWCEditorAsyncRequestPolicy::LatestWins);
+        VisualizationDescriptor.GetRequestPolicy() == EDWCEditorAsyncRequestPolicy::LatestWins);
     TestTrue(TEXT("Bake policy is explicit on its descriptor"),
-             BakeDescriptor.GetRequestPolicy() == EDWCEditorAsyncRequestPolicy::FIFO);
+        BakeDescriptor.GetRequestPolicy() == EDWCEditorAsyncRequestPolicy::FIFO);
     return true;
 }
 

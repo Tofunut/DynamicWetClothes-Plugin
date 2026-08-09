@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Preview/Session/DWCEditorPreviewSession.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -21,7 +20,7 @@ namespace
     template <typename BindingType>
     const BindingType* FindBindingByName(
         const TArray<BindingType>& Bindings,
-        const FName                ParameterName)
+        const FName ParameterName)
     {
         return Bindings.FindByPredicate(
             [ParameterName](const BindingType& Binding)
@@ -71,7 +70,7 @@ namespace
         }
         return true;
     }
-} // namespace
+}
 
 FDWCEditorPreviewSession::~FDWCEditorPreviewSession()
 {
@@ -79,8 +78,8 @@ FDWCEditorPreviewSession::~FDWCEditorPreviewSession()
 }
 
 void FDWCEditorPreviewSession::Initialize(
-    UWetClothingAsset*                    WetClothingAssetIn,
-    UWorld*                               PreviewWorldIn,
+    UWetClothingAsset* WetClothingAssetIn,
+    UWorld* PreviewWorldIn,
     const FDWCEditorPreviewSessionConfig& Config)
 {
     Shutdown();
@@ -200,8 +199,8 @@ bool FDWCEditorPreviewSession::RefreshSlotStates()
         return false;
     }
 
-    const int32                     NewDataUVChannelIndex = Asset->GetDWCDataUVChannelIndex();
-    const bool                      bDataUVChanged = CachedDataUVChannelIndex != NewDataUVChannelIndex;
+    const int32 NewDataUVChannelIndex = Asset->GetDWCDataUVChannelIndex();
+    const bool bDataUVChanged = CachedDataUVChannelIndex != NewDataUVChannelIndex;
     FDWCEditorPreviewSlotCollection NewCollection = FDWCEditorPreviewSlotResolver::Resolve(Asset);
     if (!bDataUVChanged && NewCollection.StateSignature == SlotCollection.StateSignature)
     {
@@ -226,10 +225,10 @@ bool FDWCEditorPreviewSession::RefreshSlotStates()
         NewRuntime.Eligibility = NewEligibility;
 
         const FDWCEditorPreviewSessionSlot* PreviousRuntime = FindSlot(NewEligibility.MaterialSlotIndex);
-        const bool                          bCanKeepMaterial = !bDataUVChanged &&
-                                      PreviousRuntime != nullptr &&
-                                      PreviousRuntime->Eligibility.SourceMaterial == NewEligibility.SourceMaterial &&
-                                      PreviousRuntime->Eligibility.bPreviewReady == NewEligibility.bPreviewReady;
+        const bool bCanKeepMaterial = !bDataUVChanged &&
+            PreviousRuntime != nullptr &&
+            PreviousRuntime->Eligibility.SourceMaterial == NewEligibility.SourceMaterial &&
+            PreviousRuntime->Eligibility.bPreviewReady == NewEligibility.bPreviewReady;
         if (bCanKeepMaterial)
         {
             NewRuntime.PreviewMID = PreviousRuntime->PreviewMID;
@@ -302,11 +301,6 @@ FDWCEditorPreviewSessionSlot* FDWCEditorPreviewSession::FindMutableSlot(
     return Slot.Eligibility.MaterialSlotIndex == MaterialSlotIndex ? &Slot : nullptr;
 }
 
-TConstArrayView<int32> FDWCEditorPreviewSession::GetReadyWettableSlots() const
-{
-    return SlotCollection.ReadyWettableSlotIndices;
-}
-
 bool FDWCEditorPreviewSession::SetSelectedMaterialSlot(const int32 MaterialSlotIndex)
 {
     return SetPreviewMaterialScope(
@@ -318,7 +312,7 @@ bool FDWCEditorPreviewSession::SetSelectedMaterialSlot(const int32 MaterialSlotI
 
 bool FDWCEditorPreviewSession::SetPreviewMaterialScope(
     const EDWCEditorPreviewMaterialScope Scope,
-    const int32                          MaterialSlotIndex)
+    const int32 MaterialSlotIndex)
 {
     if (!IsInitialized())
     {
@@ -332,8 +326,8 @@ bool FDWCEditorPreviewSession::SetPreviewMaterialScope(
     const TArray<int32, TInlineAllocator<16>> PreviousActiveSlots = ActivePreviewMaterialSlots;
     PreviewMaterialScope = Scope;
     SelectedMaterialSlotIndex = Scope == EDWCEditorPreviewMaterialScope::SingleSlot
-                                    ? MaterialSlotIndex
-                                    : AllWettableSlots;
+        ? MaterialSlotIndex
+        : AllWettableSlots;
     RebuildActivePreviewMaterialSlots();
 
     if (PreviousActiveSlots == ActivePreviewMaterialSlots)
@@ -371,7 +365,7 @@ void FDWCEditorPreviewSession::SetPreviewWetness(const float PreviewWetnessIn)
 }
 
 bool FDWCEditorPreviewSession::SetLayerStack(
-    const int32                        MaterialSlotIndex,
+    const int32 MaterialSlotIndex,
     const FDWCEditorPreviewLayerStack& LayerStack)
 {
     FDWCEditorPreviewSessionSlot* Slot = FindMutableSlot(MaterialSlotIndex);
@@ -395,13 +389,6 @@ bool FDWCEditorPreviewSession::SetLayerStack(
         ApplyLayerParameterDiff(*Slot, *MID);
     }
     return true;
-}
-
-void FDWCEditorPreviewSession::ClearLayerStack(const int32 MaterialSlotIndex)
-{
-    FDWCEditorPreviewLayerStack EmptyStack;
-    EmptyStack.MaterialSlotIndex = MaterialSlotIndex;
-    SetLayerStack(MaterialSlotIndex, EmptyStack);
 }
 
 void FDWCEditorPreviewSession::PreparePreviewMaterials(
@@ -459,7 +446,7 @@ FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePrev
 
 FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePreviewMaterialInternal(
     const int32 MaterialSlotIndex,
-    const bool  bFlushRenderResourceBindings)
+    const bool bFlushRenderResourceBindings)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorPreviewSession_GetOrCreatePreviewMaterial);
     ++MaterialRequestCount;
@@ -481,8 +468,7 @@ FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePrev
     if (!Slot->Eligibility.bPreviewReady)
     {
         SessionResult.Message = FDWCEditorPreviewSlotResolver::GetIssueText(
-                                    Slot->Eligibility.Issue)
-                                    .ToString();
+            Slot->Eligibility.Issue).ToString();
         return SessionResult;
     }
 
@@ -514,7 +500,7 @@ FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePrev
     }
 
     UMaterialInterface* SourceMaterial = Slot->Eligibility.SourceMaterial.Get();
-    UWetClothingAsset*  Asset = WetClothingAsset.Get();
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (SourceMaterial == nullptr || Asset == nullptr)
     {
         SessionResult.Message = TEXT("The preview source material or Wet Clothing Asset is no longer available.");
@@ -618,13 +604,13 @@ void FDWCEditorPreviewSession::NotifySourceMaterialChanged(UMaterialInterface* S
     MaterialCache.InvalidateSource(SourceMaterial, bBaseMaterialChanged);
 
     TSet<FObjectKey> RevisedSources;
-    bool             bInvalidatedAnySlot = false;
+    bool bInvalidatedAnySlot = false;
     for (FDWCEditorPreviewSessionSlot& Slot : RuntimeSlots)
     {
         UMaterialInterface* SlotSourceMaterial = Slot.Eligibility.SourceMaterial.Get();
-        const bool          bAffected = SlotSourceMaterial == SourceMaterial ||
-                               (bBaseMaterialChanged && SlotSourceMaterial != nullptr &&
-                                SlotSourceMaterial->GetMaterial() == ChangedBaseMaterial);
+        const bool bAffected = SlotSourceMaterial == SourceMaterial ||
+            (bBaseMaterialChanged && SlotSourceMaterial != nullptr &&
+             SlotSourceMaterial->GetMaterial() == ChangedBaseMaterial);
         if (bAffected)
         {
             const FObjectKey SourceKey(SlotSourceMaterial);
@@ -676,7 +662,7 @@ void FDWCEditorPreviewSession::FlushRenderResourceBindings()
     ++RenderBindingFlushCount;
 
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    UWorld*            World = PreviewWorld.Get();
+    UWorld* World = PreviewWorld.Get();
     if (Asset == nullptr || World == nullptr)
     {
         return;
@@ -697,9 +683,9 @@ void FDWCEditorPreviewSession::FlushRenderResourceBindings()
 
 void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
 {
-    int32  BuiltMIDCount = 0;
-    int32  PendingMaterialCount = 0;
-    int32  FailedMaterialCount = 0;
+    int32 BuiltMIDCount = 0;
+    int32 PendingMaterialCount = 0;
+    int32 FailedMaterialCount = 0;
     uint64 SessionContainerBytes =
         static_cast<uint64>(SlotCollection.Slots.GetAllocatedSize()) +
         static_cast<uint64>(SlotCollection.ReadyWettableSlotIndices.GetAllocatedSize()) +
@@ -717,12 +703,12 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
     }
 
     const FDWCEditorPreviewMaterialCacheStats CacheStats = MaterialCache.GetStats();
-    const FString                             Label = SessionConfig.DiagnosticLabel.IsEmpty()
-                                                          ? TEXT("Unnamed")
-                                                          : SessionConfig.DiagnosticLabel;
-    const FString                             SelectedSlot = SelectedMaterialSlotIndex == AllWettableSlots
-                                                                 ? TEXT("All Wettable Slots")
-                                                                 : FString::FromInt(SelectedMaterialSlotIndex);
+    const FString Label = SessionConfig.DiagnosticLabel.IsEmpty()
+        ? TEXT("Unnamed")
+        : SessionConfig.DiagnosticLabel;
+    const FString SelectedSlot = SelectedMaterialSlotIndex == AllWettableSlots
+        ? TEXT("All Wettable Slots")
+        : FString::FromInt(SelectedMaterialSlotIndex);
 
     UE_LOG(
         LogDWCEditorPreview,
@@ -818,10 +804,10 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
         for (const FDWCEditorPreviewMemoryBucket& Bucket : Buckets)
         {
             const FString BudgetText = Bucket.BudgetBytes > 0
-                                           ? FString::Printf(
-                                                 TEXT("/%s"),
-                                                 *FDWCEditorPreviewDiagnostics::FormatBytes(Bucket.BudgetBytes))
-                                           : FString();
+                ? FString::Printf(
+                    TEXT("/%s"),
+                    *FDWCEditorPreviewDiagnostics::FormatBytes(Bucket.BudgetBytes))
+                : FString();
             UE_LOG(
                 LogDWCEditorPreview,
                 Display,
@@ -845,10 +831,10 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
         for (const FDWCEditorPreviewOperationCounter& Counter : Counters)
         {
             const FString BytesText = Counter.Bytes > 0
-                                          ? FString::Printf(
-                                                TEXT(", bytes=%s"),
-                                                *FDWCEditorPreviewDiagnostics::FormatBytes(Counter.Bytes))
-                                          : FString();
+                ? FString::Printf(
+                    TEXT(", bytes=%s"),
+                    *FDWCEditorPreviewDiagnostics::FormatBytes(Counter.Bytes))
+                : FString();
             UE_LOG(
                 LogDWCEditorPreview,
                 Display,
@@ -912,9 +898,9 @@ void FDWCEditorPreviewSession::ApplyCommonParameters(UMaterialInstanceDynamic& M
 
 bool FDWCEditorPreviewSession::ApplyLayerParameterDiff(
     FDWCEditorPreviewSessionSlot& Slot,
-    UMaterialInstanceDynamic&     MID)
+    UMaterialInstanceDynamic& MID)
 {
-    bool                                 bChanged = false;
+    bool bChanged = false;
     const FDWCEditorPreviewParameterSet& Desired = Slot.DesiredLayerParameters;
     const FDWCEditorPreviewParameterSet& Applied = Slot.AppliedLayerParameters;
 
@@ -1024,8 +1010,8 @@ void FDWCEditorPreviewSession::TrimIdlePreviewMaterials(const bool bReleaseAllId
         });
 
     const int32 RemoveCount = bReleaseAllIdle
-                                  ? IdleSlots.Num()
-                                  : FMath::Max(0, IdleSlots.Num() - MaxIdleSlotMIDCount);
+        ? IdleSlots.Num()
+        : FMath::Max(0, IdleSlots.Num() - MaxIdleSlotMIDCount);
     if (RemoveCount == 0)
     {
         MaterialCache.PruneUnusedHierarchies();
@@ -1036,7 +1022,7 @@ void FDWCEditorPreviewSession::TrimIdlePreviewMaterials(const bool bReleaseAllId
     for (int32 Index = 0; Index < RemoveCount; ++Index)
     {
         FDWCEditorPreviewSessionSlot* Slot = IdleSlots[Index];
-        const int32                   MaterialSlotIndex = Slot->Eligibility.MaterialSlotIndex;
+        const int32 MaterialSlotIndex = Slot->Eligibility.MaterialSlotIndex;
         Slot->PreviewMID.Reset();
         Slot->AppliedLayerParameters = FDWCEditorPreviewParameterSet();
         Slot->bMaterialBuildPending = false;
@@ -1097,7 +1083,7 @@ bool FDWCEditorPreviewSession::IsPreviewMaterialSlotActive(const int32 MaterialS
 }
 
 void FDWCEditorPreviewSession::HandleObjectPropertyChanged(
-    UObject*               Object,
+    UObject* Object,
     FPropertyChangedEvent& Event)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorPreviewSession_HandleObjectPropertyChanged);
@@ -1139,7 +1125,7 @@ void FDWCEditorPreviewSession::HandleObjectPropertyChanged(
 }
 
 bool FDWCEditorPreviewSession::IsSourceOrBaseMaterial(
-    const UObject*      Object,
+    const UObject* Object,
     UMaterialInterface* SourceMaterial) const
 {
     return SourceMaterial != nullptr &&

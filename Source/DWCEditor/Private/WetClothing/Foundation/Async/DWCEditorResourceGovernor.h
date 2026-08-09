@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,7 +11,7 @@ struct FDWCEditorResourceBudgetConfig
     uint64 GlobalEditorCPUBytes = 1024ull * MiB;
     uint64 WorkerPrivateCPUBytes = 512ull * MiB;
     uint64 PreviewWorkspaceCPUBytes = 640ull * MiB;
-    uint64 SpatialCacheCPUBytes = 64ull * MiB;
+    uint64 SharedCacheCPUBytes = 192ull * MiB;
     uint64 UploadStagingCPUBytes = 64ull * MiB;
     uint64 PreviewGPUBytes = 384ull * MiB;
 
@@ -23,7 +22,7 @@ class FDWCEditorResourceGovernorState;
 
 class FDWCEditorMemoryLease
 {
-  public:
+public:
     FDWCEditorMemoryLease() = default;
     ~FDWCEditorMemoryLease();
 
@@ -33,28 +32,30 @@ class FDWCEditorMemoryLease
     FDWCEditorMemoryLease(FDWCEditorMemoryLease&& Other) noexcept;
     FDWCEditorMemoryLease& operator=(FDWCEditorMemoryLease&& Other) noexcept;
 
-    bool                   IsValid() const;
-    uint64                 GetReservationId() const { return ReservationId; }
-    uint64                 GetReservedBytes() const;
+    bool IsValid() const;
+    uint64 GetReservationId() const { return ReservationId; }
+    uint64 GetReservedBytes() const;
     EDWCEditorResourcePool GetPool() const;
 
     bool TryGrow(uint64 AdditionalBytes, FString* OutError = nullptr);
+    bool TryResize(uint64 NewBytes, FString* OutError = nullptr);
+    bool ReleaseBytes(uint64 Bytes, FString* OutError = nullptr);
     void Reset();
 
-  private:
+private:
     friend class FDWCEditorResourceGovernor;
 
     FDWCEditorMemoryLease(
         TSharedPtr<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe> InState,
-        uint64                                                           InReservationId);
+        uint64 InReservationId);
 
     TSharedPtr<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe> State;
-    uint64                                                           ReservationId = 0;
+    uint64 ReservationId = 0;
 };
 
 class FDWCEditorResourceGovernor
 {
-  public:
+public:
     explicit FDWCEditorResourceGovernor(
         const FDWCEditorResourceBudgetConfig& InConfig = FDWCEditorResourceBudgetConfig());
 
@@ -63,15 +64,15 @@ class FDWCEditorResourceGovernor
 
     FDWCEditorMemoryLease TryAcquire(
         const FDWCEditorResourceReservationRequest& Request,
-        FString*                                    OutError = nullptr);
+        FString* OutError = nullptr);
     FDWCEditorMemoryLease TryAcquireForAdmission(
         const FDWCEditorResourceReservationRequest& Request,
-        EDWCEditorResourceAdmissionResult&          OutResult,
-        FString*                                    OutError = nullptr);
+        EDWCEditorResourceAdmissionResult& OutResult,
+        FString* OutError = nullptr);
 
     FDWCEditorResourceGovernorDiagnostics GetDiagnostics() const;
-    void                                  ResetDiagnosticCounters();
+    void ResetDiagnosticCounters();
 
-  private:
+private:
     TSharedRef<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe> State;
 };

@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetWrinkleViewport.h"
 
 #include "AdvancedPreviewScene.h"
@@ -21,16 +20,17 @@
 #include "ToolMenus.h"
 #include "ViewportToolbar/UnrealEdViewportToolbar.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
-#include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
 #include "WetClothing/Foundation/TextureAccess/WetWrinkleTextureRasterUtils.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
 #include "WetClothing/Foundation/Input/DWCEditorInteractiveToolsHost.h"
 #include "WetClothing/Foundation/Raster/DWCEditorNormalRasterCore.h"
 #include "WetClothing/Foundation/Raster/DWCEditorRasterPostProcess.h"
+#include "WetClothing/Foundation/Raster/DWCEditorSurfacePatchRasterBuilder.h"
 #include "WetClothing/Foundation/Preview/Session/DWCEditorPreviewSession.h"
 #include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
 #include "WetClothing/Foundation/Preview/Orchestration/DWCEditorPreviewOrchestrator.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionCacheService.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorRenderUploadQueue.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
@@ -43,6 +43,8 @@
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleAccumulatedPreviewWorker.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleIncrementalPreviewWorker.h"
 #include "WetWrinkleViewportClient.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "WetWrinkleViewport"
 
@@ -52,17 +54,38 @@ namespace
 {
     constexpr int32 WrinkleViewportForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
 
+    TAutoConsoleVariable<int32> CVarDWCWrinkleHoverDiagnostics(
+        TEXT("dwc.Wrinkle.HoverDiagnostics"),
+        0,
+        TEXT("Wrinkle hover timing diagnostics: 0=off, 1=slow completions, 2=sampled completions, 3=include canceled requests."),
+        ECVF_Default);
+    TAutoConsoleVariable<float> CVarDWCWrinkleHoverSlowThresholdMs(
+        TEXT("dwc.Wrinkle.HoverSlowThresholdMs"),
+        16.0f,
+        TEXT("End-to-end threshold in milliseconds for wrinkle hover diagnostics."),
+        ECVF_Default);
+    TAutoConsoleVariable<float> CVarDWCWrinkleHoverLogIntervalSeconds(
+        TEXT("dwc.Wrinkle.HoverLogIntervalSeconds"),
+        0.5f,
+        TEXT("Minimum interval between wrinkle hover diagnostic log lines."),
+        ECVF_Default);
+
     FDWCEditorTextureKey MakeWrinkleTextureKey(
-        const UWetClothingAsset*       Asset,
+        const UWetClothingAsset* Asset,
         const EDWCEditorTexturePurpose Purpose,
-        const int32                    MaterialSlotIndex)
+        const int32 MaterialSlotIndex,
+        const FGuid& LayerGuid = FGuid())
     {
         FDWCEditorTextureKey Key;
         Key.Owner = FObjectKey(Asset);
         Key.Purpose = Purpose;
         Key.MaterialSlotIndex = MaterialSlotIndex;
+        Key.LayerGuid = LayerGuid;
         return Key;
     }
+
+    const FGuid WrinkleHoverFrontLayerGuid(0x44574348, 0x6F766572, 0x46726F6E, 0x74000001);
+    const FGuid WrinkleHoverBackLayerGuid(0x44574348, 0x6F766572, 0x4261636B, 0x00000002);
 
     FDWCEditorTextureDescriptor MakeWrinkleNormalDescriptor(
         const FIntPoint& Size,
@@ -86,7 +109,7 @@ namespace
     UMaterialInterface* ResolveSourceMeshMaterialForPreviewSlot(
         const USkeletalMesh* PreparedMesh,
         const USkeletalMesh* SourceMesh,
-        const int32          MaterialSlotIndex)
+        const int32 MaterialSlotIndex)
     {
         if (PreparedMesh == nullptr || SourceMesh == nullptr || !PreparedMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
         {
@@ -144,8 +167,8 @@ namespace
     FIntPoint ComputeWetWrinklePreviewTextureSize(const UWetClothingAsset* Asset)
     {
         const int32 Resolution = Asset != nullptr
-                                     ? Asset->Authored.WrinkleData.BakeSettings.DefaultResolution
-                                     : WetWrinkleTextureRaster::InternalBakeResolution;
+            ? Asset->Authored.WrinkleData.BakeSettings.DefaultResolution
+            : WetWrinkleTextureRaster::InternalBakeResolution;
         return WetWrinkleTextureRaster::ResolveFinalTextureSize(Resolution);
     }
 
@@ -153,17 +176,30 @@ namespace
         const FWetWrinkleAccumulatedPreviewJobInput& Input)
     {
         FDWCEditorWorkerMemoryEstimate Estimate;
-        const uint64                   WorkingSurfaceBytes =
+        const uint64 WorkingSurfaceBytes =
             static_cast<uint64>(Input.WorkingTextureSize.X) * Input.WorkingTextureSize.Y * sizeof(uint32);
         const uint64 FinalPixelsBytes =
             static_cast<uint64>(Input.TextureSize.X) * Input.TextureSize.Y * sizeof(FColor);
         const uint64 LargestRidgeScratchBytes = Input.RidgeStrokes.IsEmpty()
-                                                    ? 0
-                                                    : FWetProceduralRidgeRasterizer::GetTransientScratchBytesUpperBound();
+            ? 0
+            : FWetProceduralRidgeRasterizer::GetTransientScratchBytesUpperBound();
 
         // The source readbacks are immutable shared snapshots. Count only the
         // per-job arrays and allocations that coexist while this worker runs.
-        Estimate.SnapshotBytes = Input.Patches.GetAllocatedSize() + Input.RidgeStrokes.GetAllocatedSize();
+        Estimate.SnapshotBytes = Input.Patches.GetAllocatedSize() +
+            Input.SurfacePatches.GetAllocatedSize() + Input.RidgeStrokes.GetAllocatedSize();
+        uint64 ProjectionScratchBytes = 0;
+        for (const FWetWrinkleSurfacePatchPreviewInput& Patch : Input.SurfacePatches)
+        {
+            const int32 TriangleCount = Patch.Projection.SpatialHandle.IsValid()
+                ? Patch.Projection.SpatialHandle->Triangles.Num()
+                : 0;
+            ProjectionScratchBytes = FMath::Max(
+                ProjectionScratchBytes,
+                FMath::Min(
+                    static_cast<uint64>(TriangleCount) * 128ull,
+                    Patch.Projection.MaxWorkingSetBytes));
+        }
         for (const FWetProceduralRidgeStroke& Stroke : Input.RidgeStrokes)
         {
             Estimate.SnapshotBytes += Stroke.Points.GetAllocatedSize();
@@ -171,14 +207,14 @@ namespace
         }
         Estimate.WorkingBytes = WorkingSurfaceBytes;
         Estimate.OutputBytes = FinalPixelsBytes;
-        Estimate.ScratchBytes = LargestRidgeScratchBytes;
+        Estimate.ScratchBytes = FMath::Max(LargestRidgeScratchBytes, ProjectionScratchBytes);
         return Estimate;
     }
 
     FDWCEditorWorkerMemoryEstimate EstimateWetWrinklePreviewAdmissionMemory(
         const UWetClothingAsset* Asset,
-        const FIntPoint&         TextureSize,
-        const FIntPoint&         WorkingTextureSize)
+        const FIntPoint& TextureSize,
+        const FIntPoint& WorkingTextureSize)
     {
         FWetWrinkleAccumulatedPreviewJobInput EstimateInput;
         EstimateInput.TextureSize = TextureSize;
@@ -192,7 +228,7 @@ namespace
 
         const FWetClothingWrinkleData& WrinkleData = Asset->Authored.WrinkleData;
         Estimate.SnapshotBytes =
-            static_cast<uint64>(WrinkleData.EditablePatches.Num()) * sizeof(FDWCEditorNormalStampCommand) +
+            static_cast<uint64>(WrinkleData.EditablePatches.Num()) * sizeof(FWetWrinkleSurfacePatchPreviewInput) +
             WrinkleData.EditableProceduralRidgeStrokes.GetAllocatedSize();
         for (const FWetProceduralRidgeStroke& Stroke : WrinkleData.EditableProceduralRidgeStrokes)
         {
@@ -204,9 +240,9 @@ namespace
 
     bool EncodeWetWrinklePreviewSurface(
         const FDWCEditorNormalRasterSurface& WorkingSurface,
-        const FIntPoint&                     FinalTextureSize,
-        TArray<FColor>&                      InOutPixels,
-        const FIntRect&                      FinalDirtyRect)
+        const FIntPoint& FinalTextureSize,
+        TArray<FColor>& InOutPixels,
+        const FIntRect& FinalDirtyRect)
     {
         if (!WorkingSurface.IsValid())
         {
@@ -255,31 +291,18 @@ namespace
             255);
     }
 
-    bool BuildWetWrinkleNormalStampCommand(
+    bool BuildWetWrinkleSurfacePatchPreviewInput(
         const FWetWrinklePatchPlacement& Stamp,
-        FDWCEditorNormalStampCommand&    OutCommand)
+        const FDWCEditorSpatialHandle& SpatialHandle,
+        FWetWrinkleSurfacePatchPreviewInput& OutInput)
     {
-        if (Stamp.WrinkleNormalTexture == nullptr || Stamp.BrushRadiusUV <= 0.0f || Stamp.Strength <= 0.0f)
-        {
-            return false;
-        }
+        FDWCEditorWrinklePatchDescriptor Descriptor;
         FString Error;
-        if (!FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
-                Stamp.WrinkleNormalTexture,
-                OutCommand.NormalSource.Texture,
-                Error))
-        {
-            return false;
-        }
-        OutCommand.NormalSource.bFlipGreenChannel = Stamp.WrinkleNormalTexture->bFlipGreenChannel;
-        OutCommand.Footprint.CenterUV = FVector2f(Stamp.PositionUV);
-        OutCommand.Footprint.RadiusUV = Stamp.BrushRadiusUV;
-        OutCommand.Footprint.RotationRadians = Stamp.RotationRadians;
-        OutCommand.Footprint.Scale = FVector2f(Stamp.Scale);
-        OutCommand.Footprint.Falloff = Stamp.Falloff;
-        OutCommand.Footprint.bWrap = true;
-        OutCommand.Strength = Stamp.Strength;
-        return OutCommand.NormalSource.IsValid();
+        return FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
+                Stamp, SpatialHandle.IsValid() ? SpatialHandle->UVChannelIndex : INDEX_NONE,
+                Descriptor, &Error) &&
+            FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInput(
+                Descriptor, SpatialHandle, OutInput, &Error);
     }
 
 } // namespace
@@ -290,6 +313,7 @@ void SWetWrinkleViewport::Construct(const FArguments& InArgs)
     WorkerJobScheduler = InArgs._WorkerJobScheduler;
     SessionStore = InArgs._SessionStore;
     SpatialQueryService = InArgs._SpatialQueryService;
+    SurfacePatchProjectionCache = InArgs._SurfacePatchProjectionCache;
     TextureWorkspace = InArgs._TextureWorkspace;
     PreviewCommitCoordinator = InArgs._PreviewCommitCoordinator;
     RenderUploadQueue = InArgs._RenderUploadQueue;
@@ -326,6 +350,12 @@ SWetWrinkleViewport::~SWetWrinkleViewport()
             WorkerJobScheduler->Cancel(Key);
         }
     }
+    // Release producer state while the scheduler is still alive so every
+    // pending hover/ridge/accumulated job is canceled before weak callbacks
+    // lose their viewport owner.
+    ReleaseAccumulatedPreviewStates();
+    ReleaseTransientProceduralPreviewState();
+    ResetPatchHoverPreviewState();
     WorkerJobScheduler.Reset();
     if (PreviewOrchestrator)
     {
@@ -337,13 +367,11 @@ SWetWrinkleViewport::~SWetWrinkleViewport()
         PreviewSession->Shutdown();
         PreviewSession.Reset();
     }
-    ReleaseAccumulatedPreviewStates();
-    ReleaseTransientProceduralPreviewState();
-
     if (PreviewScene.IsValid() && PreviewMeshComponent != nullptr)
     {
         PreviewScene->RemoveComponent(PreviewMeshComponent);
     }
+
 }
 
 void SWetWrinkleViewport::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
@@ -365,6 +393,48 @@ void SWetWrinkleViewport::Tick(const FGeometry& AllottedGeometry, const double I
     {
         RenderUploadQueue->Flush();
     }
+    if (PatchHoverPreviewState.bPresentationSwapPending &&
+        PatchHoverPreviewState.PendingPresentedDescriptor.IsSet() &&
+        PatchHoverPreviewState.StagingTextureHandle.IsValid() &&
+        RenderUploadQueue.IsValid())
+    {
+        const EDWCEditorTextureUploadStatus UploadStatus =
+            RenderUploadQueue->GetStatus(PatchHoverPreviewState.PendingPresentationUpload);
+        if (UploadStatus == EDWCEditorTextureUploadStatus::RenderEnqueued ||
+            UploadStatus == EDWCEditorTextureUploadStatus::Stale ||
+            UploadStatus == EDWCEditorTextureUploadStatus::Invalid)
+        {
+            HandlePatchHoverUploadStatus(
+                PatchHoverPreviewState.PendingPresentationUpload,
+                PatchHoverPreviewState.RequestSerial,
+                UploadStatus);
+        }
+    }
+    if (PatchHoverPreviewState.bCommitHandoffPending &&
+        PatchHoverPreviewState.PendingAccumulatedUpload.IsValid() &&
+        RenderUploadQueue.IsValid())
+    {
+        const EDWCEditorTextureUploadStatus UploadStatus =
+            RenderUploadQueue->GetStatus(PatchHoverPreviewState.PendingAccumulatedUpload);
+        if (UploadStatus == EDWCEditorTextureUploadStatus::RenderEnqueued)
+        {
+            PatchHoverPreviewState.bCommitHandoffPending = false;
+            PatchHoverPreviewState.PendingAccumulatedUpload = {};
+            PatchHoverPreviewState.PendingAccumulatedSequence = 0;
+            PatchHoverPreviewState.PendingAccumulatedContentRevision = 0;
+            PatchHoverPreviewState.bBound = false;
+            PatchHoverPreviewState.PresentedDescriptor.Reset();
+            PatchHoverPreviewState.RequestHash = 0;
+            ApplyPatchHoverPreviewLayer();
+        }
+        else if (UploadStatus == EDWCEditorTextureUploadStatus::Stale ||
+                 UploadStatus == EDWCEditorTextureUploadStatus::Invalid)
+        {
+            // Keep the visible hover until a recovery rebuild supplies a new
+            // upload ticket for the same authored content revision.
+            PatchHoverPreviewState.PendingAccumulatedUpload = {};
+        }
+    }
     if (PreviewSession)
     {
         PreviewSession->TickPendingMaterialCompilations();
@@ -381,11 +451,11 @@ void SWetWrinkleViewport::Tick(const FGeometry& AllottedGeometry, const double I
             [this, ActiveMaterialSlotIndex, InCurrentTime](const FWetWrinkleAccumulatedPreviewState& State)
             {
                 return State.MaterialSlotIndex == ActiveMaterialSlotIndex &&
-                       State.UVChannelIndex == BrushSettings.UVChannelIndex &&
-                       State.bDirty &&
-                       !State.bRebuildPending &&
-                       (State.Recovery.GetState() == EDWCEditorPreviewRecoveryState::FullRebuildRequired ||
-                        State.Recovery.IsRetryDue(InCurrentTime));
+                    State.UVChannelIndex == BrushSettings.UVChannelIndex &&
+                    State.bDirty &&
+                    !State.bRebuildPending &&
+                    (State.Recovery.GetState() == EDWCEditorPreviewRecoveryState::FullRebuildRequired ||
+                     State.Recovery.IsRetryDue(InCurrentTime));
             });
         if (RetryState != nullptr)
         {
@@ -483,6 +553,7 @@ void SWetWrinkleViewport::SuspendPreview(const EDWCEditorPreviewSuspendReason Re
     }
 
     ClearSurfaceHover();
+    ResetPatchHoverPreviewState();
     ClearTransientProceduralStroke(false);
     ReleaseAccumulatedPreviewStates();
     if (PreviewOrchestrator)
@@ -519,7 +590,7 @@ void SWetWrinkleViewport::ResumePreviewIfNeeded()
 }
 
 void SWetWrinkleViewport::HandlePreviewSessionMaterialReady(
-    const int32               MaterialSlotIndex,
+    const int32 MaterialSlotIndex,
     UMaterialInstanceDynamic* PreviewMID)
 {
     if (PreviewMID == nullptr)
@@ -550,7 +621,7 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
     }
 
     USkeletalMesh* TargetMesh = ResolveTargetMesh();
-    const bool     bMeshChanged = PreviewMeshComponent->GetSkeletalMeshAsset() != TargetMesh;
+    const bool bMeshChanged = PreviewMeshComponent->GetSkeletalMeshAsset() != TargetMesh;
     if (bMeshChanged)
     {
         SpatialLease.Reset();
@@ -589,6 +660,7 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
     {
         ReleaseAccumulatedPreviewStates();
         ReleaseTransientProceduralPreviewState();
+        ResetPatchHoverPreviewState();
         RefreshStoredStampOverlay();
     }
     RefreshWrinklePreviewMaterials();
@@ -602,6 +674,8 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
     {
         PreviewScene->SetFloorOffset(0.0f);
     }
+
+    RefreshViewportHint();
 
     if (ViewportClient.IsValid())
     {
@@ -624,7 +698,7 @@ void SWetWrinkleViewport::SynchronizeBrushSettings(const FWetWrinkleBrushSetting
     TRACE_CPUPROFILER_EVENT_SCOPE(SWetWrinkleViewport_SynchronizeBrushSettings);
 
     const int32 PreviousMaterialSlotIndex = BrushSettings.MaterialSlotIndex;
-    const bool  bLeavingProceduralRidgeMode =
+    const bool bLeavingProceduralRidgeMode =
         BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
         InBrushSettings.ToolMode != EWetWrinkleToolMode::ProceduralRidgeStroke;
     const bool bNeedsTriangleRebuild =
@@ -647,6 +721,7 @@ void SWetWrinkleViewport::SynchronizeBrushSettings(const FWetWrinkleBrushSetting
         ReleaseTransientProceduralPreviewState();
     }
 
+    InvalidatePatchHoverRequest();
     BrushSettings = InBrushSettings;
     if (bNeedsTriangleRebuild && PreviewOrchestrator && PreviousMaterialSlotIndex != INDEX_NONE)
     {
@@ -711,6 +786,7 @@ void SWetWrinkleViewport::SetBrushTopology(
 
     CurrentSurfaceHit = FWetWrinkleSurfaceHit();
     ClearBrushCursor();
+    ResetPatchHoverPreviewState();
     RebuildHitTriangles();
     RefreshWrinklePreviewMaterials();
     Invalidate();
@@ -729,10 +805,11 @@ void SWetWrinkleViewport::UpdateBrushPreviewSettings(
     const int32 MaterialSlotIndex = BrushSettings.MaterialSlotIndex;
     const int32 UVChannelIndex = BrushSettings.UVChannelIndex;
     const float PreviewWetness = BrushSettings.PreviewWetness;
-    const bool  bLeavingProceduralRidgeMode =
+    const bool bLeavingProceduralRidgeMode =
         BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
         InBrushSettings.ToolMode != EWetWrinkleToolMode::ProceduralRidgeStroke;
 
+    InvalidatePatchHoverRequest();
     BrushSettings = InBrushSettings;
     BrushSettings.MaterialSlotIndex = MaterialSlotIndex;
     BrushSettings.UVChannelIndex = UVChannelIndex;
@@ -754,6 +831,7 @@ void SWetWrinkleViewport::UpdateBrushPreviewSettings(
 
     RefreshBrushCursor();
     RefreshWrinklePreviewHoverParameters();
+    RefreshViewportHint();
     Invalidate();
 }
 
@@ -792,7 +870,7 @@ void SWetWrinkleViewport::SetGeneratedNormalPreviewTexture(
     const int32 MaterialSlotIndex,
     const int32 UVChannelIndex,
     UTexture2D* GeneratedNormalTexture,
-    const bool  bRefreshPreview)
+    const bool bRefreshPreview)
 {
     if (bGeneratedNormalPreviewOverrideActive &&
         GeneratedNormalPreviewMaterialSlotIndex == MaterialSlotIndex &&
@@ -868,8 +946,8 @@ void SWetWrinkleViewport::SetSelectedProceduralStrokePointIndex(const int32 InPo
 
 void SWetWrinkleViewport::SetTransientProceduralStroke(
     const TArray<FWetWrinkleSurfaceHit>& SurfaceHits,
-    const bool                           bStartJunction,
-    const bool                           bEndJunction)
+    const bool bStartJunction,
+    const bool bEndJunction)
 {
     TransientProceduralStrokeHits = SurfaceHits;
     bTransientProceduralStartJunction = bStartJunction;
@@ -893,7 +971,7 @@ void SWetWrinkleViewport::PreviewEditedProceduralStroke(const FWetProceduralRidg
 
 bool SWetWrinkleViewport::SetEditingProceduralStrokeGuid(
     const FGuid& InStrokeGuid,
-    const bool   bRefreshPreview)
+    const bool bRefreshPreview)
 {
     if (EditingProceduralStrokeGuid == InStrokeGuid)
     {
@@ -918,10 +996,10 @@ bool SWetWrinkleViewport::SetEditingProceduralStrokeGuid(
 
 int32 SWetWrinkleViewport::FindNearestProceduralStrokePoint(
     const FWetProceduralRidgeStroke& Stroke,
-    const FVector&                   WorldPosition,
-    const float                      MaxDistance) const
+    const FVector& WorldPosition,
+    const float MaxDistance) const
 {
-    int32  NearestPointIndex = INDEX_NONE;
+    int32 NearestPointIndex = INDEX_NONE;
     double NearestDistanceSq = FMath::Square(FMath::Max(static_cast<double>(MaxDistance), 0.0));
     for (int32 PointIndex = 0; PointIndex < Stroke.Points.Num(); ++PointIndex)
     {
@@ -975,10 +1053,10 @@ bool SWetWrinkleViewport::ClearTransientProceduralStroke(const bool bRefreshPrev
 }
 
 bool SWetWrinkleViewport::TryBuildSurfaceHitAtUVNearWorldPosition(
-    int32                  MaterialSlotIndex,
-    int32                  UVChannelIndex,
-    const FVector2D&       UV,
-    const FVector&         ReferenceWorldPosition,
+    int32 MaterialSlotIndex,
+    int32 UVChannelIndex,
+    const FVector2D& UV,
+    const FVector& ReferenceWorldPosition,
     FWetWrinkleSurfaceHit& OutHit) const
 {
     OutHit = FWetWrinkleSurfaceHit();
@@ -993,7 +1071,7 @@ bool SWetWrinkleViewport::TryBuildSurfaceHitAtUVNearWorldPosition(
     }
 
     const FWetWrinkleProjectedSurface* Surface = &ProjectedSurfaces[0];
-    double                             BestDistanceSq = FVector::DistSquared(Surface->WorldPosition, ReferenceWorldPosition);
+    double BestDistanceSq = FVector::DistSquared(Surface->WorldPosition, ReferenceWorldPosition);
     for (int32 SurfaceIndex = 1; SurfaceIndex < ProjectedSurfaces.Num(); ++SurfaceIndex)
     {
         const double DistanceSq = FVector::DistSquared(ProjectedSurfaces[SurfaceIndex].WorldPosition, ReferenceWorldPosition);
@@ -1018,6 +1096,11 @@ bool SWetWrinkleViewport::TryBuildSurfaceHitAtUVNearWorldPosition(
     OutHit.LocalNormal = ComponentTransform.InverseTransformVectorNoScale(Surface->WorldNormal).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
     OutHit.LocalTangent = ComponentTransform.InverseTransformVectorNoScale(Surface->WorldTangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
     OutHit.LocalBitangent = ComponentTransform.InverseTransformVectorNoScale(Surface->WorldBitangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+    OutHit.LocalSurfaceAxisU = Surface->LocalSurfaceAxisU;
+    OutHit.LocalSurfaceAxisV = Surface->LocalSurfaceAxisV;
+    OutHit.LocalSurfaceFrameU = Surface->LocalSurfaceFrameU;
+    OutHit.LocalSurfaceFrameV = Surface->LocalSurfaceFrameV;
+    OutHit.SurfaceUnitsPerUV = Surface->SurfaceUnitsPerUV;
     OutHit.UV = UV;
     OutHit.Barycentric = Surface->Barycentric;
     OutHit.DistanceSq = BestDistanceSq;
@@ -1061,6 +1144,11 @@ bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& 
     OutHit.LocalNormal = SharedHit.LocalNormal;
     OutHit.LocalTangent = SharedHit.LocalTangent;
     OutHit.LocalBitangent = SharedHit.LocalBitangent;
+    OutHit.LocalSurfaceAxisU = SharedHit.LocalSurfaceAxisU;
+    OutHit.LocalSurfaceAxisV = SharedHit.LocalSurfaceAxisV;
+    OutHit.LocalSurfaceFrameU = SharedHit.LocalSurfaceFrameU;
+    OutHit.LocalSurfaceFrameV = SharedHit.LocalSurfaceFrameV;
+    OutHit.SurfaceUnitsPerUV = SharedHit.SurfaceUnitsPerUV;
     OutHit.UV = SharedHit.UV;
     OutHit.Barycentric = SharedHit.Barycentric;
     OutHit.DistanceSq = SharedHit.DistanceSq;
@@ -1080,20 +1168,93 @@ bool SWetWrinkleViewport::HitTestSurface(const FRay& WorldRay, double& OutHitDep
 
 bool SWetWrinkleViewport::CanBeginSurfaceInteraction(const FRay& WorldRay, double& OutHitDepth)
 {
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::Patch)
+    {
+        const bool bCanCommitPresentedPatch =
+            !bPreviewSuspended &&
+            !PatchHoverPreviewState.bCommitHandoffPending &&
+            PatchHoverPreviewState.bBound &&
+            PatchHoverPreviewState.PresentedDescriptor.IsSet() &&
+            PatchHoverPreviewState.PresentedDescriptor->MaterialSlotIndex ==
+                BrushSettings.MaterialSlotIndex &&
+            PatchHoverPreviewState.PresentedDescriptor->UVChannelIndex ==
+                BrushSettings.UVChannelIndex;
+        return bCanCommitPresentedPatch && HitTestSurface(WorldRay, OutHitDepth);
+    }
     return HitTestSurface(WorldRay, OutHitDepth);
 }
 
 void SWetWrinkleViewport::BeginSurfaceInteraction(const FRay& WorldRay)
 {
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::Patch)
+    {
+        CommitPresentedPatch();
+        return;
+    }
+
     FWetWrinkleSurfaceHit Hit;
     if (TraceSurface(WorldRay.Origin, WorldRay.Direction, Hit))
     {
         HandleSurfaceHitFromClient(Hit);
         if (const TSharedPtr<FWetWrinkleAuthoringController> Controller = AuthoringController.Pin())
         {
-            Controller->BeginSurfaceInteraction(Hit);
+            Controller->BeginSurfaceInteraction(CurrentSurfaceHit);
         }
     }
+}
+
+bool SWetWrinkleViewport::CommitPresentedPatch()
+{
+    if (bPreviewSuspended || !PatchHoverPreviewState.bBound ||
+        !PatchHoverPreviewState.PresentedDescriptor.IsSet())
+    {
+        return false;
+    }
+    const FDWCEditorWrinklePatchDescriptor Descriptor =
+        PatchHoverPreviewState.PresentedDescriptor.GetValue();
+    if (Descriptor.MaterialSlotIndex != BrushSettings.MaterialSlotIndex ||
+        Descriptor.UVChannelIndex != BrushSettings.UVChannelIndex)
+    {
+        return false;
+    }
+    const TSharedPtr<FWetWrinkleAuthoringController> Controller = AuthoringController.Pin();
+    if (!Controller.IsValid())
+    {
+        return false;
+    }
+    const FWetWrinklePatchCommitResult CommitResult =
+        Controller->CommitPresentedPatch(Descriptor);
+    if (!CommitResult.bSucceeded)
+    {
+        UE_LOG(
+            LogWetWrinklePreviewViewport,
+            Warning,
+            TEXT("The presented wrinkle Patch was not committed: %s"),
+            CommitResult.FailureReason.IsEmpty() ? TEXT("unknown reason") : *CommitResult.FailureReason);
+        return false;
+    }
+
+    if (PatchHoverPreviewState.PendingTicket.IsValid() && WorkerJobScheduler.IsValid())
+    {
+        WorkerJobScheduler->CancelTicket(PatchHoverPreviewState.PendingTicket);
+    }
+    if (RenderUploadQueue.IsValid())
+    {
+        RenderUploadQueue->RemoveObserver(PatchHoverPreviewState.PendingPresentationObserver);
+        if (PatchHoverPreviewState.bPresentationSwapPending &&
+            PatchHoverPreviewState.StagingTextureHandle.IsValid())
+        {
+            RenderUploadQueue->Cancel(PatchHoverPreviewState.StagingTextureHandle->GetKey());
+        }
+    }
+    PatchHoverPreviewState.PendingTicket = {};
+    PatchHoverPreviewState.RequestedDescriptor.Reset();
+    PatchHoverPreviewState.PendingPresentedDescriptor.Reset();
+    PatchHoverPreviewState.PendingPresentationUpload = {};
+    PatchHoverPreviewState.bPresentationSwapPending = false;
+    ++PatchHoverPreviewState.RequestSerial;
+    PatchHoverPreviewState.RequestHash = Descriptor.GetStableHash();
+    return true;
 }
 
 void SWetWrinkleViewport::UpdateSurfaceInteraction(const FRay& WorldRay)
@@ -1104,7 +1265,7 @@ void SWetWrinkleViewport::UpdateSurfaceInteraction(const FRay& WorldRay)
         HandleSurfaceHitFromClient(Hit);
         if (const TSharedPtr<FWetWrinkleAuthoringController> Controller = AuthoringController.Pin())
         {
-            Controller->UpdateSurfaceInteraction(Hit);
+            Controller->UpdateSurfaceInteraction(CurrentSurfaceHit);
         }
     }
     else
@@ -1198,6 +1359,17 @@ TSharedPtr<SWidget> SWetWrinkleViewport::BuildViewportToolbar()
 void SWetWrinkleViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Overlay)
 {
     SEditorViewport::PopulateViewportOverlays(Overlay);
+
+    Overlay->AddSlot()
+        .VAlign(VAlign_Top)
+        .HAlign(HAlign_Left)
+        .Padding(8.0f)
+            [SNew(SBorder)
+                 .BorderImage(FAppStyle::Get().GetBrush("FloatingBorder"))
+                 .Padding(6.0f)
+                     [SAssignNew(OverlayText, STextBlock)
+                          .ColorAndOpacity(this, &SWetWrinkleViewport::GetViewportHintColor)
+                          .Text(GetViewportHintText())]];
 }
 
 void SWetWrinkleViewport::OnFocusViewportToSelection()
@@ -1239,10 +1411,10 @@ UTexture* SWetWrinkleViewport::ResolveSourceTextureForMaterialSlot(int32 Materia
     }
 
     const USkeletalMesh* TargetMesh = ResolveTargetMesh();
-    UMaterialInterface*  SourceMaterial =
+    UMaterialInterface* SourceMaterial =
         TargetMesh != nullptr && TargetMesh->GetMaterials().IsValidIndex(MaterialSlotIndex)
-             ? TargetMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface
-             : nullptr;
+            ? TargetMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface
+            : nullptr;
     if (SourceMaterial == nullptr && SourceWetClothingAsset != nullptr)
     {
         SourceMaterial = ResolveSourceMeshMaterialForPreviewSlot(
@@ -1266,7 +1438,7 @@ void SWetWrinkleViewport::ApplyPreviewMaterialsToMesh()
     }
 
     const int32 ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
-    const bool  bPreviewAllReadySlots = ActiveMaterialSlotIndex == FDWCEditorPreviewSession::AllWettableSlots;
+    const bool bPreviewAllReadySlots = ActiveMaterialSlotIndex == FDWCEditorPreviewSession::AllWettableSlots;
     PreviewSession->SetPreviewMaterialScope(
         bPreviewAllReadySlots
             ? EDWCEditorPreviewMaterialScope::AllWettableSlots
@@ -1289,8 +1461,8 @@ void SWetWrinkleViewport::ApplyPreviewMaterialsToMesh()
     for (const FDWCEditorPreviewSlotState& SlotState : PreviewSession->GetSlotStates().Slots)
     {
         UMaterialInterface* MaterialToApply = SlotState.SourceMaterial.Get();
-        const bool          bUsePreviewMaterial = SlotState.bPreviewReady &&
-                                         PreviewMaterialSlotIndices.Contains(SlotState.MaterialSlotIndex);
+        const bool bUsePreviewMaterial = SlotState.bPreviewReady &&
+            PreviewMaterialSlotIndices.Contains(SlotState.MaterialSlotIndex);
         if (bUsePreviewMaterial)
         {
             const FDWCEditorPreviewSessionSlot* PreviewSlot =
@@ -1397,11 +1569,11 @@ FDWCEditorPreviewLayer SWetWrinkleViewport::BuildTransientPreviewLayer(
     const int32 MaterialSlotIndex) const
 {
     const bool bEnabled = BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
-                          (!TransientProceduralStrokeHits.IsEmpty() || EditedProceduralStrokePreview.IsSet()) &&
-                          TransientProceduralPreviewState.MaterialSlotIndex == MaterialSlotIndex &&
-                          TransientProceduralPreviewState.UVChannelIndex == BrushSettings.UVChannelIndex &&
-                          TransientProceduralPreviewState.TextureHandle.IsValid() &&
-                          TransientProceduralPreviewState.TextureHandle->GetTexture() != nullptr;
+        (!TransientProceduralStrokeHits.IsEmpty() || EditedProceduralStrokePreview.IsSet()) &&
+        TransientProceduralPreviewState.MaterialSlotIndex == MaterialSlotIndex &&
+        TransientProceduralPreviewState.UVChannelIndex == BrushSettings.UVChannelIndex &&
+        TransientProceduralPreviewState.TextureHandle.IsValid() &&
+        TransientProceduralPreviewState.TextureHandle->GetTexture() != nullptr;
 
     FDWCEditorPreviewLayer Layer;
     Layer.Kind = EDWCEditorPreviewLayerKind::LiveWrinkleTransient;
@@ -1417,6 +1589,47 @@ FDWCEditorPreviewLayer SWetWrinkleViewport::BuildTransientPreviewLayer(
 
 void SWetWrinkleViewport::RefreshWrinklePreviewHoverParameters()
 {
+    const bool bShouldProject = BrushSettings.ToolMode == EWetWrinkleToolMode::Patch &&
+        BrushSettings.bShowPreview && CurrentSurfaceHit.bHit &&
+        BrushSettings.WrinkleNormalTexture != nullptr;
+    if (bShouldProject)
+    {
+        SchedulePatchHoverPreview();
+    }
+    else
+    {
+        if (PatchHoverPreviewState.PendingTicket.IsValid() && WorkerJobScheduler.IsValid())
+        {
+            WorkerJobScheduler->Cancel(PatchHoverPreviewState.PendingTicket.Key);
+        }
+        if (RenderUploadQueue.IsValid())
+        {
+            RenderUploadQueue->RemoveObserver(PatchHoverPreviewState.PendingPresentationObserver);
+            if (PatchHoverPreviewState.bPresentationSwapPending &&
+                PatchHoverPreviewState.StagingTextureHandle.IsValid())
+            {
+                RenderUploadQueue->Cancel(PatchHoverPreviewState.StagingTextureHandle->GetKey());
+            }
+        }
+        PatchHoverPreviewState.PendingTicket = {};
+        ++PatchHoverPreviewState.RequestSerial;
+        PatchHoverPreviewState.bBound = false;
+        PatchHoverPreviewState.RequestHash = 0;
+        PatchHoverPreviewState.RequestedDescriptor.Reset();
+        PatchHoverPreviewState.PresentedDescriptor.Reset();
+        PatchHoverPreviewState.PendingPresentedDescriptor.Reset();
+        PatchHoverPreviewState.PendingPresentationUpload = {};
+        PatchHoverPreviewState.PendingAccumulatedUpload = {};
+        PatchHoverPreviewState.bPresentationSwapPending = false;
+        PatchHoverPreviewState.bCommitHandoffPending = false;
+        PatchHoverPreviewState.PendingAccumulatedSequence = 0;
+        PatchHoverPreviewState.PendingAccumulatedContentRevision = 0;
+    }
+    ApplyPatchHoverPreviewLayer();
+}
+
+void SWetWrinkleViewport::ApplyPatchHoverPreviewLayer()
+{
     const int32 ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
     if (PreviewOrchestrator && ActiveMaterialSlotIndex != FDWCEditorPreviewSession::AllWettableSlots)
     {
@@ -1429,38 +1642,19 @@ void SWetWrinkleViewport::RefreshWrinklePreviewHoverParameters()
 FDWCEditorPreviewLayer SWetWrinkleViewport::BuildHoverPreviewLayer(
     const int32 MaterialSlotIndex) const
 {
-    const bool bEnableHover =
-        BrushSettings.ToolMode == EWetWrinkleToolMode::Patch &&
-        BrushSettings.bShowPreview &&
-        CurrentSurfaceHit.bHit &&
-        CurrentSurfaceHit.MaterialSlotIndex == MaterialSlotIndex &&
-        CurrentSurfaceHit.UVChannelIndex == BrushSettings.UVChannelIndex &&
-        BrushSettings.WrinkleNormalTexture != nullptr;
-    const float RadiusUV = bEnableHover
-                               ? FMath::Max(BrushSettings.BrushRadiusUV, UE_SMALL_NUMBER)
-                               : 0.0f;
-    const float Strength = FMath::Clamp(BrushSettings.Strength, 0.0f, 4.0f);
-    const float Falloff = FMath::Clamp(BrushSettings.Falloff, 0.0f, 1.0f);
+    const bool bEnableHover = PatchHoverPreviewState.bBound &&
+        PatchHoverPreviewState.MaterialSlotIndex == MaterialSlotIndex &&
+        PatchHoverPreviewState.UVChannelIndex == BrushSettings.UVChannelIndex &&
+        PatchHoverPreviewState.TextureHandle.IsValid() &&
+        PatchHoverPreviewState.TextureHandle->GetTexture() != nullptr;
 
     FDWCEditorPreviewLayer Layer;
     Layer.Kind = EDWCEditorPreviewLayerKind::LiveWrinkleHover;
     Layer.MaterialSlotIndex = MaterialSlotIndex;
     Layer.AddTexture(
         WetWrinklePreviewMaterialParameters::HoverNormal,
-        bEnableHover ? BrushSettings.WrinkleNormalTexture.Get() : nullptr);
+        bEnableHover ? PatchHoverPreviewState.TextureHandle->GetTexture() : nullptr);
     Layer.AddScalar(WetWrinklePreviewMaterialParameters::HoverEnabled, bEnableHover ? 1.0f : 0.0f);
-    Layer.AddScalar(WetWrinklePreviewMaterialParameters::HoverRadiusUV, RadiusUV);
-    Layer.AddScalar(WetWrinklePreviewMaterialParameters::HoverRotation, BrushSettings.RotationRadians);
-    Layer.AddVector(
-        WetWrinklePreviewMaterialParameters::HoverScale,
-        FLinearColor(1.0f, 1.0f, 0.0f, 0.0f));
-    Layer.AddScalar(WetWrinklePreviewMaterialParameters::HoverStrength, Strength);
-    Layer.AddScalar(WetWrinklePreviewMaterialParameters::HoverFalloff, Falloff);
-    Layer.AddVector(
-        WetWrinklePreviewMaterialParameters::HoverCenterUV,
-        bEnableHover
-            ? FLinearColor(static_cast<float>(CurrentSurfaceHit.UV.X), static_cast<float>(CurrentSurfaceHit.UV.Y), 0.0f, 0.0f)
-            : FLinearColor::Black);
     return Layer;
 }
 
@@ -1504,8 +1698,8 @@ UMaterialInstanceDynamic* SWetWrinkleViewport::GetActiveWrinklePreviewMID(
 void SWetWrinkleViewport::AppendAccumulatedPreviewStamp(const FWetWrinklePatchPlacement& Stamp)
 {
     const int32 DataUVChannelIndex = WetClothingAsset.IsValid()
-                                         ? WetClothingAsset->GetDWCDataUVChannelIndex()
-                                         : INDEX_NONE;
+        ? WetClothingAsset->GetDWCDataUVChannelIndex()
+        : INDEX_NONE;
     if (Stamp.MaterialSlotIndex == INDEX_NONE || DataUVChannelIndex < 0)
     {
         return;
@@ -1518,6 +1712,20 @@ void SWetWrinkleViewport::AppendAccumulatedPreviewStamp(const FWetWrinklePatchPl
         return;
     }
     ++PreviewState->ContentRevision;
+    if (PatchHoverPreviewState.bBound && PatchHoverPreviewState.PresentedDescriptor.IsSet())
+    {
+        FDWCEditorWrinklePatchDescriptor CommittedDescriptor;
+        if (FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
+                Stamp, DataUVChannelIndex, CommittedDescriptor) &&
+            CommittedDescriptor.GetStableHash() ==
+                PatchHoverPreviewState.PresentedDescriptor->GetStableHash())
+        {
+            PatchHoverPreviewState.bCommitHandoffPending = true;
+            PatchHoverPreviewState.PendingAccumulatedUpload = {};
+            PatchHoverPreviewState.PendingAccumulatedSequence = 0;
+            PatchHoverPreviewState.PendingAccumulatedContentRevision = PreviewState->ContentRevision;
+        }
+    }
 
     if (PreviewState->bDirty || !PreviewState->TextureHandle.IsValid() ||
         PreviewState->TextureHandle->GetTexture() == nullptr)
@@ -1554,30 +1762,183 @@ void SWetWrinkleViewport::AppendAccumulatedPreviewStamp(const FWetWrinklePatchPl
         return;
     }
 
-    FDWCEditorNormalStampCommand Command;
-    if (!BuildWetWrinkleNormalStampCommand(Stamp, Command))
+    FWetWrinkleSurfacePatchPreviewInput SurfaceInput;
+    FDWCEditorProjectedNormalPatchCommand Command;
+    FString ProjectionError;
+    if (!BuildWetWrinkleSurfacePatchPreviewInput(Stamp, SpatialHandle, SurfaceInput) ||
+        !FDWCEditorSurfacePatchRasterBuilder::BuildProjectedPatchCommand(
+            SurfaceInput, Command, &ProjectionError, nullptr,
+            SurfacePatchProjectionCache.Get(), EDWCEditorSurfacePatchCachePolicy::Persistent))
     {
+        UE_LOG(
+            LogWetWrinklePreviewViewport,
+            Warning,
+            TEXT("Wrinkle patch %s could not be projected for preview: %s"),
+            *Stamp.PatchGuid.ToString(),
+            ProjectionError.IsEmpty() ? TEXT("invalid surface anchor or source texture") : *ProjectionError);
         return;
     }
 
     FWetWrinkleIncrementalCommand Delta;
     Delta.Kind = EWetWrinkleIncrementalCommandKind::Patch;
-    Delta.Patch = MoveTemp(Command);
+    Delta.ProjectedPatch = MoveTemp(Command);
     QueueAccumulatedIncrementalCommand(*PreviewState, MoveTemp(Delta));
+    if (PatchHoverPreviewState.bCommitHandoffPending &&
+        PatchHoverPreviewState.PendingAccumulatedContentRevision == PreviewState->ContentRevision)
+    {
+        PatchHoverPreviewState.PendingAccumulatedSequence = PreviewState->NextIncrementalSequence;
+    }
     PruneAccumulatedPreviewStates(Stamp.MaterialSlotIndex, DataUVChannelIndex);
+}
+
+void SWetWrinkleViewport::InvalidatePatchHoverRequest()
+{
+    if (PatchHoverPreviewState.PendingTicket.IsValid() && WorkerJobScheduler.IsValid())
+    {
+        WorkerJobScheduler->CancelTicket(PatchHoverPreviewState.PendingTicket);
+    }
+    if (RenderUploadQueue.IsValid())
+    {
+        RenderUploadQueue->RemoveObserver(PatchHoverPreviewState.PendingPresentationObserver);
+        if (PatchHoverPreviewState.bPresentationSwapPending &&
+            PatchHoverPreviewState.StagingTextureHandle.IsValid())
+        {
+            RenderUploadQueue->Cancel(PatchHoverPreviewState.StagingTextureHandle->GetKey());
+        }
+    }
+
+    PatchHoverPreviewState.PendingTicket = {};
+    PatchHoverPreviewState.RequestedDescriptor.Reset();
+    PatchHoverPreviewState.PendingPresentedDescriptor.Reset();
+    PatchHoverPreviewState.PendingPresentationUpload = {};
+    PatchHoverPreviewState.PendingPerformanceDiagnostics.Reset();
+    PatchHoverPreviewState.bPendingTouchesUVSeam = false;
+    PatchHoverPreviewState.bPresentationSwapPending = false;
+    PatchHoverPreviewState.bBound = false;
+    PatchHoverPreviewState.PresentedDescriptor.Reset();
+    PatchHoverPreviewState.RequestHash = 0;
+    ++PatchHoverPreviewState.RequestSerial;
+
+    bNonUVSeamBrushCrossesSeam = false;
+    RefreshViewportHint();
+    ApplyPatchHoverPreviewLayer();
+}
+
+void SWetWrinkleViewport::HandlePatchHoverUploadStatus(
+    const FDWCEditorTextureUploadTicket& UploadTicket,
+    const uint64 RequestSerial,
+    const EDWCEditorTextureUploadStatus Status)
+{
+    FWetWrinklePatchHoverPreviewState& State = PatchHoverPreviewState;
+    const bool bMatchingTicket = State.PendingPresentationUpload.State == UploadTicket.State &&
+        State.PendingPresentationUpload.ResourceGeneration == UploadTicket.ResourceGeneration &&
+        State.PendingPresentationUpload.ContentRevision == UploadTicket.ContentRevision;
+    if (!bMatchingTicket || State.RequestSerial != RequestSerial || !State.bPresentationSwapPending)
+    {
+        return;
+    }
+    if (RenderUploadQueue.IsValid())
+    {
+        RenderUploadQueue->RemoveObserver(State.PendingPresentationObserver);
+    }
+
+    const bool bCanPresent = Status == EDWCEditorTextureUploadStatus::RenderEnqueued &&
+        State.PendingPresentedDescriptor.IsSet() &&
+        State.PendingPresentedDescriptor->HasCurrentNormalTextureContent() &&
+        State.StagingTextureHandle.IsValid();
+    if (!bCanPresent)
+    {
+        State.PendingPerformanceDiagnostics.Reset();
+        State.PendingPresentedDescriptor.Reset();
+        State.PendingPresentationUpload = {};
+        State.bPresentationSwapPending = false;
+        State.bPendingTouchesUVSeam = false;
+        State.RequestHash = State.PresentedDescriptor.IsSet()
+            ? State.PresentedDescriptor->GetStableHash()
+            : 0;
+        SchedulePatchHoverPreview();
+        return;
+    }
+
+    TOptional<FWetWrinkleHoverPerformanceDiagnostics> CompletedDiagnostics;
+    if (State.PendingPerformanceDiagnostics.IsSet())
+    {
+        CompletedDiagnostics = MoveTemp(State.PendingPerformanceDiagnostics.GetValue());
+        State.PendingPerformanceDiagnostics.Reset();
+        const double NowSeconds = FPlatformTime::Seconds();
+        FWetWrinkleHoverPerformanceDiagnostics& Diagnostics = CompletedDiagnostics.GetValue();
+        Diagnostics.UploadWaitMs = Diagnostics.CommitFinishedSeconds > 0.0
+            ? (NowSeconds - Diagnostics.CommitFinishedSeconds) * 1000.0
+            : 0.0;
+        FDWCEditorTextureUploadTiming UploadTiming;
+        if (RenderUploadQueue.IsValid())
+        {
+            RenderUploadQueue->GetStatus(UploadTicket);
+            if (RenderUploadQueue->GetTiming(UploadTicket, UploadTiming))
+            {
+                Diagnostics.UploadQueueWaitMs = UploadTiming.QueueWaitMs;
+                Diagnostics.UploadSliceDelayMs = UploadTiming.SliceDelayMs;
+                Diagnostics.UploadStagingCopyMs = UploadTiming.StagingCopyMs;
+                Diagnostics.UploadSubmitCallMs = UploadTiming.SubmitCallMs;
+                Diagnostics.UploadPollDelayMs = UploadTiming.SubmittedToObservedMs;
+                Diagnostics.UploadRenderCallbackLatencyMs = UploadTiming.RenderCallbackLatencyMs;
+                Diagnostics.UploadBytes = UploadTiming.SubmittedBytes;
+                Diagnostics.UploadPreparedPayloadBytes = UploadTiming.PreparedPayloadBytes;
+                Diagnostics.UploadAvoidedStagingCopyBytes = UploadTiming.AvoidedStagingCopyBytes;
+                Diagnostics.UploadRequestedRegionCount = UploadTiming.RequestedRegionCount;
+                Diagnostics.UploadSubmittedRegionCount = UploadTiming.SubmittedRegionCount;
+                Diagnostics.UploadCompletedRegionCount = UploadTiming.CompletedRegionCount;
+                Diagnostics.UploadCoalescedRequestCount = UploadTiming.CoalescedRequestCount;
+                Diagnostics.UploadQueueDepthAtSelection = UploadTiming.QueueDepthAtSelection;
+                Diagnostics.bFullTextureUpload = UploadTiming.bFullTextureUpload;
+                Diagnostics.bUsedPreparedUpload = UploadTiming.bUsedPreparedPayload;
+            }
+        }
+    }
+
+    const double PresentationStartSeconds = FPlatformTime::Seconds();
+    Swap(State.TextureHandle, State.StagingTextureHandle);
+    Swap(State.FrontOutputRects, State.StagingOutputRects);
+    State.PresentedDescriptor = State.PendingPresentedDescriptor.GetValue();
+    State.PendingPresentedDescriptor.Reset();
+    State.PendingPresentationUpload = {};
+    State.bPresentationSwapPending = false;
+    State.bBound = true;
+    const bool bSeamWarningChanged = bNonUVSeamBrushCrossesSeam != State.bPendingTouchesUVSeam;
+    bNonUVSeamBrushCrossesSeam = State.bPendingTouchesUVSeam;
+    State.bPendingTouchesUVSeam = false;
+    if (bSeamWarningChanged)
+    {
+        RefreshViewportHint();
+    }
+    ApplyPatchHoverPreviewLayer();
+
+    if (CompletedDiagnostics.IsSet())
+    {
+        FWetWrinkleHoverPerformanceDiagnostics Diagnostics =
+            MoveTemp(CompletedDiagnostics.GetValue());
+        const double NowSeconds = FPlatformTime::Seconds();
+        Diagnostics.PresentationSwapMs =
+            (NowSeconds - PresentationStartSeconds) * 1000.0;
+        Diagnostics.EndToEndMs = Diagnostics.RequestStartSeconds > 0.0
+            ? (NowSeconds - Diagnostics.RequestStartSeconds) * 1000.0
+            : 0.0;
+        RecordPatchHoverDiagnostics(MoveTemp(Diagnostics));
+    }
+    SchedulePatchHoverPreview();
 }
 
 void SWetWrinkleViewport::AppendAccumulatedPreviewProceduralStroke(const FWetProceduralRidgeStroke& Stroke)
 {
     const int32 DataUVChannelIndex = WetClothingAsset.IsValid()
-                                         ? WetClothingAsset->GetDWCDataUVChannelIndex()
-                                         : INDEX_NONE;
+        ? WetClothingAsset->GetDWCDataUVChannelIndex()
+        : INDEX_NONE;
     if (!Stroke.bEnabled || Stroke.MaterialSlotIndex == INDEX_NONE || DataUVChannelIndex < 0 || Stroke.Points.Num() < 2)
     {
         return;
     }
 
-    UTexture*                           SourceTexture = ResolveSourceTextureForMaterialSlot(Stroke.MaterialSlotIndex);
+    UTexture* SourceTexture = ResolveSourceTextureForMaterialSlot(Stroke.MaterialSlotIndex);
     FWetWrinkleAccumulatedPreviewState* PreviewState =
         FindOrAddAccumulatedPreviewState(SourceTexture, Stroke.MaterialSlotIndex, DataUVChannelIndex);
     if (PreviewState == nullptr)
@@ -1626,7 +1987,7 @@ void SWetWrinkleViewport::ReleaseAccumulatedPreviewStates()
 
 void SWetWrinkleViewport::ReleaseAccumulatedPreviewStateResources(
     FWetWrinkleAccumulatedPreviewState& PreviewState,
-    const bool                          bClearMaterialBinding)
+    const bool bClearMaterialBinding)
 {
     if (PreviewState.bRebuildPending && WorkerJobScheduler.IsValid())
     {
@@ -1725,11 +2086,11 @@ bool SWetWrinkleViewport::EnsureTransientProceduralPreviewState(
         return false;
     }
 
-    UTexture*       SourceTexture = ResolveSourceTextureForMaterialSlot(MaterialSlotIndex);
+    UTexture* SourceTexture = ResolveSourceTextureForMaterialSlot(MaterialSlotIndex);
     const FIntPoint TextureSize = ComputeWetWrinklePreviewTextureSize(WetClothingAsset.Get());
     const FIntPoint WorkingTextureSize = WetWrinkleTextureRaster::ResolveWorkingTextureSize(TextureSize);
-    const int32     PixelCount = TextureSize.X * TextureSize.Y;
-    const int32     WorkingPixelCount = WorkingTextureSize.X * WorkingTextureSize.Y;
+    const int32 PixelCount = TextureSize.X * TextureSize.Y;
+    const int32 WorkingPixelCount = WorkingTextureSize.X * WorkingTextureSize.Y;
     if (TextureSize.X <= 0 || TextureSize.Y <= 0 || PixelCount <= 0 || WorkingPixelCount <= 0)
     {
         return false;
@@ -1770,21 +2131,20 @@ bool SWetWrinkleViewport::EnsureTransientProceduralPreviewState(
     FDWCEditorPreviewCommitContext CommitContext;
     CommitContext.ConsumerToken = PreviewCommitLifetime.CaptureToken();
     CommitContext.DebugName = TEXT("Transient procedural wrinkle preview");
-    CommitContext.IsCurrent = [this]()
-    { return !bPreviewSuspended; };
+    CommitContext.IsCurrent = [this]() { return !bPreviewSuspended; };
     const EDWCEditorPreviewCommitResult CommitResult = PreviewCommitCoordinator.IsValid()
-                                                           ? PreviewCommitCoordinator->CommitNormalBGRA8(
-                                                                 CommitContext,
-                                                                 MakeWrinkleTextureKey(
-                                                                     WetClothingAsset.Get(),
-                                                                     EDWCEditorTexturePurpose::WrinkleProcedural,
-                                                                     MaterialSlotIndex),
-                                                                 MakeWrinkleNormalDescriptor(TextureSize, WorkingTextureSize),
-                                                                 MoveTemp(Pixels),
-                                                                 MoveTemp(WorkingSurface),
-                                                                 TransientProceduralPreviewState.TextureHandle,
-                                                                 EDWCEditorTextureUploadPriority::Interactive)
-                                                           : EDWCEditorPreviewCommitResult::CoordinatorShutdown;
+        ? PreviewCommitCoordinator->CommitNormalBGRA8(
+        CommitContext,
+        MakeWrinkleTextureKey(
+            WetClothingAsset.Get(),
+            EDWCEditorTexturePurpose::WrinkleProcedural,
+            MaterialSlotIndex),
+        MakeWrinkleNormalDescriptor(TextureSize, WorkingTextureSize),
+        MoveTemp(Pixels),
+        MoveTemp(WorkingSurface),
+        TransientProceduralPreviewState.TextureHandle,
+        EDWCEditorTextureUploadPriority::Interactive)
+        : EDWCEditorPreviewCommitResult::CoordinatorShutdown;
     if (CommitResult != EDWCEditorPreviewCommitResult::Applied)
     {
         ResetTransientProceduralPreviewResources();
@@ -1799,9 +2159,569 @@ bool SWetWrinkleViewport::UpdateTransientProceduralPreview(const FWetProceduralR
     return ScheduleTransientProceduralPreview(Stroke);
 }
 
+void SWetWrinkleViewport::ResetPatchHoverPreviewState()
+{
+    if (PatchHoverPreviewState.PendingTicket.IsValid() && WorkerJobScheduler.IsValid())
+    {
+        WorkerJobScheduler->CancelTicket(PatchHoverPreviewState.PendingTicket);
+    }
+    if (RenderUploadQueue.IsValid())
+    {
+        RenderUploadQueue->RemoveObserver(PatchHoverPreviewState.PendingPresentationObserver);
+        if (PatchHoverPreviewState.bPresentationSwapPending &&
+            PatchHoverPreviewState.StagingTextureHandle.IsValid())
+        {
+            RenderUploadQueue->Cancel(PatchHoverPreviewState.StagingTextureHandle->GetKey());
+        }
+    }
+    if (TextureWorkspace.IsValid() && PatchHoverPreviewState.TextureHandle.IsValid())
+    {
+        TextureWorkspace->Discard(PatchHoverPreviewState.TextureHandle);
+    }
+    if (TextureWorkspace.IsValid() && PatchHoverPreviewState.StagingTextureHandle.IsValid())
+    {
+        TextureWorkspace->Discard(PatchHoverPreviewState.StagingTextureHandle);
+    }
+    PatchHoverPreviewState = FWetWrinklePatchHoverPreviewState();
+}
+
+void SWetWrinkleViewport::RecordPatchHoverDiagnostics(
+    FWetWrinkleHoverPerformanceDiagnostics Diagnostics)
+{
+    constexpr int32 MaxHistoryEntries = 120;
+    PatchHoverDiagnosticsHistory.Add(Diagnostics);
+    if (PatchHoverDiagnosticsHistory.Num() > MaxHistoryEntries)
+    {
+        PatchHoverDiagnosticsHistory.RemoveAt(
+            0,
+            PatchHoverDiagnosticsHistory.Num() - MaxHistoryEntries,
+            EAllowShrinking::No);
+    }
+
+    const int32 DiagnosticsLevel = CVarDWCWrinkleHoverDiagnostics.GetValueOnGameThread();
+    const double NowSeconds = FPlatformTime::Seconds();
+    const bool bSlow = Diagnostics.EndToEndMs >=
+        CVarDWCWrinkleHoverSlowThresholdMs.GetValueOnGameThread();
+    const double LogInterval = FMath::Max(
+        static_cast<double>(CVarDWCWrinkleHoverLogIntervalSeconds.GetValueOnGameThread()),
+        0.0);
+    if (DiagnosticsLevel <= 0 || (DiagnosticsLevel == 1 && !bSlow) ||
+        NowSeconds - LastPatchHoverDiagnosticsLogSeconds < LogInterval)
+    {
+        return;
+    }
+    LastPatchHoverDiagnosticsLogSeconds = NowSeconds;
+
+    struct FStageTiming
+    {
+        const TCHAR* Name;
+        double Milliseconds;
+    };
+    const FStageTiming Stages[] = {
+        {TEXT("phase-a-admission"), Diagnostics.AdmissionWaitMs},
+        {TEXT("phase-b-admission"), Diagnostics.RasterAdmissionWaitMs},
+        {TEXT("projection"), Diagnostics.ProjectionMs},
+        {TEXT("region-plan"), Diagnostics.RegionPlanMs + Diagnostics.RegionAllocationMs},
+        {TEXT("raster"), Diagnostics.RasterMs},
+        {TEXT("encode"), Diagnostics.ResampleEncodeMs},
+        {TEXT("commit"), Diagnostics.CommitMs},
+        {TEXT("upload-queue"), Diagnostics.UploadQueueWaitMs},
+        {TEXT("upload-slice-delay"), Diagnostics.UploadSliceDelayMs},
+        {TEXT("upload-staging"), Diagnostics.UploadStagingCopyMs},
+        {TEXT("upload-submit"), Diagnostics.UploadSubmitCallMs},
+        {TEXT("upload-poll"), Diagnostics.UploadPollDelayMs},
+        {TEXT("present-swap"), Diagnostics.PresentationSwapMs}
+    };
+    const FStageTiming* Bottleneck = &Stages[0];
+    for (const FStageTiming& Stage : Stages)
+    {
+        if (Stage.Milliseconds > Bottleneck->Milliseconds)
+        {
+            Bottleneck = &Stage;
+        }
+    }
+
+    const TCHAR* ModeName = Diagnostics.ProjectionMode == EWetWrinklePatchProjectionMode::SurfaceDecal
+        ? TEXT("UVSeam")
+        : TEXT("NonUVSeam");
+    const TCHAR* UploadPlanName = TEXT("bounded");
+    if (Diagnostics.UploadPlan == EDWCEditorSparseUploadPlan::Sparse)
+    {
+        UploadPlanName = TEXT("sparse");
+    }
+    else if (Diagnostics.UploadPlan == EDWCEditorSparseUploadPlan::MergedSparse)
+    {
+        UploadPlanName = TEXT("merged-sparse");
+    }
+    UE_LOG(
+        LogWetWrinklePreviewViewport,
+        Display,
+        TEXT("Wrinkle hover perf: request=%llu slot=%d mode=%s size=%.1fcm total=%.2fms "
+             "prepare={descriptor=%.2f,source=%.2f} worker={phaseAWait=%.2f,phaseBWait=%.2f,projection=%.2f,plan=%.2f,bin=%.2f,alloc=%.2f,raster=%.2f,encode=%.2f,direct=%.2f,resample=%.2f,total=%.2f} "
+             "present={commit=%.2f,uploadTotal=%.2f,queue=%.2f,sliceDelay=%.2f,staging=%.2f,submit=%.2f,poll=%.2f,renderCallback=%.2f,swap=%.2f,bytes=%llu,regions=%u/%u/%u,coalesced=%u,queueDepth=%u,full=%s,prepared=%s,payload=%llu,avoided=%llu} "
+             "geometry={visited=%d,fragments=%d,regions=%d,rowRefs=%llu,parallel=%s/%d} "
+             "regions={mode=%s,source=%d,planned=%d,current=%d,previous=%d,clear=%d,refs=%llu,boundedPixels=%llu,sparsePixels=%llu,plannedPixels=%llu} "
+             "pixels={candidates=%llu,affected=%llu,working=%llu,output=%llu} encodePath={direct=%s,parallel=%s} "
+             "memory={phaseA=%.2fMiB,retained=%.2fMiB,phaseB=%.2fMiB,result=%.2fMiB} bottleneck=%s(%.2fms)"),
+        Diagnostics.RequestId,
+        Diagnostics.MaterialSlotIndex,
+        ModeName,
+        Diagnostics.BrushDiameterLocal,
+        Diagnostics.EndToEndMs,
+        Diagnostics.DescriptorBuildMs,
+        Diagnostics.TextureResolveMs,
+        Diagnostics.AdmissionWaitMs,
+        Diagnostics.RasterAdmissionWaitMs,
+        Diagnostics.ProjectionMs,
+        Diagnostics.RegionPlanMs,
+        Diagnostics.TileBinningMs,
+        Diagnostics.RegionAllocationMs,
+        Diagnostics.RasterMs,
+        Diagnostics.ResampleEncodeMs,
+        Diagnostics.DirectEncodeMs,
+        Diagnostics.NormalAwareResampleMs,
+        Diagnostics.WorkerTotalMs,
+        Diagnostics.CommitMs,
+        Diagnostics.UploadWaitMs,
+        Diagnostics.UploadQueueWaitMs,
+        Diagnostics.UploadSliceDelayMs,
+        Diagnostics.UploadStagingCopyMs,
+        Diagnostics.UploadSubmitCallMs,
+        Diagnostics.UploadPollDelayMs,
+        Diagnostics.UploadRenderCallbackLatencyMs,
+        Diagnostics.PresentationSwapMs,
+        Diagnostics.UploadBytes,
+        Diagnostics.UploadRequestedRegionCount,
+        Diagnostics.UploadSubmittedRegionCount,
+        Diagnostics.UploadCompletedRegionCount,
+        Diagnostics.UploadCoalescedRequestCount,
+        Diagnostics.UploadQueueDepthAtSelection,
+        Diagnostics.bFullTextureUpload ? TEXT("yes") : TEXT("no"),
+        Diagnostics.bUsedPreparedUpload ? TEXT("yes") : TEXT("no"),
+        Diagnostics.UploadPreparedPayloadBytes,
+        Diagnostics.UploadAvoidedStagingCopyBytes,
+        Diagnostics.VisitedTriangleCount,
+        Diagnostics.ProjectedFragmentCount,
+        Diagnostics.DirtyRegionCount,
+        Diagnostics.RowReferenceCount,
+        Diagnostics.bUsedParallelRaster ? TEXT("yes") : TEXT("no"),
+        Diagnostics.ParallelRowCount,
+        UploadPlanName,
+        Diagnostics.SourceUploadRegionCount,
+        Diagnostics.DirtyRegionCount,
+        Diagnostics.CurrentTileCount,
+        Diagnostics.PreviousTileCount,
+        Diagnostics.ClearOnlyTileCount,
+        Diagnostics.TileFragmentReferenceCount,
+        Diagnostics.BoundedOutputPixelCount,
+        Diagnostics.SparseOutputPixelCount,
+        Diagnostics.PlannedOutputPixelCount,
+        Diagnostics.CandidatePixelCount,
+        Diagnostics.AffectedPixelCount,
+        Diagnostics.DirtyWorkingPixelCount,
+        Diagnostics.EncodedOutputPixelCount,
+        Diagnostics.bUsedDirectEncode ? TEXT("yes") : TEXT("no"),
+        Diagnostics.bUsedParallelEncode ? TEXT("yes") : TEXT("no"),
+        static_cast<double>(Diagnostics.EstimatedMemoryBytes) / (1024.0 * 1024.0),
+        static_cast<double>(Diagnostics.RetainedPhaseBytes) / (1024.0 * 1024.0),
+        static_cast<double>(Diagnostics.RasterPhaseMemoryBytes) / (1024.0 * 1024.0),
+        static_cast<double>(Diagnostics.ActualResultBytes) / (1024.0 * 1024.0),
+        Bottleneck->Name,
+        Bottleneck->Milliseconds);
+}
+
+bool SWetWrinkleViewport::EnsurePatchHoverPreviewState(
+    const int32 MaterialSlotIndex,
+    const int32 UVChannelIndex)
+{
+    if (MaterialSlotIndex == INDEX_NONE || UVChannelIndex < 0 ||
+        !TextureWorkspace.IsValid() || !PreviewCommitCoordinator.IsValid())
+    {
+        return false;
+    }
+    const FIntPoint TextureSize = ComputeWetWrinklePreviewTextureSize(WetClothingAsset.Get());
+    const FIntPoint WorkingTextureSize = WetWrinkleTextureRaster::ResolveWorkingTextureSize(TextureSize);
+    const bool bReusable = PatchHoverPreviewState.TextureHandle.IsValid() &&
+        PatchHoverPreviewState.StagingTextureHandle.IsValid() &&
+        PatchHoverPreviewState.MaterialSlotIndex == MaterialSlotIndex &&
+        PatchHoverPreviewState.UVChannelIndex == UVChannelIndex &&
+        PatchHoverPreviewState.TextureSize == TextureSize &&
+        PatchHoverPreviewState.WorkingTextureSize == WorkingTextureSize;
+    if (bReusable)
+    {
+        return true;
+    }
+
+    ResetPatchHoverPreviewState();
+    if (TextureSize.X <= 0 || TextureSize.Y <= 0 ||
+        WorkingTextureSize.X <= 0 || WorkingTextureSize.Y <= 0)
+    {
+        return false;
+    }
+    PatchHoverPreviewState.MaterialSlotIndex = MaterialSlotIndex;
+    PatchHoverPreviewState.UVChannelIndex = UVChannelIndex;
+    PatchHoverPreviewState.TextureSize = TextureSize;
+    PatchHoverPreviewState.WorkingTextureSize = WorkingTextureSize;
+
+    FDWCEditorPreviewCommitContext CommitContext;
+    CommitContext.ConsumerToken = PreviewCommitLifetime.CaptureToken();
+    CommitContext.DebugName = TEXT("Projected wrinkle patch hover");
+    CommitContext.IsCurrent = [this]() { return !bPreviewSuspended; };
+    const auto InitializeBuffer = [this, &CommitContext, MaterialSlotIndex, TextureSize, WorkingTextureSize](
+        const FGuid& LayerGuid,
+        FDWCEditorTextureLease& OutLease)
+    {
+        TArray<FColor> Pixels;
+        Pixels.Init(EncodeWetWrinkleNormal(FVector::UpVector), TextureSize.X * TextureSize.Y);
+        FDWCEditorNormalRasterSurface WorkingSurface;
+        if (!WorkingSurface.Initialize(WorkingTextureSize, false))
+        {
+            return false;
+        }
+        return PreviewCommitCoordinator->CommitNormalBGRA8(
+            CommitContext,
+            MakeWrinkleTextureKey(
+                WetClothingAsset.Get(),
+                EDWCEditorTexturePurpose::WrinkleHover,
+                MaterialSlotIndex,
+                LayerGuid),
+            MakeWrinkleNormalDescriptor(TextureSize, WorkingTextureSize),
+            MoveTemp(Pixels),
+            MoveTemp(WorkingSurface),
+            OutLease,
+            EDWCEditorTextureUploadPriority::Interactive) == EDWCEditorPreviewCommitResult::Applied;
+    };
+    if (!InitializeBuffer(WrinkleHoverFrontLayerGuid, PatchHoverPreviewState.TextureHandle) ||
+        !InitializeBuffer(WrinkleHoverBackLayerGuid, PatchHoverPreviewState.StagingTextureHandle))
+    {
+        ResetPatchHoverPreviewState();
+        return false;
+    }
+    return true;
+}
+
+bool SWetWrinkleViewport::SchedulePatchHoverPreview()
+{
+    if (bPreviewSuspended || !WorkerJobScheduler.IsValid() ||
+        !PreviewCommitCoordinator.IsValid() || !SpatialHandle.IsValid())
+    {
+        return false;
+    }
+    const int32 DiagnosticsLevel = CVarDWCWrinkleHoverDiagnostics.GetValueOnGameThread();
+    const bool bCollectDiagnostics = DiagnosticsLevel > 0;
+    const double RequestStartSeconds = bCollectDiagnostics ? FPlatformTime::Seconds() : 0.0;
+    const int32 MaterialSlotIndex = CurrentSurfaceHit.MaterialSlotIndex;
+    const int32 UVChannelIndex = CurrentSurfaceHit.UVChannelIndex;
+    if (!EnsurePatchHoverPreviewState(MaterialSlotIndex, UVChannelIndex))
+    {
+        return false;
+    }
+    const uint64 RequestSerial = PatchHoverPreviewState.RequestSerial + 1;
+    FDWCEditorWrinklePatchDescriptor PatchDescriptor;
+    FString ProjectionError;
+    if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildFromHit(
+            CurrentSurfaceHit, BrushSettings, RequestSerial, PatchDescriptor, &ProjectionError))
+    {
+        return false;
+    }
+    const double DescriptorBuildMs = bCollectDiagnostics
+        ? (FPlatformTime::Seconds() - RequestStartSeconds) * 1000.0
+        : 0.0;
+    const uint32 RequestHash = PatchDescriptor.GetStableHash();
+    const bool bAlreadyPresented = PatchHoverPreviewState.bBound &&
+        PatchHoverPreviewState.PresentedDescriptor.IsSet() &&
+        PatchHoverPreviewState.PresentedDescriptor->GetStableHash() == RequestHash;
+    if (bAlreadyPresented ||
+        PatchHoverPreviewState.bPresentationSwapPending ||
+        (PatchHoverPreviewState.RequestHash == RequestHash &&
+         PatchHoverPreviewState.PendingTicket.IsValid()))
+    {
+        return true;
+    }
+
+    const double TextureResolveStartSeconds = bCollectDiagnostics ? FPlatformTime::Seconds() : 0.0;
+    FWetWrinkleSurfacePatchPreviewInput SurfaceInput;
+    if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInput(
+            PatchDescriptor, SpatialHandle, SurfaceInput, &ProjectionError))
+    {
+        return false;
+    }
+    const double TextureResolveMs = bCollectDiagnostics
+        ? (FPlatformTime::Seconds() - TextureResolveStartSeconds) * 1000.0
+        : 0.0;
+
+    PatchHoverPreviewState.RequestHash = RequestHash;
+    PatchHoverPreviewState.RequestSerial = RequestSerial;
+    PatchHoverPreviewState.RequestedDescriptor = PatchDescriptor;
+    ++PatchHoverRequestCount;
+    const FIntPoint TextureSize = PatchHoverPreviewState.TextureSize;
+    const FIntPoint WorkingTextureSize = PatchHoverPreviewState.WorkingTextureSize;
+
+    FDWCEditorWorkerJobDescriptor Descriptor;
+    Descriptor.Key.Kind = EDWCEditorWorkerJobKind::WrinkleHoverPreview;
+    Descriptor.Key.MaterialSlotIndex = MaterialSlotIndex;
+    Descriptor.Domain = EDWCEditorAuthoringDomain::None;
+    Descriptor.Priority = EDWCEditorWorkerJobPriority::Interactive;
+    Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::LatestWins;
+    Descriptor.MemoryEstimate = FWetWrinkleIncrementalPreviewWorker::EstimateProjectedHoverMemory(
+        SurfaceInput,
+        WorkingTextureSize,
+        TextureSize);
+    Descriptor.DebugName = FString::Printf(TEXT("Projected wrinkle hover slot %d"), MaterialSlotIndex);
+
+    FWetWrinkleHoverPerformanceDiagnostics HoverDiagnostics;
+    if (bCollectDiagnostics)
+    {
+        HoverDiagnostics.RequestId = RequestSerial;
+        HoverDiagnostics.MaterialSlotIndex = MaterialSlotIndex;
+        HoverDiagnostics.ProjectionMode = PatchDescriptor.ProjectionMode;
+        HoverDiagnostics.BrushDiameterLocal = PatchDescriptor.SurfaceHalfExtentLocal.GetMax() * 2.0f;
+        HoverDiagnostics.TextureSize = TextureSize;
+        HoverDiagnostics.WorkingTextureSize = WorkingTextureSize;
+        HoverDiagnostics.RequestStartSeconds = RequestStartSeconds;
+        HoverDiagnostics.SubmitSeconds = FPlatformTime::Seconds();
+        HoverDiagnostics.DescriptorBuildMs = DescriptorBuildMs;
+        HoverDiagnostics.TextureResolveMs = TextureResolveMs;
+        HoverDiagnostics.EstimatedMemoryBytes = Descriptor.MemoryEstimate.GetTotalBytes();
+    }
+
+    const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    TWeakPtr<SWetWrinkleViewport> WeakThis = SharedThis(this);
+    FString SubmitError;
+    const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitPrepared(
+        Descriptor,
+        [WeakThis, MaterialSlotIndex, UVChannelIndex, RequestSerial, TextureSize, WorkingTextureSize,
+         bCollectDiagnostics, HoverDiagnostics, SurfaceInput = MoveTemp(SurfaceInput)](
+            const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken,
+            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
+            FString& OutPrepareError) mutable
+        {
+            const TSharedPtr<SWetWrinkleViewport> Viewport = WeakThis.Pin();
+            if (!Viewport.IsValid() || CancellationToken->IsCanceled())
+            {
+                OutPrepareError = TEXT("The projected wrinkle hover was canceled before prepare.");
+                return false;
+            }
+            FWetWrinklePatchHoverPreviewState& State = Viewport->PatchHoverPreviewState;
+            if (State.RequestSerial != RequestSerial ||
+                State.MaterialSlotIndex != MaterialSlotIndex ||
+                State.UVChannelIndex != UVChannelIndex || !State.StagingTextureHandle.IsValid())
+            {
+                OutPrepareError = TEXT("The projected wrinkle hover source changed before admission.");
+                return false;
+            }
+            FWetWrinkleProjectedHoverPreviewJobInput Input;
+            Input.SurfaceInput = MoveTemp(SurfaceInput);
+            Input.ProjectionCache = Viewport->SurfacePatchProjectionCache;
+            Input.TextureSize = TextureSize;
+            Input.WorkingTextureSize = WorkingTextureSize;
+            Input.PreviousOutputRects = State.StagingOutputRects;
+            Input.Target.Key = State.StagingTextureHandle->GetKey();
+            Input.Target.Descriptor = State.StagingTextureHandle->GetDescriptor();
+            Input.Target.ExpectedDataRevision = State.StagingTextureHandle->GetDataRevision();
+            Input.Target.ExpectedResourceGeneration = State.StagingTextureHandle->GetResourceGeneration();
+            Input.bCollectPerformanceDiagnostics = bCollectDiagnostics;
+            Input.PerformanceDiagnostics = HoverDiagnostics;
+            OutPrepared.ActualMemoryEstimate =
+                FWetWrinkleIncrementalPreviewWorker::EstimateProjectedHoverMemory(
+                    Input.SurfaceInput,
+                    WorkingTextureSize,
+                    TextureSize);
+            OutPrepared.Work = [Input = MoveTemp(Input)](
+                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
+            {
+                return FWetWrinkleIncrementalPreviewWorker::BuildProjectedHoverProjectionPhase(
+                    MoveTemp(Input), WorkerToken);
+            };
+            return true;
+        },
+        [WeakThis, MaterialSlotIndex, UVChannelIndex, RequestSerial, PatchDescriptor, CommitToken](
+            const FDWCEditorWorkerJobTicket& CompletedTicket,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult) mutable
+        {
+            const TSharedPtr<SWetWrinkleViewport> Viewport = WeakThis.Pin();
+            const TSharedPtr<FWetWrinkleIncrementalPreviewJobResult, ESPMode::ThreadSafe> Result =
+                StaticCastSharedPtr<FWetWrinkleIncrementalPreviewJobResult>(BaseResult);
+            if (!Viewport.IsValid() || !Result.IsValid() || !Viewport->PreviewCommitCoordinator.IsValid())
+            {
+                return;
+            }
+            FWetWrinklePatchHoverPreviewState& State = Viewport->PatchHoverPreviewState;
+            FDWCEditorPreviewCommitContext CommitContext;
+            CommitContext.ConsumerToken = CommitToken;
+            CommitContext.ProducerSessionEpoch = CompletedTicket.SessionEpoch;
+            CommitContext.DebugName = TEXT("Projected wrinkle patch hover");
+            CommitContext.IsCurrent = [Viewport, MaterialSlotIndex, UVChannelIndex,
+                                       RequestSerial, CompletedTicket, PatchDescriptor]()
+            {
+                const FWetWrinklePatchHoverPreviewState& Current = Viewport->PatchHoverPreviewState;
+                return !Viewport->bPreviewSuspended && PatchDescriptor.HasCurrentNormalTextureContent() &&
+                    Current.RequestSerial == RequestSerial &&
+                    Current.MaterialSlotIndex == MaterialSlotIndex &&
+                    Current.UVChannelIndex == UVChannelIndex &&
+                    Current.PendingTicket.JobId == CompletedTicket.JobId &&
+                    Current.PendingTicket.Generation == CompletedTicket.Generation;
+            };
+            FDWCEditorPreviewRegionCommitOutcome Outcome;
+            const double CommitStartSeconds = Result->HoverDiagnostics.IsSet()
+                ? FPlatformTime::Seconds()
+                : 0.0;
+            const EDWCEditorPreviewCommitResult CommitResult =
+                Viewport->PreviewCommitCoordinator->CommitInteractiveNormalRegions(
+                    CommitContext,
+                    State.StagingTextureHandle,
+                    Result->Target,
+                    MoveTemp(Result->Regions),
+                    Outcome);
+            if (Result->HoverDiagnostics.IsSet())
+            {
+                Result->HoverDiagnostics->CommitMs =
+                    (FPlatformTime::Seconds() - CommitStartSeconds) * 1000.0;
+                Result->HoverDiagnostics->CommitFinishedSeconds = FPlatformTime::Seconds();
+            }
+            if (State.PendingTicket.JobId != CompletedTicket.JobId ||
+                State.PendingTicket.Generation != CompletedTicket.Generation)
+            {
+                return;
+            }
+            State.PendingTicket = {};
+            if (CommitResult == EDWCEditorPreviewCommitResult::Applied)
+            {
+                ++Viewport->PatchHoverAppliedCount;
+                State.StagingOutputRects = MoveTemp(Result->ProjectedOutputRects);
+                State.PendingPresentedDescriptor = PatchDescriptor;
+                State.PendingPresentationUpload = Outcome.UploadTicket;
+                State.PendingPerformanceDiagnostics = MoveTemp(Result->HoverDiagnostics);
+                State.bPendingTouchesUVSeam =
+                    PatchDescriptor.ProjectionMode == EWetWrinklePatchProjectionMode::NonUVSeam &&
+                    Result->bTouchesUVSeam;
+                State.RequestedDescriptor.Reset();
+                State.RequestHash = PatchDescriptor.GetStableHash();
+                State.bPresentationSwapPending = true;
+                Viewport->Invalidate();
+                if (Viewport->RenderUploadQueue.IsValid())
+                {
+                    const FDWCEditorTextureUploadTicket UploadTicket = State.PendingPresentationUpload;
+                    State.PendingPresentationObserver = Viewport->RenderUploadQueue->Observe(
+                        UploadTicket,
+                        [WeakThis, UploadTicket, RequestSerial](
+                            const EDWCEditorTextureUploadStatus UploadStatus)
+                        {
+                            if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = WeakThis.Pin())
+                            {
+                                PinnedViewport->HandlePatchHoverUploadStatus(
+                                    UploadTicket,
+                                    RequestSerial,
+                                    UploadStatus);
+                            }
+                        });
+                    Viewport->RenderUploadQueue->TrySubmitInteractive(UploadTicket);
+                }
+                else
+                {
+                    Viewport->HandlePatchHoverUploadStatus(
+                        State.PendingPresentationUpload,
+                        RequestSerial,
+                        EDWCEditorTextureUploadStatus::Invalid);
+                }
+            }
+        },
+        &SubmitError,
+        [WeakThis, MaterialSlotIndex, UVChannelIndex, RequestSerial,
+         bCollectDiagnostics, HoverDiagnostics](
+            const FDWCEditorWorkerJobTicket& CompletedTicket,
+            const EDWCEditorWorkerJobCompletion Completion,
+            const FString& Error)
+        {
+            if (Completion == EDWCEditorWorkerJobCompletion::Applied)
+            {
+                return;
+            }
+            const TSharedPtr<SWetWrinkleViewport> Viewport = WeakThis.Pin();
+            if (!Viewport.IsValid())
+            {
+                return;
+            }
+            if (bCollectDiagnostics &&
+                CVarDWCWrinkleHoverDiagnostics.GetValueOnAnyThread() >= 3)
+            {
+                const TCHAR* CompletionName = TEXT("unknown");
+                switch (Completion)
+                {
+                case EDWCEditorWorkerJobCompletion::Superseded: CompletionName = TEXT("superseded"); break;
+                case EDWCEditorWorkerJobCompletion::Stale: CompletionName = TEXT("stale"); break;
+                case EDWCEditorWorkerJobCompletion::Canceled: CompletionName = TEXT("canceled"); break;
+                case EDWCEditorWorkerJobCompletion::Failed: CompletionName = TEXT("failed"); break;
+                default: break;
+                }
+                UE_LOG(
+                    LogWetWrinklePreviewViewport,
+                    Display,
+                    TEXT("Wrinkle hover perf: request=%llu slot=%d completion=%s elapsed=%.2fms reason=%s"),
+                    RequestSerial,
+                    MaterialSlotIndex,
+                    CompletionName,
+                    HoverDiagnostics.RequestStartSeconds > 0.0
+                        ? (FPlatformTime::Seconds() - HoverDiagnostics.RequestStartSeconds) * 1000.0
+                        : 0.0,
+                    Error.IsEmpty() ? TEXT("none") : *Error);
+            }
+            switch (Completion)
+            {
+            case EDWCEditorWorkerJobCompletion::Superseded:
+            case EDWCEditorWorkerJobCompletion::Stale:
+                ++Viewport->PatchHoverSupersededCount;
+                break;
+            case EDWCEditorWorkerJobCompletion::Canceled:
+                ++Viewport->PatchHoverCanceledCount;
+                break;
+            case EDWCEditorWorkerJobCompletion::Failed:
+                ++Viewport->PatchHoverFailedCount;
+                break;
+            default:
+                break;
+            }
+            FWetWrinklePatchHoverPreviewState& State = Viewport->PatchHoverPreviewState;
+            if (State.RequestSerial == RequestSerial &&
+                State.MaterialSlotIndex == MaterialSlotIndex &&
+                State.UVChannelIndex == UVChannelIndex &&
+                State.PendingTicket.JobId == CompletedTicket.JobId &&
+                State.PendingTicket.Generation == CompletedTicket.Generation)
+            {
+                State.PendingTicket = {};
+                State.RequestedDescriptor.Reset();
+                State.PendingPresentationUpload = {};
+                State.PendingPerformanceDiagnostics.Reset();
+                State.RequestHash = State.PresentedDescriptor.IsSet()
+                    ? State.PresentedDescriptor->GetStableHash()
+                    : 0;
+                if (Completion == EDWCEditorWorkerJobCompletion::Failed)
+                {
+                    UE_LOG(
+                        LogWetWrinklePreviewViewport,
+                        Warning,
+                        TEXT("Projected wrinkle hover failed for slot %d: %s"),
+                        MaterialSlotIndex,
+                        Error.IsEmpty() ? TEXT("unknown worker failure") : *Error);
+                }
+            }
+        });
+    PatchHoverPreviewState.PendingTicket = Ticket;
+    if (!Ticket.IsValid())
+    {
+        PatchHoverPreviewState.RequestedDescriptor.Reset();
+        PatchHoverPreviewState.RequestHash = PatchHoverPreviewState.PresentedDescriptor.IsSet()
+            ? PatchHoverPreviewState.PresentedDescriptor->GetStableHash()
+            : 0;
+        return false;
+    }
+    ++PatchHoverSubmittedCount;
+    return true;
+}
+
 void SWetWrinkleViewport::QueueAccumulatedIncrementalCommand(
     FWetWrinkleAccumulatedPreviewState& PreviewState,
-    FWetWrinkleIncrementalCommand&&     Command)
+    FWetWrinkleIncrementalCommand&& Command)
 {
     Command.Sequence = ++PreviewState.NextIncrementalSequence;
     PreviewState.PendingIncrementalCommands.Add(MoveTemp(Command));
@@ -1840,14 +2760,14 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
         return RebuildAccumulatedPreviewTexture(PreviewState);
     }
 
-    const int32     MaterialSlotIndex = PreviewState.MaterialSlotIndex;
-    const int32     UVChannelIndex = PreviewState.UVChannelIndex;
+    const int32 MaterialSlotIndex = PreviewState.MaterialSlotIndex;
+    const int32 UVChannelIndex = PreviewState.UVChannelIndex;
     const FIntPoint TextureSize = PreviewState.TextureSize;
     const FIntPoint WorkingTextureSize = PreviewState.WorkingTextureSize;
-    const uint64    IncrementalGeneration = PreviewState.IncrementalGeneration;
-    const int32     BatchCommandCount = PreviewState.PendingIncrementalCommands.Num();
-    const uint64    FirstSequence = PreviewState.PendingIncrementalCommands[0].Sequence;
-    const uint64    LastSequence = PreviewState.PendingIncrementalCommands[BatchCommandCount - 1].Sequence;
+    const uint64 IncrementalGeneration = PreviewState.IncrementalGeneration;
+    const int32 BatchCommandCount = PreviewState.PendingIncrementalCommands.Num();
+    const uint64 FirstSequence = PreviewState.PendingIncrementalCommands[0].Sequence;
+    const uint64 LastSequence = PreviewState.PendingIncrementalCommands[BatchCommandCount - 1].Sequence;
 
     TArray<FWetWrinkleIncrementalCommand> PlanCommands;
     PlanCommands.Append(PreviewState.PendingIncrementalCommands.GetData(), BatchCommandCount);
@@ -1875,7 +2795,6 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
         PlanCommands,
         RegionPlan,
         PreviewState.TextureHandle->GetWorkingNormalSurface().HasCoverage());
-    Descriptor.EstimatedBytes = Descriptor.MemoryEstimate.GetTotalBytes();
     Descriptor.DebugName = FString::Printf(
         TEXT("Wrinkle incremental preview slot %d [%llu-%llu]"),
         MaterialSlotIndex,
@@ -1883,16 +2802,16 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
         LastSequence);
 
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
-    TWeakPtr<SWetWrinkleViewport>        WeakThis = SharedThis(this);
-    FString                              SubmitError;
-    const FDWCEditorWorkerJobTicket      Ticket = WorkerJobScheduler->SubmitTwoPhase(
+    TWeakPtr<SWetWrinkleViewport> WeakThis = SharedThis(this);
+    FString SubmitError;
+    const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitPrepared(
         Descriptor,
         [WeakThis, MaterialSlotIndex, UVChannelIndex, TextureSize, WorkingTextureSize,
          IncrementalGeneration, BatchCommandCount, FirstSequence, LastSequence,
          RegionPlan = MoveTemp(RegionPlan)](
             const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken,
-            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob&                   OutPrepared,
-            FString&                                                            OutPrepareError) mutable
+            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
+            FString& OutPrepareError) mutable
         {
             const TSharedPtr<SWetWrinkleViewport> Viewport = WeakThis.Pin();
             if (!Viewport.IsValid() || CancellationToken->IsCanceled())
@@ -1904,7 +2823,7 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
                 [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleAccumulatedPreviewState& Candidate)
                 {
                     return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == UVChannelIndex;
+                        Candidate.UVChannelIndex == UVChannelIndex;
                 });
             if (State == nullptr || State->IncrementalGeneration != IncrementalGeneration ||
                 State->PendingIncrementalCommands.Num() < BatchCommandCount ||
@@ -1954,9 +2873,8 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
                 Input.Commands,
                 RegionPlan,
                 SourceSurface.HasCoverage());
-            OutPrepared.ActualEstimatedBytes = OutPrepared.ActualMemoryEstimate.GetTotalBytes();
             OutPrepared.Work = [Input = MoveTemp(Input)](
-                                   const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
+                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
             {
                 return FWetWrinkleIncrementalPreviewWorker::Build(MoveTemp(Input), WorkerToken);
             };
@@ -1964,10 +2882,10 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
         },
         [WeakThis, MaterialSlotIndex, UVChannelIndex, IncrementalGeneration,
          BatchCommandCount, FirstSequence, LastSequence, CommitToken](
-            const FDWCEditorWorkerJobTicket&                           CompletedTicket,
+            const FDWCEditorWorkerJobTicket& CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
-            const TSharedPtr<SWetWrinkleViewport>                                         Viewport = WeakThis.Pin();
+            const TSharedPtr<SWetWrinkleViewport> Viewport = WeakThis.Pin();
             const TSharedPtr<FWetWrinkleIncrementalPreviewJobResult, ESPMode::ThreadSafe> Result =
                 StaticCastSharedPtr<FWetWrinkleIncrementalPreviewJobResult>(BaseResult);
             if (!Viewport.IsValid() || !Result.IsValid() || !Viewport->PreviewCommitCoordinator.IsValid())
@@ -1978,7 +2896,7 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
                 [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleAccumulatedPreviewState& Candidate)
                 {
                     return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == UVChannelIndex;
+                        Candidate.UVChannelIndex == UVChannelIndex;
                 });
             if (State == nullptr)
             {
@@ -2000,24 +2918,24 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
                         [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleAccumulatedPreviewState& Candidate)
                         {
                             return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                                   Candidate.UVChannelIndex == UVChannelIndex;
+                                Candidate.UVChannelIndex == UVChannelIndex;
                         });
                 return !Viewport->bPreviewSuspended && Current != nullptr &&
-                       Current->IncrementalGeneration == IncrementalGeneration &&
-                       Current->PendingIncrementalTicket.JobId == CompletedTicket.JobId &&
-                       Current->PendingIncrementalTicket.Generation == CompletedTicket.Generation &&
-                       !Current->PendingIncrementalCommands.IsEmpty() &&
-                       Current->PendingIncrementalCommands[0].Sequence == FirstSequence &&
-                       Current->PendingIncrementalCommands.Num() >= 1 &&
-                       Current->PendingIncrementalCommands.ContainsByPredicate(
-                           [LastSequence](const FWetWrinkleIncrementalCommand& Command)
-                           {
-                               return Command.Sequence == LastSequence;
-                           });
+                    Current->IncrementalGeneration == IncrementalGeneration &&
+                    Current->PendingIncrementalTicket.JobId == CompletedTicket.JobId &&
+                    Current->PendingIncrementalTicket.Generation == CompletedTicket.Generation &&
+                    !Current->PendingIncrementalCommands.IsEmpty() &&
+                    Current->PendingIncrementalCommands[0].Sequence == FirstSequence &&
+                    Current->PendingIncrementalCommands.Num() >= 1 &&
+                    Current->PendingIncrementalCommands.ContainsByPredicate(
+                        [LastSequence](const FWetWrinkleIncrementalCommand& Command)
+                        {
+                            return Command.Sequence == LastSequence;
+                        });
             };
 
             FDWCEditorPreviewRegionCommitOutcome Outcome;
-            const EDWCEditorPreviewCommitResult  CommitResult =
+            const EDWCEditorPreviewCommitResult CommitResult =
                 Viewport->PreviewCommitCoordinator->CommitNormalRegions(
                     CommitContext,
                     State->TextureHandle,
@@ -2026,7 +2944,7 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
                     Outcome,
                     EDWCEditorTextureUploadPriority::Interactive);
             const bool bOwnsTicket = State->PendingIncrementalTicket.JobId == CompletedTicket.JobId &&
-                                     State->PendingIncrementalTicket.Generation == CompletedTicket.Generation;
+                State->PendingIncrementalTicket.Generation == CompletedTicket.Generation;
             if (!bOwnsTicket)
             {
                 return;
@@ -2042,6 +2960,8 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
                 State->Recovery.MarkIncrementalSucceeded();
                 ++Viewport->AccumulatedIncrementalCommitCount;
                 Viewport->RefreshWrinklePreviewAccumulatedParameters();
+                Viewport->CompletePatchHoverHandoff(
+                    MaterialSlotIndex, Outcome.UploadTicket, LastSequence);
                 Viewport->Invalidate();
                 Viewport->ScheduleAccumulatedIncrementalPreview(*State);
                 return;
@@ -2055,9 +2975,9 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
         },
         &SubmitError,
         [WeakThis, MaterialSlotIndex, UVChannelIndex, IncrementalGeneration](
-            const FDWCEditorWorkerJobTicket&    CompletedTicket,
+            const FDWCEditorWorkerJobTicket& CompletedTicket,
             const EDWCEditorWorkerJobCompletion Completion,
-            const FString&                      Error)
+            const FString& Error)
         {
             if (Completion == EDWCEditorWorkerJobCompletion::Applied)
             {
@@ -2072,7 +2992,7 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
                 [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleAccumulatedPreviewState& Candidate)
                 {
                     return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == UVChannelIndex;
+                        Candidate.UVChannelIndex == UVChannelIndex;
                 });
             if (State == nullptr || State->IncrementalGeneration != IncrementalGeneration ||
                 State->PendingIncrementalTicket.JobId != CompletedTicket.JobId ||
@@ -2116,12 +3036,33 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
     return true;
 }
 
+void SWetWrinkleViewport::CompletePatchHoverHandoff(
+    const int32 MaterialSlotIndex,
+    const FDWCEditorTextureUploadTicket& UploadTicket,
+    const uint64 LastAppliedSequence,
+    const uint64 AppliedContentRevision)
+{
+    const bool bSequenceReached = PatchHoverPreviewState.PendingAccumulatedSequence > 0 &&
+        LastAppliedSequence >= PatchHoverPreviewState.PendingAccumulatedSequence;
+    const bool bRevisionReached = PatchHoverPreviewState.PendingAccumulatedSequence == 0 &&
+        PatchHoverPreviewState.PendingAccumulatedContentRevision > 0 &&
+        AppliedContentRevision >= PatchHoverPreviewState.PendingAccumulatedContentRevision;
+    if (!PatchHoverPreviewState.bCommitHandoffPending ||
+        PatchHoverPreviewState.MaterialSlotIndex != MaterialSlotIndex ||
+        (!bSequenceReached && !bRevisionReached) || !UploadTicket.IsValid())
+    {
+        return;
+    }
+
+    PatchHoverPreviewState.PendingAccumulatedUpload = UploadTicket;
+}
+
 bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
     const FWetProceduralRidgeStroke& Stroke)
 {
     const int32 DataUVChannelIndex = WetClothingAsset.IsValid()
-                                         ? WetClothingAsset->GetDWCDataUVChannelIndex()
-                                         : INDEX_NONE;
+        ? WetClothingAsset->GetDWCDataUVChannelIndex()
+        : INDEX_NONE;
     if (bPreviewSuspended || Stroke.Points.Num() < 2 ||
         Stroke.MaterialSlotIndex == INDEX_NONE || DataUVChannelIndex < 0 ||
         !WorkerJobScheduler.IsValid() || !PreviewCommitCoordinator.IsValid() ||
@@ -2153,10 +3094,10 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
         return false;
     }
 
-    const int32                   MaterialSlotIndex = Stroke.MaterialSlotIndex;
-    const FIntPoint               TextureSize = TransientProceduralPreviewState.TextureSize;
-    const FIntPoint               WorkingTextureSize = TransientProceduralPreviewState.WorkingTextureSize;
-    const uint64                  RequestSerial = ++TransientProceduralPreviewState.RequestSerial;
+    const int32 MaterialSlotIndex = Stroke.MaterialSlotIndex;
+    const FIntPoint TextureSize = TransientProceduralPreviewState.TextureSize;
+    const FIntPoint WorkingTextureSize = TransientProceduralPreviewState.WorkingTextureSize;
+    const uint64 RequestSerial = ++TransientProceduralPreviewState.RequestSerial;
     FDWCEditorWorkerJobDescriptor Descriptor;
     Descriptor.Key.Kind = EDWCEditorWorkerJobKind::WrinkleTransientPreview;
     Descriptor.Key.MaterialSlotIndex = MaterialSlotIndex;
@@ -2167,19 +3108,18 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
         Commands,
         RegionPlan,
         false);
-    Descriptor.EstimatedBytes = Descriptor.MemoryEstimate.GetTotalBytes();
     Descriptor.DebugName = FString::Printf(TEXT("Wrinkle transient preview slot %d"), MaterialSlotIndex);
 
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
-    TWeakPtr<SWetWrinkleViewport>        WeakThis = SharedThis(this);
-    FString                              SubmitError;
-    const FDWCEditorWorkerJobTicket      Ticket = WorkerJobScheduler->SubmitTwoPhase(
+    TWeakPtr<SWetWrinkleViewport> WeakThis = SharedThis(this);
+    FString SubmitError;
+    const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitPrepared(
         Descriptor,
         [WeakThis, MaterialSlotIndex, DataUVChannelIndex, TextureSize, WorkingTextureSize,
          RequestSerial, Stroke, RegionPlan = MoveTemp(RegionPlan)](
             const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken,
-            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob&                   OutPrepared,
-            FString&                                                            OutPrepareError) mutable
+            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
+            FString& OutPrepareError) mutable
         {
             const TSharedPtr<SWetWrinkleViewport> Viewport = WeakThis.Pin();
             if (!Viewport.IsValid() || CancellationToken->IsCanceled())
@@ -2226,19 +3166,18 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
                 Input.Commands,
                 RegionPlan,
                 false);
-            OutPrepared.ActualEstimatedBytes = OutPrepared.ActualMemoryEstimate.GetTotalBytes();
             OutPrepared.Work = [Input = MoveTemp(Input)](
-                                   const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
+                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
             {
                 return FWetWrinkleIncrementalPreviewWorker::Build(MoveTemp(Input), WorkerToken);
             };
             return true;
         },
         [WeakThis, MaterialSlotIndex, DataUVChannelIndex, RequestSerial, Stroke, CommitToken](
-            const FDWCEditorWorkerJobTicket&                           CompletedTicket,
+            const FDWCEditorWorkerJobTicket& CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
-            const TSharedPtr<SWetWrinkleViewport>                                         Viewport = WeakThis.Pin();
+            const TSharedPtr<SWetWrinkleViewport> Viewport = WeakThis.Pin();
             const TSharedPtr<FWetWrinkleIncrementalPreviewJobResult, ESPMode::ThreadSafe> Result =
                 StaticCastSharedPtr<FWetWrinkleIncrementalPreviewJobResult>(BaseResult);
             if (!Viewport.IsValid() || !Result.IsValid() || !Viewport->PreviewCommitCoordinator.IsValid())
@@ -2246,7 +3185,7 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
                 return;
             }
             FWetProceduralRidgeTransientPreviewState& State = Viewport->TransientProceduralPreviewState;
-            FDWCEditorPreviewCommitContext            CommitContext;
+            FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
             CommitContext.ProducerSessionEpoch = CompletedTicket.SessionEpoch;
             CommitContext.DebugName = FString::Printf(
@@ -2258,13 +3197,13 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
                 const FWetProceduralRidgeTransientPreviewState& Current =
                     Viewport->TransientProceduralPreviewState;
                 return !Viewport->bPreviewSuspended && Current.RequestSerial == RequestSerial &&
-                       Current.MaterialSlotIndex == MaterialSlotIndex &&
-                       Current.UVChannelIndex == DataUVChannelIndex &&
-                       Current.PendingIncrementalTicket.JobId == CompletedTicket.JobId &&
-                       Current.PendingIncrementalTicket.Generation == CompletedTicket.Generation;
+                    Current.MaterialSlotIndex == MaterialSlotIndex &&
+                    Current.UVChannelIndex == DataUVChannelIndex &&
+                    Current.PendingIncrementalTicket.JobId == CompletedTicket.JobId &&
+                    Current.PendingIncrementalTicket.Generation == CompletedTicket.Generation;
             };
             FDWCEditorPreviewRegionCommitOutcome Outcome;
-            const EDWCEditorPreviewCommitResult  CommitResult =
+            const EDWCEditorPreviewCommitResult CommitResult =
                 Viewport->PreviewCommitCoordinator->CommitNormalRegions(
                     CommitContext,
                     State.TextureHandle,
@@ -2273,7 +3212,7 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
                     Outcome,
                     EDWCEditorTextureUploadPriority::Interactive);
             const bool bOwnsTicket = State.PendingIncrementalTicket.JobId == CompletedTicket.JobId &&
-                                     State.PendingIncrementalTicket.Generation == CompletedTicket.Generation;
+                State.PendingIncrementalTicket.Generation == CompletedTicket.Generation;
             if (!bOwnsTicket)
             {
                 return;
@@ -2293,9 +3232,9 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
         },
         &SubmitError,
         [WeakThis, MaterialSlotIndex, DataUVChannelIndex, RequestSerial](
-            const FDWCEditorWorkerJobTicket&    CompletedTicket,
+            const FDWCEditorWorkerJobTicket& CompletedTicket,
             const EDWCEditorWorkerJobCompletion Completion,
-            const FString&                      Error)
+            const FString& Error)
         {
             if (Completion == EDWCEditorWorkerJobCompletion::Applied)
             {
@@ -2358,8 +3297,8 @@ void SWetWrinkleViewport::MarkAccumulatedPreviewStatesDirty()
 
 FWetWrinkleAccumulatedPreviewState* SWetWrinkleViewport::FindOrAddAccumulatedPreviewState(
     UTexture* SourceTexture,
-    int32     MaterialSlotIndex,
-    int32     UVChannelIndex)
+    int32 MaterialSlotIndex,
+    int32 UVChannelIndex)
 {
     if (MaterialSlotIndex == INDEX_NONE || UVChannelIndex < 0)
     {
@@ -2433,8 +3372,8 @@ UTexture2D* SWetWrinkleViewport::ResolveAccumulatedPreviewTexture(UTexture* Sour
     }
 
     UTexture2D* Result = PreviewState->TextureHandle.IsValid()
-                             ? PreviewState->TextureHandle->GetTexture()
-                             : nullptr;
+        ? PreviewState->TextureHandle->GetTexture()
+        : nullptr;
     PruneAccumulatedPreviewStates(MaterialSlotIndex, UVChannelIndex);
     return Result;
 }
@@ -2490,14 +3429,14 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
         return false;
     }
 
-    const UWetClothingAsset*             Asset = WetClothingAsset.Get();
-    const int32                          MaterialSlotIndex = PreviewState.MaterialSlotIndex;
-    const int32                          UVChannelIndex = PreviewState.UVChannelIndex;
-    const FIntPoint                      TextureSize = PreviewState.TextureSize;
-    const FIntPoint                      WorkingTextureSize = PreviewState.WorkingTextureSize;
-    const uint64                         SnapshotContentRevision = PreviewState.ContentRevision;
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const int32 MaterialSlotIndex = PreviewState.MaterialSlotIndex;
+    const int32 UVChannelIndex = PreviewState.UVChannelIndex;
+    const FIntPoint TextureSize = PreviewState.TextureSize;
+    const FIntPoint WorkingTextureSize = PreviewState.WorkingTextureSize;
+    const uint64 SnapshotContentRevision = PreviewState.ContentRevision;
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
-    FDWCEditorWorkerJobDescriptor        Descriptor;
+    FDWCEditorWorkerJobDescriptor Descriptor;
     Descriptor.Key.Kind = EDWCEditorWorkerJobKind::WrinkleAccumulatedPreview;
     Descriptor.Key.MaterialSlotIndex = MaterialSlotIndex;
     Descriptor.Domain = EDWCEditorAuthoringDomain::Wrinkle;
@@ -2508,17 +3447,16 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
         Asset,
         TextureSize,
         WorkingTextureSize);
-    Descriptor.EstimatedBytes = Descriptor.MemoryEstimate.GetTotalBytes();
     Descriptor.DebugName = FString::Printf(TEXT("Wrinkle preview slot %d"), MaterialSlotIndex);
 
-    TWeakPtr<SWetWrinkleViewport>   WeakThis = SharedThis(this);
-    FString                         SubmitError;
-    const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitTwoPhase(
+    TWeakPtr<SWetWrinkleViewport> WeakThis = SharedThis(this);
+    FString SubmitError;
+    const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitPrepared(
         Descriptor,
         [WeakThis, MaterialSlotIndex, UVChannelIndex, TextureSize, WorkingTextureSize, SnapshotContentRevision](
             const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken,
-            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob&                   OutPrepared,
-            FString&                                                            OutPrepareError)
+            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
+            FString& OutPrepareError)
         {
             const TSharedPtr<SWetWrinkleViewport> Viewport = WeakThis.Pin();
             if (!Viewport.IsValid() || CancellationToken->IsCanceled())
@@ -2531,7 +3469,7 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                 [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleAccumulatedPreviewState& Candidate)
                 {
                     return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == UVChannelIndex;
+                        Candidate.UVChannelIndex == UVChannelIndex;
                 });
             const UWetClothingAsset* CurrentAsset = Viewport->WetClothingAsset.Get();
             if (State == nullptr || CurrentAsset == nullptr ||
@@ -2544,6 +3482,37 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
             FWetWrinkleAccumulatedPreviewJobInput Input;
             Input.TextureSize = TextureSize;
             Input.WorkingTextureSize = WorkingTextureSize;
+            if (!Viewport->SpatialQueryService.IsValid())
+            {
+                OutPrepareError = TEXT("The wrinkle preview spatial service is unavailable.");
+                return false;
+            }
+            TSharedPtr<FWetWrinkleSpatialLeaseOwner, ESPMode::ThreadSafe> SpatialLeaseOwner =
+                MakeShared<FWetWrinkleSpatialLeaseOwner, ESPMode::ThreadSafe>();
+            FString SpatialError;
+            SpatialLeaseOwner->Lease = Viewport->SpatialQueryService->AcquireLease(
+                CurrentAsset,
+                Viewport->ResolveTargetMesh(),
+                UVChannelIndex,
+                MaterialSlotIndex,
+                &SpatialError);
+            if (!SpatialLeaseOwner->Lease.IsValid())
+            {
+                OutPrepareError = SpatialError.IsEmpty()
+                    ? TEXT("The wrinkle preview could not lease the selected surface topology.")
+                    : SpatialError;
+                return false;
+            }
+            const FDWCEditorSpatialHandle JobSpatialHandle =
+                StaticCastSharedPtr<const FDWCEditorSpatialData>(
+                    SpatialLeaseOwner->Lease.GetSharedValue());
+            if (!JobSpatialHandle.IsValid())
+            {
+                OutPrepareError = TEXT("The wrinkle preview spatial lease has no usable payload.");
+                return false;
+            }
+            Input.SpatialLeaseOwner = SpatialLeaseOwner;
+            Input.SurfacePatchProjectionCache = Viewport->SurfacePatchProjectionCache;
             for (const FWetWrinklePatchPlacement& Stamp : CurrentAsset->Authored.WrinkleData.EditablePatches)
             {
                 if (!Stamp.bEnabled || Stamp.MaterialSlotIndex != MaterialSlotIndex)
@@ -2551,10 +3520,10 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                     continue;
                 }
 
-                FDWCEditorNormalStampCommand Command;
-                if (BuildWetWrinkleNormalStampCommand(Stamp, Command))
+                FWetWrinkleSurfacePatchPreviewInput PatchInput;
+                if (BuildWetWrinkleSurfacePatchPreviewInput(Stamp, JobSpatialHandle, PatchInput))
                 {
-                    Input.Patches.Add(MoveTemp(Command));
+                    Input.SurfacePatches.Add(MoveTemp(PatchInput));
                 }
             }
             for (const FWetProceduralRidgeStroke& Stroke :
@@ -2568,9 +3537,8 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
             }
 
             OutPrepared.ActualMemoryEstimate = EstimateWetWrinklePreviewWorkerMemory(Input);
-            OutPrepared.ActualEstimatedBytes = OutPrepared.ActualMemoryEstimate.GetTotalBytes();
             OutPrepared.Work = [Input = MoveTemp(Input)](
-                                   const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerCancellationToken) mutable
+                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerCancellationToken) mutable
             {
                 return FWetWrinkleAccumulatedPreviewWorker::Build(
                     MoveTemp(Input),
@@ -2579,10 +3547,10 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
             return true;
         },
         [WeakThis, MaterialSlotIndex, UVChannelIndex, SnapshotContentRevision, CommitToken](
-            const FDWCEditorWorkerJobTicket&                           Ticket,
+            const FDWCEditorWorkerJobTicket& Ticket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
-            const TSharedPtr<SWetWrinkleViewport>                                         Viewport = WeakThis.Pin();
+            const TSharedPtr<SWetWrinkleViewport> Viewport = WeakThis.Pin();
             const TSharedPtr<FWetWrinkleAccumulatedPreviewJobResult, ESPMode::ThreadSafe> Result =
                 StaticCastSharedPtr<FWetWrinkleAccumulatedPreviewJobResult>(BaseResult);
             if (!Viewport.IsValid() || !Result.IsValid() || !Viewport->PreviewCommitCoordinator.IsValid())
@@ -2593,7 +3561,7 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                 [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleAccumulatedPreviewState& Candidate)
                 {
                     return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == UVChannelIndex;
+                        Candidate.UVChannelIndex == UVChannelIndex;
                 });
             if (State == nullptr)
             {
@@ -2613,27 +3581,40 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                         [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleAccumulatedPreviewState& Candidate)
                         {
                             return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                                   Candidate.UVChannelIndex == UVChannelIndex;
+                                Candidate.UVChannelIndex == UVChannelIndex;
                         });
                 return !Viewport->bPreviewSuspended && CurrentState != nullptr &&
-                       CurrentState->PendingTicket.JobId == Ticket.JobId &&
-                       CurrentState->PendingTicket.Generation == Ticket.Generation &&
-                       CurrentState->ContentRevision == SnapshotContentRevision;
+                    CurrentState->PendingTicket.JobId == Ticket.JobId &&
+                    CurrentState->PendingTicket.Generation == Ticket.Generation &&
+                    CurrentState->ContentRevision == SnapshotContentRevision;
             };
 
-            FDWCEditorTextureLease              NewLease;
+            FDWCEditorTextureLease NewLease;
             const EDWCEditorPreviewCommitResult CommitResult =
                 Viewport->PreviewCommitCoordinator->CommitNormalBGRA8(
-                    CommitContext,
-                    MakeWrinkleTextureKey(
-                        Viewport->WetClothingAsset.Get(),
-                        EDWCEditorTexturePurpose::WrinkleAccumulated,
-                        MaterialSlotIndex),
-                    MakeWrinkleNormalDescriptor(State->TextureSize, State->WorkingTextureSize),
-                    MoveTemp(Result->Pixels),
-                    MoveTemp(Result->WorkingSurface),
-                    NewLease,
-                    EDWCEditorTextureUploadPriority::Interactive);
+                CommitContext,
+                MakeWrinkleTextureKey(
+                    Viewport->WetClothingAsset.Get(),
+                    EDWCEditorTexturePurpose::WrinkleAccumulated,
+                    MaterialSlotIndex),
+                MakeWrinkleNormalDescriptor(State->TextureSize, State->WorkingTextureSize),
+                MoveTemp(Result->Pixels),
+                MoveTemp(Result->WorkingSurface),
+                NewLease,
+                EDWCEditorTextureUploadPriority::Interactive);
+            if (CommitResult == EDWCEditorPreviewCommitResult::Applied &&
+                Result->SkippedSurfacePatchCount > 0)
+            {
+                UE_LOG(
+                    LogWetWrinklePreviewViewport,
+                    Warning,
+                    TEXT("Wrinkle preview skipped %d surface patch(es) in slot %d: %s"),
+                    Result->SkippedSurfacePatchCount,
+                    MaterialSlotIndex,
+                    Result->FirstSurfacePatchError.IsEmpty()
+                        ? TEXT("surface projection unavailable")
+                        : *Result->FirstSurfacePatchError);
+            }
 
             const bool bOwnsPendingTicket =
                 State->PendingTicket.JobId == Ticket.JobId &&
@@ -2655,6 +3636,13 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                 State->Recovery.MarkSucceeded();
                 ++Viewport->AccumulatedPreviewRebuildCount;
                 Viewport->RefreshWrinklePreviewAccumulatedParameters();
+                Viewport->CompletePatchHoverHandoff(
+                    MaterialSlotIndex,
+                    Viewport->RenderUploadQueue.IsValid()
+                        ? Viewport->RenderUploadQueue->CaptureTicket(State->TextureHandle.GetHandle())
+                        : FDWCEditorTextureUploadTicket(),
+                    0,
+                    SnapshotContentRevision);
                 Viewport->Invalidate();
             }
             else
@@ -2693,9 +3681,9 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
         },
         &SubmitError,
         [WeakThis, MaterialSlotIndex, UVChannelIndex](
-            const FDWCEditorWorkerJobTicket&    Ticket,
+            const FDWCEditorWorkerJobTicket& Ticket,
             const EDWCEditorWorkerJobCompletion Completion,
-            const FString&                      Error)
+            const FString& Error)
         {
             if (Completion == EDWCEditorWorkerJobCompletion::Applied)
             {
@@ -2711,7 +3699,7 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                 [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleAccumulatedPreviewState& Candidate)
                 {
                     return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == UVChannelIndex;
+                        Candidate.UVChannelIndex == UVChannelIndex;
                 });
             if (State != nullptr && State->PendingTicket.JobId == Ticket.JobId &&
                 State->PendingTicket.Generation == Ticket.Generation)
@@ -2776,20 +3764,20 @@ void SWetWrinkleViewport::ApplyMaterialSlotVisibility()
     }
 
     const FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
-    constexpr int32                PreviewLODIndex = 0;
+    constexpr int32 PreviewLODIndex = 0;
     if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(PreviewLODIndex))
     {
         return;
     }
 
-    const int32                       ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
+    const int32 ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
     const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[PreviewLODIndex];
     for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); ++SectionIndex)
     {
         const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
-        const bool                    bShowSection = ActiveMaterialSlotIndex == FDWCEditorPreviewSession::AllWettableSlots
-                                                         ? PreviewSession && PreviewSession->GetSlotStates().IsReady(Section.MaterialIndex)
-                                                         : Section.MaterialIndex == ActiveMaterialSlotIndex;
+        const bool bShowSection = ActiveMaterialSlotIndex == FDWCEditorPreviewSession::AllWettableSlots
+                                      ? PreviewSession && PreviewSession->GetSlotStates().IsReady(Section.MaterialIndex)
+                                      : Section.MaterialIndex == ActiveMaterialSlotIndex;
         PreviewMeshComponent->ShowMaterialSection(
             Section.MaterialIndex,
             SectionIndex,
@@ -2819,6 +3807,10 @@ void SWetWrinkleViewport::CollectDiagnosticMemoryStats(
     {
         SpatialQueryService->AppendDiagnosticMemoryBucket(OutBuckets);
     }
+    if (SurfacePatchProjectionCache.IsValid())
+    {
+        SurfacePatchProjectionCache->AppendDiagnosticMemoryBucket(OutBuckets);
+    }
 
     FDWCEditorPreviewMemoryBucket& Procedural = OutBuckets.AddDefaulted_GetRef();
     Procedural.Name = TEXT("Wrinkle procedural control state");
@@ -2839,12 +3831,18 @@ void SWetWrinkleViewport::CollectDiagnosticMemoryStats(
 void SWetWrinkleViewport::CollectDiagnosticOperationStats(
     TArray<FDWCEditorPreviewOperationCounter>& OutCounters) const
 {
-    OutCounters.Add({ TEXT("Wrinkle preview mesh refreshes"), PreviewMeshRefreshCount, 0 });
-    OutCounters.Add({ TEXT("Wrinkle accumulated texture rebuilds"), AccumulatedPreviewRebuildCount, 0 });
-    OutCounters.Add({ TEXT("Wrinkle incremental region commits"), AccumulatedIncrementalCommitCount, 0 });
-    OutCounters.Add({ TEXT("Wrinkle incremental full-rebuild fallbacks"), AccumulatedIncrementalFallbackCount, 0 });
-    OutCounters.Add({ TEXT("Wrinkle transient region commits"), TransientIncrementalCommitCount, 0 });
-    OutCounters.Add({ TEXT("Wrinkle spatial-cache acquisitions"), HitTriangleBuildCount, 0 });
+    OutCounters.Add({TEXT("Wrinkle preview mesh refreshes"), PreviewMeshRefreshCount, 0});
+    OutCounters.Add({TEXT("Wrinkle accumulated texture rebuilds"), AccumulatedPreviewRebuildCount, 0});
+    OutCounters.Add({TEXT("Wrinkle incremental region commits"), AccumulatedIncrementalCommitCount, 0});
+    OutCounters.Add({TEXT("Wrinkle incremental full-rebuild fallbacks"), AccumulatedIncrementalFallbackCount, 0});
+    OutCounters.Add({TEXT("Wrinkle transient region commits"), TransientIncrementalCommitCount, 0});
+    OutCounters.Add({TEXT("Wrinkle patch hover requests"), PatchHoverRequestCount, 0});
+    OutCounters.Add({TEXT("Wrinkle patch hover submissions"), PatchHoverSubmittedCount, 0});
+    OutCounters.Add({TEXT("Wrinkle patch hover presentations"), PatchHoverAppliedCount, 0});
+    OutCounters.Add({TEXT("Wrinkle patch hover superseded"), PatchHoverSupersededCount, 0});
+    OutCounters.Add({TEXT("Wrinkle patch hover canceled"), PatchHoverCanceledCount, 0});
+    OutCounters.Add({TEXT("Wrinkle patch hover failures"), PatchHoverFailedCount, 0});
+    OutCounters.Add({TEXT("Wrinkle spatial-cache acquisitions"), HitTriangleBuildCount, 0});
     uint64 RecoveryRetries = 0;
     uint64 RecoveryStaleDrops = 0;
     uint64 RecoveryDegraded = 0;
@@ -2855,9 +3853,9 @@ void SWetWrinkleViewport::CollectDiagnosticOperationStats(
         RecoveryStaleDrops += Diagnostics.StaleDropCount;
         RecoveryDegraded += Diagnostics.DegradedCount;
     }
-    OutCounters.Add({ TEXT("Wrinkle preview recovery retries"), RecoveryRetries, 0 });
-    OutCounters.Add({ TEXT("Wrinkle preview stale result drops"), RecoveryStaleDrops, 0 });
-    OutCounters.Add({ TEXT("Wrinkle preview degraded transitions"), RecoveryDegraded, 0 });
+    OutCounters.Add({TEXT("Wrinkle preview recovery retries"), RecoveryRetries, 0});
+    OutCounters.Add({TEXT("Wrinkle preview stale result drops"), RecoveryStaleDrops, 0});
+    OutCounters.Add({TEXT("Wrinkle preview degraded transitions"), RecoveryDegraded, 0});
     if (TextureWorkspace.IsValid())
     {
         TextureWorkspace->AppendDiagnosticOperationCounters(OutCounters);
@@ -2882,11 +3880,21 @@ void SWetWrinkleViewport::ResetDiagnosticCounters()
     {
         SpatialQueryService->ResetDiagnosticCounters();
     }
+    if (SurfacePatchProjectionCache.IsValid())
+    {
+        SurfacePatchProjectionCache->ResetDiagnosticCounters();
+    }
     PreviewMeshRefreshCount = 0;
     AccumulatedPreviewRebuildCount = 0;
     AccumulatedIncrementalCommitCount = 0;
     AccumulatedIncrementalFallbackCount = 0;
     TransientIncrementalCommitCount = 0;
+    PatchHoverRequestCount = 0;
+    PatchHoverSubmittedCount = 0;
+    PatchHoverAppliedCount = 0;
+    PatchHoverSupersededCount = 0;
+    PatchHoverCanceledCount = 0;
+    PatchHoverFailedCount = 0;
     HitTriangleBuildCount = 0;
     for (FWetWrinkleAccumulatedPreviewState& State : AccumulatedPreviewStates)
     {
@@ -2932,12 +3940,37 @@ void SWetWrinkleViewport::RebuildHitTriangles()
 
 void SWetWrinkleViewport::HandleSurfaceHitFromClient(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
-    if (AreWetWrinkleSurfaceHitsEquivalentForPreview(CurrentSurfaceHit, SurfaceHit))
+    FWetWrinkleSurfaceHit StableHit = SurfaceHit;
+    if (StableHit.bHit && CurrentSurfaceHit.bHit &&
+        StableHit.MaterialSlotIndex == CurrentSurfaceHit.MaterialSlotIndex)
+    {
+        FVector3f StableU;
+        FVector3f StableV;
+        if (FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
+                FVector3f(StableHit.LocalNormal),
+                FVector3f(CurrentSurfaceHit.LocalSurfaceFrameU),
+                FVector3f(CurrentSurfaceHit.LocalSurfaceFrameV),
+                StableU,
+                StableV))
+        {
+            StableHit.LocalSurfaceFrameU = FVector(StableU);
+            StableHit.LocalSurfaceFrameV = FVector(StableV);
+            if (PreviewMeshComponent != nullptr)
+            {
+                const FTransform ComponentTransform = PreviewMeshComponent->GetComponentTransform();
+                StableHit.WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(StableU)).GetSafeNormal();
+                StableHit.WorldBitangent = ComponentTransform.TransformVectorNoScale(FVector(StableV)).GetSafeNormal();
+            }
+        }
+    }
+
+    if (AreWetWrinkleSurfaceHitsEquivalentForPreview(CurrentSurfaceHit, StableHit))
     {
         return;
     }
 
-    CurrentSurfaceHit = SurfaceHit;
+    CurrentSurfaceHit = StableHit;
+    RefreshViewportHint();
     if (const TSharedPtr<FWetWrinkleAuthoringController> Controller = AuthoringController.Pin())
     {
         Controller->HandleSurfaceHitChanged(CurrentSurfaceHit);
@@ -2998,9 +4031,9 @@ void SWetWrinkleViewport::DrawBrushCursor(FPrimitiveDrawInterface* PDI) const
     {
         SurfaceTangent = MakeWetWrinkleAnyPerpendicular(SurfaceNormal);
     }
-    const FVector      SurfaceBitangent = FVector::CrossProduct(SurfaceNormal, SurfaceTangent).GetSafeNormal();
-    const FVector      Center = CurrentSurfaceHit.WorldPosition + SurfaceNormal * FMath::Max(Radius * 0.01f, 0.15f);
-    constexpr float    Thickness = 2.0f;
+    const FVector SurfaceBitangent = FVector::CrossProduct(SurfaceNormal, SurfaceTangent).GetSafeNormal();
+    const FVector Center = CurrentSurfaceHit.WorldPosition + SurfaceNormal * FMath::Max(Radius * 0.01f, 0.15f);
+    constexpr float Thickness = 2.0f;
     const FLinearColor CursorColor(1.0f, 0.35f, 0.03f, 1.0f);
 
     if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke)
@@ -3009,7 +4042,7 @@ void SWetWrinkleViewport::DrawBrushCursor(FPrimitiveDrawInterface* PDI) const
         if (TransientProceduralStrokeHits.Num() >= 2)
         {
             StrokeDirection = TransientProceduralStrokeHits.Last().WorldPosition -
-                              TransientProceduralStrokeHits[TransientProceduralStrokeHits.Num() - 2].WorldPosition;
+                TransientProceduralStrokeHits[TransientProceduralStrokeHits.Num() - 2].WorldPosition;
             StrokeDirection = (StrokeDirection - SurfaceNormal * FVector::DotProduct(StrokeDirection, SurfaceNormal)).GetSafeNormal();
             if (StrokeDirection.IsNearlyZero())
             {
@@ -3023,8 +4056,8 @@ void SWetWrinkleViewport::DrawBrushCursor(FPrimitiveDrawInterface* PDI) const
             WidthDirection = SurfaceBitangent;
         }
 
-        const float   HalfWidth = FMath::Max(Radius * 0.5f, 0.25f);
-        const float   EndTickLength = FMath::Clamp(HalfWidth * 0.3f, 0.15f, 1.5f);
+        const float HalfWidth = FMath::Max(Radius * 0.5f, 0.25f);
+        const float EndTickLength = FMath::Clamp(HalfWidth * 0.3f, 0.15f, 1.5f);
         const FVector WidthStart = Center - WidthDirection * HalfWidth;
         const FVector WidthEnd = Center + WidthDirection * HalfWidth;
         PDI->DrawLine(WidthStart, WidthEnd, CursorColor, SDPG_Foreground, Thickness, 0.0f, true);
@@ -3049,12 +4082,12 @@ void SWetWrinkleViewport::DrawBrushCursor(FPrimitiveDrawInterface* PDI) const
     }
 
     constexpr int32 SegmentCount = 64;
-    FVector         Previous = Center + SurfaceTangent * Radius;
+    FVector Previous = Center + SurfaceTangent * Radius;
     for (int32 SegmentIndex = 1; SegmentIndex <= SegmentCount; ++SegmentIndex)
     {
-        const float   Angle = (static_cast<float>(SegmentIndex) / static_cast<float>(SegmentCount)) * UE_TWO_PI;
+        const float Angle = (static_cast<float>(SegmentIndex) / static_cast<float>(SegmentCount)) * UE_TWO_PI;
         const FVector Current = Center +
-                                (SurfaceTangent * FMath::Cos(Angle) + SurfaceBitangent * FMath::Sin(Angle)) * Radius;
+            (SurfaceTangent * FMath::Cos(Angle) + SurfaceBitangent * FMath::Sin(Angle)) * Radius;
         PDI->DrawLine(Previous, Current, CursorColor, SDPG_Foreground, Thickness, 0.0f, true);
         Previous = Current;
     }
@@ -3067,15 +4100,82 @@ float SWetWrinkleViewport::CalculateBrushCursorWorldRadius() const
         return 5.0f;
     }
 
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::Patch)
+    {
+        return FMath::Max(BrushSettings.PatchDiameterLocal * 0.5f, 0.05f);
+    }
+
     const FBoxSphereBounds Bounds = PreviewMeshComponent->CalcBounds(PreviewMeshComponent->GetComponentTransform());
-    const float            MeshRadius = FMath::Max(1.0f, static_cast<float>(Bounds.SphereRadius));
+    const float MeshRadius = FMath::Max(1.0f, static_cast<float>(Bounds.SphereRadius));
     return FMath::Clamp(MeshRadius * BrushSettings.BrushRadiusUV, 0.25f, MeshRadius * 0.35f);
 }
 
+FText SWetWrinkleViewport::GetViewportHintText() const
+{
+    if (ResolveTargetMesh() == nullptr)
+    {
+        return LOCTEXT("NoTargetMeshHint", "Assign a Target Mesh or Source Wet Clothing Asset.");
+    }
+
+    if (!SpatialLease.IsValid() || !SpatialHandle.IsValid() || SpatialHandle->Triangles.IsEmpty())
+    {
+        return LOCTEXT("NoHitTrianglesHint", "No triangles available for the selected UV channel/material slot.");
+    }
+
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke)
+    {
+        if (BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Draw &&
+            (bTransientProceduralStartJunction || bTransientProceduralEndJunction))
+        {
+            if (bTransientProceduralStartJunction && bTransientProceduralEndJunction)
+            {
+                return LOCTEXT("RidgeBothJunctionCandidateHint", "Junction candidate: Start + End");
+            }
+            return bTransientProceduralStartJunction
+                ? LOCTEXT("RidgeStartJunctionCandidateHint", "Junction candidate: Start")
+                : LOCTEXT("RidgeEndJunctionCandidateHint", "Junction candidate: End");
+        }
+        if (BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit)
+        {
+            return BrushSettings.bRidgeJunctionModeEnabled
+                ? LOCTEXT("RidgeEditViewportHint", "Drag a selected ridge control point. Shift-click a segment to insert a point. Endpoints snap to nearby ridges.")
+                : LOCTEXT("RidgeEditNoJunctionViewportHint", "Drag a selected ridge control point. Shift-click a segment to insert a point. Junction snapping is off.");
+        }
+        return BrushSettings.bRidgeJunctionModeEnabled
+            ? LOCTEXT("RidgeDrawViewportHint", "Drag on the mesh to draw a ridge. Endpoints snap to nearby ridges to form junctions.")
+            : LOCTEXT("RidgeDrawNoJunctionViewportHint", "Drag on the mesh to draw a ridge. Junction snapping is off.");
+    }
+
+    if (bNonUVSeamBrushCrossesSeam)
+    {
+        return LOCTEXT(
+            "NonUVSeamWarning",
+            "UV seam crosses this brush. Switch Projection Mode to UV Seam for continuous placement.");
+    }
+
+    return LOCTEXT("ViewportHint", "Move the cursor over the mesh to inspect wrinkle brush UV hits.");
+}
+
+FSlateColor SWetWrinkleViewport::GetViewportHintColor() const
+{
+    return bNonUVSeamBrushCrossesSeam
+        ? FSlateColor(FLinearColor(1.0f, 0.72f, 0.05f))
+        : FSlateColor::UseForeground();
+}
+
+void SWetWrinkleViewport::RefreshViewportHint()
+{
+    if (OverlayText.IsValid())
+    {
+        OverlayText->SetText(GetViewportHintText());
+        OverlayText->SetColorAndOpacity(GetViewportHintColor());
+    }
+}
+
 void SWetWrinkleViewport::FindProjectedSurfacesAtUV(
-    int32                                MaterialSlotIndex,
-    int32                                UVChannelIndex,
-    const FVector2D&                     UV,
+    int32 MaterialSlotIndex,
+    int32 UVChannelIndex,
+    const FVector2D& UV,
     TArray<FWetWrinkleProjectedSurface>& OutSurfaces) const
 {
     OutSurfaces.Reset();
@@ -3095,9 +4195,9 @@ void SWetWrinkleViewport::FindProjectedSurfacesAtUV(
 
 bool SWetWrinkleViewport::ResolveProceduralStrokePointWorld(
     const FWetProceduralRidgeStrokePoint& Point,
-    int32                                 MaterialSlotIndex,
-    FVector&                              OutWorldPosition,
-    FVector&                              OutWorldNormal) const
+    int32 MaterialSlotIndex,
+    FVector& OutWorldPosition,
+    FVector& OutWorldNormal) const
 {
     if (!SpatialQueryService.IsValid() || !SpatialLease.IsValid() ||
         !SpatialHandle.IsValid() || PreviewMeshComponent == nullptr)
@@ -3123,9 +4223,9 @@ bool SWetWrinkleViewport::ResolveProceduralStrokePointWorld(
 
 bool SWetWrinkleViewport::TryBuildSurfaceHitFromProceduralStrokePoint(
     const FWetProceduralRidgeStrokePoint& Point,
-    const int32                           MaterialSlotIndex,
-    const int32                           UVChannelIndex,
-    FWetWrinkleSurfaceHit&                OutHit) const
+    const int32 MaterialSlotIndex,
+    const int32 UVChannelIndex,
+    FWetWrinkleSurfaceHit& OutHit) const
 {
     OutHit = FWetWrinkleSurfaceHit();
     if (!SpatialQueryService.IsValid() || !SpatialLease.IsValid() ||
@@ -3159,11 +4259,16 @@ bool SWetWrinkleViewport::TryBuildSurfaceHitFromProceduralStrokePoint(
     OutHit.WorldBitangent = Surface.WorldBitangent;
     OutHit.LocalPosition = ComponentTransform.InverseTransformPosition(Surface.WorldPosition);
     OutHit.LocalNormal = ComponentTransform.InverseTransformVectorNoScale(Surface.WorldNormal)
-                             .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+        .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
     OutHit.LocalTangent = ComponentTransform.InverseTransformVectorNoScale(Surface.WorldTangent)
-                              .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+        .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
     OutHit.LocalBitangent = ComponentTransform.InverseTransformVectorNoScale(Surface.WorldBitangent)
-                                .GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+        .GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+    OutHit.LocalSurfaceAxisU = Surface.LocalSurfaceAxisU;
+    OutHit.LocalSurfaceAxisV = Surface.LocalSurfaceAxisV;
+    OutHit.LocalSurfaceFrameU = Surface.LocalSurfaceFrameU;
+    OutHit.LocalSurfaceFrameV = Surface.LocalSurfaceFrameV;
+    OutHit.SurfaceUnitsPerUV = Surface.SurfaceUnitsPerUV;
     OutHit.UV = Point.PositionUV;
     OutHit.Barycentric = Surface.Barycentric;
     OutHit.DistanceSq = 0.0;
@@ -3177,8 +4282,8 @@ void SWetWrinkleViewport::DrawProceduralStrokeGuides(FPrimitiveDrawInterface* PD
         return;
     }
 
-    constexpr float    GuideOffset = 0.35f;
-    constexpr float    GuideThickness = 2.0f;
+    constexpr float GuideOffset = 0.35f;
+    constexpr float GuideThickness = 2.0f;
     const FLinearColor StoredColor(1.0f, 0.35f, 0.05f, 1.0f);
     const FLinearColor TransientColor(0.0f, 0.85f, 1.0f, 1.0f);
     const FLinearColor JunctionColor(1.0f, 0.72f, 0.05f, 1.0f);
@@ -3202,13 +4307,13 @@ void SWetWrinkleViewport::DrawProceduralStrokeGuides(FPrimitiveDrawInterface* PD
     if (StrokeToDraw != nullptr)
     {
         const FWetProceduralRidgeStroke* Stroke = StrokeToDraw;
-        FVector                          Previous = FVector::ZeroVector;
-        bool                             bHasPrevious = false;
+        FVector Previous = FVector::ZeroVector;
+        bool bHasPrevious = false;
         for (int32 PointIndex = 0; PointIndex < Stroke->Points.Num(); ++PointIndex)
         {
             const FWetProceduralRidgeStrokePoint& Point = Stroke->Points[PointIndex];
-            FVector                               Position = FVector::ZeroVector;
-            FVector                               Normal = FVector::UpVector;
+            FVector Position = FVector::ZeroVector;
+            FVector Normal = FVector::UpVector;
             if (!ResolveProceduralStrokePointWorld(Point, Stroke->MaterialSlotIndex, Position, Normal))
             {
                 bHasPrevious = false;
@@ -3223,17 +4328,17 @@ void SWetWrinkleViewport::DrawProceduralStrokeGuides(FPrimitiveDrawInterface* PD
             Previous = Position;
             bHasPrevious = true;
 
-            const bool         bStartJunction = PointIndex == 0 && Stroke->StartEndpoint.Mode == EWetProceduralRidgeEndpointMode::Junction;
-            const bool         bEndJunction = PointIndex == Stroke->Points.Num() - 1 && Stroke->EndEndpoint.Mode == EWetProceduralRidgeEndpointMode::Junction;
-            const bool         bJunction = bStartJunction || bEndJunction;
-            const bool         bStartFlared = PointIndex == 0 && Stroke->StartEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared;
-            const bool         bEndFlared = PointIndex == Stroke->Points.Num() - 1 && Stroke->EndEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared;
-            const bool         bFlared = bStartFlared || bEndFlared;
+            const bool bStartJunction = PointIndex == 0 && Stroke->StartEndpoint.Mode == EWetProceduralRidgeEndpointMode::Junction;
+            const bool bEndJunction = PointIndex == Stroke->Points.Num() - 1 && Stroke->EndEndpoint.Mode == EWetProceduralRidgeEndpointMode::Junction;
+            const bool bJunction = bStartJunction || bEndJunction;
+            const bool bStartFlared = PointIndex == 0 && Stroke->StartEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared;
+            const bool bEndFlared = PointIndex == Stroke->Points.Num() - 1 && Stroke->EndEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared;
+            const bool bFlared = bStartFlared || bEndFlared;
             const FLinearColor PointColor = bJunction
-                                                ? JunctionColor
-                                                : (bFlared
-                                                       ? FlaredColor
-                                                       : (PointIndex == SelectedProceduralStrokePointIndex ? FLinearColor::White : StoredColor));
+                ? JunctionColor
+                : (bFlared
+                       ? FlaredColor
+                       : (PointIndex == SelectedProceduralStrokePointIndex ? FLinearColor::White : StoredColor));
             PDI->DrawPoint(
                 Position,
                 PointColor,
@@ -3246,8 +4351,8 @@ void SWetWrinkleViewport::DrawProceduralStrokeGuides(FPrimitiveDrawInterface* PD
     {
         const FWetWrinkleSurfaceHit& PreviousHit = TransientProceduralStrokeHits[PointIndex - 1];
         const FWetWrinkleSurfaceHit& CurrentHit = TransientProceduralStrokeHits[PointIndex];
-        const FVector                Previous = PreviousHit.WorldPosition + PreviousHit.WorldNormal * GuideOffset;
-        const FVector                Current = CurrentHit.WorldPosition + CurrentHit.WorldNormal * GuideOffset;
+        const FVector Previous = PreviousHit.WorldPosition + PreviousHit.WorldNormal * GuideOffset;
+        const FVector Current = CurrentHit.WorldPosition + CurrentHit.WorldNormal * GuideOffset;
         PDI->DrawLine(Previous, Current, TransientColor, SDPG_Foreground, GuideThickness, 0.0f, true);
     }
 

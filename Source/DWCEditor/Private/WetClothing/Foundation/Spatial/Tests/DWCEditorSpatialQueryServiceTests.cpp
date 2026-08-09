@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -15,8 +14,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCEditorSpatialQueryTest::RunTest(const FString& Parameters)
 {
-    TSharedRef<FDWCEditorCacheStore>                       Store = MakeShared<FDWCEditorCacheStore>();
-    FDWCEditorSpatialQueryService                          Service(Store);
+    TSharedRef<FDWCEditorCacheStore> Store = MakeShared<FDWCEditorCacheStore>();
+    FDWCEditorSpatialQueryService Service(Store);
     TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
         MakeShared<FDWCEditorSpatialData, ESPMode::ThreadSafe>();
     Data->UVChannelIndex = 2;
@@ -77,6 +76,104 @@ bool FDWCEditorSpatialQueryTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSpatialTopologyContractTest,
+    "DWC.Editor.Foundation.Spatial.SurfaceTopologyContract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSpatialTopologyContractTest::RunTest(const FString& Parameters)
+{
+    FDWCEditorSpatialData Data;
+    Data.Triangles.Reserve(2);
+    FDWCEditorSpatialTriangle& TriangleA = Data.Triangles.AddDefaulted_GetRef();
+    TriangleA.MaterialSlotIndex = 4;
+    TriangleA.TriangleID = 10;
+    TriangleA.UVIslandID = 1;
+    TriangleA.TopologyVertexIDs[0] = 0;
+    TriangleA.TopologyVertexIDs[1] = 1;
+    TriangleA.TopologyVertexIDs[2] = 2;
+    TriangleA.UVs[0] = FVector2f(0.0f, 0.0f);
+    TriangleA.UVs[1] = FVector2f(0.5f, 0.0f);
+    TriangleA.UVs[2] = FVector2f(0.5f, 0.5f);
+
+    FDWCEditorSpatialTriangle& TriangleB = Data.Triangles.AddDefaulted_GetRef();
+    TriangleB.MaterialSlotIndex = 4;
+    TriangleB.TriangleID = 11;
+    TriangleB.UVIslandID = 2;
+    TriangleB.TopologyVertexIDs[0] = 2;
+    TriangleB.TopologyVertexIDs[1] = 1;
+    TriangleB.TopologyVertexIDs[2] = 3;
+    TriangleB.UVs[0] = FVector2f(0.8f, 0.8f);
+    TriangleB.UVs[1] = FVector2f(0.8f, 0.3f);
+    TriangleB.UVs[2] = FVector2f(1.0f, 0.8f);
+
+    FDWCEditorSpatialQueryService::BuildTriangleTopology(Data);
+    TestEqual(
+        TEXT("A physical edge split across UV islands is classified as a seam"),
+        TriangleA.EdgeTypes[1],
+        EDWCEditorSpatialEdgeType::UVSeam);
+    TestEqual(
+        TEXT("Seam adjacency points at the connected triangle"),
+        TriangleA.AdjacentTriangleIndices[1],
+        1);
+    TestEqual(
+        TEXT("The reverse seam edge points back to the source triangle"),
+        TriangleB.AdjacentTriangleIndices[0],
+        0);
+    TestEqual(
+        TEXT("An unshared physical edge remains a boundary"),
+        TriangleA.EdgeTypes[0],
+        EDWCEditorSpatialEdgeType::Boundary);
+
+    FDWCEditorSpatialData RegularData;
+    RegularData.Triangles = Data.Triangles;
+    RegularData.Triangles[1].UVIslandID = RegularData.Triangles[0].UVIslandID;
+    RegularData.Triangles[1].UVs[0] = RegularData.Triangles[0].UVs[2];
+    RegularData.Triangles[1].UVs[1] = RegularData.Triangles[0].UVs[1];
+    FDWCEditorSpatialQueryService::BuildTriangleTopology(RegularData);
+    TestEqual(
+        TEXT("A physically and UV-contiguous edge is classified as regular"),
+        RegularData.Triangles[0].EdgeTypes[1],
+        EDWCEditorSpatialEdgeType::Regular);
+
+    FDWCEditorSpatialData NonManifoldData;
+    NonManifoldData.Triangles.Reserve(3);
+    for (int32 TriangleIndex = 0; TriangleIndex < 3; ++TriangleIndex)
+    {
+        FDWCEditorSpatialTriangle& Triangle = NonManifoldData.Triangles.AddDefaulted_GetRef();
+        Triangle.TopologyVertexIDs[0] = 10;
+        Triangle.TopologyVertexIDs[1] = 11;
+        Triangle.TopologyVertexIDs[2] = 20 + TriangleIndex;
+    }
+    FDWCEditorSpatialQueryService::BuildTriangleTopology(NonManifoldData);
+    TestEqual(
+        TEXT("A non-manifold edge is blocked instead of choosing an arbitrary neighbor"),
+        NonManifoldData.Triangles[0].EdgeTypes[0],
+        EDWCEditorSpatialEdgeType::Blocked);
+    TestEqual(
+        TEXT("Blocked non-manifold edges have no adjacency"),
+        NonManifoldData.Triangles[0].AdjacentTriangleIndices[0],
+        INDEX_NONE);
+
+    FVector3f NormalizedBarycentric;
+    TestTrue(
+        TEXT("Small barycentric edge error is normalized"),
+        FDWCEditorSpatialQueryService::NormalizeSurfaceAnchor(
+            FVector3f(-0.0001f, 0.4f, 0.6001f),
+            NormalizedBarycentric));
+    TestTrue(
+        TEXT("Normalized barycentric coordinates sum to one"),
+        FMath::IsNearlyEqual(
+            NormalizedBarycentric.X + NormalizedBarycentric.Y + NormalizedBarycentric.Z,
+            1.0f));
+    TestFalse(
+        TEXT("A materially invalid barycentric anchor is rejected"),
+        FDWCEditorSpatialQueryService::NormalizeSurfaceAnchor(
+            FVector3f(-0.2f, 0.6f, 0.6f),
+            NormalizedBarycentric));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorSpatialLeaseLifetimeTest,
     "DWC.Editor.Foundation.Spatial.LeaseSurvivesInvalidation",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -84,9 +181,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorSpatialLeaseLifetimeTest::RunTest(const FString& Parameters)
 {
     TSharedRef<FDWCEditorCacheStore> Store = MakeShared<FDWCEditorCacheStore>();
-    FDWCEditorSpatialQueryService    Service(Store);
-    UTexture2D*                      Owner = NewObject<UTexture2D>();
-    FDWCEditorCacheKey               Key;
+    FDWCEditorSpatialQueryService Service(Store);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorCacheKey Key;
     Key.Namespace = TEXT("Spatial");
     Key.Owner = FObjectKey(Owner);
     Key.LODIndex = 0;
@@ -118,7 +215,7 @@ bool FDWCEditorSpatialLeaseLifetimeTest::RunTest(const FString& Parameters)
         Triangle.UVBounds += Triangle.UVs[CornerIndex];
     }
     const uint64 LookupKey = (static_cast<uint64>(Key.MaterialSlotIndex) << 32) |
-                             static_cast<uint32>(Triangle.TriangleID);
+        static_cast<uint32>(Triangle.TriangleID);
     Data->TriangleLookup.Add(LookupKey, 0);
 
     TSharedRef<const IDWCEditorCacheValue, ESPMode::ThreadSafe> CacheValue = Data;
@@ -133,7 +230,7 @@ bool FDWCEditorSpatialLeaseLifetimeTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("The spatial lease keeps the query payload alive"), Lease.IsValid());
 
     USkeletalMeshComponent* Component = NewObject<USkeletalMeshComponent>();
-    FDWCEditorSurfaceHit    Hit;
+    FDWCEditorSurfaceHit Hit;
     TestTrue(
         TEXT("Spatial queries remain valid after cache invalidation while leased"),
         Service.TraceSurface(
@@ -146,6 +243,100 @@ bool FDWCEditorSpatialLeaseLifetimeTest::RunTest(const FString& Parameters)
 
     Lease.Reset();
     TestEqual(TEXT("Released spatial lease retires no entry"), Store->GetRetiredEntryCount(), 0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorStableSurfaceFrameTest,
+    "DWC.Editor.Foundation.Spatial.StableSurfaceFrame",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorStableSurfaceFrameTest::RunTest(const FString& Parameters)
+{
+    FVector3f FrameU;
+    FVector3f FrameV;
+    TestTrue(
+        TEXT("A valid normal and preferred tangent build a surface frame"),
+        FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
+            FVector3f(0.0f, 0.0f, 1.0f),
+            FVector3f(2.0f, 0.0f, 0.5f),
+            FVector3f(0.0f, 1.0f, 0.0f),
+            FrameU,
+            FrameV));
+    TestTrue(TEXT("Surface frame U is normalized"), FMath::IsNearlyEqual(FrameU.Size(), 1.0f));
+    TestTrue(TEXT("Surface frame V is normalized"), FMath::IsNearlyEqual(FrameV.Size(), 1.0f));
+    TestTrue(TEXT("Surface frame axes are orthogonal"),
+        FMath::IsNearlyZero(FVector3f::DotProduct(FrameU, FrameV), 0.001f));
+    TestTrue(TEXT("Surface frame U is tangent to the surface"),
+        FMath::IsNearlyZero(FVector3f::DotProduct(FrameU, FVector3f(0.0f, 0.0f, 1.0f)), 0.001f));
+
+    FVector3f ContinuedU;
+    FVector3f ContinuedV;
+    TestTrue(
+        TEXT("The previous frame transports onto a neighboring smooth normal"),
+        FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
+            FVector3f(0.0f, 0.2f, 0.98f).GetSafeNormal(),
+            FrameU,
+            FrameV,
+            ContinuedU,
+            ContinuedV));
+    TestTrue(TEXT("Transport preserves frame sign continuity"),
+        FVector3f::DotProduct(FrameU, ContinuedU) > 0.0f);
+
+    FVector3f ParallelFallbackU;
+    FVector3f ParallelFallbackV;
+    TestTrue(
+        TEXT("A preferred direction parallel to the normal uses a deterministic tangent fallback"),
+        FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
+            FVector3f(0.0f, 0.0f, 1.0f),
+            FVector3f(0.0f, 0.0f, 4.0f),
+            FVector3f(0.0f, 1.0f, 0.0f),
+            ParallelFallbackU,
+            ParallelFallbackV));
+    TestTrue(
+        TEXT("The fallback frame honors the preferred bitangent sign"),
+        FVector3f::DotProduct(ParallelFallbackV, FVector3f(0.0f, 1.0f, 0.0f)) > 0.999f);
+
+    FVector3f RepeatedFallbackU;
+    FVector3f RepeatedFallbackV;
+    TestTrue(
+        TEXT("Repeated fallback construction succeeds"),
+        FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
+            FVector3f(0.0f, 0.0f, 1.0f),
+            FVector3f(0.0f, 0.0f, 4.0f),
+            FVector3f(0.0f, 1.0f, 0.0f),
+            RepeatedFallbackU,
+            RepeatedFallbackV));
+    TestTrue(
+        TEXT("Repeated fallback construction cannot rotate or flip the frame"),
+        ParallelFallbackU.Equals(RepeatedFallbackU, UE_KINDA_SMALL_NUMBER) &&
+            ParallelFallbackV.Equals(RepeatedFallbackV, UE_KINDA_SMALL_NUMBER));
+
+    FVector3f MirroredU;
+    FVector3f MirroredV;
+    TestTrue(
+        TEXT("A mirrored preferred bitangent still builds a stable frame"),
+        FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
+            FVector3f(0.0f, 0.0f, 1.0f),
+            FrameU,
+            -FrameV,
+            MirroredU,
+            MirroredV));
+    TestTrue(
+        TEXT("The mirrored bitangent flips both axes together and preserves handedness"),
+        FVector3f::DotProduct(MirroredV, -FrameV) > 0.999f &&
+            FVector3f::DotProduct(
+                FVector3f::CrossProduct(MirroredU, MirroredV),
+                FVector3f(0.0f, 0.0f, 1.0f)) > 0.999f);
+
+    TestFalse(
+        TEXT("A degenerate normal cannot build a surface frame"),
+        FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
+            FVector3f::ZeroVector,
+            FVector3f(1.0f, 0.0f, 0.0f),
+            FVector3f(0.0f, 1.0f, 0.0f),
+            FrameU,
+            FrameV));
     return true;
 }
 

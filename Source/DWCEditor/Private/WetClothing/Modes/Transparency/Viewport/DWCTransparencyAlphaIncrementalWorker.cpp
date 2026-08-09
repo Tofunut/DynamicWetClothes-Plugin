@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyAlphaIncrementalWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -7,9 +6,9 @@
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 
 FDWCEditorWorkerMemoryEstimate FDWCTransparencyAlphaIncrementalWorker::EstimateMemory(
-    const TArray<FDWCTransparencyAlphaTilePayload>&         SnapshotTiles,
+    const TArray<FDWCTransparencyAlphaTilePayload>& SnapshotTiles,
     const TArray<FDWCTransparencyAlphaComposeTileSnapshot>& ComposeTiles,
-    const int32                                             OutputTileCount)
+    const int32 OutputTileCount)
 {
     FDWCEditorWorkerMemoryEstimate Estimate;
     for (const FDWCTransparencyAlphaTilePayload& Tile : SnapshotTiles)
@@ -32,14 +31,14 @@ FDWCEditorWorkerMemoryEstimate FDWCTransparencyAlphaIncrementalWorker::EstimateM
 
 TSharedPtr<FDWCTransparencyAlphaIncrementalJobResult, ESPMode::ThreadSafe>
 FDWCTransparencyAlphaIncrementalWorker::Build(
-    FDWCTransparencyAlphaIncrementalJobInput&&                          Input,
+    FDWCTransparencyAlphaIncrementalJobInput&& Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FDWCTransparencyAlphaIncrementalJobResult, ESPMode::ThreadSafe> Output =
         MakeShared<FDWCTransparencyAlphaIncrementalJobResult, ESPMode::ThreadSafe>();
     Output->ExpectedAlphaRevision = Input.ExpectedAlphaRevision;
     Output->PreviewTarget = Input.PreviewTarget;
-    if (!Input.AutoResult.IsValid() || CancellationToken->IsCanceled())
+    if (!Input.SourcePayload.IsValid() || CancellationToken->IsCanceled())
     {
         Output->bSucceeded = false;
         Output->Error = TEXT("The transparency alpha incremental snapshot is unavailable.");
@@ -48,11 +47,11 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
 
     TArray<FDWCTransparencyAlphaTilePayload> WorkingTiles = MoveTemp(Input.SnapshotTiles);
     Output->bHasChanges = FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
-        *Input.AutoResult,
-        Input.Stroke,
-        Input.Samples,
-        Input.OutputTileCoordinates,
-        WorkingTiles);
+            *Input.SourcePayload,
+            Input.Stroke,
+            Input.Samples,
+            Input.OutputTileCoordinates,
+            WorkingTiles);
     if (!Output->bHasChanges)
     {
         Output->bSucceeded = true;
@@ -66,7 +65,7 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
     }
 
     FDWCTransparencyAlphaTileStore ComposedStore;
-    ComposedStore.Initialize(Input.AutoResult->Resolution);
+    ComposedStore.Initialize(Input.SourcePayload->Resolution);
     if (!ComposedStore.Commit(ComposedStore.GetRevision(), WorkingTiles))
     {
         Output->bSucceeded = false;
@@ -75,13 +74,13 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
     }
 
     FDWCTransparencyPixelComposeContext Context;
-    Context.AutoResult = Input.AutoResult.Get();
+    Context.SourcePayload = Input.SourcePayload.Get();
     Context.ManualAlphaTileStore = &ComposedStore;
     Context.VisualizationMode = Input.VisualizationMode;
     Context.bDeferPresentationToMaterial = true;
     Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
-                                     ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
-                                     : KINDA_SMALL_NUMBER;
+        ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.SourcePayload)
+        : KINDA_SMALL_NUMBER;
 
     Output->AlphaTiles = MoveTemp(WorkingTiles);
     for (const FDWCTransparencyAlphaComposeTileSnapshot& Tile : Input.ComposeTiles)
@@ -114,7 +113,7 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
             for (int32 X = Tile.Rect.Min.X; X < Tile.Rect.Max.X; ++X)
             {
                 const int32 LocalIndex = (Y - Tile.Rect.Min.Y) * Tile.Rect.Width() + X - Tile.Rect.Min.X;
-                const int32 PixelIndex = Y * Input.AutoResult->Resolution.X + X;
+                const int32 PixelIndex = Y * Input.SourcePayload->Resolution.X + X;
                 Region.Pixels[LocalIndex] = FDWCTransparencyComposite::ComposeVisualizationPixel(
                     Context,
                     PixelIndex,

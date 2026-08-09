@@ -1,21 +1,22 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleAccumulatedPreviewWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
 #include "WetClothing/Foundation/Raster/DWCEditorNormalRasterCore.h"
 #include "WetClothing/Foundation/Raster/DWCEditorRasterPostProcess.h"
+#include "WetClothing/Foundation/Raster/DWCEditorSurfacePatchRasterBuilder.h"
 #include "WetClothing/Modes/Wrinkle/Stroke/WetProceduralRidgeRasterizer.h"
 
 TSharedPtr<FWetWrinkleAccumulatedPreviewJobResult, ESPMode::ThreadSafe>
 FWetWrinkleAccumulatedPreviewWorker::Build(
-    FWetWrinkleAccumulatedPreviewJobInput                               Input,
+    FWetWrinkleAccumulatedPreviewJobInput Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FWetWrinkleAccumulatedPreviewJobResult, ESPMode::ThreadSafe> Result =
         MakeShared<FWetWrinkleAccumulatedPreviewJobResult, ESPMode::ThreadSafe>();
     Result->TextureSize = Input.TextureSize;
     Result->WorkingTextureSize = Input.WorkingTextureSize;
+    Result->SpatialLeaseOwner = Input.SpatialLeaseOwner;
     if (!Result->WorkingSurface.Initialize(Input.WorkingTextureSize, false) ||
         Input.TextureSize.X <= 0 || Input.TextureSize.Y <= 0)
     {
@@ -34,6 +35,42 @@ FWetWrinkleAccumulatedPreviewWorker::Build(
         {
             Result->bSucceeded = false;
             Result->Error = TEXT("The wrinkle preview job was canceled.");
+            return Result;
+        }
+    }
+    for (const FWetWrinkleSurfacePatchPreviewInput& SurfacePatch : Input.SurfacePatches)
+    {
+        FDWCEditorProjectedNormalPatchCommand Command;
+        FString ProjectionError;
+        if (!FDWCEditorSurfacePatchRasterBuilder::BuildProjectedPatchCommand(
+                SurfacePatch,
+                Command,
+                &ProjectionError,
+                &CancellationToken.Get(),
+                Input.SurfacePatchProjectionCache.Get(),
+                EDWCEditorSurfacePatchCachePolicy::Persistent))
+        {
+            if (CancellationToken->IsCanceled())
+            {
+                Result->bSucceeded = false;
+                Result->Error = TEXT("The wrinkle surface projection was canceled.");
+                return Result;
+            }
+            ++Result->SkippedSurfacePatchCount;
+            if (Result->FirstSurfacePatchError.IsEmpty())
+            {
+                Result->FirstSurfacePatchError = MoveTemp(ProjectionError);
+            }
+            continue;
+        }
+        const FDWCEditorRasterResult RasterResult = FDWCEditorNormalRasterCore::RasterizeProjectedPatch(
+            Command,
+            Result->WorkingSurface,
+            &CancellationToken.Get());
+        if (RasterResult.bCanceled)
+        {
+            Result->bSucceeded = false;
+            Result->Error = TEXT("The projected wrinkle preview raster was canceled.");
             return Result;
         }
     }

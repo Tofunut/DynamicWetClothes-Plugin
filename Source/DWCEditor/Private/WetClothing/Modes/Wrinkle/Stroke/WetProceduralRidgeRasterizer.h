@@ -1,18 +1,18 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #pragma once
 
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingWrinkleData.h"
-#include "WetClothing/Foundation/Raster/DWCEditorRasterTypes.h"
 
 struct FWetProceduralRidgeRasterResult
 {
-    bool     bAffectedPixels = false;
-    bool     bCanceled = false;
+    bool bAffectedPixels = false;
+    bool bCanceled = false;
     FIntRect DirtyRect = FIntRect(0, 0, 0, 0);
 };
 
+struct FDWCEditorNormalRasterSurface;
+struct FDWCEditorNormalRasterRegion;
 class FDWCEditorCancellationToken;
 
 class FWetProceduralRidgeRasterizer
@@ -22,19 +22,19 @@ class FWetProceduralRidgeRasterizer
 
     static FIntRect ComputeBounds(
         const FWetProceduralRidgeStroke& Stroke,
-        FIntPoint                        TextureSize,
-        int32                            FirstPointIndex = 0);
+        FIntPoint TextureSize,
+        int32 FirstPointIndex = 0);
 
     static FWetProceduralRidgeRasterResult RasterizeToSurface(
-        const FWetProceduralRidgeStroke&   Stroke,
-        FDWCEditorNormalRasterSurface&     Surface,
-        const FIntRect*                    ClipRect = nullptr,
+        const FWetProceduralRidgeStroke& Stroke,
+        FDWCEditorNormalRasterSurface& Surface,
+        const FIntRect* ClipRect = nullptr,
         const FDWCEditorCancellationToken* CancellationToken = nullptr);
 
     static FWetProceduralRidgeRasterResult RasterizeToRegion(
-        const FWetProceduralRidgeStroke&   Stroke,
-        FDWCEditorNormalRasterRegion&      Region,
-        const FIntRect*                    ClipRect = nullptr,
+        const FWetProceduralRidgeStroke& Stroke,
+        FDWCEditorNormalRasterRegion& Region,
+        const FIntRect* ClipRect = nullptr,
         const FDWCEditorCancellationToken* CancellationToken = nullptr);
 
     static uint64 GetTransientScratchBytesUpperBound();

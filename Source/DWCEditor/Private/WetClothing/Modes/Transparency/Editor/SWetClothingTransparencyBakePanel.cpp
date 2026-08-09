@@ -1,11 +1,9 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/Editor/SWetClothingTransparencyBakePanel.h"
 
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
 
 #include "AssetThumbnail.h"
-#include "Brushes/SlateRoundedBoxBrush.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "AssetRegistry/AssetData.h"
 #include "Engine/SkeletalMesh.h"
@@ -17,6 +15,7 @@
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
+#include "Styling/StyleColors.h"
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
 #include "WetClothing/WCAEditor/WCAEditorTypes.h"
 #include "WetClothing/WCAEditor/UI/UVView/SWCAUVView.h"
@@ -28,6 +27,10 @@
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyRevealCommitWorker.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyFinalWorkingSet.h"
+#include "WetClothing/Modes/Transparency/Temp/DWCTransparencyTempAssetStore.h"
 #include "WetClothing/Modes/Transparency/Editor/DWCTransparencyWorkflowPolicy.h"
 #include "WetClothing/Modes/Transparency/Authoring/DWCTransparencyAuthoringController.h"
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
@@ -47,7 +50,6 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
-#include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/Layout/SUniformGridPanel.h"
@@ -56,7 +58,6 @@
 #include "Widgets/SBoxPanel.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SNullWidget.h"
-#include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STableRow.h"
@@ -65,132 +66,167 @@
 
 namespace
 {
-    DECLARE_DELEGATE_OneParam(FOnDWCTransparencyUVIslandColorAccepted, FLinearColor);
+struct FDWCTransparencyUVIslandColorSelection
+{
+    FLinearColor Color = FLinearColor::White;
+    TWeakObjectPtr<UTexture2D> Texture;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    int32 UVChannelIndex = INDEX_NONE;
+    int32 UVIslandID = INDEX_NONE;
+};
 
-    int32 ResolveTransparencyDataUVChannel(const UWetClothingAsset* Asset)
+DECLARE_DELEGATE_OneParam(
+    FOnDWCTransparencyUVIslandColorAccepted,
+    const FDWCTransparencyUVIslandColorSelection&);
+
+int32 ResolveTransparencyDataUVChannel(const UWetClothingAsset* Asset)
+{
+    return Asset != nullptr && Asset->HasValidDataUVForLOD(0)
+        ? Asset->GetDWCDataUVChannelIndex()
+        : INDEX_NONE;
+}
+
+const TCHAR* GetTransparencyStrokeModeLabel(const EDWCTransparencyBrushMode Mode)
+{
+    switch (Mode)
     {
-        return Asset != nullptr && Asset->HasValidDataUVForLOD(0)
-                   ? Asset->GetDWCDataUVChannelIndex()
-                   : INDEX_NONE;
+    case EDWCTransparencyBrushMode::Erase:
+        return TEXT("Erase");
+    case EDWCTransparencyBrushMode::SetValue:
+        return TEXT("Set");
+    case EDWCTransparencyBrushMode::Smooth:
+        return TEXT("Smooth");
+    case EDWCTransparencyBrushMode::ResetToAuto:
+        return TEXT("Reset");
+    case EDWCTransparencyBrushMode::Apply:
+    default:
+        return TEXT("Apply");
     }
+}
 
-    const TCHAR* GetTransparencyStrokeModeLabel(const EDWCTransparencyBrushMode Mode)
+FText GetTransparencySourceTypeLabel(const EDWCTransparencySourceType SourceType)
+{
+    switch (SourceType)
     {
-        switch (Mode)
+    case EDWCTransparencySourceType::OtherSkeletalMeshComponents:
+        return LOCTEXT("TransparencySourceTypeMultipleMeshes", "Blueprint / Multiple Skeletal Meshes");
+    case EDWCTransparencySourceType::ManualColorOrTexture:
+        return LOCTEXT("TransparencySourceTypeManualColor", "No Inner Mesh / Base Color");
+    case EDWCTransparencySourceType::ExternalSkeletalMesh:
+        return LOCTEXT("TransparencySourceTypeExternalMesh", "External Skeletal Mesh");
+    case EDWCTransparencySourceType::SameMeshMaterialSlots:
+    default:
+        return LOCTEXT("TransparencySourceTypeSameMesh", "Single Skeletal Mesh / Inner Material Slots");
+    }
+}
+
+const FWetClothingBakedTransparencyMap* FindExactBakedTransparencyMap(
+    const UWetClothingAsset* Asset,
+    const FWetClothingTransparencyLayerData* Layer)
+{
+    if (Asset == nullptr || Layer == nullptr)
+    {
+        return nullptr;
+    }
+    return Layer->BakedMaps.FindByPredicate(
+        [Layer](const FWetClothingBakedTransparencyMap& Candidate)
         {
-        case EDWCTransparencyBrushMode::Erase:
-            return TEXT("Erase");
-        case EDWCTransparencyBrushMode::SetValue:
-            return TEXT("Set");
-        case EDWCTransparencyBrushMode::Smooth:
-            return TEXT("Smooth");
-        case EDWCTransparencyBrushMode::ResetToAuto:
-            return TEXT("Reset");
-        case EDWCTransparencyBrushMode::Apply:
-        default:
-            return TEXT("Apply");
-        }
-    }
+            return Candidate.MaterialSlotIndex == Layer->TargetSurface.OuterMaterialSlotIndex &&
+                   Candidate.TransparencyMap != nullptr;
+        });
+}
 
-    TSharedRef<SWidget> BuildTransparencyStageHeading(const FText& Title)
-    {
-        return SNew(STextBlock)
-            .Text(Title)
-            .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16));
-    }
+TSharedRef<SWidget> BuildLabeledControl(const FText& Label, const TSharedRef<SWidget>& Control)
+{
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+            [SNew(STextBlock).Text(Label).Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
+        + SVerticalBox::Slot().AutoHeight()[Control];
+}
 
-    const FWetClothingBakedTransparencyMap* FindExactBakedTransparencyMap(
-        const UWetClothingAsset*                 Asset,
-        const FWetClothingTransparencyLayerData* Layer)
-    {
-        if (Asset == nullptr || Layer == nullptr)
-        {
-            return nullptr;
-        }
-        return Layer->BakedMaps.FindByPredicate(
-            [Layer](const FWetClothingBakedTransparencyMap& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == Layer->TargetSurface.OuterMaterialSlotIndex &&
-                       Candidate.TransparencyMap != nullptr;
-            });
-    }
+constexpr float DWCTransparencyDefaultBrushSizeCm = 8.0f;
+constexpr float DWCTransparencyDefaultBrushRadiusUV = 0.0677f;
+constexpr float DWCTransparencyUVPerCm =
+    DWCTransparencyDefaultBrushRadiusUV / DWCTransparencyDefaultBrushSizeCm;
 
-    TSharedRef<SWidget> BuildLabeledControl(const FText& Label, const TSharedRef<SWidget>& Control)
-    {
-        return SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(118.0f)[SNew(STextBlock).Text(Label)]] + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[Control];
-    }
+float DWCTransparencyRadiusUVToSizeCm(const float RadiusUV)
+{
+    return FMath::Clamp(RadiusUV / DWCTransparencyUVPerCm, 0.1f, 100.0f);
+}
 
-    TSharedRef<SWidget> BuildVerticalLabeledControl(
-        const FText&               Label,
-        const TSharedRef<SWidget>& Control)
-    {
-        return SNew(SVerticalBox)
-            + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 3.0f)
-              [SNew(STextBlock)
-                   .Text(Label)
-                   .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))
-                   .AutoWrapText(true)]
-            + SVerticalBox::Slot().AutoHeight()
-              [Control];
-    }
+float DWCTransparencySizeCmToRadiusUV(const float SizeCm)
+{
+    return FMath::Clamp(SizeCm * DWCTransparencyUVPerCm, 0.001f, 0.5f);
+}
 
-    constexpr float DWCTransparencyDefaultBrushSizeCm = 8.0f;
-    constexpr float DWCTransparencyDefaultBrushRadiusUV = 0.0677f;
-    constexpr float DWCTransparencyUVPerCm =
-        DWCTransparencyDefaultBrushRadiusUV / DWCTransparencyDefaultBrushSizeCm;
+FText FormatDWCTransparencyBrushSizeCm(const float SizeCm)
+{
+    FNumberFormattingOptions Options;
+    Options.MinimumFractionalDigits = 0;
+    Options.MaximumFractionalDigits = SizeCm < 10.0f ? 1 : 0;
+    return FText::Format(LOCTEXT("TransparencyBrushSizeCmFormat", "{0} cm"), FText::AsNumber(SizeCm, &Options));
+}
 
-    float DWCTransparencyRadiusUVToSizeCm(const float RadiusUV)
-    {
-        return FMath::Clamp(RadiusUV / DWCTransparencyUVPerCm, 0.1f, 100.0f);
-    }
-
-    float DWCTransparencySizeCmToRadiusUV(const float SizeCm)
-    {
-        return FMath::Clamp(SizeCm * DWCTransparencyUVPerCm, 0.001f, 0.5f);
-    }
-
-    FText FormatDWCTransparencyBrushSizeCm(const float SizeCm)
-    {
-        FNumberFormattingOptions Options;
-        Options.MinimumFractionalDigits = 0;
-        Options.MaximumFractionalDigits = SizeCm < 10.0f ? 1 : 0;
-        return FText::Format(LOCTEXT("TransparencyBrushSizeCmFormat", "{0} cm"), FText::AsNumber(SizeCm, &Options));
-    }
-
-    /**
-     * Transient helper used only while choosing a manual reveal color.  The mesh,
-     * texture, UV channel and island are intentionally not persisted in WCA data.
-     */
-    class SDWCTransparencyUVIslandColorPicker final : public SCompoundWidget
-    {
-      public:
-        SLATE_BEGIN_ARGS(SDWCTransparencyUVIslandColorPicker) {}
+/**
+ * Transient helper used while choosing a manual reveal color. The accepted
+ * texture/island identity is persisted only as source metadata; raster data
+ * remains in the generated stage artifacts.
+ */
+class SDWCTransparencyUVIslandColorPicker final : public SCompoundWidget
+{
+public:
+    SLATE_BEGIN_ARGS(SDWCTransparencyUVIslandColorPicker) {}
         SLATE_ARGUMENT(TSharedPtr<SWindow>, ParentWindow)
         SLATE_ARGUMENT(USkeletalMesh*, InitialMesh)
         SLATE_ARGUMENT(int32, InitialOriginalUVChannel)
         SLATE_EVENT(FOnDWCTransparencyUVIslandColorAccepted, OnColorAccepted)
-        SLATE_END_ARGS()
+    SLATE_END_ARGS()
 
-        void Construct(const FArguments& InArgs)
-        {
-            ParentWindow = InArgs._ParentWindow;
-            ReferenceMesh = InArgs._InitialMesh;
-            PreferredOriginalUVChannel = FMath::Max(0, InArgs._InitialOriginalUVChannel);
-            OnColorAccepted = InArgs._OnColorAccepted;
-            RebuildSlotOptions();
-            RebuildUVOptions();
-            RebuildTextureOptions();
+    void Construct(const FArguments& InArgs)
+    {
+        ParentWindow = InArgs._ParentWindow;
+        ReferenceMesh = InArgs._InitialMesh;
+        PreferredOriginalUVChannel = FMath::Max(0, InArgs._InitialOriginalUVChannel);
+        OnColorAccepted = InArgs._OnColorAccepted;
+        RebuildSlotOptions();
+        RebuildUVOptions();
+        RebuildTextureOptions();
 
-            ChildSlot
-                [SNew(SBorder)
-                     .Padding(12.0f)
-                     .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
-                         [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)[SNew(STextBlock).Text(LOCTEXT("UVIslandColorPickerDescription", "Choose a color texture and one UV island. The selected island is sampled in linear color space and its average becomes the Base Reveal Color.")).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())] + SVerticalBox::Slot().FillHeight(1.0f)[SNew(SSplitter).Orientation(Orient_Horizontal) + SSplitter::Slot().Value(0.30f).MinSize(220.0f)[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 10.0f, 10.0f)[BuildLabeledControl(LOCTEXT("ReferenceSkeletalMesh", "Reference Skeletal Mesh"), SNew(SObjectPropertyEntryBox).AllowedClass(USkeletalMesh::StaticClass()).AllowClear(true).ObjectPath_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           {
+        ChildSlot
+        [
+            SNew(SBorder)
+            .Padding(12.0f)
+            .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+            [
+                SNew(SVerticalBox)
+                + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("UVIslandColorPickerDescription", "Choose a color texture and one UV island. The selected island is sampled in linear color space and its average becomes the Base Reveal Color."))
+                    .AutoWrapText(true)
+                    .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                ]
+                + SVerticalBox::Slot().FillHeight(1.0f)
+                [
+                    SNew(SSplitter)
+                    .Orientation(Orient_Horizontal)
+                    + SSplitter::Slot().Value(0.30f).MinSize(220.0f)
+                    [
+                        SNew(SVerticalBox)
+                        + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 10.0f, 10.0f)
+                        [
+                            BuildLabeledControl(
+                                LOCTEXT("ReferenceSkeletalMesh", "Reference Skeletal Mesh"),
+                                SNew(SObjectPropertyEntryBox)
+                                .AllowedClass(USkeletalMesh::StaticClass())
+                                .AllowClear(true)
+                                .ObjectPath_Lambda([this]()
+                                {
                                     const USkeletalMesh* Mesh = ReferenceMesh.Get();
-                                    return Mesh != nullptr ? Mesh->GetPathName() : FString(); })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   .OnObjectChanged_Lambda([this](const FAssetData& AssetData)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           {
+                                    return Mesh != nullptr ? Mesh->GetPathName() : FString();
+                                })
+                                .OnObjectChanged_Lambda([this](const FAssetData& AssetData)
+                                {
                                     ReferenceMesh = Cast<USkeletalMesh>(AssetData.GetAsset());
                                     SelectedSlotIndex = INDEX_NONE;
                                     SelectedIslandID = INDEX_NONE;
@@ -200,12 +236,36 @@ namespace
                                     RebuildUVOptions();
                                     RebuildTextureOptions();
                                     RefreshSlotList();
-                                    RefreshUVIslandView(); }))] +
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 10.0f, 6.0f)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("ReferenceMaterialSlots", "Material Slots"))] + SVerticalBox::Slot().FillHeight(1.0f).Padding(0.0f, 0.0f, 10.0f, 0.0f)[SAssignNew(SlotListView, SListView<TSharedPtr<int32>>).ListItemsSource(&SlotOptions).SelectionMode(ESelectionMode::Single).OnGenerateRow(this, &SDWCTransparencyUVIslandColorPicker::GenerateSlotRow).OnSelectionChanged(this, &SDWCTransparencyUVIslandColorPicker::HandleSlotSelectionChanged)]] +
-                                                                                                                                                                                                                                                                                                                                                                                                                                                     SSplitter::Slot().Value(0.70f).MinSize(440.0f)[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(10.0f, 0.0f, 0.0f, 10.0f)[BuildLabeledControl(LOCTEXT("ReferenceColorTexture", "Color Texture"), SNew(SComboBox<TSharedPtr<FWCATextureItem>>).OptionsSource(&TextureOptions).InitiallySelectedItem(SelectedTextureItem).OnGenerateWidget_Lambda([this](TSharedPtr<FWCATextureItem> Item)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   { return SNew(STextBlock).Text(GetTextureLabel(Item)); })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        .OnSelectionChanged_Lambda([this](TSharedPtr<FWCATextureItem> Item, ESelectInfo::Type)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   {
+                                    RefreshUVIslandView();
+                                }))
+                        ]
+                        + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 10.0f, 6.0f)
+                        [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("ReferenceMaterialSlots", "Material Slots"))]
+                        + SVerticalBox::Slot().FillHeight(1.0f).Padding(0.0f, 0.0f, 10.0f, 0.0f)
+                        [
+                            SAssignNew(SlotListView, SListView<TSharedPtr<int32>>)
+                            .ListItemsSource(&SlotOptions)
+                            .SelectionMode(ESelectionMode::Single)
+                            .OnGenerateRow(this, &SDWCTransparencyUVIslandColorPicker::GenerateSlotRow)
+                            .OnSelectionChanged(this, &SDWCTransparencyUVIslandColorPicker::HandleSlotSelectionChanged)
+                        ]
+                    ]
+                    + SSplitter::Slot().Value(0.70f).MinSize(440.0f)
+                    [
+                        SNew(SVerticalBox)
+                        + SVerticalBox::Slot().AutoHeight().Padding(10.0f, 0.0f, 0.0f, 10.0f)
+                        [
+                            BuildLabeledControl(
+                                LOCTEXT("ReferenceColorTexture", "Color Texture"),
+                                SNew(SComboBox<TSharedPtr<FWCATextureItem>>)
+                                .OptionsSource(&TextureOptions)
+                                .InitiallySelectedItem(SelectedTextureItem)
+                                .OnGenerateWidget_Lambda([this](TSharedPtr<FWCATextureItem> Item)
+                                {
+                                    return SNew(STextBlock).Text(GetTextureLabel(Item));
+                                })
+                                .OnSelectionChanged_Lambda([this](TSharedPtr<FWCATextureItem> Item, ESelectInfo::Type)
+                                {
                                     if (!Item.IsValid() || SelectedTextureItem == Item)
                                     {
                                         return;
@@ -214,354 +274,392 @@ namespace
                                     ReferenceTexture = Cast<UTexture2D>(Item->Texture.Get());
                                     SelectedIslandID = INDEX_NONE;
                                     bHasCandidateColor = false;
-                                    RefreshUVIslandView(); })[SNew(STextBlock).Text_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     { return GetTextureLabel(SelectedTextureItem); })])] +
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    SVerticalBox::Slot().FillHeight(1.0f).Padding(10.0f, 0.0f, 0.0f, 0.0f)[SNew(SBox).MinDesiredHeight(420.0f)[SAssignNew(UVIslandView, SWCAUVView).OnIslandSelectionChanged(this, &SDWCTransparencyUVIslandColorPicker::HandleUVIslandSelectionChanged)]] + SVerticalBox::Slot().AutoHeight().Padding(10.0f, 10.0f, 0.0f, 0.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)[SNew(STextBlock).Text(LOCTEXT("AverageColorLabel", "Average Island Color"))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SColorBlock).Color_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        { return CandidateColor; })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             .Size(FVector2D(64.0f, 24.0f))
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             .ShowBackgroundForAlpha(false)]]]] +
-                          SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
-                              [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNullWidget::NullWidget] + SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)[SNew(SButton).Text(LOCTEXT("UVIslandColorPickerCancel", "Cancel")).OnClicked(this, &SDWCTransparencyUVIslandColorPicker::HandleCancelClicked)] + SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("UVIslandColorPickerApply", "Use Average Color")).IsEnabled_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                             { return bHasCandidateColor; })
-                                                                                                                                                                                                                                                                                                                                                                                   .OnClicked(this, &SDWCTransparencyUVIslandColorPicker::HandleApplyClicked)]]]];
+                                    RefreshUVIslandView();
+                                })
+                                [SNew(STextBlock).Text_Lambda([this]() { return GetTextureLabel(SelectedTextureItem); })]
+                            )
+                        ]
+                        + SVerticalBox::Slot().FillHeight(1.0f).Padding(10.0f, 0.0f, 0.0f, 0.0f)
+                        [
+                            SNew(SBox)
+                            .MinDesiredHeight(420.0f)
+                            [
+                                SAssignNew(UVIslandView, SWCAUVView)
+                                .OnIslandSelectionChanged(this, &SDWCTransparencyUVIslandColorPicker::HandleUVIslandSelectionChanged)
+                            ]
+                        ]
+                        + SVerticalBox::Slot().AutoHeight().Padding(10.0f, 10.0f, 0.0f, 0.0f)
+                        [
+                            SNew(SHorizontalBox)
+                            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                            [SNew(STextBlock).Text(LOCTEXT("AverageColorLabel", "Average Island Color"))]
+                            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+                            [SNew(SColorBlock).Color_Lambda([this]() { return CandidateColor; }).Size(FVector2D(64.0f, 24.0f)).ShowBackgroundForAlpha(false)]
+                        ]
+                    ]
+                ]
+                + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot().FillWidth(1.0f)[SNullWidget::NullWidget]
+                    + SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                    [SNew(SButton).Text(LOCTEXT("UVIslandColorPickerCancel", "Cancel")).OnClicked(this, &SDWCTransparencyUVIslandColorPicker::HandleCancelClicked)]
+                    + SHorizontalBox::Slot().AutoWidth()
+                    [SNew(SButton).Text(LOCTEXT("UVIslandColorPickerApply", "Use Average Color")).IsEnabled_Lambda([this]() { return bHasCandidateColor; }).OnClicked(this, &SDWCTransparencyUVIslandColorPicker::HandleApplyClicked)]
+                ]
+            ]
+        ];
 
-            RefreshSlotList();
-            RefreshUVIslandView();
-        }
-
-      private:
-        void RebuildSlotOptions()
-        {
-            SlotOptions.Reset();
-            const USkeletalMesh* Mesh = ReferenceMesh.Get();
-            if (Mesh == nullptr)
-            {
-                SelectedSlotIndex = INDEX_NONE;
-                return;
-            }
-            for (int32 SlotIndex = 0; SlotIndex < Mesh->GetMaterials().Num(); ++SlotIndex)
-            {
-                SlotOptions.Add(MakeShared<int32>(SlotIndex));
-            }
-            if (!SlotOptions.ContainsByPredicate([this](const TSharedPtr<int32>& Item)
-                                                 { return Item.IsValid() && *Item == SelectedSlotIndex; }))
-            {
-                SelectedSlotIndex = SlotOptions.IsEmpty() ? INDEX_NONE : *SlotOptions[0];
-            }
-        }
-
-        void RebuildUVOptions()
-        {
-            UVChannelOptions.Reset();
-            const USkeletalMesh*           Mesh = ReferenceMesh.Get();
-            const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
-            const int32                    UVCount = RenderData != nullptr && RenderData->LODRenderData.Num() > 0
-                                                         ? RenderData->LODRenderData[0].GetNumTexCoords()
-                                                         : 0;
-            for (int32 UVIndex = 0; UVIndex < UVCount; ++UVIndex)
-            {
-                UVChannelOptions.Add(MakeShared<int32>(UVIndex));
-            }
-            SelectedUVChannel = UVChannelOptions.ContainsByPredicate([this](const TSharedPtr<int32>& Item)
-                                                                     { return Item.IsValid() && *Item == PreferredOriginalUVChannel; })
-                                    ? PreferredOriginalUVChannel
-                                    : (UVChannelOptions.IsEmpty() ? INDEX_NONE : *UVChannelOptions[0]);
-        }
-
-        void RebuildTextureOptions()
-        {
-            TextureOptions.Reset();
-            SelectedTextureItem.Reset();
-            ReferenceTexture.Reset();
-
-            const USkeletalMesh* Mesh = ReferenceMesh.Get();
-            if (Mesh == nullptr || !Mesh->GetMaterials().IsValidIndex(SelectedSlotIndex))
-            {
-                return;
-            }
-
-            FWetClothingMaterialTextureResolver::BuildTextureItems(
-                Mesh->GetMaterials()[SelectedSlotIndex].MaterialInterface,
-                TextureOptions);
-
-            for (const TSharedPtr<FWCATextureItem>& Item : TextureOptions)
-            {
-                if (Item.IsValid() && Cast<UTexture2D>(Item->Texture.Get()) != nullptr)
-                {
-                    SelectedTextureItem = Item;
-                    ReferenceTexture = Cast<UTexture2D>(Item->Texture.Get());
-                    break;
-                }
-            }
-        }
-
-        void RefreshSlotList()
-        {
-            if (!SlotListView.IsValid())
-            {
-                return;
-            }
-
-            SlotListView->RequestListRefresh();
-            if (const TSharedPtr<int32>* Item = SlotOptions.FindByPredicate([this](const TSharedPtr<int32>& Candidate)
-                                                                            { return Candidate.IsValid() && *Candidate == SelectedSlotIndex; }))
-            {
-                SlotListView->SetSelection(*Item, ESelectInfo::Direct);
-            }
-            else
-            {
-                SlotListView->ClearSelection();
-            }
-        }
-
-        TSharedRef<ITableRow> GenerateSlotRow(TSharedPtr<int32> Item, const TSharedRef<STableViewBase>& OwnerTable)
-        {
-            return SNew(STableRow<TSharedPtr<int32>>, OwnerTable)
-                .Padding(FMargin(4.0f, 3.0f))
-                    [SNew(STextBlock)
-                         .Text(GetSlotLabel(Item))
-                         .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.NormalFont")))];
-        }
-
-        void HandleSlotSelectionChanged(TSharedPtr<int32> Item, ESelectInfo::Type)
-        {
-            if (!Item.IsValid() || SelectedSlotIndex == *Item)
-            {
-                return;
-            }
-
-            SelectedSlotIndex = *Item;
-            SelectedIslandID = INDEX_NONE;
-            CandidateColor = FLinearColor::White;
-            bHasCandidateColor = false;
-            RebuildTextureOptions();
-            RefreshUVIslandView();
-        }
-
-        FText GetTextureLabel(const TSharedPtr<FWCATextureItem>& Item) const
-        {
-            if (!Item.IsValid() || !Item->Texture.IsValid())
-            {
-                return LOCTEXT("NoReferenceColorTexture", "No usable color texture");
-            }
-            return FText::FromString(Item->Label);
-        }
-
-        FText GetSlotLabel(const TSharedPtr<int32>& Item) const
-        {
-            const USkeletalMesh* Mesh = ReferenceMesh.Get();
-            if (Mesh == nullptr || !Item.IsValid() || !Mesh->GetMaterials().IsValidIndex(*Item))
-            {
-                return LOCTEXT("NoReferenceMaterialSlot", "No material slot");
-            }
-            return FText::Format(LOCTEXT("ReferenceMaterialSlotItem", "[{0}] {1}"), FText::AsNumber(*Item), FText::FromName(Mesh->GetMaterials()[*Item].MaterialSlotName));
-        }
-
-        static float EdgeFunction(const FVector2D& A, const FVector2D& B, const FVector2D& Point)
-        {
-            return static_cast<float>((Point.X - A.X) * (B.Y - A.Y) - (Point.Y - A.Y) * (B.X - A.X));
-        }
-
-        static bool IsPointInTriangle(const FVector2D& Point, const FVector2D& A, const FVector2D& B, const FVector2D& C)
-        {
-            const float AB = EdgeFunction(A, B, Point);
-            const float BC = EdgeFunction(B, C, Point);
-            const float CA = EdgeFunction(C, A, Point);
-            return (AB >= 0.0f && BC >= 0.0f && CA >= 0.0f) || (AB <= 0.0f && BC <= 0.0f && CA <= 0.0f);
-        }
-
-        static double ApplyAddress(const double Value, const TextureAddress Address)
-        {
-            return Address == TA_Wrap ? FMath::Frac(Value) : FMath::Clamp(Value, 0.0, 1.0);
-        }
-
-        static FLinearColor SampleTextureBilinear(const FWetClothingTextureReadback& Readback, const FVector2D& UV)
-        {
-            const float U = static_cast<float>(ApplyAddress(UV.X, Readback.AddressX));
-            const float V = static_cast<float>(ApplyAddress(UV.Y, Readback.AddressY));
-            const float X = U * static_cast<float>(Readback.Width - 1);
-            const float Y = V * static_cast<float>(Readback.Height - 1);
-            const int32 X0 = FMath::FloorToInt(X);
-            const int32 Y0 = FMath::FloorToInt(Y);
-            const int32 X1 = FMath::Min(X0 + 1, Readback.Width - 1);
-            const int32 Y1 = FMath::Min(Y0 + 1, Readback.Height - 1);
-            return FMath::Lerp(
-                FMath::Lerp(Readback.GetLinearColor(X0, Y0), Readback.GetLinearColor(X1, Y0), X - X0),
-                FMath::Lerp(Readback.GetLinearColor(X0, Y1), Readback.GetLinearColor(X1, Y1), X - X0),
-                Y - Y0);
-        }
-
-        void RefreshUVIslandView()
-        {
-            if (!UVIslandView.IsValid())
-            {
-                return;
-            }
-
-            UVIslandView->SetBackgroundTexture(ReferenceTexture.Get());
-            UVIslandView->SetSelectedIslands({});
-            IslandOptions.Reset();
-            StatusMessage.Reset();
-
-            const USkeletalMesh* Mesh = ReferenceMesh.Get();
-            if (Mesh == nullptr || SelectedSlotIndex == INDEX_NONE || SelectedUVChannel == INDEX_NONE)
-            {
-                UVIslandView->Clear();
-                StatusMessage = TEXT("Select a reference mesh, material slot, and UV channel.");
-                return;
-            }
-
-            FString ErrorMessage;
-            if (!FWCAUVIslandViewCache::GetMaterialSlotUVIslands(Mesh, 0, SelectedUVChannel, SelectedSlotIndex, IslandOptions, &ErrorMessage))
-            {
-                UVIslandView->Clear();
-                StatusMessage = ErrorMessage;
-                return;
-            }
-
-            UVIslandView->SetBackgroundTexture(ReferenceTexture.Get());
-            UVIslandView->SetIslands(IslandOptions);
-            StatusMessage = ReferenceTexture.IsValid()
-                                ? TEXT("Select one UV island to calculate its average color.")
-                                : TEXT("Select a color texture, then select one UV island.");
-        }
-
-        void HandleUVIslandSelectionChanged(const TArray<int32>& UVIslandIDs, EWCAUVSelectionOp)
-        {
-            SelectedIslandID = UVIslandIDs.IsEmpty() ? INDEX_NONE : UVIslandIDs.Last();
-            if (UVIslandView.IsValid())
-            {
-                TSet<int32> Selected;
-                if (SelectedIslandID != INDEX_NONE)
-                {
-                    Selected.Add(SelectedIslandID);
-                }
-                UVIslandView->SetSelectedIslands(Selected);
-            }
-            UpdateCandidateColor();
-        }
-
-        void UpdateCandidateColor()
-        {
-            bHasCandidateColor = false;
-            UTexture2D*                                  Texture = ReferenceTexture.Get();
-            const TSharedPtr<FWetClothingAssetUVIsland>* Island = IslandOptions.FindByPredicate([this](const TSharedPtr<FWetClothingAssetUVIsland>& Item)
-                                                                                                { return Item.IsValid() && Item->UVIslandID == SelectedIslandID; });
-            if (Texture == nullptr || Island == nullptr || !Island->IsValid())
-            {
-                StatusMessage = Texture == nullptr ? TEXT("Select a color texture.") : TEXT("Select one UV island.");
-                return;
-            }
-
-            FWetClothingTextureReadback Readback;
-            FString                     ErrorMessage;
-            if (!FWetClothingTextureReadbackUtils::TryReadTextureSourceData(Texture, Readback, ErrorMessage))
-            {
-                StatusMessage = ErrorMessage;
-                return;
-            }
-
-            const int32                      AnalysisWidth = FMath::Clamp(Readback.Width, 1, 1024);
-            const int32                      AnalysisHeight = FMath::Clamp(Readback.Height, 1, 1024);
-            TBitArray<>                      CoveredPixels(false, AnalysisWidth * AnalysisHeight);
-            const FWetClothingAssetUVIsland& SelectedIsland = **Island;
-            for (const FWetClothingAssetUVTriangle& Triangle : SelectedIsland.UVTriangles)
-            {
-                const FVector2D A = Triangle.UVs[0] * FVector2D(AnalysisWidth, AnalysisHeight);
-                const FVector2D B = Triangle.UVs[1] * FVector2D(AnalysisWidth, AnalysisHeight);
-                const FVector2D C = Triangle.UVs[2] * FVector2D(AnalysisWidth, AnalysisHeight);
-                const int32     MinX = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X)), 0, AnalysisWidth - 1));
-                const int32     MaxX = IntCastChecked<int32>(FMath::Clamp(FMath::CeilToInt(FMath::Max3(A.X, B.X, C.X)), 0, AnalysisWidth - 1));
-                const int32     MinY = IntCastChecked<int32>(FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y)), 0, AnalysisHeight - 1));
-                const int32     MaxY = IntCastChecked<int32>(FMath::Clamp(FMath::CeilToInt(FMath::Max3(A.Y, B.Y, C.Y)), 0, AnalysisHeight - 1));
-                for (int32 Y = MinY; Y <= MaxY; ++Y)
-                {
-                    for (int32 X = MinX; X <= MaxX; ++X)
-                    {
-                        if (IsPointInTriangle(FVector2D(X + 0.5f, Y + 0.5f), A, B, C))
-                        {
-                            CoveredPixels[Y * AnalysisWidth + X] = true;
-                        }
-                    }
-                }
-            }
-
-            FLinearColor Sum = FLinearColor::Black;
-            int32        SampleCount = 0;
-            for (int32 Y = 0; Y < AnalysisHeight; ++Y)
-            {
-                for (int32 X = 0; X < AnalysisWidth; ++X)
-                {
-                    if (!CoveredPixels[Y * AnalysisWidth + X])
-                    {
-                        continue;
-                    }
-                    Sum += SampleTextureBilinear(Readback, FVector2D((X + 0.5f) / AnalysisWidth, (Y + 0.5f) / AnalysisHeight));
-                    ++SampleCount;
-                }
-            }
-            if (SampleCount == 0)
-            {
-                StatusMessage = TEXT("The selected island did not cover any readable texture pixels.");
-                return;
-            }
-
-            CandidateColor = Sum / static_cast<float>(SampleCount);
-            CandidateColor.A = 1.0f;
-            bHasCandidateColor = true;
-            StatusMessage = FString::Printf(TEXT("Island %d: averaged %d covered samples."), SelectedIslandID, SampleCount);
-        }
-
-        FReply HandleCancelClicked()
-        {
-            if (const TSharedPtr<SWindow> Window = ParentWindow.Pin())
-            {
-                Window->RequestDestroyWindow();
-            }
-            return FReply::Handled();
-        }
-
-        FReply HandleApplyClicked()
-        {
-            if (bHasCandidateColor && OnColorAccepted.IsBound())
-            {
-                OnColorAccepted.Execute(CandidateColor);
-            }
-            return HandleCancelClicked();
-        }
-
-      private:
-        TWeakPtr<SWindow>                             ParentWindow;
-        TWeakObjectPtr<USkeletalMesh>                 ReferenceMesh;
-        TWeakObjectPtr<UTexture2D>                    ReferenceTexture;
-        FOnDWCTransparencyUVIslandColorAccepted       OnColorAccepted;
-        TSharedPtr<SWCAUVView>                        UVIslandView;
-        TSharedPtr<SListView<TSharedPtr<int32>>>      SlotListView;
-        TArray<TSharedPtr<int32>>                     SlotOptions;
-        TArray<TSharedPtr<int32>>                     UVChannelOptions;
-        TArray<TSharedPtr<FWCATextureItem>>           TextureOptions;
-        TSharedPtr<FWCATextureItem>                   SelectedTextureItem;
-        TArray<TSharedPtr<FWetClothingAssetUVIsland>> IslandOptions;
-        int32                                         PreferredOriginalUVChannel = 0;
-        int32                                         SelectedSlotIndex = INDEX_NONE;
-        int32                                         SelectedUVChannel = INDEX_NONE;
-        int32                                         SelectedIslandID = INDEX_NONE;
-        FLinearColor                                  CandidateColor = FLinearColor::White;
-        FString                                       StatusMessage;
-        bool                                          bHasCandidateColor = false;
-    };
-
-    FDWCTransparencyPreviewSettings MakeTransparencyPreviewSettings(
-        const FWetClothingTransparencyData& Data)
-    {
-        FDWCTransparencyPreviewSettings Settings;
-        Settings.TransparencyStrength = Data.TransparencyPreviewStrength;
-        Settings.WrinkleSuppressionStrength = Data.WrinkleSuppressionStrength;
-        Settings.WrinkleMaskThreshold = Data.WrinkleSuppressionCoverageThreshold;
-        Settings.WrinkleMaskSoftness = Data.WrinkleSuppressionMaskSoftness;
-        return Settings;
+        RefreshSlotList();
+        RefreshUVIslandView();
     }
-} // namespace
+
+private:
+    void RebuildSlotOptions()
+    {
+        SlotOptions.Reset();
+        const USkeletalMesh* Mesh = ReferenceMesh.Get();
+        if (Mesh == nullptr)
+        {
+            SelectedSlotIndex = INDEX_NONE;
+            return;
+        }
+        for (int32 SlotIndex = 0; SlotIndex < Mesh->GetMaterials().Num(); ++SlotIndex)
+        {
+            SlotOptions.Add(MakeShared<int32>(SlotIndex));
+        }
+        if (!SlotOptions.ContainsByPredicate([this](const TSharedPtr<int32>& Item) { return Item.IsValid() && *Item == SelectedSlotIndex; }))
+        {
+            SelectedSlotIndex = SlotOptions.IsEmpty() ? INDEX_NONE : *SlotOptions[0];
+        }
+    }
+
+    void RebuildUVOptions()
+    {
+        UVChannelOptions.Reset();
+        const USkeletalMesh* Mesh = ReferenceMesh.Get();
+        const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
+        const int32 UVCount = RenderData != nullptr && RenderData->LODRenderData.Num() > 0
+            ? RenderData->LODRenderData[0].GetNumTexCoords()
+            : 0;
+        for (int32 UVIndex = 0; UVIndex < UVCount; ++UVIndex)
+        {
+            UVChannelOptions.Add(MakeShared<int32>(UVIndex));
+        }
+        SelectedUVChannel = UVChannelOptions.ContainsByPredicate([this](const TSharedPtr<int32>& Item)
+        {
+            return Item.IsValid() && *Item == PreferredOriginalUVChannel;
+        })
+            ? PreferredOriginalUVChannel
+            : (UVChannelOptions.IsEmpty() ? INDEX_NONE : *UVChannelOptions[0]);
+    }
+
+    void RebuildTextureOptions()
+    {
+        TextureOptions.Reset();
+        SelectedTextureItem.Reset();
+        ReferenceTexture.Reset();
+
+        const USkeletalMesh* Mesh = ReferenceMesh.Get();
+        if (Mesh == nullptr || !Mesh->GetMaterials().IsValidIndex(SelectedSlotIndex))
+        {
+            return;
+        }
+
+        FWetClothingMaterialTextureResolver::BuildTextureItems(
+            Mesh->GetMaterials()[SelectedSlotIndex].MaterialInterface,
+            TextureOptions);
+
+        for (const TSharedPtr<FWCATextureItem>& Item : TextureOptions)
+        {
+            if (Item.IsValid() && Cast<UTexture2D>(Item->Texture.Get()) != nullptr)
+            {
+                SelectedTextureItem = Item;
+                ReferenceTexture = Cast<UTexture2D>(Item->Texture.Get());
+                break;
+            }
+        }
+    }
+
+    void RefreshSlotList()
+    {
+        if (!SlotListView.IsValid())
+        {
+            return;
+        }
+
+        SlotListView->RequestListRefresh();
+        if (const TSharedPtr<int32>* Item = SlotOptions.FindByPredicate([this](const TSharedPtr<int32>& Candidate)
+            {
+                return Candidate.IsValid() && *Candidate == SelectedSlotIndex;
+            }))
+        {
+            SlotListView->SetSelection(*Item, ESelectInfo::Direct);
+        }
+        else
+        {
+            SlotListView->ClearSelection();
+        }
+    }
+
+    TSharedRef<ITableRow> GenerateSlotRow(TSharedPtr<int32> Item, const TSharedRef<STableViewBase>& OwnerTable)
+    {
+        return SNew(STableRow<TSharedPtr<int32>>, OwnerTable)
+        .Padding(FMargin(4.0f, 3.0f))
+        [
+            SNew(STextBlock)
+            .Text(GetSlotLabel(Item))
+            .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.NormalFont")))
+        ];
+    }
+
+    void HandleSlotSelectionChanged(TSharedPtr<int32> Item, ESelectInfo::Type)
+    {
+        if (!Item.IsValid() || SelectedSlotIndex == *Item)
+        {
+            return;
+        }
+
+        SelectedSlotIndex = *Item;
+        SelectedIslandID = INDEX_NONE;
+        CandidateColor = FLinearColor::White;
+        bHasCandidateColor = false;
+        RebuildTextureOptions();
+        RefreshUVIslandView();
+    }
+
+    FText GetTextureLabel(const TSharedPtr<FWCATextureItem>& Item) const
+    {
+        if (!Item.IsValid() || !Item->Texture.IsValid())
+        {
+            return LOCTEXT("NoReferenceColorTexture", "No usable color texture");
+        }
+        return FText::FromString(Item->Label);
+    }
+
+    FText GetSlotLabel(const TSharedPtr<int32>& Item) const
+    {
+        const USkeletalMesh* Mesh = ReferenceMesh.Get();
+        if (Mesh == nullptr || !Item.IsValid() || !Mesh->GetMaterials().IsValidIndex(*Item))
+        {
+            return LOCTEXT("NoReferenceMaterialSlot", "No material slot");
+        }
+        return FText::Format(LOCTEXT("ReferenceMaterialSlotItem", "[{0}] {1}"), FText::AsNumber(*Item), FText::FromName(Mesh->GetMaterials()[*Item].MaterialSlotName));
+    }
+
+    static float EdgeFunction(const FVector2D& A, const FVector2D& B, const FVector2D& Point)
+    {
+        return (Point.X - A.X) * (B.Y - A.Y) - (Point.Y - A.Y) * (B.X - A.X);
+    }
+
+    static bool IsPointInTriangle(const FVector2D& Point, const FVector2D& A, const FVector2D& B, const FVector2D& C)
+    {
+        const float AB = EdgeFunction(A, B, Point);
+        const float BC = EdgeFunction(B, C, Point);
+        const float CA = EdgeFunction(C, A, Point);
+        return (AB >= 0.0f && BC >= 0.0f && CA >= 0.0f) || (AB <= 0.0f && BC <= 0.0f && CA <= 0.0f);
+    }
+
+    static float ApplyAddress(const float Value, const TextureAddress Address)
+    {
+        return Address == TA_Wrap ? FMath::Frac(Value) : FMath::Clamp(Value, 0.0f, 1.0f);
+    }
+
+    static FLinearColor SampleTextureBilinear(const FWetClothingTextureReadback& Readback, const FVector2D& UV)
+    {
+        const float U = ApplyAddress(UV.X, Readback.AddressX);
+        const float V = ApplyAddress(UV.Y, Readback.AddressY);
+        const float X = U * static_cast<float>(Readback.Width - 1);
+        const float Y = V * static_cast<float>(Readback.Height - 1);
+        const int32 X0 = FMath::FloorToInt(X);
+        const int32 Y0 = FMath::FloorToInt(Y);
+        const int32 X1 = FMath::Min(X0 + 1, Readback.Width - 1);
+        const int32 Y1 = FMath::Min(Y0 + 1, Readback.Height - 1);
+        return FMath::Lerp(
+            FMath::Lerp(Readback.GetLinearColor(X0, Y0), Readback.GetLinearColor(X1, Y0), X - X0),
+            FMath::Lerp(Readback.GetLinearColor(X0, Y1), Readback.GetLinearColor(X1, Y1), X - X0),
+            Y - Y0);
+    }
+
+    void RefreshUVIslandView()
+    {
+        if (!UVIslandView.IsValid())
+        {
+            return;
+        }
+
+        UVIslandView->SetBackgroundTexture(ReferenceTexture.Get());
+        UVIslandView->SetSelectedIslands({});
+        IslandOptions.Reset();
+        StatusMessage.Reset();
+
+        const USkeletalMesh* Mesh = ReferenceMesh.Get();
+        if (Mesh == nullptr || SelectedSlotIndex == INDEX_NONE || SelectedUVChannel == INDEX_NONE)
+        {
+            UVIslandView->Clear();
+            StatusMessage = TEXT("Select a reference mesh, material slot, and UV channel.");
+            return;
+        }
+
+        FString ErrorMessage;
+        if (!FWCAUVIslandViewCache::GetMaterialSlotUVIslands(Mesh, 0, SelectedUVChannel, SelectedSlotIndex, IslandOptions, &ErrorMessage))
+        {
+            UVIslandView->Clear();
+            StatusMessage = ErrorMessage;
+            return;
+        }
+
+        UVIslandView->SetBackgroundTexture(ReferenceTexture.Get());
+        UVIslandView->SetIslands(IslandOptions);
+        StatusMessage = ReferenceTexture.IsValid()
+            ? TEXT("Select one UV island to calculate its average color.")
+            : TEXT("Select a color texture, then select one UV island.");
+    }
+
+    void HandleUVIslandSelectionChanged(const TArray<int32>& UVIslandIDs, EWCAUVSelectionOp)
+    {
+        SelectedIslandID = UVIslandIDs.IsEmpty() ? INDEX_NONE : UVIslandIDs.Last();
+        if (UVIslandView.IsValid())
+        {
+            TSet<int32> Selected;
+            if (SelectedIslandID != INDEX_NONE)
+            {
+                Selected.Add(SelectedIslandID);
+            }
+            UVIslandView->SetSelectedIslands(Selected);
+        }
+        UpdateCandidateColor();
+    }
+
+    void UpdateCandidateColor()
+    {
+        bHasCandidateColor = false;
+        UTexture2D* Texture = ReferenceTexture.Get();
+        const TSharedPtr<FWetClothingAssetUVIsland>* Island = IslandOptions.FindByPredicate([this](const TSharedPtr<FWetClothingAssetUVIsland>& Item)
+        {
+            return Item.IsValid() && Item->UVIslandID == SelectedIslandID;
+        });
+        if (Texture == nullptr || Island == nullptr || !Island->IsValid())
+        {
+            StatusMessage = Texture == nullptr ? TEXT("Select a color texture.") : TEXT("Select one UV island.");
+            return;
+        }
+
+        FWetClothingTextureReadback Readback;
+        FString ErrorMessage;
+        if (!FWetClothingTextureReadbackUtils::TryReadTextureSourceData(Texture, Readback, ErrorMessage))
+        {
+            StatusMessage = ErrorMessage;
+            return;
+        }
+
+        const int32 AnalysisWidth = FMath::Clamp(Readback.Width, 1, 1024);
+        const int32 AnalysisHeight = FMath::Clamp(Readback.Height, 1, 1024);
+        TBitArray<> CoveredPixels(false, AnalysisWidth * AnalysisHeight);
+        const FWetClothingAssetUVIsland& SelectedIsland = **Island;
+        for (const FWetClothingAssetUVTriangle& Triangle : SelectedIsland.UVTriangles)
+        {
+            const FVector2D A = Triangle.UVs[0] * FVector2D(AnalysisWidth, AnalysisHeight);
+            const FVector2D B = Triangle.UVs[1] * FVector2D(AnalysisWidth, AnalysisHeight);
+            const FVector2D C = Triangle.UVs[2] * FVector2D(AnalysisWidth, AnalysisHeight);
+            const int32 MinX = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.X, B.X, C.X)), 0, AnalysisWidth - 1);
+            const int32 MaxX = FMath::Clamp(FMath::CeilToInt(FMath::Max3(A.X, B.X, C.X)), 0, AnalysisWidth - 1);
+            const int32 MinY = FMath::Clamp(FMath::FloorToInt(FMath::Min3(A.Y, B.Y, C.Y)), 0, AnalysisHeight - 1);
+            const int32 MaxY = FMath::Clamp(FMath::CeilToInt(FMath::Max3(A.Y, B.Y, C.Y)), 0, AnalysisHeight - 1);
+            for (int32 Y = MinY; Y <= MaxY; ++Y)
+            {
+                for (int32 X = MinX; X <= MaxX; ++X)
+                {
+                    if (IsPointInTriangle(FVector2D(X + 0.5f, Y + 0.5f), A, B, C))
+                    {
+                        CoveredPixels[Y * AnalysisWidth + X] = true;
+                    }
+                }
+            }
+        }
+
+        FLinearColor Sum = FLinearColor::Black;
+        int32 SampleCount = 0;
+        for (int32 Y = 0; Y < AnalysisHeight; ++Y)
+        {
+            for (int32 X = 0; X < AnalysisWidth; ++X)
+            {
+                if (!CoveredPixels[Y * AnalysisWidth + X])
+                {
+                    continue;
+                }
+                Sum += SampleTextureBilinear(Readback, FVector2D((X + 0.5f) / AnalysisWidth, (Y + 0.5f) / AnalysisHeight));
+                ++SampleCount;
+            }
+        }
+        if (SampleCount == 0)
+        {
+            StatusMessage = TEXT("The selected island did not cover any readable texture pixels.");
+            return;
+        }
+
+        CandidateColor = Sum / static_cast<float>(SampleCount);
+        CandidateColor.A = 1.0f;
+        bHasCandidateColor = true;
+        StatusMessage = FString::Printf(TEXT("Island %d: averaged %d covered samples."), SelectedIslandID, SampleCount);
+    }
+
+    FReply HandleCancelClicked()
+    {
+        if (const TSharedPtr<SWindow> Window = ParentWindow.Pin())
+        {
+            Window->RequestDestroyWindow();
+        }
+        return FReply::Handled();
+    }
+
+    FReply HandleApplyClicked()
+    {
+        if (bHasCandidateColor && OnColorAccepted.IsBound())
+        {
+            FDWCTransparencyUVIslandColorSelection Selection;
+            Selection.Color = CandidateColor;
+            Selection.Texture = ReferenceTexture;
+            Selection.MaterialSlotIndex = SelectedSlotIndex;
+            Selection.UVChannelIndex = SelectedUVChannel;
+            Selection.UVIslandID = SelectedIslandID;
+            OnColorAccepted.Execute(Selection);
+        }
+        return HandleCancelClicked();
+    }
+
+private:
+    TWeakPtr<SWindow> ParentWindow;
+    TWeakObjectPtr<USkeletalMesh> ReferenceMesh;
+    TWeakObjectPtr<UTexture2D> ReferenceTexture;
+    FOnDWCTransparencyUVIslandColorAccepted OnColorAccepted;
+    TSharedPtr<SWCAUVView> UVIslandView;
+    TSharedPtr<SListView<TSharedPtr<int32>>> SlotListView;
+    TArray<TSharedPtr<int32>> SlotOptions;
+    TArray<TSharedPtr<int32>> UVChannelOptions;
+    TArray<TSharedPtr<FWCATextureItem>> TextureOptions;
+    TSharedPtr<FWCATextureItem> SelectedTextureItem;
+    TArray<TSharedPtr<FWetClothingAssetUVIsland>> IslandOptions;
+    int32 PreferredOriginalUVChannel = 0;
+    int32 SelectedSlotIndex = INDEX_NONE;
+    int32 SelectedUVChannel = INDEX_NONE;
+    int32 SelectedIslandID = INDEX_NONE;
+    FLinearColor CandidateColor = FLinearColor::White;
+    FString StatusMessage;
+    bool bHasCandidateColor = false;
+};
+
+FDWCTransparencyPreviewSettings MakeTransparencyPreviewSettings(
+    const FWetClothingTransparencyData& Data)
+{
+    FDWCTransparencyPreviewSettings Settings;
+    Settings.TransparencyStrength = Data.TransparencyPreviewStrength;
+    Settings.WrinkleSuppressionStrength = Data.WrinkleSuppressionStrength;
+    Settings.WrinkleMaskThreshold = Data.WrinkleSuppressionCoverageThreshold;
+    Settings.WrinkleMaskSoftness = Data.WrinkleSuppressionMaskSoftness;
+    return Settings;
+}
+}
 
 void SWetClothingTransparencyBakePanel::Construct(const FArguments& InArgs)
 {
@@ -576,10 +674,12 @@ void SWetClothingTransparencyBakePanel::Construct(const FArguments& InArgs)
     {
         SessionStore = MakeShared<FDWCEditorSessionStore>();
     }
+    InitializeCharacterTypeSessionState();
     AuthoringController = MakeShared<FDWCTransparencyAuthoringController>(
         WetClothingAsset.Get(), AuthoringDocument, SessionStore);
     WorkerJobScheduler = InArgs._WorkerJobScheduler;
     BakeCoordinator = InArgs._BakeCoordinator;
+    WrinkleSuppressionCoverageService = InArgs._WrinkleSuppressionCoverageService;
     SpatialQueryService = InArgs._SpatialQueryService;
     TextureWorkspace = InArgs._TextureWorkspace;
     PreviewCommitCoordinator = InArgs._PreviewCommitCoordinator;
@@ -625,6 +725,12 @@ void SWetClothingTransparencyBakePanel::Construct(const FArguments& InArgs)
 
 SWetClothingTransparencyBakePanel::~SWetClothingTransparencyBakePanel()
 {
+    if (PendingRevealCommitTicket.IsValid() && WorkerJobScheduler.IsValid())
+    {
+        WorkerJobScheduler->Cancel(PendingRevealCommitTicket.Key);
+        PendingRevealCommitTicket = {};
+        ++RevealCommitEpoch;
+    }
     if (AuthoringController.IsValid())
     {
         AuthoringController->CancelActiveInteraction(false);
@@ -646,8 +752,8 @@ void SWetClothingTransparencyBakePanel::DispatchTransparencyPreviewState()
 
     FDWCSetTransparencyPreviewAction Action;
     Action.PreviewMode = PreviewViewport.IsValid()
-                             ? PreviewViewport->GetPreviewMode()
-                             : EWetClothingTransparencyPreviewMode::TargetMeshOnly;
+        ? PreviewViewport->GetPreviewMode()
+        : EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     Action.VisualizationMode = SelectedVisualizationMode;
     Action.WetnessPreviewPercent = WetnessPreviewPercent;
     Action.Settings = GetTransparencyPreviewSettings();
@@ -678,7 +784,7 @@ void SWetClothingTransparencyBakePanel::DispatchTransparencyPreviewSettings(
         return;
     }
 
-    FDWCSetTransparencyPreviewAction          Action;
+    FDWCSetTransparencyPreviewAction Action;
     const FDWCEditorTransparencySessionState& Current = SessionStore->GetState().Transparency;
     Action.PreviewMode = Current.PreviewMode;
     Action.VisualizationMode = Current.VisualizationMode;
@@ -767,15 +873,15 @@ void SWetClothingTransparencyBakePanel::DispatchTransparencyEditContext()
     }
 
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    const EDWCTransparencyEditorStage        Stage = GetCurrentStage();
-    FDWCSetTransparencyEditContextAction     Action;
+    const EDWCTransparencyEditorStage Stage = GetCurrentStage();
+    FDWCSetTransparencyEditContextAction Action;
     Action.Context.LayerGuid = SelectedLayerGuid;
     Action.Context.MaterialSlotIndex =
         Layer != nullptr ? Layer->TargetSurface.OuterMaterialSlotIndex : INDEX_NONE;
     Action.Context.UVChannelIndex = GetTransparencyDataUVChannel();
     Action.Context.AddressMode = Layer != nullptr
-                                     ? Layer->TargetSurface.UVAddressMode
-                                     : EDWCTransparencyUVAddressMode::Clamp;
+        ? Layer->TargetSurface.UVAddressMode
+        : EDWCTransparencyUVAddressMode::Clamp;
     Action.Context.PaintTarget = DWCTransparencyWorkflow::ResolvePaintTarget(
         Stage,
         Layer != nullptr ? Layer->SourceType : EDWCTransparencySourceType::SameMeshMaterialSlots);
@@ -787,7 +893,7 @@ void SWetClothingTransparencyBakePanel::HandleSessionStateChanged(
     const EDWCEditorSessionEffect Effects,
     uint64)
 {
-    TGuardValue<bool>                         Guard(bApplyingSessionState, true);
+    TGuardValue<bool> Guard(bApplyingSessionState, true);
     const FDWCEditorTransparencySessionState& TransparencyState = State.Transparency;
     if (AuthoringController.IsValid())
     {
@@ -844,9 +950,7 @@ void SWetClothingTransparencyBakePanel::HandleSessionStateChanged(
         const FLayerItemPtr* Item = LayerItems.FindByPredicate(
             [this](const FLayerItemPtr& Candidate)
             {
-                return SelectedLayerGuid.IsValid() &&
-                       Candidate.IsValid() &&
-                       Candidate->LayerGuid == SelectedLayerGuid;
+                return Candidate.IsValid() && Candidate->LayerGuid == SelectedLayerGuid;
             });
         TGuardValue<bool> SelectionGuard(bRefreshingLayerSelection, true);
         Item != nullptr
@@ -869,7 +973,12 @@ void SWetClothingTransparencyBakePanel::RebuildEditorLayout()
     else
     {
         ChildSlot
-            [SNew(SSplitter) + SSplitter::Slot().Value(0.34f)[SAssignNew(ControlPanelContainer, SBox)[BuildControlPanel()]] + SSplitter::Slot().Value(0.66f)[BuildTransparencyPreviewSection()]];
+            [SNew(SSplitter)
+             + SSplitter::Slot().Value(0.34f)
+                 [SAssignNew(ControlPanelContainer, SBox)
+                     [BuildControlPanel()]]
+             + SSplitter::Slot().Value(0.66f)
+                 [BuildTransparencyPreviewSection()]];
     }
 
     // The switcher owns all stage roots for this panel lifetime. Select the
@@ -879,12 +988,7 @@ void SWetClothingTransparencyBakePanel::RebuildEditorLayout()
     if (LayerListView.IsValid())
     {
         const FLayerItemPtr* SelectedItem = LayerItems.FindByPredicate(
-            [this](const FLayerItemPtr& Item)
-            {
-                return SelectedLayerGuid.IsValid() &&
-                       Item.IsValid() &&
-                       Item->LayerGuid == SelectedLayerGuid;
-            });
+            [this](const FLayerItemPtr& Item) { return Item.IsValid() && Item->LayerGuid == SelectedLayerGuid; });
         bRefreshingLayerSelection = true;
         SelectedItem != nullptr ? LayerListView->SetSelection(*SelectedItem, ESelectInfo::Direct) : LayerListView->ClearSelection();
         bRefreshingLayerSelection = false;
@@ -894,8 +998,8 @@ void SWetClothingTransparencyBakePanel::RebuildEditorLayout()
 bool SWetClothingTransparencyBakePanel::RefreshOptionItems()
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const USkeletalMesh*     Mesh = Asset != nullptr ? Asset->GetDWCSkeletalMesh() : nullptr;
-    int32                    NumUVChannels = 0;
+    const USkeletalMesh* Mesh = Asset != nullptr ? Asset->GetDWCSkeletalMesh() : nullptr;
+    int32 NumUVChannels = 0;
     if (Mesh != nullptr)
     {
         if (const FSkeletalMeshRenderData* RenderData = Mesh->GetResourceForRendering();
@@ -906,8 +1010,8 @@ bool SWetClothingTransparencyBakePanel::RefreshOptionItems()
     }
 
     const int32 MaterialSlotCount = Mesh != nullptr ? Mesh->GetMaterials().Num() : 0;
-    const bool  bBaseOptionsChanged = OptionItemsTargetMesh.Get() != Mesh ||
-                                     OptionItemsMaterialSlotCount != MaterialSlotCount || OptionItemsUVChannelCount != NumUVChannels;
+    const bool bBaseOptionsChanged = OptionItemsTargetMesh.Get() != Mesh ||
+        OptionItemsMaterialSlotCount != MaterialSlotCount || OptionItemsUVChannelCount != NumUVChannels;
     if (!bBaseOptionsChanged && !bPreviewSlotStateRefreshRequested)
     {
         return false;
@@ -916,8 +1020,8 @@ bool SWetClothingTransparencyBakePanel::RefreshOptionItems()
     FDWCEditorPreviewSlotCollection ResolvedPreviewSlotStates =
         FDWCEditorPreviewSlotResolver::Resolve(Asset);
     const uint32 PreviewStateSignature = ResolvedPreviewSlotStates.StateSignature;
-    const bool   bMeshOptionsChanged = bBaseOptionsChanged ||
-                                     OptionItemsPreviewStateSignature != PreviewStateSignature;
+    const bool bMeshOptionsChanged = bBaseOptionsChanged ||
+        OptionItemsPreviewStateSignature != PreviewStateSignature;
     bPreviewSlotStateRefreshRequested = false;
     if (!bMeshOptionsChanged)
     {
@@ -982,7 +1086,7 @@ void SWetClothingTransparencyBakePanel::RepairInvalidLayerIdentities()
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::ElementList;
+        EDWCEditorAuthoringImpact::ElementList;
     AuthoringDocument->Edit(
         LOCTEXT("RepairTransparencyLayerIdentities", "Repair Transparency Target Part Identities"),
         Change,
@@ -1018,20 +1122,20 @@ static const TCHAR* GetRevealColorStrokeModeLabel(const EDWCTransparencyRevealCo
 void SWetClothingTransparencyBakePanel::RefreshLayerItems()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    bool               bLayerItemsChanged = LayerItems.Num() != TargetMaterialSlotItems.Num();
+    bool bLayerItemsChanged = LayerItems.Num() != TargetMaterialSlotItems.Num();
     if (!bLayerItemsChanged)
     {
         for (int32 ItemIndex = 0; ItemIndex < LayerItems.Num(); ++ItemIndex)
         {
-            const FLayerItemPtr&                     ExistingItem = LayerItems[ItemIndex];
-            const FMaterialSlotItemPtr&              TargetSlotItem = TargetMaterialSlotItems[ItemIndex];
+            const FLayerItemPtr& ExistingItem = LayerItems[ItemIndex];
+            const FMaterialSlotItemPtr& TargetSlotItem = TargetMaterialSlotItems[ItemIndex];
             const FWetClothingTransparencyLayerData* ExistingLayer =
                 Asset != nullptr && TargetSlotItem.IsValid()
                     ? Asset->Authored.TransparencyData.FindTransparencyLayer(TargetSlotItem->SlotIndex)
                     : nullptr;
             const FGuid ExpectedGuid = ExistingLayer != nullptr
-                                           ? ExistingLayer->LayerGuid
-                                           : FGuid();
+                ? ExistingLayer->LayerGuid
+                : FGuid();
             if (!ExistingItem.IsValid() || !TargetSlotItem.IsValid() ||
                 ExistingItem->MaterialSlotIndex != TargetSlotItem->SlotIndex ||
                 ExistingItem->MaterialSlotName != TargetSlotItem->SlotName ||
@@ -1072,7 +1176,7 @@ void SWetClothingTransparencyBakePanel::RefreshLayerItems()
         SelectedLayerGuid.Invalidate();
         if (SessionStore.IsValid())
         {
-            SessionStore->Dispatch(FDWCSelectTransparencyLayerAction{ FGuid() });
+            SessionStore->Dispatch(FDWCSelectTransparencyLayerAction{FGuid()});
         }
     }
     EnsureStageForSelectedLayer();
@@ -1080,12 +1184,7 @@ void SWetClothingTransparencyBakePanel::RefreshLayerItems()
     {
         LayerListView->RequestListRefresh();
         const FLayerItemPtr* SelectedItem = LayerItems.FindByPredicate(
-            [this](const FLayerItemPtr& Item)
-            {
-                return SelectedLayerGuid.IsValid() &&
-                       Item.IsValid() &&
-                       Item->LayerGuid == SelectedLayerGuid;
-            });
+            [this](const FLayerItemPtr& Item) { return Item.IsValid() && Item->LayerGuid == SelectedLayerGuid; });
         bRefreshingLayerSelection = true;
         SelectedItem != nullptr ? LayerListView->SetSelection(*SelectedItem, ESelectInfo::Direct) : LayerListView->ClearSelection();
         bRefreshingLayerSelection = false;
@@ -1104,6 +1203,7 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
     {
         if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
         {
+            ReconcileCharacterTypeSessionState();
             FDWCInitializeTransparencyPreviewSettingsAction SyncPreviewSettings;
             SyncPreviewSettings.Settings =
                 MakeTransparencyPreviewSettings(Asset->Authored.TransparencyData);
@@ -1158,7 +1258,7 @@ bool SWetClothingTransparencyBakePanel::RefreshModelState()
 {
     const bool bOptionItemsChanged = RefreshOptionItems();
     RefreshLayerItems();
-    const UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset == nullptr)
     {
@@ -1193,20 +1293,19 @@ bool SWetClothingTransparencyBakePanel::RefreshModelState()
         const FDWCEditorPreviewSlotState* State =
             FindPreviewSlotState(Layer->TargetSurface.OuterMaterialSlotIndex);
         StatusMessage = State != nullptr
-                            ? FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue).ToString()
-                            : TEXT("The selected Transparency Target Part is unavailable for preview.");
+            ? FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue).ToString()
+            : TEXT("The selected Transparency Target Part is unavailable for preview.");
         PanelStatus = EDWCTransparencyPanelStatus::Warning;
     }
-    else if (Layer->SourceType != EDWCTransparencySourceType::OtherSkeletalMeshComponents)
+    else
     {
         TArray<FString> Errors;
-        if ((GetCurrentStage() == EDWCTransparencyEditorStage::FinalEditing ||
-             GetCurrentStage() == EDWCTransparencyEditorStage::BakeOutput) &&
+        if (GetCurrentStage() == EDWCTransparencyEditorStage::FinalEditing &&
             EnsureFinalEditingWorkingMap())
         {
-            const TSharedPtr<FDWCTransparencyAutoBakeResult>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
+            const TSharedPtr<FDWCTransparencySourcePayload>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
             check(Existing != nullptr && Existing->IsValid());
-            const FDWCTransparencyAutoBakeResult& Result = **Existing;
+            const FDWCTransparencySourcePayload& Result = **Existing;
             if (Result.bIsFinalBakedBaseline)
             {
                 StatusMessage = FString::Printf(
@@ -1217,16 +1316,16 @@ bool SWetClothingTransparencyBakePanel::RefreshModelState()
             else
             {
                 StatusMessage = Layer->SourceType == EDWCTransparencySourceType::ManualColorOrTexture
-                                    ? FString::Printf(
-                                          TEXT("Base-color preview map ready. Target texels: %d, UV Overlaps: %d"),
-                                          Result.OuterSampleCount,
-                                          Result.OverlappedUVPixelCount)
-                                    : FString::Printf(
-                                          TEXT("Preview map ready. Samples: %d, Valid Hits: %d, No Hits: %d, UV Overlaps: %d"),
-                                          Result.OuterSampleCount,
-                                          Result.ValidHitCount,
-                                          Result.NoHitCount,
-                                          Result.OverlappedUVPixelCount);
+                    ? FString::Printf(
+                        TEXT("Base-color preview map ready. Target texels: %d, UV Overlaps: %d"),
+                        Result.OuterSampleCount,
+                        Result.OverlappedUVPixelCount)
+                    : FString::Printf(
+                        TEXT("Preview map ready. Samples: %d, Valid Hits: %d, No Hits: %d, UV Overlaps: %d"),
+                        Result.OuterSampleCount,
+                        Result.ValidHitCount,
+                        Result.NoHitCount,
+                        Result.OverlappedUVPixelCount);
                 PanelStatus = Result.OverlappedUVPixelCount > 0 ? EDWCTransparencyPanelStatus::Warning : EDWCTransparencyPanelStatus::Ready;
             }
         }
@@ -1242,28 +1341,21 @@ bool SWetClothingTransparencyBakePanel::RefreshModelState()
             const bool bFinalBakeCurrent =
                 BakedMap->BakeGuid.IsValid() && !BakedMap->BuildSignature.IsEmpty();
             StatusMessage = bFinalBakeCurrent
-                                ? FString::Printf(
-                                      TEXT("Baked map is available but its editable source data could not be loaded: %s."),
-                                      *GetNameSafe(BakedMap->TransparencyMap))
-                                : FString::Printf(
-                                      TEXT("A stale baked map is available for inspection: %s. Generate Transparency Map and rebake to update it."),
-                                      *GetNameSafe(BakedMap->TransparencyMap));
+                ? FString::Printf(
+                    TEXT("Baked map is available but its editable source data could not be loaded: %s."),
+                    *GetNameSafe(BakedMap->TransparencyMap))
+                : FString::Printf(
+                    TEXT("A stale baked map is available for inspection: %s. Generate Transparency Map and rebake to update it."),
+                    *GetNameSafe(BakedMap->TransparencyMap));
             PanelStatus = bFinalBakeCurrent
-                              ? EDWCTransparencyPanelStatus::Ready
-                              : EDWCTransparencyPanelStatus::Warning;
+                ? EDWCTransparencyPanelStatus::Ready
+                : EDWCTransparencyPanelStatus::Warning;
         }
         else
         {
             StatusMessage = TEXT("Ready for automatic transparency generation.");
             PanelStatus = EDWCTransparencyPanelStatus::Ready;
         }
-    }
-    else if (Layer->SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents)
-    {
-        StatusMessage = Asset->Authored.TransparencyData.SourceBlueprintClass.IsNull()
-                            ? TEXT("Assign a Source Blueprint.")
-                            : TEXT("Packed Transparency Map generation for Other Skeletal Mesh Components is not implemented yet.");
-        PanelStatus = EDWCTransparencyPanelStatus::Warning;
     }
     UpdateInnerSourceStatus();
     // Edit context follows authoring state reconciliation. The viewport only
@@ -1284,7 +1376,7 @@ EDWCTransparencyEditorStage SWetClothingTransparencyBakePanel::GetCurrentStage()
 void SWetClothingTransparencyBakePanel::EnsureStageForSelectedLayer()
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    const UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Layer == nullptr)
     {
         if (!StageByLayer.Contains(FGuid()))
@@ -1294,7 +1386,7 @@ void SWetClothingTransparencyBakePanel::EnsureStageForSelectedLayer()
             const EDWCTransparencyEditorStage Stage = EDWCTransparencyEditorStage::StructureSetup;
             if (SessionStore.IsValid())
             {
-                SessionStore->Dispatch(FDWCSetTransparencyStageAction{ FGuid(), Stage });
+                SessionStore->Dispatch(FDWCSetTransparencyStageAction{FGuid(), Stage});
             }
             else
             {
@@ -1309,13 +1401,13 @@ void SWetClothingTransparencyBakePanel::EnsureStageForSelectedLayer()
     }
 
     const FWetClothingBakedTransparencyMap* BakedMap = FindExactBakedTransparencyMap(Asset, Layer);
-    const bool                              bHasBakedMap = BakedMap != nullptr;
-    const EDWCTransparencyEditorStage       Stage = bHasBakedMap
-                                                        ? EDWCTransparencyEditorStage::BakeOutput
-                                                        : EDWCTransparencyEditorStage::StructureSetup;
+    const bool bHasBakedMap = BakedMap != nullptr;
+    const EDWCTransparencyEditorStage Stage = bHasBakedMap
+        ? EDWCTransparencyEditorStage::FinalEditing
+        : EDWCTransparencyEditorStage::StructureSetup;
     if (SessionStore.IsValid())
     {
-        SessionStore->Dispatch(FDWCSetTransparencyStageAction{ Layer->LayerGuid, Stage });
+        SessionStore->Dispatch(FDWCSetTransparencyStageAction{Layer->LayerGuid, Stage});
     }
     else
     {
@@ -1326,29 +1418,62 @@ void SWetClothingTransparencyBakePanel::EnsureStageForSelectedLayer()
 bool SWetClothingTransparencyBakePanel::CanEnterFinalEditingStage() const
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    const UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Layer == nullptr || Asset == nullptr)
     {
         return false;
     }
 
-    if (const TSharedPtr<FDWCTransparencyAutoBakeResult>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
+    if (const TSharedPtr<FDWCTransparencySourcePayload>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
         Existing != nullptr && Existing->IsValid())
     {
-        return true;
+        const EDWCTransparencyEditorStage CurrentStage = GetCurrentStage();
+        return (*Existing)->bIsFinalBakedBaseline ||
+            CurrentStage == EDWCTransparencyEditorStage::RevealEditing ||
+            CurrentStage == EDWCTransparencyEditorStage::FinalEditing;
     }
 
     return FindExactBakedTransparencyMap(Asset, Layer) != nullptr;
 }
 
+bool SWetClothingTransparencyBakePanel::CanEnterRevealEditingStage() const
+{
+    if (bRevealCommitInFlight)
+    {
+        return false;
+    }
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    if (Layer == nullptr)
+    {
+        return false;
+    }
+    const TSharedPtr<FDWCTransparencySourcePayload>* Existing =
+        AutoBakeResults.Find(Layer->LayerGuid);
+    return Existing != nullptr && Existing->IsValid() &&
+        !(*Existing)->bIsFinalBakedBaseline;
+}
+
 void SWetClothingTransparencyBakePanel::SetCurrentStage(const EDWCTransparencyEditorStage Stage)
 {
-    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if ((Stage == EDWCTransparencyEditorStage::FinalEditing ||
-         Stage == EDWCTransparencyEditorStage::BakeOutput) &&
-        !CanEnterFinalEditingStage())
+    if (Stage != EDWCTransparencyEditorStage::StructureSetup && HasDirtySourceTypeDraft())
     {
-        StatusMessage = TEXT("Generate a Preview Transparency Map or bake/load an existing Transparency Map before entering this stage.");
+        StatusMessage = TEXT("Apply or cancel the pending Character Structure change before leaving Stage 1.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+        RequestRefresh(EDWCTransparencyPanelRefreshFlags::StageContent);
+        return;
+    }
+
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    if (Stage == EDWCTransparencyEditorStage::RevealEditing && !CanEnterRevealEditingStage())
+    {
+        StatusMessage = TEXT("Generate the Stage 2 source map before entering Reveal Color editing.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+        RequestRefresh(EDWCTransparencyPanelRefreshFlags::Viewport);
+        return;
+    }
+    if (Stage == EDWCTransparencyEditorStage::FinalEditing && !CanEnterFinalEditingStage())
+    {
+        StatusMessage = TEXT("Complete source generation or load an existing Transparency Map before entering Stage 4.");
         PanelStatus = EDWCTransparencyPanelStatus::Warning;
         RequestRefresh(EDWCTransparencyPanelRefreshFlags::Viewport);
         return;
@@ -1356,13 +1481,22 @@ void SWetClothingTransparencyBakePanel::SetCurrentStage(const EDWCTransparencyEd
     const FGuid StageLayerGuid = Layer != nullptr ? Layer->LayerGuid : FGuid();
     if (SessionStore.IsValid())
     {
-        SessionStore->Dispatch(FDWCSetTransparencyStageAction{ StageLayerGuid, Stage });
+        SessionStore->Dispatch(FDWCSetTransparencyStageAction{StageLayerGuid, Stage});
     }
     else
     {
         StageByLayer.FindOrAdd(StageLayerGuid) = Stage;
     }
-    if (Stage == EDWCTransparencyEditorStage::BakeOutput)
+    if (Stage == EDWCTransparencyEditorStage::RevealEditing)
+    {
+        SelectedVisualizationMode = EDWCTransparencyVisualizationMode::InnerColor;
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->SetPreviewMode(EWetClothingTransparencyPreviewMode::TargetMeshOnly);
+        }
+        EnsureRevealEditingWorkingMap();
+    }
+    else if (Stage == EDWCTransparencyEditorStage::FinalEditing)
     {
         if (SelectedVisualizationMode != EDWCTransparencyVisualizationMode::Final &&
             SelectedVisualizationMode != EDWCTransparencyVisualizationMode::AutoAlpha)
@@ -1395,12 +1529,65 @@ ECheckBoxState SWetClothingTransparencyBakePanel::IsStageChecked(const EDWCTrans
 ECheckBoxState SWetClothingTransparencyBakePanel::IsSourceTypeCardChecked(
     const EDWCTransparencySourceType SourceType) const
 {
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    return Asset != nullptr &&
-                   Asset->Authored.TransparencyData.bCharacterStructureTypeConfigured &&
-                   Asset->Authored.TransparencyData.CharacterStructureType == SourceType
-               ? ECheckBoxState::Checked
-               : ECheckBoxState::Unchecked;
+    const FDWCEditorTransparencySessionState* Transparency = SessionStore.IsValid()
+        ? &SessionStore->GetState().Transparency
+        : nullptr;
+    return Transparency != nullptr &&
+        Transparency->bDraftCharacterTypeConfigured &&
+        Transparency->DraftCharacterType == SourceType
+        ? ECheckBoxState::Checked
+        : ECheckBoxState::Unchecked;
+}
+
+FText SWetClothingTransparencyBakePanel::GetSourceTypeCardStatusText(
+    const EDWCTransparencySourceType SourceType,
+    const FText Availability) const
+{
+    if (!IsSourceTypeAvailable(SourceType) || !SessionStore.IsValid())
+    {
+        return Availability;
+    }
+
+    const FDWCEditorTransparencySessionState& Transparency =
+        SessionStore->GetState().Transparency;
+    if (Transparency.bDraftCharacterTypeConfigured &&
+        Transparency.DraftCharacterType == SourceType &&
+        Transparency.bCharacterTypeDraftDirty)
+    {
+        return LOCTEXT("TransparencyTypeSelectedNotApplied", "Selected - Not Applied");
+    }
+    if (Transparency.bSavedCharacterTypeConfigured &&
+        Transparency.SavedCharacterType == SourceType)
+    {
+        return LOCTEXT("TransparencyTypeSaved", "Saved");
+    }
+    return Availability;
+}
+
+bool SWetClothingTransparencyBakePanel::HasDirtySourceTypeDraft() const
+{
+    return SessionStore.IsValid() &&
+        SessionStore->GetState().Transparency.bCharacterTypeDraftDirty;
+}
+
+EVisibility SWetClothingTransparencyBakePanel::GetSourceTypeDraftStatusVisibility() const
+{
+    return HasDirtySourceTypeDraft() ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+FText SWetClothingTransparencyBakePanel::GetSourceTypeDraftStatusText() const
+{
+    if (!SessionStore.IsValid())
+    {
+        return FText::GetEmpty();
+    }
+
+    return FText::Format(
+        LOCTEXT(
+            "TransparencySourceTypeDraftStatus",
+            "Selected: {0} (not applied). Continue to Stage 2 to apply this change."),
+        GetTransparencySourceTypeLabel(
+            SessionStore->GetState().Transparency.DraftCharacterType));
 }
 
 bool SWetClothingTransparencyBakePanel::IsSourceTypeAvailable(
@@ -1411,20 +1598,82 @@ bool SWetClothingTransparencyBakePanel::IsSourceTypeAvailable(
 
 bool SWetClothingTransparencyBakePanel::CanContinueToGeneration() const
 {
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const FDWCEditorTransparencySessionState* Transparency = SessionStore.IsValid()
+        ? &SessionStore->GetState().Transparency
+        : nullptr;
     return DWCTransparencyWorkflow::CanContinueToGeneration(
-        Asset != nullptr,
-        Asset != nullptr && Asset->Authored.TransparencyData.bCharacterStructureTypeConfigured,
-        Asset != nullptr
-            ? Asset->Authored.TransparencyData.CharacterStructureType
+        WetClothingAsset.IsValid(),
+        Transparency != nullptr && Transparency->bDraftCharacterTypeConfigured,
+        Transparency != nullptr
+            ? Transparency->DraftCharacterType
             : EDWCTransparencySourceType::SameMeshMaterialSlots);
+}
+
+void SWetClothingTransparencyBakePanel::InitializeCharacterTypeSessionState()
+{
+    if (!SessionStore.IsValid())
+    {
+        return;
+    }
+
+    FDWCInitializeTransparencyCharacterTypeAction Action;
+    if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        Action.SavedType = Asset->Authored.TransparencyData.CharacterStructureType;
+        Action.bSavedTypeConfigured =
+            Asset->Authored.TransparencyData.bCharacterStructureTypeConfigured;
+    }
+    SessionStore->Dispatch(Action);
+}
+
+void SWetClothingTransparencyBakePanel::ReconcileCharacterTypeSessionState()
+{
+    if (!SessionStore.IsValid())
+    {
+        return;
+    }
+
+    FDWCReconcileTransparencyCharacterTypeAction Action;
+    if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        Action.SavedType = Asset->Authored.TransparencyData.CharacterStructureType;
+        Action.bSavedTypeConfigured =
+            Asset->Authored.TransparencyData.bCharacterStructureTypeConfigured;
+    }
+    SessionStore->Dispatch(Action);
+}
+
+DWCTransparencyWorkflow::FDWCTransparencyTypeChangeImpact
+SWetClothingTransparencyBakePanel::EvaluateCharacterTypeChangeImpact() const
+{
+    DWCTransparencyWorkflow::FDWCTransparencyTypeChangeImpact Impact;
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        return Impact;
+    }
+
+    const TArray<FWetClothingTransparencyLayerData>& Layers =
+        Asset->Authored.TransparencyData.TransparencyLayers;
+    Impact.LayerCount = Layers.Num();
+    for (const FWetClothingTransparencyLayerData& Layer : Layers)
+    {
+        Impact.RevealStrokeCount += Layer.RevealColorPaintStrokes.Num();
+        Impact.AlphaStrokeCount += Layer.EditableStrokes.Num();
+        if (Layer.AutoBakeMetadata.AutoBakeGuid.IsValid() ||
+            !Layer.AutoBakeMetadata.BuildSignature.IsEmpty())
+        {
+            ++Impact.GeneratedResultCount;
+        }
+        Impact.GeneratedResultCount += Layer.BakedMaps.Num();
+    }
+    return Impact;
 }
 
 FReply SWetClothingTransparencyBakePanel::HandleSourceTypeCardClicked(
     const EDWCTransparencySourceType SourceType)
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
+    if (!WetClothingAsset.IsValid() || !SessionStore.IsValid())
     {
         return FReply::Handled();
     }
@@ -1437,57 +1686,7 @@ FReply SWetClothingTransparencyBakePanel::HandleSourceTypeCardClicked(
         return FReply::Handled();
     }
 
-    bool bNeedsLayerSourceSync = false;
-    for (const FWetClothingTransparencyLayerData& Layer : Asset->Authored.TransparencyData.TransparencyLayers)
-    {
-        if (Layer.SourceType != SourceType)
-        {
-            bNeedsLayerSourceSync = true;
-            break;
-        }
-    }
-
-    const bool bTypeChanged = !Asset->Authored.TransparencyData.bCharacterStructureTypeConfigured ||
-                              Asset->Authored.TransparencyData.CharacterStructureType != SourceType;
-    if (!bTypeChanged && !bNeedsLayerSourceSync)
-    {
-        return FReply::Handled();
-    }
-
-    FDWCEditorAuthoringChange Change;
-    Change.Domain = EDWCEditorAuthoringDomain::Transparency;
-    Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::TransparencyAutoBake;
-    if (!AuthoringDocument.IsValid() ||
-        !AuthoringDocument->Edit(
-                              LOCTEXT("ChooseTransparencyStructureType", "Choose Transparency Structure Type"),
-                              Change,
-                              [SourceType](UWetClothingAsset& MutableAsset)
-                              {
-                                  FWetClothingTransparencyData& TransparencyData = MutableAsset.Authored.TransparencyData;
-                                  bool                           bChanged = false;
-                                  for (FWetClothingTransparencyLayerData& Layer : TransparencyData.TransparencyLayers)
-                                  {
-                                      if (Layer.SourceType != SourceType)
-                                      {
-                                          Layer.SourceType = SourceType;
-                                          bChanged = true;
-                                      }
-                                  }
-                                  if (!TransparencyData.bCharacterStructureTypeConfigured ||
-                                      TransparencyData.CharacterStructureType != SourceType)
-                                  {
-                                      bChanged = true;
-                                  }
-                                  TransparencyData.CharacterStructureType = SourceType;
-                                  TransparencyData.bCharacterStructureTypeConfigured = true;
-                                  return bChanged;
-                              })
-             .bChanged)
-    {
-        return FReply::Handled();
-    }
-    AutoBakeResults.Reset();
+    SessionStore->Dispatch(FDWCSelectTransparencyCharacterTypeDraftAction{SourceType});
     if (GetCurrentStage() != EDWCTransparencyEditorStage::StructureSetup)
     {
         SetCurrentStage(EDWCTransparencyEditorStage::StructureSetup);
@@ -1499,18 +1698,98 @@ FReply SWetClothingTransparencyBakePanel::HandleSourceTypeCardClicked(
     return FReply::Handled();
 }
 
+FReply SWetClothingTransparencyBakePanel::HandleCancelSourceTypeDraftClicked()
+{
+    if (SessionStore.IsValid())
+    {
+        SessionStore->Dispatch(FDWCCancelTransparencyCharacterTypeDraftAction{});
+    }
+    return FReply::Handled();
+}
+
 FReply SWetClothingTransparencyBakePanel::HandleContinueToGenerationClicked()
 {
-    if (CanContinueToGeneration())
-    {
-        SetCurrentStage(EDWCTransparencyEditorStage::MapGeneration);
-    }
-    else
+    if (!CanContinueToGeneration() || !SessionStore.IsValid())
     {
         StatusMessage = TEXT("Choose an available character structure type before continuing to Stage 2.");
         PanelStatus = EDWCTransparencyPanelStatus::Warning;
         RequestRefresh(EDWCTransparencyPanelRefreshFlags::StageContent);
+        return FReply::Handled();
     }
+
+
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        return FReply::Handled();
+    }
+
+    const FDWCEditorTransparencySessionState& TransparencySession =
+        SessionStore->GetState().Transparency;
+    const EDWCTransparencySourceType DraftType = TransparencySession.DraftCharacterType;
+    if (!TransparencySession.bCharacterTypeDraftDirty)
+    {
+        SetCurrentStage(EDWCTransparencyEditorStage::MapGeneration);
+        return FReply::Handled();
+    }
+
+    const DWCTransparencyWorkflow::FDWCTransparencyTypeChangeImpact Impact =
+        EvaluateCharacterTypeChangeImpact();
+    if (Impact.RequiresConfirmation())
+    {
+        const FText Message = FText::Format(
+            LOCTEXT(
+                "ConfirmTransparencyCharacterTypeChange",
+                "Change Transparency Character Structure?\n\n"
+                "Current: {0}\nNew: {1}\n\n"
+                "{2} target part(s) will use the new source type. Previous source settings will be cleared, and generated Transparency results will become out of date.\n\n"
+                "Reveal Color strokes ({3}) and Transparency Alpha strokes ({4}) will be preserved."),
+            GetTransparencySourceTypeLabel(TransparencySession.SavedCharacterType),
+            GetTransparencySourceTypeLabel(DraftType),
+            FText::AsNumber(Impact.LayerCount),
+            FText::AsNumber(Impact.RevealStrokeCount),
+            FText::AsNumber(Impact.AlphaStrokeCount));
+        if (FMessageDialog::Open(EAppMsgType::YesNo, Message) != EAppReturnType::Yes)
+        {
+            return FReply::Handled();
+        }
+    }
+
+    FDWCEditorAuthoringChange Change;
+    Change.Domain = EDWCEditorAuthoringDomain::Transparency;
+    Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::TransparencyAutoBake |
+        EDWCEditorAuthoringImpact::Details;
+    const FDWCEditorAuthoringResult Result = AuthoringDocument.IsValid()
+        ? AuthoringDocument->Edit(
+            LOCTEXT("ChangeTransparencyStructureType", "Change Transparency Character Structure"),
+            Change,
+            [DraftType](UWetClothingAsset& MutableAsset)
+            {
+                DWCTransparencyWorkflow::ApplyCharacterTypeCommit(
+                    MutableAsset.Authored.TransparencyData,
+                    DraftType);
+                return true;
+            })
+        : FDWCEditorAuthoringResult{};
+    if (!Result.bChanged)
+    {
+        StatusMessage = Result.Error.IsEmpty()
+            ? TEXT("Could not apply the Transparency character structure change.")
+            : Result.Error;
+        PanelStatus = EDWCTransparencyPanelStatus::Error;
+        RequestRefresh(EDWCTransparencyPanelRefreshFlags::StageContent);
+        return FReply::Handled();
+    }
+
+    AutoBakeResults.Reset();
+    SessionStore->Dispatch(FDWCCommitTransparencyCharacterTypeSucceededAction{DraftType});
+    StatusMessage = FString::Printf(
+        TEXT("Transparency character structure changed to %s. Generated results are out of date."),
+        *GetTransparencySourceTypeLabel(DraftType).ToString());
+    PanelStatus = EDWCTransparencyPanelStatus::Warning;
+    SetCurrentStage(EDWCTransparencyEditorStage::MapGeneration);
     return FReply::Handled();
 }
 
@@ -1528,12 +1807,12 @@ void SWetClothingTransparencyBakePanel::RefreshStageContent()
         RefreshMapGenerationSettings();
         break;
     case EDWCTransparencyEditorStage::FinalEditing:
-        StageContentSwitcher->SetActiveWidgetIndex(2);
+        StageContentSwitcher->SetActiveWidgetIndex(3);
         RefreshFinalEditingContent();
         break;
-    case EDWCTransparencyEditorStage::BakeOutput:
-        StageContentSwitcher->SetActiveWidgetIndex(3);
-        RefreshBakeOutputContent();
+    case EDWCTransparencyEditorStage::RevealEditing:
+        StageContentSwitcher->SetActiveWidgetIndex(2);
+        RefreshRevealEditingContent();
         break;
     default:
         StageContentSwitcher->SetActiveWidgetIndex(0);
@@ -1551,33 +1830,19 @@ void SWetClothingTransparencyBakePanel::RefreshMapGenerationSettings()
     int32 SettingsIndex = 0;
     if (const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer())
     {
-        EDWCTransparencySourceType SourceType = Layer->SourceType;
-        if (!DWCTransparencyWorkflow::IsSourceTypeAvailable(SourceType))
-        {
-            const UWetClothingAsset* Asset = WetClothingAsset.Get();
-            if (Asset != nullptr &&
-                Asset->Authored.TransparencyData.bCharacterStructureTypeConfigured &&
-                DWCTransparencyWorkflow::IsSourceTypeAvailable(Asset->Authored.TransparencyData.CharacterStructureType))
-            {
-                SourceType = Asset->Authored.TransparencyData.CharacterStructureType;
-            }
-        }
-        if (!DWCTransparencyWorkflow::IsSourceTypeAvailable(SourceType))
-        {
-            SourceType = EDWCTransparencySourceType::SameMeshMaterialSlots;
-        }
-
-        switch (SourceType)
+        switch (Layer->SourceType)
         {
         case EDWCTransparencySourceType::SameMeshMaterialSlots:
             SettingsIndex = 1;
             break;
         case EDWCTransparencySourceType::OtherSkeletalMeshComponents:
-            // Internal multi-component source path. Not exposed through the current editor workflow.
-            SettingsIndex = 0;
+            SettingsIndex = 2;
             break;
         case EDWCTransparencySourceType::ManualColorOrTexture:
-            SettingsIndex = 2;
+            SettingsIndex = 3;
+            break;
+        case EDWCTransparencySourceType::ExternalSkeletalMesh:
+            SettingsIndex = 4;
             break;
         default:
             break;
@@ -1586,6 +1851,7 @@ void SWetClothingTransparencyBakePanel::RefreshMapGenerationSettings()
 
     MapGenerationSettingsSwitcher->SetActiveWidgetIndex(SettingsIndex);
     RefreshInnerSourceSlotItems();
+    RefreshRevealColorStrokeList();
 }
 
 void SWetClothingTransparencyBakePanel::RefreshInnerSourceSlotItems()
@@ -1620,20 +1886,7 @@ void SWetClothingTransparencyBakePanel::RefreshFinalEditingContent()
         GeneratedOutputThumbnails.Reset();
         FinalEditingGeneratedOutputsContainer->SetContent(BuildGeneratedOutputsSection());
     }
-    RefreshRevealColorStrokeList();
-}
-
-void SWetClothingTransparencyBakePanel::RefreshBakeOutputContent()
-{
-    if (BakeOutputNoticeContainer.IsValid())
-    {
-        BakeOutputNoticeContainer->SetContent(BuildFinalEditingNotice());
-    }
-    if (BakeOutputGeneratedOutputsContainer.IsValid())
-    {
-        GeneratedOutputThumbnails.Reset();
-        BakeOutputGeneratedOutputsContainer->SetContent(BuildGeneratedOutputsSection());
-    }
+    RefreshTransparencyStrokeList();
 }
 
 void SWetClothingTransparencyBakePanel::RequestRefresh(
@@ -1701,10 +1954,10 @@ EActiveTimerReturnType SWetClothingTransparencyBakePanel::HandleDeferredRefresh(
 }
 
 bool SWetClothingTransparencyBakePanel::LoadBakedMapAsWorkingResult(
-    const FWetClothingBakedTransparencyMap&     BakedMap,
-    const FWetClothingTransparencyLayerData&    Layer,
-    TSharedPtr<FDWCTransparencyAutoBakeResult>& OutResult,
-    FString&                                    OutError) const
+    const FWetClothingBakedTransparencyMap& BakedMap,
+    const FWetClothingTransparencyLayerData& Layer,
+    TSharedPtr<FDWCTransparencySourcePayload>& OutResult,
+    FString& OutError) const
 {
     OutResult.Reset();
     OutError.Reset();
@@ -1722,9 +1975,9 @@ bool SWetClothingTransparencyBakePanel::LoadBakedMapAsWorkingResult(
         return false;
     }
 
-    const int32     Width = IntCastChecked<int32>(Texture->Source.GetSizeX());
-    const int32     Height = IntCastChecked<int32>(Texture->Source.GetSizeY());
-    const int32     PixelCount = Width * Height;
+    const int32 Width = Texture->Source.GetSizeX();
+    const int32 Height = Texture->Source.GetSizeY();
+    const int32 PixelCount = Width * Height;
     TArray64<uint8> RawMipData;
     if (Width <= 0 || Height <= 0 || !Texture->Source.GetMipData(RawMipData, 0) ||
         RawMipData.Num() < static_cast<int64>(PixelCount) * static_cast<int64>(sizeof(FColor)))
@@ -1733,8 +1986,8 @@ bool SWetClothingTransparencyBakePanel::LoadBakedMapAsWorkingResult(
         return false;
     }
 
-    TSharedPtr<FDWCTransparencyAutoBakeResult> Result = MakeShared<FDWCTransparencyAutoBakeResult>();
-    const UWetClothingAsset*                   Asset = WetClothingAsset.Get();
+    TSharedPtr<FDWCTransparencySourcePayload> Result = MakeShared<FDWCTransparencySourcePayload>();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     Result->LayerGuid = Layer.LayerGuid;
     Result->MaterialSlotIndex = BakedMap.MaterialSlotIndex;
     Result->UVChannelIndex = Asset != nullptr ? Asset->GetDWCDataUVChannelIndex() : INDEX_NONE;
@@ -1783,15 +2036,12 @@ bool SWetClothingTransparencyBakePanel::LoadBakedMapAsWorkingResult(
 bool SWetClothingTransparencyBakePanel::EnsureFinalEditingWorkingMap()
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    const UWetClothingAsset*                 Asset = WetClothingAsset.Get();
-    const EDWCTransparencyEditorStage        Stage = GetCurrentStage();
-    if (Layer == nullptr ||
-        (Stage != EDWCTransparencyEditorStage::FinalEditing &&
-         Stage != EDWCTransparencyEditorStage::BakeOutput))
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Layer == nullptr || GetCurrentStage() != EDWCTransparencyEditorStage::FinalEditing)
     {
         return false;
     }
-    if (const TSharedPtr<FDWCTransparencyAutoBakeResult>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
+    if (const TSharedPtr<FDWCTransparencySourcePayload>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
         Existing != nullptr && Existing->IsValid())
     {
         return true;
@@ -1802,8 +2052,8 @@ bool SWetClothingTransparencyBakePanel::EnsureFinalEditingWorkingMap()
     {
         return false;
     }
-    TSharedPtr<FDWCTransparencyAutoBakeResult> LoadedResult;
-    FString                                    LoadError;
+    TSharedPtr<FDWCTransparencySourcePayload> LoadedResult;
+    FString LoadError;
     if (!LoadBakedMapAsWorkingResult(*BakedMap, *Layer, LoadedResult, LoadError))
     {
         StatusMessage = LoadError;
@@ -1820,89 +2070,34 @@ bool SWetClothingTransparencyBakePanel::EnsureFinalEditingWorkingMap()
     return true;
 }
 
-bool SWetClothingTransparencyBakePanel::EnsureManualRevealWorkingMap(const bool bForceRebuild)
+bool SWetClothingTransparencyBakePanel::EnsureRevealEditingWorkingMap()
 {
-    const UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset == nullptr || Layer == nullptr ||
-        (GetCurrentStage() != EDWCTransparencyEditorStage::MapGeneration &&
-         GetCurrentStage() != EDWCTransparencyEditorStage::FinalEditing))
+        GetCurrentStage() != EDWCTransparencyEditorStage::RevealEditing)
     {
         return false;
     }
 
-    if (!bForceRebuild)
+    if (const TSharedPtr<FDWCTransparencySourcePayload>* Existing =
+            AutoBakeResults.Find(Layer->LayerGuid);
+        Existing != nullptr && Existing->IsValid() &&
+        !(*Existing)->bIsFinalBakedBaseline)
     {
-        if (const TSharedPtr<FDWCTransparencyAutoBakeResult>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
-            Existing != nullptr && Existing->IsValid() && !(*Existing)->bIsFinalBakedBaseline)
-        {
-            return true;
-        }
+        return true;
     }
-    if (Layer->SourceType != EDWCTransparencySourceType::ManualColorOrTexture)
-    {
-        return false;
-    }
-
-    if (!HasUsableTransparencyDataUV())
-    {
-        StatusMessage = TEXT("Generate the DWC Data UV before editing Reveal Color.");
-        PanelStatus = EDWCTransparencyPanelStatus::Warning;
-        return false;
-    }
-    if (!PreviewSlotStates.IsReady(Layer->TargetSurface.OuterMaterialSlotIndex))
-    {
-        const FDWCEditorPreviewSlotState* State =
-            FindPreviewSlotState(Layer->TargetSurface.OuterMaterialSlotIndex);
-        StatusMessage = State != nullptr
-                            ? FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue).ToString()
-                            : TEXT("The selected Transparency Target Part is unavailable for preview.");
-        PanelStatus = EDWCTransparencyPanelStatus::Warning;
-        return false;
-    }
-
-    TArray<FString> ValidationErrors;
-    if (!FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
-            Asset->GetDWCSkeletalMesh(),
-            *Layer,
-            ValidationErrors,
-            ResolveTransparencyDataUVChannel(Asset)))
-    {
-        StatusMessage = FString::Join(ValidationErrors, TEXT("\n"));
-        PanelStatus = EDWCTransparencyPanelStatus::Warning;
-        return false;
-    }
-
-    TSharedPtr<FDWCTransparencyAutoBakeResult> Result = MakeShared<FDWCTransparencyAutoBakeResult>();
-    FString                                    Summary;
-    TArray<FString>                            Warnings;
-    if (!FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
-            *Asset, *Layer, *Result, Summary, Warnings))
-    {
-        StatusMessage = Summary;
-        PanelStatus = EDWCTransparencyPanelStatus::Warning;
-        return false;
-    }
-
-    // Stage 2 owns only an editor-session buffer.  Do not create a
-    // transaction, mutate bake metadata, dirty the asset, or change stages.
-    AutoBakeResults.Reset();
-    AutoBakeResults.Add(Layer->LayerGuid, MoveTemp(Result));
-    StatusMessage = Warnings.IsEmpty()
-                        ? TEXT("Reveal Color working map is ready.")
-                        : Summary;
-    PanelStatus = Warnings.IsEmpty()
-                      ? EDWCTransparencyPanelStatus::Ready
-                      : EDWCTransparencyPanelStatus::Warning;
-    return true;
+    StatusMessage = TEXT("The Stage 2 source working map is unavailable. Return to Stage 2 and generate it again.");
+    PanelStatus = EDWCTransparencyPanelStatus::Warning;
+    return false;
 }
 
 int32 SWetClothingTransparencyBakePanel::GetCurrentBaselineStrokeCount() const
 {
-    const TSharedPtr<FDWCTransparencyAutoBakeResult>* Result = AutoBakeResults.Find(SelectedLayerGuid);
+    const TSharedPtr<FDWCTransparencySourcePayload>* Result = AutoBakeResults.Find(SelectedLayerGuid);
     return Result != nullptr && Result->IsValid()
-               ? FMath::Max((*Result)->BaselineStrokeCount, 0)
-               : 0;
+        ? FMath::Max((*Result)->BaselineStrokeCount, 0)
+        : 0;
 }
 
 bool SWetClothingTransparencyBakePanel::SaveTransparencySetupAssets() const
@@ -1938,20 +2133,18 @@ void SWetClothingTransparencyBakePanel::HandleSourceClassChanged(const UClass* N
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::Preview |
-                    EDWCEditorAuthoringImpact::TransparencyAutoBake;
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::TransparencyAutoBake;
     if (!AuthoringDocument.IsValid() ||
         !AuthoringDocument->Edit(
-                              LOCTEXT("SetTransparencySourceBlueprint", "Set Transparency Source Blueprint"),
-                              Change,
-                              [NewSourceClass](UWetClothingAsset& MutableAsset)
-                              {
-                                  if (MutableAsset.Authored.TransparencyData.SourceBlueprintClass == NewSourceClass)
-                                      return false;
-                                  MutableAsset.Authored.TransparencyData.SourceBlueprintClass = NewSourceClass;
-                                  return true;
-                              })
-             .bChanged)
+            LOCTEXT("SetTransparencySourceBlueprint", "Set Transparency Source Blueprint"),
+            Change,
+            [NewSourceClass](UWetClothingAsset& MutableAsset)
+            {
+                if (MutableAsset.Authored.TransparencyData.SourceBlueprintClass == NewSourceClass) return false;
+                MutableAsset.Authored.TransparencyData.SourceBlueprintClass = NewSourceClass;
+                return true;
+            }).bChanged)
     {
         return;
     }
@@ -1969,13 +2162,50 @@ void SWetClothingTransparencyBakePanel::HandleSourceClassChanged(const UClass* N
     }
 }
 
+void SWetClothingTransparencyBakePanel::RefreshRevealEditingContent()
+{
+    RefreshRevealColorStrokeList();
+    if (RevealEditingContentContainer.IsValid())
+    {
+        RevealEditingContentContainer->SetContent(BuildRevealColorEditingSection());
+    }
+}
+
+FString SWetClothingTransparencyBakePanel::GetExternalSourceMeshPath() const
+{
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    return Layer != nullptr && Layer->ExternalMeshSource.SkeletalMesh != nullptr
+        ? Layer->ExternalMeshSource.SkeletalMesh->GetPathName()
+        : FString();
+}
+
+void SWetClothingTransparencyBakePanel::HandleExternalSourceMeshChanged(
+    const FAssetData& AssetData)
+{
+    USkeletalMesh* NewMesh = Cast<USkeletalMesh>(AssetData.GetAsset());
+    EditSelectedLayer(
+        LOCTEXT("SetTransparencyExternalMesh", "Set Transparency External Mesh"),
+        [NewMesh](FWetClothingTransparencyLayerData& Layer)
+        {
+            Layer.ExternalMeshSource.SkeletalMesh = NewMesh;
+            Layer.ExternalMeshSource.SourceSlotPriority.Reset();
+            Layer.MarkAutoBakeStale();
+            Layer.MarkFinalBakeStale();
+        },
+        true);
+    AutoBakeResults.Remove(SelectedLayerGuid);
+    RequestRefresh(
+        EDWCTransparencyPanelRefreshFlags::Model |
+        EDWCTransparencyPanelRefreshFlags::StageContent |
+        EDWCTransparencyPanelRefreshFlags::Viewport);
+}
+
 FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
 {
-    UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset != nullptr && Layer != nullptr &&
-        (Layer->SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots ||
-         Layer->SourceType == EDWCTransparencySourceType::ManualColorOrTexture))
+        IsSourceTypeAvailable(Layer->SourceType))
     {
         if (!HasUsableTransparencyDataUV())
         {
@@ -1990,8 +2220,8 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
             const FDWCEditorPreviewSlotState* State =
                 FindPreviewSlotState(Layer->TargetSurface.OuterMaterialSlotIndex);
             const FString Message = State != nullptr
-                                        ? FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue).ToString()
-                                        : TEXT("The selected Transparency Target Part is unavailable for preview.");
+                ? FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue).ToString()
+                : TEXT("The selected Transparency Target Part is unavailable for preview.");
             StatusMessage = Message;
             PanelStatus = EDWCTransparencyPanelStatus::Warning;
             FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Message));
@@ -2012,30 +2242,12 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
             return FReply::Handled();
         }
 
-        if (Layer->SourceType == EDWCTransparencySourceType::ManualColorOrTexture)
-        {
-            if (const TSharedPtr<FDWCTransparencyAutoBakeResult>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
-                Existing != nullptr && Existing->IsValid() &&
-                !(*Existing)->bIsFinalBakedBaseline)
-            {
-                // Type 3 has already authored its source color in the Stage 2
-                // working map. Generate is a stage transition here, not a
-                // second rasterization pass that would replace that work.
-                SelectedVisualizationMode = EDWCTransparencyVisualizationMode::Final;
-                DisableRevealPaintInSession();
-                StatusMessage = TEXT("Preview Transparency Map is ready for Stage 3 editing.");
-                PanelStatus = EDWCTransparencyPanelStatus::Ready;
-                SetCurrentStage(EDWCTransparencyEditorStage::FinalEditing);
-                return FReply::Handled();
-            }
-        }
-
-        TSharedPtr<FDWCTransparencyAutoBakeResult> Result = MakeShared<FDWCTransparencyAutoBakeResult>();
-        FString                                    Summary;
-        TArray<FString>                            Warnings;
-        const bool                                 bGenerated = Layer->SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots
-                                                                    ? FDWCTransparencyAutoMapGenerator::GenerateSameMesh(*Asset, *Layer, *Result, Summary, Warnings)
-                                                                    : FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(*Asset, *Layer, *Result, Summary, Warnings);
+        TSharedPtr<FDWCTransparencySourcePayload> Result = MakeShared<FDWCTransparencySourcePayload>();
+        FString Summary;
+        TArray<FString> Warnings;
+        const bool bGenerated = Layer->SourceType == EDWCTransparencySourceType::ManualColorOrTexture
+            ? FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(*Asset, *Layer, *Result, Summary, Warnings)
+            : FDWCTransparencyAutoMapGenerator::GenerateSameMesh(*Asset, *Layer, *Result, Summary, Warnings);
         if (!bGenerated)
         {
             FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
@@ -2045,36 +2257,59 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
         const FScopedTransaction Transaction(LOCTEXT("GenerateTransparencyAutoMap", "Generate Transparency Map"));
         Asset->Modify();
         Layer = GetSelectedLayer();
-        if (Layer == nullptr)
-            return FReply::Handled();
+        if (Layer == nullptr) return FReply::Handled();
         Layer->AutoBakeMetadata.AutoBakeGuid = FGuid::NewGuid();
         Layer->AutoBakeMetadata.BuildSignature = Result->BuildSignature;
         Layer->AutoBakeMetadata.Resolution = Result->Resolution.X;
         Layer->AutoBakeMetadata.PaddingPixels = Asset->Authored.TransparencyData.TransparencyPaddingPixels;
         Layer->AutoBakeMetadata.ValidHitCount = Result->ValidHitCount;
         Layer->AutoBakeMetadata.NoHitCount = Result->NoHitCount;
+
+        FString SourceSignature;
+        FString MaterialBakeSignature;
+        FString SignatureError;
+        if (!FDWCTransparencySignatureService::BuildSourceSignature(
+                *Asset,
+                *Layer,
+                SourceSignature,
+                MaterialBakeSignature,
+                SignatureError))
+        {
+            Warnings.Add(SignatureError);
+        }
+        else
+        {
+            Result->BuildSignature = SourceSignature;
+            Layer->AutoBakeMetadata.BuildSignature = SourceSignature;
+            FString TempStoreError;
+            if (!FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
+                    *Asset,
+                    *Layer,
+                    *Result,
+                    MaterialBakeSignature,
+                    TempStoreError))
+            {
+                Warnings.Add(FString::Printf(
+                    TEXT("The generated map is usable, but its editor Temp artifacts could not be updated: %s"),
+                    *TempStoreError));
+            }
+        }
         Layer->MarkFinalBakeStale();
         Asset->MarkPackageDirty();
         // Keep only the active layer's large CPU intermediate buffers in memory.
         AutoBakeResults.Reset();
         AutoBakeResults.Add(Layer->LayerGuid, Result);
-        const bool bRevealColorPaintWorkflow =
-            Layer->SourceType == EDWCTransparencySourceType::ManualColorOrTexture;
         const EDWCTransparencyEditorStage ResultStage =
-            EDWCTransparencyEditorStage::FinalEditing;
+            EDWCTransparencyEditorStage::RevealEditing;
         if (SessionStore.IsValid())
         {
-            SessionStore->Dispatch(FDWCSetTransparencyStageAction{ Layer->LayerGuid, ResultStage });
+            SessionStore->Dispatch(FDWCSetTransparencyStageAction{Layer->LayerGuid, ResultStage});
         }
         else
         {
             StageByLayer.FindOrAdd(Layer->LayerGuid) = ResultStage;
         }
-        if (bRevealColorPaintWorkflow)
-        {
-            SelectedVisualizationMode = EDWCTransparencyVisualizationMode::Final;
-            DisableRevealPaintInSession();
-        }
+        SelectedVisualizationMode = EDWCTransparencyVisualizationMode::InnerColor;
         // Generation can advance Stage 2 directly to Stage 3 without passing
         // through SetCurrentStage. Keep the controller's paint target in the
         // session authoritative for that direct transition as well.
@@ -2085,23 +2320,19 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
         // it can show an authored manual reveal color (or a ray-generated map).
         if (PreviewViewport.IsValid())
         {
-            // Manual reveal-color painting is surface editing. It must always
+            // Reveal-color painting is surface editing. It must always
             // use the single target mesh so the hit BVH and the displayed MID
             // describe the same selected material slot.
-            if (bRevealColorPaintWorkflow)
-            {
-                PreviewViewport->SetPreviewMode(EWetClothingTransparencyPreviewMode::TargetMeshOnly);
-            }
+            PreviewViewport->SetPreviewMode(EWetClothingTransparencyPreviewMode::TargetMeshOnly);
             PreviewViewport->SetAutoBakePreviewResult(Result);
         }
 
         for (const FDWCTransparencySourceHitStats& Stats : Result->SourceStats)
         {
             Summary += FString::Printf(TEXT("\n- Priority %d: %s (Slot %d) -> %d hit(s)"), Stats.PriorityIndex,
-                                       *Stats.MaterialSlotName.ToString(), Stats.MaterialSlotIndex, Stats.HitCount);
+                *Stats.MaterialSlotName.ToString(), Stats.MaterialSlotIndex, Stats.HitCount);
         }
-        if (!Warnings.IsEmpty())
-            Summary += TEXT("\n\nWarnings:\n- ") + FString::Join(Warnings, TEXT("\n- "));
+        if (!Warnings.IsEmpty()) Summary += TEXT("\n\nWarnings:\n- ") + FString::Join(Warnings, TEXT("\n- "));
         StatusMessage = Summary;
         PanelStatus = Warnings.IsEmpty() ? EDWCTransparencyPanelStatus::Ready : EDWCTransparencyPanelStatus::Warning;
         EDWCTransparencyPanelRefreshFlags RefreshFlags = EDWCTransparencyPanelRefreshFlags::Viewport;
@@ -2110,22 +2341,203 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
             EDWCTransparencyPanelRefreshFlags::Details;
         RequestRefresh(RefreshFlags);
         FMessageDialog::Open(Warnings.IsEmpty() ? EAppMsgCategory::Success : EAppMsgCategory::Warning,
-                             EAppMsgType::Ok, FText::FromString(Summary));
+            EAppMsgType::Ok, FText::FromString(Summary));
         return FReply::Handled();
     }
 
-    const FString Message =
-        TEXT("Packed Transparency Map generation for Other Skeletal Mesh Components is not implemented yet. "
-             "The legacy reveal-map/material fallback has been removed.");
-    StatusMessage = Message;
-    PanelStatus = EDWCTransparencyPanelStatus::Warning;
-    FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::Ok, FText::FromString(Message));
+    return FReply::Handled();
+}
+
+FReply SWetClothingTransparencyBakePanel::HandleContinueToFinalEditingClicked()
+{
+    if (!CanEnterRevealEditingStage())
+    {
+        StatusMessage = TEXT("The Reveal Color working map is unavailable. Return to Stage 2 and generate it again.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+        RequestRefresh(EDWCTransparencyPanelRefreshFlags::Viewport);
+        return FReply::Handled();
+    }
+
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    const TSharedPtr<FDWCTransparencySourcePayload>* StoredResult =
+        Layer != nullptr ? AutoBakeResults.Find(Layer->LayerGuid) : nullptr;
+    if (Asset == nullptr || Layer == nullptr || StoredResult == nullptr || !StoredResult->IsValid())
+    {
+        StatusMessage = TEXT("The Reveal Color stage could not commit because its source result is unavailable.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+        return FReply::Handled();
+    }
+
+    if (!WorkerJobScheduler.IsValid() || !PreviewViewport.IsValid())
+    {
+        StatusMessage = TEXT("The asynchronous reveal-color commit service is unavailable.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+        return FReply::Handled();
+    }
+    if (bRevealCommitInFlight)
+    {
+        return FReply::Handled();
+    }
+
+    const FGuid ExpectedLayerGuid = Layer->LayerGuid;
+    const int32 ExpectedSlot = Layer->TargetSurface.OuterMaterialSlotIndex;
+    const FString ExpectedSourceSignature = (*StoredResult)->BuildSignature;
+    const FString ExpectedRevealSignature = FDWCTransparencySignatureService::BuildRevealSignature(
+        (*StoredResult)->BuildSignature,
+        *Layer);
+    const uint64 ExpectedEpoch = ++RevealCommitEpoch;
+
+    FDWCEditorWorkerJobDescriptor Descriptor;
+    Descriptor.Key.Kind = EDWCEditorWorkerJobKind::TransparencyRevealColorCommit;
+    Descriptor.Key.MaterialSlotIndex = ExpectedSlot;
+    Descriptor.Key.LayerGuid = ExpectedLayerGuid;
+    Descriptor.Priority = EDWCEditorWorkerJobPriority::UserInitiated;
+    Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::LatestWins;
+    const uint64 PixelBytes = static_cast<uint64>((*StoredResult)->Resolution.X) *
+        (*StoredResult)->Resolution.Y * sizeof(FColor);
+    Descriptor.MemoryEstimate.ResidentSharedBytes = (*StoredResult)->InnerColorBuffer.GetAllocatedSize();
+    Descriptor.MemoryEstimate.OutputBytes = PixelBytes;
+    Descriptor.DebugName = FString::Printf(
+        TEXT("Transparency reveal commit slot %d"), ExpectedSlot);
+
+    bRevealCommitInFlight = true;
+    StatusMessage = TEXT("Committing the Stage 3 reveal-color corrections...");
+    PanelStatus = EDWCTransparencyPanelStatus::Info;
+
+    TWeakPtr<SWetClothingTransparencyBakePanel> WeakPanel = SharedThis(this);
+    FString SubmitError;
+    PendingRevealCommitTicket = WorkerJobScheduler->SubmitPrepared(
+        Descriptor,
+        [WeakPanel, ExpectedLayerGuid, ExpectedSlot, ExpectedEpoch](
+            const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken,
+            FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
+            FString& OutPrepareError)
+        {
+            const TSharedPtr<SWetClothingTransparencyBakePanel> Panel = WeakPanel.Pin();
+            if (!Panel.IsValid() || CancellationToken->IsCanceled() ||
+                Panel->RevealCommitEpoch != ExpectedEpoch ||
+                !Panel->PreviewViewport.IsValid())
+            {
+                OutPrepareError = TEXT("The reveal-color commit context changed before admission.");
+                return false;
+            }
+            const FWetClothingTransparencyLayerData* CurrentLayer = Panel->GetSelectedLayer();
+            if (CurrentLayer == nullptr || CurrentLayer->LayerGuid != ExpectedLayerGuid ||
+                CurrentLayer->TargetSurface.OuterMaterialSlotIndex != ExpectedSlot)
+            {
+                OutPrepareError = TEXT("The selected transparency layer changed before reveal commit.");
+                return false;
+            }
+
+            FDWCTransparencyRevealCommitJobInput Input;
+            if (!Panel->PreviewViewport->BuildRevealColorCommitInput(Input, OutPrepareError))
+            {
+                return false;
+            }
+            OutPrepared.ActualMemoryEstimate =
+                FDWCTransparencyRevealCommitWorker::EstimateMemory(Input);
+            OutPrepared.Work = [Input = MoveTemp(Input)](
+                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkerToken) mutable
+            {
+                return FDWCTransparencyRevealCommitWorker::Build(MoveTemp(Input), WorkerToken);
+            };
+            return true;
+        },
+        [WeakPanel, ExpectedLayerGuid, ExpectedSlot, ExpectedSourceSignature,
+         ExpectedRevealSignature, ExpectedEpoch](
+            const FDWCEditorWorkerJobTicket& CompletedTicket,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
+        {
+            const TSharedPtr<SWetClothingTransparencyBakePanel> Panel = WeakPanel.Pin();
+            const TSharedPtr<FDWCTransparencyRevealCommitJobResult, ESPMode::ThreadSafe> Result =
+                StaticCastSharedPtr<FDWCTransparencyRevealCommitJobResult>(BaseResult);
+            if (!Panel.IsValid() || Panel->RevealCommitEpoch != ExpectedEpoch ||
+                Panel->PendingRevealCommitTicket.JobId != CompletedTicket.JobId ||
+                Panel->PendingRevealCommitTicket.Generation != CompletedTicket.Generation)
+            {
+                return;
+            }
+            Panel->PendingRevealCommitTicket = {};
+            Panel->bRevealCommitInFlight = false;
+
+            UWetClothingAsset* CurrentAsset = Panel->WetClothingAsset.Get();
+            FWetClothingTransparencyLayerData* CurrentLayer = Panel->GetSelectedLayer();
+            const FString CurrentRevealSignature = CurrentLayer != nullptr
+                ? FDWCTransparencySignatureService::BuildRevealSignature(
+                    ExpectedSourceSignature, *CurrentLayer)
+                : FString();
+            if (!Result.IsValid() || !Result->bSucceeded || CurrentAsset == nullptr ||
+                CurrentLayer == nullptr || CurrentLayer->LayerGuid != ExpectedLayerGuid ||
+                CurrentLayer->TargetSurface.OuterMaterialSlotIndex != ExpectedSlot ||
+                Result->SourceSignature != ExpectedSourceSignature ||
+                CurrentRevealSignature != ExpectedRevealSignature)
+            {
+                Panel->StatusMessage = Result.IsValid() && !Result->Error.IsEmpty()
+                    ? Result->Error
+                    : TEXT("The reveal-color commit became stale before it could be applied.");
+                Panel->PanelStatus = EDWCTransparencyPanelStatus::Warning;
+                return;
+            }
+
+            FString CommitError;
+            if (!FDWCTransparencyTempAssetStore::CommitRevealArtifact(
+                    *CurrentAsset,
+                    *CurrentLayer,
+                    Result->CorrectedRevealPixels,
+                    Result->Resolution,
+                    ExpectedSourceSignature,
+                    ExpectedRevealSignature,
+                    CommitError))
+            {
+                Panel->StatusMessage = CommitError;
+                Panel->PanelStatus = EDWCTransparencyPanelStatus::Warning;
+                return;
+            }
+
+            CurrentAsset->MarkPackageDirty();
+            Panel->DisableRevealPaintInSession();
+            Panel->SetCurrentStage(EDWCTransparencyEditorStage::FinalEditing);
+        },
+        &SubmitError,
+        [WeakPanel, ExpectedEpoch](
+            const FDWCEditorWorkerJobTicket& FinishedTicket,
+            const EDWCEditorWorkerJobCompletion Completion,
+            const FString& Detail)
+        {
+            if (Completion == EDWCEditorWorkerJobCompletion::Applied)
+            {
+                return;
+            }
+            const TSharedPtr<SWetClothingTransparencyBakePanel> Panel = WeakPanel.Pin();
+            if (!Panel.IsValid() || Panel->RevealCommitEpoch != ExpectedEpoch ||
+                Panel->PendingRevealCommitTicket.JobId != FinishedTicket.JobId ||
+                Panel->PendingRevealCommitTicket.Generation != FinishedTicket.Generation)
+            {
+                return;
+            }
+            Panel->PendingRevealCommitTicket = {};
+            Panel->bRevealCommitInFlight = false;
+            Panel->StatusMessage = Detail.IsEmpty()
+                ? TEXT("The reveal-color commit did not complete.")
+                : Detail;
+            Panel->PanelStatus = EDWCTransparencyPanelStatus::Warning;
+        });
+
+    if (!PendingRevealCommitTicket.IsValid())
+    {
+        bRevealCommitInFlight = false;
+        StatusMessage = SubmitError.IsEmpty()
+            ? TEXT("The reveal-color commit could not be scheduled.")
+            : SubmitError;
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+    }
     return FReply::Handled();
 }
 
 FReply SWetClothingTransparencyBakePanel::HandleBakeEditedTransparencyMapClicked()
 {
-    UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset == nullptr || Layer == nullptr)
     {
@@ -2135,7 +2547,7 @@ FReply SWetClothingTransparencyBakePanel::HandleBakeEditedTransparencyMapClicked
         return FReply::Handled();
     }
 
-    const TSharedPtr<FDWCTransparencyAutoBakeResult>* StoredResult = AutoBakeResults.Find(Layer->LayerGuid);
+    const TSharedPtr<FDWCTransparencySourcePayload>* StoredResult = AutoBakeResults.Find(Layer->LayerGuid);
     if (StoredResult == nullptr || !StoredResult->IsValid())
     {
         FMessageDialog::Open(
@@ -2161,39 +2573,63 @@ FReply SWetClothingTransparencyBakePanel::HandleBakeEditedTransparencyMapClicked
 
     StatusMessage = TEXT("Baking the edited transparency map...");
     PanelStatus = EDWCTransparencyPanelStatus::Info;
-    const FGuid                                 LayerGuid = Layer->LayerGuid;
+    const FGuid LayerGuid = Layer->LayerGuid;
     TWeakPtr<SWetClothingTransparencyBakePanel> WeakPanel = SharedThis(this);
-    FString                                     RequestError;
-    if (!BakeCoordinator->RequestTransparencyFinalBake(
+    FString RequestError;
+    const bool bRequiresCanonicalRebuild = (*StoredResult)->bIsFinalBakedBaseline;
+    const auto Completion = [WeakPanel, LayerGuid](const FDWCEditorBakeBatchResult& Result)
+    {
+        const TSharedPtr<SWetClothingTransparencyBakePanel> Panel = WeakPanel.Pin();
+        if (!Panel.IsValid())
+        {
+            return;
+        }
+        if (Result.bSucceeded)
+        {
+            Panel->AutoBakeResults.Remove(LayerGuid);
+        }
+        Panel->StatusMessage = Result.Summary;
+        Panel->PanelStatus = Result.bSucceeded
+            ? EDWCTransparencyPanelStatus::Ready
+            : EDWCTransparencyPanelStatus::Warning;
+        Panel->RequestRefresh(
+            EDWCTransparencyPanelRefreshFlags::Model |
+            EDWCTransparencyPanelRefreshFlags::StageContent |
+            EDWCTransparencyPanelRefreshFlags::Viewport |
+            EDWCTransparencyPanelRefreshFlags::Details);
+        FMessageDialog::Open(
+            Result.bSucceeded ? EAppMsgCategory::Success : EAppMsgCategory::Warning,
+            EAppMsgType::Ok,
+            FText::FromString(Result.Summary));
+    };
+    TSharedPtr<const FDWCTransparencyAlphaWorkingSnapshot> AlphaSnapshot;
+    if (!bRequiresCanonicalRebuild && PreviewViewport.IsValid())
+    {
+        FDWCTransparencyAlphaWorkingSnapshot CapturedAlpha;
+        FString SnapshotError;
+        if (!PreviewViewport->BuildAlphaWorkingSnapshot(CapturedAlpha, SnapshotError))
+        {
+            StatusMessage = SnapshotError;
+            PanelStatus = EDWCTransparencyPanelStatus::Warning;
+            FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::Ok, FText::FromString(SnapshotError));
+            return FReply::Handled();
+        }
+        AlphaSnapshot = MakeShared<const FDWCTransparencyAlphaWorkingSnapshot>(MoveTemp(CapturedAlpha));
+    }
+    const bool bRequested = bRequiresCanonicalRebuild
+        ? BakeCoordinator->RequestTransparencyBake(
+            TArray<FGuid>{LayerGuid},
+            true,
+            Completion,
+            &RequestError)
+        : BakeCoordinator->RequestTransparencyFinalBake(
             LayerGuid,
             StoredResult->ToSharedRef(),
+            MoveTemp(AlphaSnapshot),
             true,
-            [WeakPanel, LayerGuid](const FDWCEditorBakeBatchResult& Result)
-            {
-                const TSharedPtr<SWetClothingTransparencyBakePanel> Panel = WeakPanel.Pin();
-                if (!Panel.IsValid())
-                {
-                    return;
-                }
-                if (Result.bSucceeded)
-                {
-                    Panel->AutoBakeResults.Remove(LayerGuid);
-                }
-                Panel->StatusMessage = Result.Summary;
-                Panel->PanelStatus = Result.bSucceeded
-                                         ? EDWCTransparencyPanelStatus::Ready
-                                         : EDWCTransparencyPanelStatus::Warning;
-                Panel->RequestRefresh(
-                    EDWCTransparencyPanelRefreshFlags::Model |
-                    EDWCTransparencyPanelRefreshFlags::StageContent |
-                    EDWCTransparencyPanelRefreshFlags::Viewport |
-                    EDWCTransparencyPanelRefreshFlags::Details);
-                FMessageDialog::Open(
-                    Result.bSucceeded ? EAppMsgCategory::Success : EAppMsgCategory::Warning,
-                    EAppMsgType::Ok,
-                    FText::FromString(Result.Summary));
-            },
-            &RequestError))
+            Completion,
+            &RequestError);
+    if (!bRequested)
     {
         StatusMessage = RequestError;
         PanelStatus = EDWCTransparencyPanelStatus::Warning;
@@ -2211,19 +2647,15 @@ FReply SWetClothingTransparencyBakePanel::HandleFocusPreviewClicked()
     return FReply::Handled();
 }
 
-FText       SWetClothingTransparencyBakePanel::GetStatusText() const { return FText::FromString(StatusMessage); }
+FText SWetClothingTransparencyBakePanel::GetStatusText() const { return FText::FromString(StatusMessage); }
 FSlateColor SWetClothingTransparencyBakePanel::GetStatusColor() const
 {
     switch (PanelStatus)
     {
-    case EDWCTransparencyPanelStatus::Ready:
-        return FSlateColor(FLinearColor(0.32f, 0.80f, 0.42f));
-    case EDWCTransparencyPanelStatus::Warning:
-        return FSlateColor(FLinearColor(0.95f, 0.68f, 0.20f));
-    case EDWCTransparencyPanelStatus::Error:
-        return FSlateColor(FLinearColor(0.95f, 0.30f, 0.25f));
-    default:
-        return FSlateColor::UseSubduedForeground();
+    case EDWCTransparencyPanelStatus::Ready: return FSlateColor(FLinearColor(0.32f, 0.80f, 0.42f));
+    case EDWCTransparencyPanelStatus::Warning: return FSlateColor(FLinearColor(0.95f, 0.68f, 0.20f));
+    case EDWCTransparencyPanelStatus::Error: return FSlateColor(FLinearColor(0.95f, 0.30f, 0.25f));
+    default: return FSlateColor::UseSubduedForeground();
     }
 }
 FText SWetClothingTransparencyBakePanel::GetGenerateTooltipText() const
@@ -2241,7 +2673,7 @@ FText SWetClothingTransparencyBakePanel::GetBakeEditedTooltipText() const
     {
         return LOCTEXT("BakeEditedSelectTargetTooltip", "Select a Transparency Target Part first.");
     }
-    const TSharedPtr<FDWCTransparencyAutoBakeResult>* Result = AutoBakeResults.Find(Layer->LayerGuid);
+    const TSharedPtr<FDWCTransparencySourcePayload>* Result = AutoBakeResults.Find(Layer->LayerGuid);
     if (Result == nullptr || !Result->IsValid())
     {
         return LOCTEXT("BakeEditedGenerateTooltip", "Generate a preview map or load an existing baked map before baking.");
@@ -2253,9 +2685,8 @@ FText SWetClothingTransparencyBakePanel::GetBakeEditedTooltipText() const
     }
     return LOCTEXT("BakeEditedReadyTooltip", "Bake the current working map and new brush edits into one packed RGBA Transparency Map.");
 }
-FText SWetClothingTransparencyBakePanel::GetInnerSourceStatusText() const { return FText::FromString(InnerSourceStatusMessage); }
 float SWetClothingTransparencyBakePanel::GetWetnessPreviewPercent() const { return WetnessPreviewPercent; }
-void  SWetClothingTransparencyBakePanel::HandleWetnessPreviewChanged(float InValue)
+void SWetClothingTransparencyBakePanel::HandleWetnessPreviewChanged(float InValue)
 {
     const float NewPercent = FMath::Clamp(InValue, 0.0f, 100.0f);
     if (FMath::IsNearlyEqual(WetnessPreviewPercent, NewPercent))
@@ -2299,6 +2730,7 @@ void SWetClothingTransparencyBakePanel::HandleShowSavedWrinkleChanged(
     bShowSavedWrinkle = NewState == ECheckBoxState::Checked;
     DispatchTransparencyPreviewState();
 }
+
 
 TOptional<float> SWetClothingTransparencyBakePanel::GetWrinkleSuppressionStrength() const
 {
@@ -2372,7 +2804,7 @@ ECheckBoxState SWetClothingTransparencyBakePanel::IsBrushModeChecked(const EDWCT
 }
 
 void SWetClothingTransparencyBakePanel::HandleBrushModeChanged(
-    const ECheckBoxState            NewState,
+    const ECheckBoxState NewState,
     const EDWCTransparencyBrushMode Mode)
 {
     if (NewState == ECheckBoxState::Checked)
@@ -2400,7 +2832,7 @@ TOptional<float> SWetClothingTransparencyBakePanel::GetBrushSpacing() const { re
 TOptional<float> SWetClothingTransparencyBakePanel::GetBrushTargetAlpha() const { return BrushTargetAlpha; }
 
 void SWetClothingTransparencyBakePanel::HandleBrushSizeChanged(
-    const float                           Value,
+    const float Value,
     const EDWCTransparencyBrushSizeTarget Target)
 {
     const float NewRadiusUV = DWCTransparencySizeCmToRadiusUV(Value);
@@ -2433,13 +2865,13 @@ void SWetClothingTransparencyBakePanel::HandleBrushSizeCommitted(
 }
 
 FReply SWetClothingTransparencyBakePanel::HandleBrushSizePresetClicked(
-    const float                           Value,
+    const float Value,
     const EDWCTransparencyBrushSizeTarget Target)
 {
     HandleBrushSizeChanged(Value, Target);
     TSharedPtr<SComboButton> ComboButton = Target == EDWCTransparencyBrushSizeTarget::RevealColorPaint
-                                               ? RevealPaintSizeComboButton
-                                               : TransparencyBrushSizeComboButton;
+        ? RevealPaintSizeComboButton
+        : TransparencyBrushSizeComboButton;
     if (ComboButton.IsValid())
     {
         ComboButton->SetIsOpen(false);
@@ -2521,28 +2953,25 @@ void SWetClothingTransparencyBakePanel::RefreshRevealColorStrokeList()
 
 FReply SWetClothingTransparencyBakePanel::HandleUndoLastStrokeClicked()
 {
-    if (AuthoringController.IsValid())
-        AuthoringController->CancelActiveInteraction(true);
-    UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    const int32                        BaselineStrokeCount = GetCurrentBaselineStrokeCount();
+    const int32 BaselineStrokeCount = GetCurrentBaselineStrokeCount();
     if (Asset == nullptr || Layer == nullptr || Layer->EditableStrokes.Num() <= BaselineStrokeCount)
     {
         return FReply::Handled();
     }
-    const FGuid                               StrokeGuid = Layer->EditableStrokes.Last().StrokeGuid;
-    const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = { Layer->EditableStrokes.Last() };
+    const FGuid StrokeGuid = Layer->EditableStrokes.Last().StrokeGuid;
+    const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = {Layer->EditableStrokes.Last()};
     if (!EditSelectedLayerFinal(
             LOCTEXT("RemoveLastTransparencyStroke", "Remove Last Transparency Stroke"),
             StrokeGuid,
             [BaselineStrokeCount](FWetClothingTransparencyLayerData& MutableLayer)
             {
-                if (MutableLayer.EditableStrokes.Num() <= BaselineStrokeCount)
-                    return false;
+                if (MutableLayer.EditableStrokes.Num() <= BaselineStrokeCount) return false;
                 MutableLayer.EditableStrokes.Pop();
                 return true;
-            }))
-        return FReply::Handled();
+            })) return FReply::Handled();
     if (PreviewViewport.IsValid())
     {
         PreviewViewport->ReplayAlphaStrokeHistory(InvalidatedStrokes);
@@ -2552,11 +2981,10 @@ FReply SWetClothingTransparencyBakePanel::HandleUndoLastStrokeClicked()
 
 FReply SWetClothingTransparencyBakePanel::HandleClearStrokesClicked()
 {
-    if (AuthoringController.IsValid())
-        AuthoringController->CancelActiveInteraction(true);
-    UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    const int32                        BaselineStrokeCount = GetCurrentBaselineStrokeCount();
+    const int32 BaselineStrokeCount = GetCurrentBaselineStrokeCount();
     if (Asset == nullptr || Layer == nullptr || Layer->EditableStrokes.Num() <= BaselineStrokeCount)
     {
         return FReply::Handled();
@@ -2570,14 +2998,12 @@ FReply SWetClothingTransparencyBakePanel::HandleClearStrokesClicked()
             FGuid(),
             [BaselineStrokeCount](FWetClothingTransparencyLayerData& MutableLayer)
             {
-                if (MutableLayer.EditableStrokes.Num() <= BaselineStrokeCount)
-                    return false;
+                if (MutableLayer.EditableStrokes.Num() <= BaselineStrokeCount) return false;
                 MutableLayer.EditableStrokes.RemoveAt(
                     BaselineStrokeCount,
                     MutableLayer.EditableStrokes.Num() - BaselineStrokeCount);
                 return true;
-            }))
-        return FReply::Handled();
+            })) return FReply::Handled();
     if (PreviewViewport.IsValid())
     {
         PreviewViewport->ReplayAlphaStrokeHistory(InvalidatedStrokes);
@@ -2587,9 +3013,8 @@ FReply SWetClothingTransparencyBakePanel::HandleClearStrokesClicked()
 
 FReply SWetClothingTransparencyBakePanel::HandleDeleteStrokeClicked(const FGuid StrokeGuid)
 {
-    if (AuthoringController.IsValid())
-        AuthoringController->CancelActiveInteraction(true);
-    UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset == nullptr || Layer == nullptr)
     {
@@ -2604,19 +3029,18 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteStrokeClicked(const FGuid 
     {
         return FReply::Handled();
     }
-    const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = { *Stroke };
+    const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = {*Stroke};
     if (!EditSelectedLayerFinal(
             LOCTEXT("DeleteTransparencyStroke", "Delete Transparency Stroke"),
             StrokeGuid,
             [StrokeGuid](FWetClothingTransparencyLayerData& MutableLayer)
             {
                 return MutableLayer.EditableStrokes.RemoveAll(
-                           [StrokeGuid](const FDWCTransparencyBrushStroke& Stroke)
-                           {
-                               return Stroke.StrokeGuid == StrokeGuid;
-                           }) > 0;
-            }))
-        return FReply::Handled();
+                    [StrokeGuid](const FDWCTransparencyBrushStroke& Stroke)
+                    {
+                        return Stroke.StrokeGuid == StrokeGuid;
+                    }) > 0;
+            })) return FReply::Handled();
     if (PreviewViewport.IsValid())
     {
         PreviewViewport->ReplayAlphaStrokeHistory(InvalidatedStrokes);
@@ -2626,22 +3050,20 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteStrokeClicked(const FGuid 
 
 void SWetClothingTransparencyBakePanel::HandleStrokeEnabledChanged(
     const ECheckBoxState NewState,
-    const FGuid          StrokeGuid)
+    const FGuid StrokeGuid)
 {
-    if (AuthoringController.IsValid())
-        AuthoringController->CancelActiveInteraction(true);
-    UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset == nullptr || Layer == nullptr)
     {
         return;
     }
     if (FDWCTransparencyBrushStroke* Stroke = Layer->EditableStrokes.FindByPredicate(
-            [StrokeGuid](const FDWCTransparencyBrushStroke& Candidate)
-            { return Candidate.StrokeGuid == StrokeGuid; }))
+            [StrokeGuid](const FDWCTransparencyBrushStroke& Candidate) { return Candidate.StrokeGuid == StrokeGuid; }))
     {
-        const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = { *Stroke };
-        const bool                                bEnabled = NewState == ECheckBoxState::Checked;
+        const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = {*Stroke};
+        const bool bEnabled = NewState == ECheckBoxState::Checked;
         if (!EditSelectedLayerFinal(
                 LOCTEXT("ToggleTransparencyStroke", "Toggle Transparency Stroke"),
                 StrokeGuid,
@@ -2652,12 +3074,10 @@ void SWetClothingTransparencyBakePanel::HandleStrokeEnabledChanged(
                         {
                             return Candidate.StrokeGuid == StrokeGuid;
                         });
-                    if (MutableStroke == nullptr || MutableStroke->bEnabled == bEnabled)
-                        return false;
+                    if (MutableStroke == nullptr || MutableStroke->bEnabled == bEnabled) return false;
                     MutableStroke->bEnabled = bEnabled;
                     return true;
-                }))
-            return;
+                })) return;
         if (PreviewViewport.IsValid())
         {
             PreviewViewport->ReplayAlphaStrokeHistory(InvalidatedStrokes);
@@ -2672,7 +3092,7 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::GenerateVisualizationMode
         Item.IsValid() ? *Item : EDWCTransparencyVisualizationMode::Final;
     return SNew(SBox)
         .IsEnabled(IsVisualizationModeAvailable(Mode))
-            [SNew(STextBlock).Text(GetVisualizationModeLabel(Mode))];
+        [SNew(STextBlock).Text(GetVisualizationModeLabel(Mode))];
 }
 
 void SWetClothingTransparencyBakePanel::HandleVisualizationModeChanged(
@@ -2697,20 +3117,13 @@ FText SWetClothingTransparencyBakePanel::GetVisualizationModeLabel(
 {
     switch (Mode)
     {
-    case EDWCTransparencyVisualizationMode::InnerColor:
-        return LOCTEXT("TransparencyViewInnerColor", "Inner Color");
-    case EDWCTransparencyVisualizationMode::AutoAlpha:
-        return LOCTEXT("TransparencyViewAutoAlpha", "Auto Alpha");
-    case EDWCTransparencyVisualizationMode::WrinkleSeparation:
-        return LOCTEXT("TransparencyViewWrinkleSeparation", "Wrinkle Separation");
-    case EDWCTransparencyVisualizationMode::ValidHit:
-        return LOCTEXT("TransparencyViewValidHit", "Valid Hit");
-    case EDWCTransparencyVisualizationMode::HitDistance:
-        return LOCTEXT("TransparencyViewHitDistance", "Hit Distance");
-    case EDWCTransparencyVisualizationMode::SourcePriority:
-        return LOCTEXT("TransparencyViewSourcePriority", "Source Priority");
-    default:
-        return LOCTEXT("TransparencyViewFinal", "Final");
+    case EDWCTransparencyVisualizationMode::InnerColor: return LOCTEXT("TransparencyViewInnerColor", "Inner Color");
+    case EDWCTransparencyVisualizationMode::AutoAlpha: return LOCTEXT("TransparencyViewAutoAlpha", "Auto Alpha");
+    case EDWCTransparencyVisualizationMode::WrinkleSeparation: return LOCTEXT("TransparencyViewWrinkleSeparation", "Wrinkle Separation");
+    case EDWCTransparencyVisualizationMode::ValidHit: return LOCTEXT("TransparencyViewValidHit", "Valid Hit");
+    case EDWCTransparencyVisualizationMode::HitDistance: return LOCTEXT("TransparencyViewHitDistance", "Hit Distance");
+    case EDWCTransparencyVisualizationMode::SourcePriority: return LOCTEXT("TransparencyViewSourcePriority", "Source Priority");
+    default: return LOCTEXT("TransparencyViewFinal", "Final");
     }
 }
 
@@ -2731,8 +3144,7 @@ ECheckBoxState SWetClothingTransparencyBakePanel::IsPreviewModeChecked(EWetCloth
 }
 void SWetClothingTransparencyBakePanel::HandlePreviewModeChanged(ECheckBoxState State, EWetClothingTransparencyPreviewMode Mode)
 {
-    if (AuthoringController.IsValid())
-        AuthoringController->CancelActiveInteraction(true);
+    if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
     if (State == ECheckBoxState::Checked && PreviewViewport.IsValid())
     {
         PreviewViewport->SetPreviewMode(Mode);
@@ -2742,36 +3154,32 @@ void SWetClothingTransparencyBakePanel::HandlePreviewModeChanged(ECheckBoxState 
 
 bool SWetClothingTransparencyBakePanel::IsGenerateEnabled() const
 {
-    const UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset == nullptr || Asset->GetDWCSkeletalMesh() == nullptr || Layer == nullptr ||
         Asset->Authored.TransparencyData.DataVersion != FWetClothingTransparencyData::CurrentDataVersion ||
-        !HasUsableTransparencyDataUV())
-        return false;
-    if (Layer->SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots ||
-        Layer->SourceType == EDWCTransparencySourceType::ManualColorOrTexture)
-    {
-        TArray<FString> Errors;
-        return PreviewSlotStates.IsReady(Layer->TargetSurface.OuterMaterialSlotIndex) &&
-               FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
-                   Asset->GetDWCSkeletalMesh(), *Layer, Errors, GetTransparencyDataUVChannel());
-    }
-    return false;
+        !HasUsableTransparencyDataUV()) return false;
+    if (!IsSourceTypeAvailable(Layer->SourceType)) return false;
+    if (Layer->SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents &&
+        Asset->Authored.TransparencyData.SourceBlueprintClass.IsNull()) return false;
+    TArray<FString> Errors;
+    return PreviewSlotStates.IsReady(Layer->TargetSurface.OuterMaterialSlotIndex) &&
+        FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
+            Asset->GetDWCSkeletalMesh(), *Layer, Errors, GetTransparencyDataUVChannel());
 }
 bool SWetClothingTransparencyBakePanel::IsBakeEditedEnabled() const
 {
-    const UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset == nullptr || Layer == nullptr ||
         Asset->Authored.TransparencyData.DataVersion != FWetClothingTransparencyData::CurrentDataVersion ||
-        (Layer->SourceType != EDWCTransparencySourceType::SameMeshMaterialSlots &&
-         Layer->SourceType != EDWCTransparencySourceType::ManualColorOrTexture) ||
+        !IsSourceTypeAvailable(Layer->SourceType) ||
         !HasUsableTransparencyDataUV() ||
         !PreviewSlotStates.IsReady(Layer->TargetSurface.OuterMaterialSlotIndex))
     {
         return false;
     }
-    const TSharedPtr<FDWCTransparencyAutoBakeResult>* Result = AutoBakeResults.Find(Layer->LayerGuid);
+    const TSharedPtr<FDWCTransparencySourcePayload>* Result = AutoBakeResults.Find(Layer->LayerGuid);
     if (Result == nullptr || !Result->IsValid())
     {
         return false;
@@ -2787,7 +3195,7 @@ bool SWetClothingTransparencyBakePanel::CanUseFullBlueprintPreview() const
 
 void SWetClothingTransparencyBakePanel::UpdateInnerSourceStatus()
 {
-    const UWetClothingAsset*                 Asset = WetClothingAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset == nullptr || Layer == nullptr)
     {
@@ -2804,35 +3212,37 @@ void SWetClothingTransparencyBakePanel::UpdateInnerSourceStatus()
         InnerSourceStatusMessage = TEXT("Base reveal color and Reveal Color Paint are written directly to the target DWC UV Channel. No ray projection is used.");
         return;
     }
+    if (Layer->SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh)
+    {
+        InnerSourceStatusMessage = Layer->ExternalMeshSource.SkeletalMesh != nullptr
+            ? TEXT("External mesh assigned. Empty source-slot priority uses every material slot.")
+            : TEXT("Assign an External Skeletal Mesh.");
+        return;
+    }
     if (Asset->Authored.TransparencyData.SourceBlueprintClass.IsNull())
     {
         InnerSourceStatusMessage = TEXT("Assign a Source Blueprint.");
         return;
     }
-    InnerSourceStatusMessage = TEXT("Source Blueprint assigned. Source mesh components will be validated when the map is generated.");
+    InnerSourceStatusMessage = TEXT("Source Blueprint assigned. Its Bake Component layers will be validated when the map is generated.");
 }
 
 FWetClothingTransparencyLayerData* SWetClothingTransparencyBakePanel::GetSelectedLayer()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     return Asset != nullptr ? Asset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
-                                  [this](const FWetClothingTransparencyLayerData& Layer)
-                                  { return Layer.LayerGuid == SelectedLayerGuid; })
-                            : nullptr;
+        [this](const FWetClothingTransparencyLayerData& Layer) { return Layer.LayerGuid == SelectedLayerGuid; }) : nullptr;
 }
 const FWetClothingTransparencyLayerData* SWetClothingTransparencyBakePanel::GetSelectedLayer() const
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     return Asset != nullptr ? Asset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
-                                  [this](const FWetClothingTransparencyLayerData& Layer)
-                                  { return Layer.LayerGuid == SelectedLayerGuid; })
-                            : nullptr;
+        [this](const FWetClothingTransparencyLayerData& Layer) { return Layer.LayerGuid == SelectedLayerGuid; }) : nullptr;
 }
 
 SWetClothingTransparencyBakePanel::FMaterialSlotItemPtr SWetClothingTransparencyBakePanel::FindMaterialSlotItem(int32 SlotIndex) const
 {
-    const FMaterialSlotItemPtr* Match = MaterialSlotItems.FindByPredicate([SlotIndex](const FMaterialSlotItemPtr& Item)
-                                                                          { return Item.IsValid() && Item->SlotIndex == SlotIndex; });
+    const FMaterialSlotItemPtr* Match = MaterialSlotItems.FindByPredicate([SlotIndex](const FMaterialSlotItemPtr& Item) { return Item.IsValid() && Item->SlotIndex == SlotIndex; });
     return Match != nullptr ? *Match : nullptr;
 }
 
@@ -2853,22 +3263,20 @@ bool SWetClothingTransparencyBakePanel::HasUsableTransparencyDataUV() const
 }
 TSharedPtr<int32> SWetClothingTransparencyBakePanel::FindUVChannelItem(int32 Index) const
 {
-    const TSharedPtr<int32>* Match = UVChannelItems.FindByPredicate([Index](const TSharedPtr<int32>& Item)
-                                                                    { return Item.IsValid() && *Item == Index; });
+    const TSharedPtr<int32>* Match = UVChannelItems.FindByPredicate([Index](const TSharedPtr<int32>& Item) { return Item.IsValid() && *Item == Index; });
     return Match != nullptr ? *Match : nullptr;
 }
 void SWetClothingTransparencyBakePanel::EditSelectedLayer(const FText& Text, TFunctionRef<void(FWetClothingTransparencyLayerData&)> Edit, bool bRebuild)
 {
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if (!AuthoringDocument.IsValid() || Layer == nullptr)
-        return;
-    const FGuid               LayerGuid = Layer->LayerGuid;
+    if (!AuthoringDocument.IsValid() || Layer == nullptr) return;
+    const FGuid LayerGuid = Layer->LayerGuid;
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::ElementList |
-                    EDWCEditorAuthoringImpact::Preview |
-                    EDWCEditorAuthoringImpact::TransparencyAutoBake;
+        EDWCEditorAuthoringImpact::ElementList |
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::TransparencyAutoBake;
     Change.MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     Change.LayerGuid = LayerGuid;
     const FDWCEditorAuthoringResult Result = AuthoringDocument->Edit(
@@ -2882,13 +3290,11 @@ void SWetClothingTransparencyBakePanel::EditSelectedLayer(const FText& Text, TFu
                     {
                         return Candidate.LayerGuid == LayerGuid;
                     });
-            if (MutableLayer == nullptr)
-                return false;
+            if (MutableLayer == nullptr) return false;
             Edit(*MutableLayer);
             return true;
         });
-    if (!Result.bChanged)
-        return;
+    if (!Result.bChanged) return;
     AutoBakeResults.Remove(LayerGuid);
     EDWCTransparencyPanelRefreshFlags RefreshFlags =
         EDWCTransparencyPanelRefreshFlags::Model |
@@ -2907,8 +3313,8 @@ void SWetClothingTransparencyBakePanel::EditSelectedLayer(const FText& Text, TFu
 }
 
 bool SWetClothingTransparencyBakePanel::EditSelectedLayerFinal(
-    const FText&                                           Text,
-    const FGuid&                                           ElementGuid,
+    const FText& Text,
+    const FGuid& ElementGuid,
     TFunctionRef<bool(FWetClothingTransparencyLayerData&)> Edit)
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
@@ -2917,41 +3323,39 @@ bool SWetClothingTransparencyBakePanel::EditSelectedLayerFinal(
         return false;
     }
 
-    const FGuid               LayerGuid = Layer->LayerGuid;
+    const FGuid LayerGuid = Layer->LayerGuid;
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::ElementList |
-                    EDWCEditorAuthoringImpact::PreviewIncremental |
-                    EDWCEditorAuthoringImpact::TransparencyFinalBake;
+        EDWCEditorAuthoringImpact::ElementList |
+        EDWCEditorAuthoringImpact::PreviewIncremental |
+        EDWCEditorAuthoringImpact::TransparencyFinalBake;
     Change.MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     Change.LayerGuid = LayerGuid;
     Change.ElementGuid = ElementGuid;
     return AuthoringDocument->Edit(
-                                Text,
-                                Change,
-                                [LayerGuid, &Edit](UWetClothingAsset& Asset)
-                                {
-                                    FWetClothingTransparencyLayerData* MutableLayer =
-                                        Asset.Authored.TransparencyData.TransparencyLayers.FindByPredicate(
-                                            [LayerGuid](const FWetClothingTransparencyLayerData& Candidate)
-                                            {
-                                                return Candidate.LayerGuid == LayerGuid;
-                                            });
-                                    return MutableLayer != nullptr && Edit(*MutableLayer);
-                                })
-        .bChanged;
+        Text,
+        Change,
+        [LayerGuid, &Edit](UWetClothingAsset& Asset)
+        {
+            FWetClothingTransparencyLayerData* MutableLayer =
+                Asset.Authored.TransparencyData.TransparencyLayers.FindByPredicate(
+                    [LayerGuid](const FWetClothingTransparencyLayerData& Candidate)
+                    {
+                        return Candidate.LayerGuid == LayerGuid;
+                    });
+            return MutableLayer != nullptr && Edit(*MutableLayer);
+        }).bChanged;
 }
 
 void SWetClothingTransparencyBakePanel::EditGlobalSettings(const FText& Text, TFunctionRef<void(FWetClothingTransparencyData&)> Edit)
 {
-    if (!AuthoringDocument.IsValid())
-        return;
+    if (!AuthoringDocument.IsValid()) return;
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::Preview |
-                    EDWCEditorAuthoringImpact::TransparencyAutoBake;
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::TransparencyAutoBake;
     const FDWCEditorAuthoringResult Result = AuthoringDocument->Edit(
         Text,
         Change,
@@ -2960,8 +3364,7 @@ void SWetClothingTransparencyBakePanel::EditGlobalSettings(const FText& Text, TF
             Edit(Asset.Authored.TransparencyData);
             return true;
         });
-    if (!Result.bChanged)
-        return;
+    if (!Result.bChanged) return;
     AutoBakeResults.Reset();
     RequestRefresh(
         EDWCTransparencyPanelRefreshFlags::Model |
@@ -2969,9 +3372,9 @@ void SWetClothingTransparencyBakePanel::EditGlobalSettings(const FText& Text, TF
 }
 
 void SWetClothingTransparencyBakePanel::EditFinalBakeSettings(
-    const FText&                                      Text,
+    const FText& Text,
     TFunctionRef<bool(FWetClothingTransparencyData&)> Edit,
-    const EDWCTransparencyFinalPreviewRefresh         PreviewRefresh)
+    const EDWCTransparencyFinalPreviewRefresh PreviewRefresh)
 {
     if (!AuthoringDocument.IsValid())
     {
@@ -2980,8 +3383,8 @@ void SWetClothingTransparencyBakePanel::EditFinalBakeSettings(
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::Preview |
-                    EDWCEditorAuthoringImpact::TransparencyFinalBake;
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::TransparencyFinalBake;
     const FDWCEditorAuthoringResult Result = AuthoringDocument->Edit(
         Text,
         Change,
@@ -2989,8 +3392,7 @@ void SWetClothingTransparencyBakePanel::EditFinalBakeSettings(
         {
             return Edit(Asset.Authored.TransparencyData);
         });
-    if (!Result.bChanged)
-        return;
+    if (!Result.bChanged) return;
     if (PreviewViewport.IsValid())
     {
         if (PreviewRefresh == EDWCTransparencyFinalPreviewRefresh::WrinkleSuppression)
@@ -3005,7 +3407,7 @@ void SWetClothingTransparencyBakePanel::EditFinalBakeSettings(
 }
 
 void SWetClothingTransparencyBakePanel::CommitTransparencyPreviewSettings(
-    const FText&                           Text,
+    const FText& Text,
     const FDWCTransparencyPreviewSettings& Settings)
 {
     if (!AuthoringDocument.IsValid())
@@ -3016,14 +3418,14 @@ void SWetClothingTransparencyBakePanel::CommitTransparencyPreviewSettings(
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::TransparencyFinalBake;
+        EDWCEditorAuthoringImpact::TransparencyFinalBake;
     AuthoringDocument->Edit(
         Text,
         Change,
         [&Settings](UWetClothingAsset& Asset)
         {
             FWetClothingTransparencyData& Data = Asset.Authored.TransparencyData;
-            const bool                    bChanged =
+            const bool bChanged =
                 !FMath::IsNearlyEqual(Data.TransparencyPreviewStrength, Settings.TransparencyStrength) ||
                 !FMath::IsNearlyEqual(Data.WrinkleSuppressionStrength, Settings.WrinkleSuppressionStrength) ||
                 !FMath::IsNearlyEqual(Data.WrinkleSuppressionCoverageThreshold, Settings.WrinkleMaskThreshold) ||
@@ -3044,39 +3446,75 @@ void SWetClothingTransparencyBakePanel::CommitTransparencyPreviewSettings(
 TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateLayerRow(FLayerItemPtr Item, const TSharedRef<STableViewBase>& Owner)
 {
     UMaterialInterface* Material = nullptr;
-    if (const UWetClothingAsset* Asset = WetClothingAsset.Get(); Asset != nullptr && Item.IsValid())
+    if (const UWetClothingAsset* Asset = WetClothingAsset.Get();
+        Asset != nullptr && Item.IsValid())
     {
-        if (const USkeletalMesh* Mesh = Asset->GetDWCSkeletalMesh(); Mesh != nullptr && Mesh->GetMaterials().IsValidIndex(Item->MaterialSlotIndex))
+        if (const USkeletalMesh* Mesh = Asset->GetDWCSkeletalMesh();
+            Mesh != nullptr && Mesh->GetMaterials().IsValidIndex(Item->MaterialSlotIndex))
         {
             Material = Mesh->GetMaterials()[Item->MaterialSlotIndex].MaterialInterface;
         }
     }
 
-    TSharedRef<SWidget> ThumbnailWidget = SNew(SBorder)
-                                              .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
-                                              .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
+    TSharedRef<SWidget> ThumbnailWidget =
+        SNew(SBorder)
+        .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+        .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
     if (Material != nullptr && ThumbnailPool.IsValid() && Item.IsValid())
     {
         TSharedPtr<FAssetThumbnail>& Thumbnail = MaterialSlotThumbnails.FindOrAdd(Item->MaterialSlotIndex);
         if (!Thumbnail.IsValid())
+        {
             Thumbnail = MakeShared<FAssetThumbnail>(Material, 48, 48, ThumbnailPool);
+        }
+
         FAssetThumbnailConfig ThumbnailConfig;
         ThumbnailConfig.bAllowFadeIn = false;
         ThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
     }
 
-    const FDWCEditorPreviewSlotState* PreviewState = Item.IsValid() ? FindPreviewSlotState(Item->MaterialSlotIndex) : nullptr;
-    const bool                        bPreviewReady = PreviewState != nullptr && PreviewState->bPreviewReady;
+    const FDWCEditorPreviewSlotState* PreviewState = Item.IsValid()
+        ? FindPreviewSlotState(Item->MaterialSlotIndex)
+        : nullptr;
+    const bool bPreviewReady = PreviewState != nullptr && PreviewState->bPreviewReady;
+    const FText PreviewTooltip = PreviewState != nullptr
+        ? FDWCEditorPreviewSlotResolver::GetIssueText(PreviewState->Issue)
+        : FText::GetEmpty();
 
-    // Unavailable target rows remain clickable so selecting one can explain
-    // exactly how to resolve the prerequisite. Keep the disabled appearance
-    // through render opacity instead of SWidget::IsEnabled(false), which would
-    // swallow the selection input before the warning dialog can be shown.
     return SNew(STableRow<FLayerItemPtr>, Owner)
-        .Padding(FMargin(2.0f, 3.0f))
-            [SNew(SBox)
-                 .RenderOpacity(bPreviewReady ? 1.0f : 0.45f)
-                     [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)[SNew(SBox).WidthOverride(52.0f).HeightOverride(52.0f)[ThumbnailWidget]] + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(2.0f, 0.0f, 10.0f, 0.0f)[SNew(STextBlock).Text(Item.IsValid() ? FText::Format(LOCTEXT("TransparencyTargetPartRow", "[{0}] {1}"), FText::AsNumber(Item->MaterialSlotIndex), FText::FromName(Item->MaterialSlotName)) : LOCTEXT("MissingTransparencyTargetPart", "Missing Target Part")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold"))).OverflowPolicy(ETextOverflowPolicy::Ellipsis)]]];
+        .Padding(4.0f)
+        .IsEnabled(bPreviewReady)
+        .ToolTipText(PreviewTooltip)
+        [SNew(SHorizontalBox)
+         + SHorizontalBox::Slot()
+               .AutoWidth()
+               .VAlign(VAlign_Center)
+               .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+               [SNew(SBox)
+                    .WidthOverride(52.0f)
+                    .HeightOverride(52.0f)
+                    [ThumbnailWidget]]
+         // Matches the Material Slots row layout without paying the cost of per-row UV previews.
+         + SHorizontalBox::Slot()
+               .AutoWidth()
+               .VAlign(VAlign_Center)
+               .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+               [SNew(SBox)
+                    .WidthOverride(52.0f)
+                    .HeightOverride(52.0f)]
+         + SHorizontalBox::Slot()
+               .FillWidth(1.0f)
+               .VAlign(VAlign_Center)
+               .Padding(2.0f, 0.0f, 10.0f, 0.0f)
+               [SNew(STextBlock)
+                    .Text(Item.IsValid()
+                              ? FText::Format(
+                                    LOCTEXT("TransparencyTargetPartRow", "[{0}] {1}"),
+                                    FText::AsNumber(Item->MaterialSlotIndex),
+                                    FText::FromName(Item->MaterialSlotName))
+                              : LOCTEXT("MissingTransparencyTargetPart", "Missing Target Part"))
+                    .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
+                    .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]];
 }
 
 void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPtr Item, ESelectInfo::Type)
@@ -3105,62 +3543,6 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
         return;
     }
 
-    // Stage 2 deliberately keeps unavailable Wettable rows clickable. Rather
-    // than hiding the reason in a tooltip, explain the prerequisite when the
-    // user selects the row and keep the previous valid selection unchanged.
-    if (!PreviewSlotStates.IsReady(Item->MaterialSlotIndex))
-    {
-        const FDWCEditorPreviewSlotState* State = FindPreviewSlotState(Item->MaterialSlotIndex);
-        FText                             WarningMessage;
-        if (State != nullptr)
-        {
-            switch (State->Issue)
-            {
-            case EDWCEditorPreviewSlotIssue::WetPartDataMissing:
-            case EDWCEditorPreviewSlotIssue::WetPartDataOutOfDate:
-            case EDWCEditorPreviewSlotIssue::SlotTextureMissing:
-            case EDWCEditorPreviewSlotIssue::SlotTextureOutOfDate:
-                WarningMessage = LOCTEXT(
-                    "TransparencyWetPartDataRequiredDialog",
-                    "This material slot is not ready for Transparency editing because its Wet Part Data is missing or out of date.\n\nUse Build for Runtime > Bake Render Profile Lookup Texture, then try again.");
-                break;
-            case EDWCEditorPreviewSlotIssue::MissingDataUV:
-                WarningMessage = LOCTEXT(
-                    "TransparencyDataUVRequiredDialog",
-                    "This material slot does not have usable DWC UV data. Build the DWC UV for this slot in Wet Part mode, then try again.");
-                break;
-            default:
-                WarningMessage = FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue);
-                break;
-            }
-        }
-        else
-        {
-            WarningMessage = LOCTEXT(
-                "TransparencyTargetUnavailableDialog",
-                "This material slot is not available for Transparency editing.");
-        }
-
-        FMessageDialog::Open(EAppMsgType::Ok, WarningMessage);
-
-        if (LayerListView.IsValid())
-        {
-            const FLayerItemPtr* PreviousItem = LayerItems.FindByPredicate(
-                [this](const FLayerItemPtr& Candidate)
-                {
-                    return SelectedLayerGuid.IsValid() &&
-                           Candidate.IsValid() &&
-                           Candidate->LayerGuid == SelectedLayerGuid;
-                });
-            bRefreshingLayerSelection = true;
-            PreviousItem != nullptr
-                ? LayerListView->SetSelection(*PreviousItem, ESelectInfo::Direct)
-                : LayerListView->ClearSelection();
-            bRefreshingLayerSelection = false;
-        }
-        return;
-    }
-
     const int32 DataUVChannel = GetTransparencyDataUVChannel();
     if (!Item->LayerGuid.IsValid())
     {
@@ -3176,30 +3558,40 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
             PanelStatus = EDWCTransparencyPanelStatus::Warning;
             return;
         }
-        const FGuid               NewLayerGuid = FGuid::NewGuid();
+        if (!PreviewSlotStates.IsReady(Item->MaterialSlotIndex))
+        {
+            const FDWCEditorPreviewSlotState* State = FindPreviewSlotState(Item->MaterialSlotIndex);
+            StatusMessage = State != nullptr
+                ? FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue).ToString()
+                : TEXT("The selected material slot is unavailable for preview.");
+            PanelStatus = EDWCTransparencyPanelStatus::Warning;
+            return;
+        }
+
+        const FGuid NewLayerGuid = FGuid::NewGuid();
         FDWCEditorAuthoringChange Change;
         Change.Domain = EDWCEditorAuthoringDomain::Transparency;
         Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                        EDWCEditorAuthoringImpact::ElementList |
-                        EDWCEditorAuthoringImpact::Preview |
-                        EDWCEditorAuthoringImpact::TransparencyAutoBake;
+            EDWCEditorAuthoringImpact::ElementList |
+            EDWCEditorAuthoringImpact::Preview |
+            EDWCEditorAuthoringImpact::TransparencyAutoBake;
         Change.MaterialSlotIndex = Item->MaterialSlotIndex;
         Change.LayerGuid = NewLayerGuid;
         if (!AuthoringDocument.IsValid() ||
             !AuthoringDocument->Edit(
-                                  LOCTEXT("CreateTransparencyTargetPart", "Create Transparency Target Part"),
-                                  Change,
-                                  [NewLayerGuid, SlotIndex = Item->MaterialSlotIndex, SlotName = Item->MaterialSlotName](UWetClothingAsset& MutableAsset)
-                                  {
-                                      FWetClothingTransparencyLayerData& NewLayer =
-                                          MutableAsset.Authored.TransparencyData.TransparencyLayers.AddDefaulted_GetRef();
-                                      NewLayer.LayerGuid = NewLayerGuid;
-                                      NewLayer.TargetSurface.OuterMaterialSlotIndex = SlotIndex;
-                                      NewLayer.TargetSurface.OuterMaterialSlotName = SlotName;
-                                      NewLayer.SourceType = MutableAsset.Authored.TransparencyData.CharacterStructureType;
-                                      return true;
-                                  })
-                 .bChanged)
+                LOCTEXT("CreateTransparencyTargetPart", "Create Transparency Target Part"),
+                Change,
+                [NewLayerGuid, SlotIndex = Item->MaterialSlotIndex, SlotName = Item->MaterialSlotName](UWetClothingAsset& MutableAsset)
+                {
+                    FWetClothingTransparencyLayerData& NewLayer =
+                        MutableAsset.Authored.TransparencyData.TransparencyLayers.AddDefaulted_GetRef();
+                    NewLayer.LayerGuid = NewLayerGuid;
+                    NewLayer.TargetSurface.OuterMaterialSlotIndex = SlotIndex;
+                    NewLayer.TargetSurface.OuterMaterialSlotName = SlotName;
+                    NewLayer.SourceType = MutableAsset.Authored.TransparencyData.CharacterStructureType;
+                    NewLayer.bSourceTypeConfigured = true;
+                    return true;
+                }).bChanged)
         {
             return;
         }
@@ -3207,10 +3599,10 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
     }
 
     const FWetClothingTransparencyLayerData* PreviousLayer = GetSelectedLayer();
-    const EDWCTransparencyEditorStage        PreviousStage = GetCurrentStage();
-    const EDWCTransparencySourceType         PreviousSourceType = PreviousLayer != nullptr
-                                                                      ? PreviousLayer->SourceType
-                                                                      : EDWCTransparencySourceType::SameMeshMaterialSlots;
+    const EDWCTransparencyEditorStage PreviousStage = GetCurrentStage();
+    const EDWCTransparencySourceType PreviousSourceType = PreviousLayer != nullptr
+        ? PreviousLayer->SourceType
+        : EDWCTransparencySourceType::SameMeshMaterialSlots;
     if (SelectedLayerGuid != Item->LayerGuid)
     {
         // Full 2048 intermediate results are intentionally scoped to the active target part.
@@ -3219,31 +3611,30 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
     SelectedLayerGuid = Item->LayerGuid;
     if (SessionStore.IsValid())
     {
-        SessionStore->Dispatch(FDWCSelectTransparencyLayerAction{ SelectedLayerGuid });
+        SessionStore->Dispatch(FDWCSelectTransparencyLayerAction{SelectedLayerGuid});
     }
     if (PreviousStage == EDWCTransparencyEditorStage::MapGeneration)
     {
-        StageByLayer.FindOrAdd(SelectedLayerGuid) = EDWCTransparencyEditorStage::MapGeneration;
         if (SessionStore.IsValid())
         {
             SessionStore->Dispatch(FDWCSetTransparencyStageAction{
                 SelectedLayerGuid,
-                EDWCTransparencyEditorStage::MapGeneration });
+                EDWCTransparencyEditorStage::MapGeneration});
+        }
+        else
+        {
+            StageByLayer.FindOrAdd(SelectedLayerGuid) = EDWCTransparencyEditorStage::MapGeneration;
         }
     }
     DispatchTransparencyEditContext();
     const FWetClothingTransparencyLayerData* NewLayer = GetSelectedLayer();
-    const bool                               bNeedsStageContentRefresh = NewLayer == nullptr ||
-                                           PreviousLayer == nullptr ||
-                                           PreviousSourceType != NewLayer->SourceType ||
-                                           PreviousStage != GetCurrentStage();
+    const bool bNeedsStageContentRefresh = NewLayer == nullptr ||
+        PreviousLayer == nullptr ||
+        PreviousSourceType != NewLayer->SourceType ||
+        PreviousStage != GetCurrentStage();
     if (LayerListView.IsValid())
     {
         LayerListView->RequestListRefresh();
-    }
-    if (GetCurrentStage() == EDWCTransparencyEditorStage::MapGeneration)
-    {
-        RefreshMapGenerationSettings();
     }
 
     EDWCTransparencyPanelRefreshFlags RefreshFlags = EDWCTransparencyPanelRefreshFlags::Viewport;
@@ -3260,40 +3651,37 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
 FReply SWetClothingTransparencyBakePanel::HandleRemoveLayerClicked()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !SelectedLayerGuid.IsValid())
-        return FReply::Handled();
+    if (Asset == nullptr || !SelectedLayerGuid.IsValid()) return FReply::Handled();
     if (FMessageDialog::Open(EAppMsgType::YesNo, LOCTEXT("RemoveTransparencyLayerConfirm", "Remove the selected Transparency Target Part and its editable strokes?")) != EAppReturnType::Yes)
         return FReply::Handled();
-    const FGuid               RemovedLayerGuid = SelectedLayerGuid;
-    const int32               RemovedSlot = GetSelectedLayer()->TargetSurface.OuterMaterialSlotIndex;
+    const FGuid RemovedLayerGuid = SelectedLayerGuid;
+    const int32 RemovedSlot = GetSelectedLayer()->TargetSurface.OuterMaterialSlotIndex;
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::ElementList |
-                    EDWCEditorAuthoringImpact::Preview |
-                    EDWCEditorAuthoringImpact::TransparencyAutoBake;
+        EDWCEditorAuthoringImpact::ElementList |
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::TransparencyAutoBake;
     Change.MaterialSlotIndex = RemovedSlot;
     Change.LayerGuid = RemovedLayerGuid;
     if (!AuthoringDocument.IsValid() ||
         !AuthoringDocument->Edit(
-                              LOCTEXT("RemoveTransparencyLayer", "Remove Transparency Target Part"),
-                              Change,
-                              [RemovedLayerGuid](UWetClothingAsset& MutableAsset)
-                              {
-                                  return MutableAsset.Authored.TransparencyData.TransparencyLayers.RemoveAll(
-                                             [RemovedLayerGuid](const FWetClothingTransparencyLayerData& Layer)
-                                             {
-                                                 return Layer.LayerGuid == RemovedLayerGuid;
-                                             }) > 0;
-                              })
-             .bChanged)
-        return FReply::Handled();
+            LOCTEXT("RemoveTransparencyLayer", "Remove Transparency Target Part"),
+            Change,
+            [RemovedLayerGuid](UWetClothingAsset& MutableAsset)
+            {
+                return MutableAsset.Authored.TransparencyData.TransparencyLayers.RemoveAll(
+                    [RemovedLayerGuid](const FWetClothingTransparencyLayerData& Layer)
+                    {
+                        return Layer.LayerGuid == RemovedLayerGuid;
+                    }) > 0;
+            }).bChanged) return FReply::Handled();
     AutoBakeResults.Remove(RemovedLayerGuid);
     StageByLayer.Remove(RemovedLayerGuid);
     SelectedLayerGuid.Invalidate();
     if (SessionStore.IsValid())
     {
-        SessionStore->Dispatch(FDWCSelectTransparencyLayerAction{ FGuid() });
+        SessionStore->Dispatch(FDWCSelectTransparencyLayerAction{FGuid()});
     }
     RequestRefresh(
         EDWCTransparencyPanelRefreshFlags::Model |
@@ -3304,11 +3692,6 @@ FReply SWetClothingTransparencyBakePanel::HandleRemoveLayerClicked()
 bool SWetClothingTransparencyBakePanel::CanRemoveSelectedLayer() const { return GetSelectedLayer() != nullptr; }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::GenerateUVChannelComboItem(TSharedPtr<int32> Item) const { return SNew(STextBlock).Text(FText::Format(LOCTEXT("UVChannelLabel", "UV {0}"), FText::AsNumber(Item.IsValid() ? *Item : 0))); }
-FText               SWetClothingTransparencyBakePanel::GetMaterialSlotLabel(int32 Index) const
-{
-    const FMaterialSlotItemPtr Item = FindMaterialSlotItem(Index);
-    return Item.IsValid() ? FText::Format(LOCTEXT("MaterialSlotLabel", "Slot {0} / {1}"), FText::AsNumber(Index), FText::FromName(Item->SlotName)) : LOCTEXT("NoMaterialSlot", "None");
-}
 bool SWetClothingTransparencyBakePanel::IsVisualizationModeAvailable(
     const EDWCTransparencyVisualizationMode Mode) const
 {
@@ -3319,52 +3702,41 @@ bool SWetClothingTransparencyBakePanel::IsVisualizationModeAvailable(
     {
         return true;
     }
-    const TSharedPtr<FDWCTransparencyAutoBakeResult>* Result = AutoBakeResults.Find(SelectedLayerGuid);
+    const TSharedPtr<FDWCTransparencySourcePayload>* Result = AutoBakeResults.Find(SelectedLayerGuid);
     return Result != nullptr && Result->IsValid() && !(*Result)->bIsFinalBakedBaseline;
 }
 FReply SWetClothingTransparencyBakePanel::HandleAddInnerSlotClicked()
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if (Layer == nullptr)
-        return FReply::Handled();
+    if (Layer == nullptr) return FReply::Handled();
     int32 SlotIndex = INDEX_NONE;
     for (const FMaterialSlotItemPtr& Item : MaterialSlotItems)
     {
-        if (!Item.IsValid() || Item->SlotIndex == Layer->TargetSurface.OuterMaterialSlotIndex)
-            continue;
-        if (!Layer->SameMeshSource.InnerSlotPriority.ContainsByPredicate([Item](const auto& Slot)
-                                                                         { return Slot.MaterialSlotIndex == Item->SlotIndex; }))
-        {
-            SlotIndex = Item->SlotIndex;
-            break;
-        }
+        if (!Item.IsValid() || Item->SlotIndex == Layer->TargetSurface.OuterMaterialSlotIndex) continue;
+        if (!Layer->SameMeshSource.InnerSlotPriority.ContainsByPredicate([Item](const auto& Slot) { return Slot.MaterialSlotIndex == Item->SlotIndex; })) { SlotIndex = Item->SlotIndex; break; }
     }
-    if (SlotIndex == INDEX_NONE)
-        return FReply::Handled();
+    if (SlotIndex == INDEX_NONE) return FReply::Handled();
     const FMaterialSlotItemPtr Item = FindMaterialSlotItem(SlotIndex);
     EditSelectedLayer(LOCTEXT("AddTransparencyInnerSlot", "Add Transparency Inner Material Slot"), [Item](auto& TargetLayer)
-                      {
+    {
         auto& Slot = TargetLayer.SameMeshSource.InnerSlotPriority.AddDefaulted_GetRef();
+        Slot.bEnabled = true;
         Slot.MaterialSlotIndex = Item->SlotIndex;
-        Slot.MaterialSlotName = Item->SlotName; }, true);
+        Slot.MaterialSlotName = Item->SlotName;
+    }, true);
     return FReply::Handled();
 }
 FReply SWetClothingTransparencyBakePanel::HandleRemoveInnerSlotClicked(int32 Index)
 {
-    EditSelectedLayer(LOCTEXT("RemoveTransparencyInnerSlot", "Remove Transparency Inner Material Slot"), [Index](auto& Layer)
-                      { if (Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(Index)) Layer.SameMeshSource.InnerSlotPriority.RemoveAt(Index); }, true);
-    return FReply::Handled();
+    EditSelectedLayer(LOCTEXT("RemoveTransparencyInnerSlot", "Remove Transparency Inner Material Slot"), [Index](auto& Layer) { if (Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(Index)) Layer.SameMeshSource.InnerSlotPriority.RemoveAt(Index); }, true); return FReply::Handled();
 }
 FReply SWetClothingTransparencyBakePanel::HandleMoveInnerSlotClicked(int32 Index, int32 Direction)
 {
-    EditSelectedLayer(LOCTEXT("MoveTransparencyInnerSlot", "Reorder Transparency Inner Material Slot"), [Index, Direction](auto& Layer)
-                      { const int32 To = Index + Direction; if (Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(Index) && Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(To)) Layer.SameMeshSource.InnerSlotPriority.Swap(Index, To); }, true);
-    return FReply::Handled();
+    EditSelectedLayer(LOCTEXT("MoveTransparencyInnerSlot", "Reorder Transparency Inner Material Slot"), [Index, Direction](auto& Layer) { const int32 To = Index + Direction; if (Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(Index) && Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(To)) Layer.SameMeshSource.InnerSlotPriority.Swap(Index, To); }, true); return FReply::Handled();
 }
 void SWetClothingTransparencyBakePanel::HandleInnerMaterialSlotChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type, int32 Index)
 {
-    if (!Item.IsValid())
-        return;
+    if (!Item.IsValid()) return;
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Layer == nullptr || Item->SlotIndex == Layer->TargetSurface.OuterMaterialSlotIndex ||
         Layer->SameMeshSource.InnerSlotPriority.ContainsByPredicate(
@@ -3379,36 +3751,38 @@ void SWetClothingTransparencyBakePanel::HandleInnerMaterialSlotChanged(FMaterial
     }
     // The row thumbnail is material-specific, so rebuild only this Stage 2
     // content after a valid source material change.
-    EditSelectedLayer(LOCTEXT("SetTransparencyInnerSlot", "Set Transparency Inner Material Slot"), [Item, Index](auto& Layer)
-                      { if (Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(Index)) { auto& Slot = Layer.SameMeshSource.InnerSlotPriority[Index]; Slot.MaterialSlotIndex = Item->SlotIndex; Slot.MaterialSlotName = Item->SlotName; } }, true);
+    EditSelectedLayer(LOCTEXT("SetTransparencyInnerSlot", "Set Transparency Inner Material Slot"), [Item, Index](auto& Layer) { if (Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(Index)) { auto& Slot = Layer.SameMeshSource.InnerSlotPriority[Index]; Slot.MaterialSlotIndex = Item->SlotIndex; Slot.MaterialSlotName = Item->SlotName; } }, true);
 }
 void SWetClothingTransparencyBakePanel::HandleInnerUVChannelChanged(TSharedPtr<int32> Item, ESelectInfo::Type, int32 Index)
 {
-    if (!Item.IsValid())
-        return;
-    EditSelectedLayer(LOCTEXT("SetTransparencyInnerUV", "Set Transparency Inner UV Channel"), [Item, Index](auto& Layer)
-                      { if (Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(Index)) Layer.SameMeshSource.InnerSlotPriority[Index].SourceUVChannel = *Item; }, false);
+    if (!Item.IsValid()) return;
+    EditSelectedLayer(LOCTEXT("SetTransparencyInnerUV", "Set Transparency Inner UV Channel"), [Item, Index](auto& Layer) { if (Layer.SameMeshSource.InnerSlotPriority.IsValidIndex(Index)) Layer.SameMeshSource.InnerSlotPriority[Index].SourceUVChannel = *Item; }, false);
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildControlPanel()
 {
     return SNew(SBorder).Padding(12.0f).BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-        [SAssignNew(ControlPanelScrollBox, SScrollBox) + SScrollBox::Slot()[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 18)[BuildStageNavigation()] + SVerticalBox::Slot().AutoHeight()[SAssignNew(StageContentSwitcher, SWidgetSwitcher) + SWidgetSwitcher::Slot()[BuildStructureSetupStage()] + SWidgetSwitcher::Slot()[BuildMapGenerationStage()] + SWidgetSwitcher::Slot()[BuildFinalEditingStage()] + SWidgetSwitcher::Slot()[BuildBakeOutputStage()]]]];
+        [SAssignNew(ControlPanelScrollBox, SScrollBox) + SScrollBox::Slot()[SNew(SVerticalBox)
+         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[BuildTargetMeshSection()]
+         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[BuildStageNavigation()]
+         + SVerticalBox::Slot().AutoHeight()
+           [SAssignNew(StageContentSwitcher, SWidgetSwitcher)
+             + SWidgetSwitcher::Slot()[BuildStructureSetupStage()]
+             + SWidgetSwitcher::Slot()[BuildMapGenerationStage()]
+             + SWidgetSwitcher::Slot()[BuildRevealEditingStage()]
+             + SWidgetSwitcher::Slot()[BuildFinalEditingStage()]]]];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildStageNavigation()
 {
     auto StageButton = [this](const EDWCTransparencyEditorStage Stage, const FText& Label, const FText& Tooltip)
     {
-        return SNew(SBox)
-            .HeightOverride(34.0f)
-                [SNew(SCheckBox)
-                     .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
-                     .Type(ESlateCheckBoxType::ToggleButton)
-                     .HAlign(HAlign_Center)
-                     .ToolTipText(Tooltip)
-                     .IsEnabled_Lambda([this, Stage]()
-                                       {
+        return SNew(SCheckBox)
+            .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
+            .Type(ESlateCheckBoxType::ToggleButton)
+            .ToolTipText(Tooltip)
+            .IsEnabled_Lambda([this, Stage]()
+            {
                 const UWetClothingAsset* Asset = WetClothingAsset.Get();
                 if (Asset == nullptr)
                 {
@@ -3422,118 +3796,283 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildStageNavigation()
                 {
                     // Stage 2 is a user-driven transition, not a side effect
                     // of choosing a character structure type in Stage 1.
-                    return Asset->Authored.TransparencyData.bCharacterStructureTypeConfigured &&
+                    return !HasDirtySourceTypeDraft() &&
+                        Asset->Authored.TransparencyData.bCharacterStructureTypeConfigured &&
                         GetCurrentStage() != EDWCTransparencyEditorStage::StructureSetup;
                 }
-                return CanEnterFinalEditingStage(); })
-                     .IsChecked(this, &SWetClothingTransparencyBakePanel::IsStageChecked, Stage)
-                     .OnCheckStateChanged_Lambda([this, Stage](const ECheckBoxState State)
-                                                 {
+                if (Stage == EDWCTransparencyEditorStage::RevealEditing)
+                {
+                    return !HasDirtySourceTypeDraft() && CanEnterRevealEditingStage();
+                }
+                return !HasDirtySourceTypeDraft() && CanEnterFinalEditingStage();
+            })
+            .IsChecked(this, &SWetClothingTransparencyBakePanel::IsStageChecked, Stage)
+            .OnCheckStateChanged_Lambda([this, Stage](const ECheckBoxState State)
+            {
                 if (State == ECheckBoxState::Checked)
                 {
                     HandleStageClicked(Stage);
-                } })
-                         [SNew(SBox)
-                              .HAlign(HAlign_Center)
-                              .VAlign(VAlign_Center)
-                                  [SNew(STextBlock).Text(Label).Justification(ETextJustify::Center)]]];
+                }
+            })
+            [SNew(STextBlock).Text(Label).Justification(ETextJustify::Center)];
     };
 
-    return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TransparencyWorkflow", "Transparency Workflow"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1).Padding(0, 0, 3, 0)[StageButton(EDWCTransparencyEditorStage::StructureSetup, LOCTEXT("TransparencyStage1", "1. Structure"), LOCTEXT("TransparencyStage1Tooltip", "Choose how the inner color source is produced."))] + SHorizontalBox::Slot().FillWidth(1).Padding(0, 0, 3, 0)[StageButton(EDWCTransparencyEditorStage::MapGeneration, LOCTEXT("TransparencyStage2", "2. Generate"), LOCTEXT("TransparencyStage2Tooltip", "Configure the source and generate an editable preview map."))] + SHorizontalBox::Slot().FillWidth(1).Padding(0, 0, 3, 0)[StageButton(EDWCTransparencyEditorStage::FinalEditing, LOCTEXT("TransparencyStage3", "3. Reveal Color"), LOCTEXT("TransparencyStage3Tooltip", "Edit the reveal color visible through wet target surfaces."))] + SHorizontalBox::Slot().FillWidth(1)[StageButton(EDWCTransparencyEditorStage::BakeOutput, LOCTEXT("TransparencyStage4", "4. Alpha & Bake"), LOCTEXT("TransparencyStage4Tooltip", "Edit alpha and bake the runtime Transparency Map."))]];
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TransparencyWorkflow", "Transparency Workflow"))]
+        + SVerticalBox::Slot().AutoHeight()
+          [SNew(SHorizontalBox)
+            + SHorizontalBox::Slot().FillWidth(1).Padding(0,0,3,0)
+              [StageButton(
+                  EDWCTransparencyEditorStage::StructureSetup,
+                  LOCTEXT("TransparencyStage1", "1. Structure"),
+                  LOCTEXT("TransparencyStage1Tooltip", "Choose how the inner color source is produced."))]
+            + SHorizontalBox::Slot().FillWidth(1).Padding(0,0,3,0)
+              [StageButton(
+                  EDWCTransparencyEditorStage::MapGeneration,
+                  LOCTEXT("TransparencyStage2", "2. Generate"),
+                  LOCTEXT("TransparencyStage2Tooltip", "Configure the source and generate an editable preview map."))]
+            + SHorizontalBox::Slot().FillWidth(1).Padding(0,0,3,0)
+              [StageButton(
+                  EDWCTransparencyEditorStage::RevealEditing,
+                  LOCTEXT("TransparencyStage3", "3. Reveal Color"),
+                  LOCTEXT("TransparencyStage3Tooltip", "Review and paint the reveal color produced by Stage 2."))]
+            + SHorizontalBox::Slot().FillWidth(1)
+              [StageButton(
+                  EDWCTransparencyEditorStage::FinalEditing,
+                  LOCTEXT("TransparencyStage4", "4. Alpha & Bake"),
+                  LOCTEXT("TransparencyStage4Tooltip", "Edit alpha and bake the runtime Transparency Map."))]];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildSourceTypeCard(
     const EDWCTransparencySourceType SourceType,
-    const FText&                     Title,
-    const FText&                     Description,
-    const FText&                     Availability)
+    const FText& Title,
+    const FText& Description,
+    const FText& Availability)
 {
     return SNew(SCheckBox)
         .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
         .Type(ESlateCheckBoxType::ToggleButton)
         .IsEnabled_Lambda([this, SourceType]()
-                          { return IsSourceTypeAvailable(SourceType); })
+        {
+            return IsSourceTypeAvailable(SourceType);
+        })
         .IsChecked(this, &SWetClothingTransparencyBakePanel::IsSourceTypeCardChecked, SourceType)
         .OnCheckStateChanged_Lambda([this, SourceType](const ECheckBoxState State)
-                                    {
+        {
             if (State == ECheckBoxState::Checked)
             {
                 HandleSourceTypeCardClicked(SourceType);
-            } })
-            [SNew(SBox).Padding(FMargin(8, 6))
-                 [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1)[SNew(STextBlock).Text(Title).Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))] + SHorizontalBox::Slot().AutoWidth()[SNew(STextBlock).Text(Availability).ColorAndOpacity(FSlateColor::UseSubduedForeground())]] + SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)[SNew(STextBlock).Text(Description).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())]]];
+            }
+        })
+        [SNew(SBox).Padding(FMargin(8,6))
+          [SNew(SVerticalBox)
+            + SVerticalBox::Slot().AutoHeight()
+              [SNew(SHorizontalBox)
+                + SHorizontalBox::Slot().FillWidth(1)
+                  [SNew(STextBlock).Text(Title).Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
+                + SHorizontalBox::Slot().AutoWidth()
+                  [SNew(STextBlock)
+                    .Text_Lambda([this, SourceType, Availability]()
+                    {
+                        return GetSourceTypeCardStatusText(SourceType, Availability);
+                    })
+                    .ColorAndOpacity(FSlateColor::UseSubduedForeground())]]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,4,0,0)
+              [SNew(STextBlock).Text(Description).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())]]];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildStructureSetupStage()
 {
-    return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[BuildTransparencyStageHeading(LOCTEXT("StructureSetupStage", "Stage 1 - Character Structure"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 12)[SNew(SSeparator)] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(STextBlock).Text(LOCTEXT("StructureSetupDescription", "Choose how this character provides the color visible through wet target surfaces. Target Parts created in Stage 2 use this structure type.")).AutoWrapText(true)] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)[BuildSourceTypeCard(EDWCTransparencySourceType::SameMeshMaterialSlots, LOCTEXT("SingleMeshStructure", "Single Skeletal Mesh / Inner Material Slots"), LOCTEXT("SingleMeshStructureDescription", "The target clothing and its inner body or garment surfaces are material slots of the same Skeletal Mesh."), LOCTEXT("StructureAvailable", "Available"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[BuildSourceTypeCard(EDWCTransparencySourceType::ManualColorOrTexture, LOCTEXT("NoInnerMeshStructure", "No Inner Mesh / Base Color"), LOCTEXT("NoInnerMeshStructureDescription", "Fill the target surface with an authored base reveal color, then edit its transparency alpha with the brush."), LOCTEXT("StructureAvailable2", "Available"))] + SVerticalBox::Slot().AutoHeight()[SNew(SButton).HAlign(HAlign_Center).Text(LOCTEXT("ContinueToTransparencyGeneration", "Continue to Stage 2")).IsEnabled_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    { return CanContinueToGeneration(); })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleContinueToGenerationClicked)];
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("StructureSetupStage", "Stage 1 - Character Structure"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
+          [SNew(STextBlock)
+            .Text(LOCTEXT("StructureSetupDescription", "Choose how this character provides the color visible through wet target surfaces. Target Parts created in Stage 2 use this structure type."))
+            .AutoWrapText(true)]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [BuildSourceTypeCard(
+              EDWCTransparencySourceType::SameMeshMaterialSlots,
+              LOCTEXT("SingleMeshStructure", "Single Skeletal Mesh / Inner Material Slots"),
+              LOCTEXT("SingleMeshStructureDescription", "The target clothing and its inner body or garment surfaces are material slots of the same Skeletal Mesh."),
+              LOCTEXT("StructureAvailable", "Available"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [BuildSourceTypeCard(
+              EDWCTransparencySourceType::OtherSkeletalMeshComponents,
+              LOCTEXT("MultiMeshStructure", "Blueprint / Multiple Skeletal Meshes"),
+              LOCTEXT("MultiMeshStructureDescription", "The target and inner surfaces are separate Skeletal Mesh Components in one character Blueprint."),
+              LOCTEXT("StructureAvailableMulti", "Available"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [BuildSourceTypeCard(
+              EDWCTransparencySourceType::ExternalSkeletalMesh,
+              LOCTEXT("ExternalMeshStructure", "External Skeletal Mesh"),
+              LOCTEXT("ExternalMeshStructureDescription", "Use a separately authored Skeletal Mesh as the inner reveal source and place it in the target bake space."),
+              LOCTEXT("StructureAvailableExternal", "Available"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)
+          [BuildSourceTypeCard(
+              EDWCTransparencySourceType::ManualColorOrTexture,
+              LOCTEXT("NoInnerMeshStructure", "No Inner Mesh / Base Color"),
+              LOCTEXT("NoInnerMeshStructureDescription", "Create a base reveal color from an authored color or UV-island average, correct it with the Reveal Color brush, then edit transparency alpha."),
+              LOCTEXT("StructureAvailable2", "Available"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
+          [SNew(SHorizontalBox)
+            .Visibility(this, &SWetClothingTransparencyBakePanel::GetSourceTypeDraftStatusVisibility)
+            + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+              [SNew(STextBlock)
+                .Text(this, &SWetClothingTransparencyBakePanel::GetSourceTypeDraftStatusText)
+                .AutoWrapText(true)
+                .ColorAndOpacity(FStyleColors::Warning)]
+            + SHorizontalBox::Slot().AutoWidth().Padding(8,0,0,0)
+              [SNew(SButton)
+                .Text(LOCTEXT("CancelTransparencySourceTypeDraft", "Cancel Change"))
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleCancelSourceTypeDraftClicked)]]
+        + SVerticalBox::Slot().AutoHeight()
+          [SNew(SButton)
+            .HAlign(HAlign_Center)
+            .Text(LOCTEXT("ContinueToTransparencyGeneration", "Continue to Stage 2"))
+            .IsEnabled_Lambda([this]()
+            {
+                return CanContinueToGeneration();
+            })
+            .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleContinueToGenerationClicked)];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildMapGenerationStage()
 {
-    const auto BuildGeneratePreviewMapCTA = [this]()
+    const auto BuildSameMeshSettings = [this]()
     {
-        return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)[SNew(STextBlock).Text(LOCTEXT("GeneratePreviewMapToContinue", "Generate the preview map to continue to Stage 3 editing.")).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())] + SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride(44.0f)[SNew(SButton).HAlign(HAlign_Center).VAlign(VAlign_Center).ContentPadding(FMargin(12.0f, 9.0f)).ToolTipText(this, &SWetClothingTransparencyBakePanel::GetGenerateTooltipText).IsEnabled(this, &SWetClothingTransparencyBakePanel::IsGenerateEnabled).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked)[SNew(STextBlock).Text(LOCTEXT("GeneratePreviewTransparencyMapAndContinue", "Generate Preview Map -> Stage 3")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold"))).Justification(ETextJustify::Center)]]];
+        return SNew(SVerticalBox)
+            + SVerticalBox::Slot().AutoHeight().Padding(0,8,0,6)
+              [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("Stage2InnerSources", "Inner Source Parts"))]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[BuildSameMeshSourceSection()]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[BuildRaySettingsSection()]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[BuildBakeSettingsSection(false)]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
+              [SNew(SButton)
+                .HAlign(HAlign_Center)
+                .Text(LOCTEXT("GeneratePreviewTransparencyMap", "Generate Preview Transparency Map"))
+                .ToolTipText(this, &SWetClothingTransparencyBakePanel::GetGenerateTooltipText)
+                .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsGenerateEnabled)
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked)];
     };
 
-    const auto BuildSameMeshSettings = [this, BuildGeneratePreviewMapCTA]()
+    const auto BuildOtherMeshSettings = [this]()
     {
-        return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 8)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("Stage2InnerSources", "Inner Source Parts"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(SSeparator)] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 18)[BuildSameMeshSourceSection()] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 18)[BuildRaySettingsSection()] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 18)[BuildBakeSettingsSection(false)] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[BuildGeneratePreviewMapCTA()];
+        return SNew(SVerticalBox)
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)[BuildOtherMeshSourceSection()]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[BuildRaySettingsSection()]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
+              [SNew(SButton)
+                .HAlign(HAlign_Center)
+                .Text(LOCTEXT("GenerateBlueprintPreviewTransparencyMap", "Generate Preview Transparency Map"))
+                .ToolTipText(this, &SWetClothingTransparencyBakePanel::GetGenerateTooltipText)
+                .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsGenerateEnabled)
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked)];
     };
 
-    // Multi-component Transparency source support is retained in the internal data model.
-    // It is not exposed through the current editor workflow.
-
-    const auto BuildManualSettings = [this, BuildGeneratePreviewMapCTA]()
+    const auto BuildExternalMeshSettings = [this]()
     {
-        return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 14)[BuildManualBaseRevealSourceSection()] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[BuildGeneratePreviewMapCTA()];
+        return SNew(SVerticalBox)
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)[BuildExternalMeshSourceSection()]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[BuildRaySettingsSection()]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
+              [SNew(SButton)
+                .HAlign(HAlign_Center)
+                .Text(LOCTEXT("GenerateExternalPreviewTransparencyMap", "Generate Preview Transparency Map"))
+                .ToolTipText(this, &SWetClothingTransparencyBakePanel::GetGenerateTooltipText)
+                .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsGenerateEnabled)
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked)];
     };
 
-    return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[BuildTransparencyStageHeading(LOCTEXT("MapGenerationStage", "Stage 2 - Reveal Source Generation"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 14)[SNew(SSeparator)] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 18)[BuildTransparencyLayersSection()] + SVerticalBox::Slot().AutoHeight()[SAssignNew(MapGenerationSettingsSwitcher, SWidgetSwitcher) + SWidgetSwitcher::Slot()[SNullWidget::NullWidget] + SWidgetSwitcher::Slot()[BuildSameMeshSettings()] + SWidgetSwitcher::Slot()[BuildManualSettings()]];
+    const auto BuildManualSettings = [this]()
+    {
+        return SNew(SVerticalBox)
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[BuildManualSourceSection()]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
+              [SNew(SButton)
+                .HAlign(HAlign_Fill)
+                .ContentPadding(FMargin(8.0f, 7.0f))
+                .Text(LOCTEXT("GenerateManualPreviewTransparencyMap", "Generate Preview Transparency Map"))
+                .ToolTipText(this, &SWetClothingTransparencyBakePanel::GetGenerateTooltipText)
+                .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsGenerateEnabled)
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked)];
+    };
+
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)
+          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("MapGenerationStage", "Stage 2 - Reveal Source Generation"))]
+        + SVerticalBox::Slot().AutoHeight()
+          [SNew(SSplitter)
+            .Orientation(Orient_Vertical)
+            + SSplitter::Slot()
+                .SizeRule(SSplitter::SizeToContent)
+                .MinSize(148.0f)
+                .Resizable(true)
+                .OnSlotResized(this, &SWetClothingTransparencyBakePanel::HandleTransparencyTargetPartsResized)
+                [BuildTransparencyLayersSection()]
+            + SSplitter::Slot()
+                .SizeRule(SSplitter::SizeToContent)
+                .MinSize(180.0f)
+                .Resizable(true)
+                .OnSlotResized_Lambda([](float) {})
+                [SAssignNew(MapGenerationSettingsSwitcher, SWidgetSwitcher)
+                    + SWidgetSwitcher::Slot()
+                      [BuildEmptyAssetRow(LOCTEXT("SelectTargetPartForGeneration", "Select a ready Wettable Transparency Target Part above to configure its source and generate a preview map."))]
+                    + SWidgetSwitcher::Slot()[BuildSameMeshSettings()]
+                    + SWidgetSwitcher::Slot()[BuildOtherMeshSettings()]
+                    + SWidgetSwitcher::Slot()[BuildManualSettings()]
+                    + SWidgetSwitcher::Slot()[BuildExternalMeshSettings()]]];
+}
+
+TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealEditingStage()
+{
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)
+          [FWCAEditorWidgets::BuildSectionHeader(
+              LOCTEXT("RevealEditingStage", "Stage 3 - Reveal Color Editing"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
+          [SNew(STextBlock)
+           .Text(LOCTEXT("RevealEditingDescription", "Review the Stage 2 source result and correct missed or unsuitable colors before editing transparency alpha."))
+           .AutoWrapText(true)
+           .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,12)
+          [SAssignNew(RevealEditingContentContainer, SBox)
+           [BuildRevealColorEditingSection()]]
+        + SVerticalBox::Slot().AutoHeight()
+          [SNew(SButton)
+           .HAlign(HAlign_Center)
+           .Text(LOCTEXT("ContinueToFinalTransparencyEditing", "Continue to Stage 4"))
+           .IsEnabled(this, &SWetClothingTransparencyBakePanel::CanEnterRevealEditingStage)
+           .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleContinueToFinalEditingClicked)];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildFinalEditingStage()
 {
     TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
-          [BuildTransparencyStageHeading(LOCTEXT("FinalEditingStage", "Stage 3 - Reveal Color Editing"))]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 12)
-          [SNew(STextBlock)
-               .Text(LOCTEXT("RevealColorEditingDescription", "Review the Stage 2 source result and correct missed or unsuitable colors before editing transparency alpha."))
-               .AutoWrapText(true)
-               .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 14)
-          [BuildRevealColorPaintSection()]
-        + SVerticalBox::Slot().AutoHeight()
-          [SNew(SButton)
-               .HAlign(HAlign_Center)
-               .Text(LOCTEXT("ContinueToAlphaAndBake", "Continue to Stage 4"))
-               .IsEnabled(this, &SWetClothingTransparencyBakePanel::CanEnterFinalEditingStage)
-               .OnClicked_Lambda([this]()
-                                {
-                                    SetCurrentStage(EDWCTransparencyEditorStage::BakeOutput);
-                                    return FReply::Handled();
-                                })];
-    return Box;
-}
-
-TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBakeOutputStage()
-{
-    TSharedRef<SVerticalBox> Box = SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[BuildTransparencyStageHeading(LOCTEXT("BakeOutputStage", "Stage 4 - Alpha & Bake"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 14)[SNew(SSeparator)];
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 14)
-        [SAssignNew(BakeOutputNoticeContainer, SBox)[BuildFinalEditingNotice()]];
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 14)[BuildTransparencyBrushSection()];
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 14)
-        [SAssignNew(BakeOutputGeneratedOutputsContainer, SBox)[BuildGeneratedOutputsSection()]];
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)
+          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("FinalEditingStage", "Stage 4 - Transparency Alpha & Bake"))];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,10)
+        [SAssignNew(FinalEditingNoticeContainer, SBox)[BuildFinalEditingNotice()]];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,14)[BuildTransparencyBrushSection()];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,14)
+        [SAssignNew(FinalEditingPreviewSettingsContainer, SBox)[BuildPreviewSettingsSection()]];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,14)
+        [SAssignNew(FinalEditingGeneratedOutputsContainer, SBox)[BuildGeneratedOutputsSection()]];
+    Box->AddSlot().AutoHeight()
+      [SNew(SButton)
+        .HAlign(HAlign_Center)
+        .Text(LOCTEXT("BakeTransparencyMap", "Bake Transparency Map"))
+        .ToolTipText(this, &SWetClothingTransparencyBakePanel::GetBakeEditedTooltipText)
+        .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsBakeEditedEnabled)
+        .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleBakeEditedTransparencyMapClicked)];
     return Box;
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildFinalEditingNotice()
 {
-    const TSharedPtr<FDWCTransparencyAutoBakeResult>* WorkingResult = AutoBakeResults.Find(SelectedLayerGuid);
-    const bool                                        bHasWorkingResult = WorkingResult != nullptr && WorkingResult->IsValid();
+    const TSharedPtr<FDWCTransparencySourcePayload>* WorkingResult = AutoBakeResults.Find(SelectedLayerGuid);
+    const bool bHasWorkingResult = WorkingResult != nullptr && WorkingResult->IsValid();
     if (!bHasWorkingResult)
     {
         return BuildEmptyAssetRow(
@@ -3543,9 +4082,9 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildFinalEditingNotice()
     {
         return SNew(SBorder).Padding(7).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
             [SNew(STextBlock)
-                 .Text(LOCTEXT("BakedBaselineNotice", "The existing baked map is loaded as the baseline. New brush strokes are editable. Transparency and wrinkle-suppression settings are already flattened into this map; regenerate in Stage 2 to change those settings or rebuild earlier ray data."))
-                 .AutoWrapText(true)
-                 .ColorAndOpacity(FSlateColor::UseSubduedForeground())];
+              .Text(LOCTEXT("BakedBaselineNotice", "The existing baked map is loaded as the baseline. New brush strokes are editable. Transparency and wrinkle-suppression settings are already flattened into this map; regenerate in Stage 2 to change those settings or rebuild earlier ray data."))
+              .AutoWrapText(true)
+              .ColorAndOpacity(FSlateColor::UseSubduedForeground())];
     }
     return SNullWidget::NullWidget;
 }
@@ -3554,42 +4093,30 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTargetMeshSection()
 {
     TargetMeshThumbnails.Reset();
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const int32              SlotCount = Asset != nullptr && Asset->GetDWCSkeletalMesh() != nullptr ? Asset->GetDWCSkeletalMesh()->GetMaterials().Num() : 0;
-    return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TargetMeshSection", "Target Mesh"))] + SVerticalBox::Slot().AutoHeight()[Asset != nullptr && Asset->GetDWCSkeletalMesh() != nullptr ? BuildAssetSummaryRow(Asset->GetDWCSkeletalMesh(), FText::FromString(Asset->GetDWCSkeletalMesh()->GetName()), FText::Format(LOCTEXT("TargetMeshDetails", "{0} material slots / {1} UV channels"), FText::AsNumber(SlotCount), FText::AsNumber(UVChannelItems.Num())), TargetMeshThumbnails) : BuildEmptyAssetRow(LOCTEXT("NoTargetMesh", "None"))];
+    const int32 SlotCount = Asset != nullptr && Asset->GetDWCSkeletalMesh() != nullptr ? Asset->GetDWCSkeletalMesh()->GetMaterials().Num() : 0;
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TargetMeshSection", "Target Mesh"))]
+        + SVerticalBox::Slot().AutoHeight()[Asset != nullptr && Asset->GetDWCSkeletalMesh() != nullptr
+            ? BuildAssetSummaryRow(Asset->GetDWCSkeletalMesh(), FText::FromString(Asset->GetDWCSkeletalMesh()->GetName()), FText::Format(LOCTEXT("TargetMeshDetails", "{0} material slots / {1} UV channels"), FText::AsNumber(SlotCount), FText::AsNumber(UVChannelItems.Num())), TargetMeshThumbnails)
+            : BuildEmptyAssetRow(LOCTEXT("NoTargetMesh", "None"))];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyLayersSection()
 {
     return SNew(SVerticalBox)
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
           [SNew(SHorizontalBox)
-               + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-                 [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TransparencyLayers", "Transparency Target Parts"))]
-               + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                 [SNew(SButton)
-                      .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
-                      .ToolTipText(LOCTEXT("RemoveTargetPartTooltip", "Remove the selected Transparency Target Part and its editable data."))
-                      .IsEnabled(this, &SWetClothingTransparencyBakePanel::CanRemoveSelectedLayer)
-                      .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleRemoveLayerClicked)
-                      [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]
-        + SVerticalBox::Slot().AutoHeight()
-          [SNew(SBox)
-               .HeightOverride_Lambda([this]()
-                                      { return LayerItems.IsEmpty() ? 112.0f : TransparencyTargetPartsListHeight; })
-               [SNew(SOverlay)
-                    + SOverlay::Slot()
-                      [SAssignNew(LayerListView, SListView<FLayerItemPtr>)
-                           .ListItemsSource(&LayerItems)
-                           .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateLayerRow)
-                           .OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged)]
-                    + SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(16.0f)
-                      [SNew(STextBlock)
-                           .Text(LOCTEXT("NoTransparencyWettableMaterialSlots", "No Wettable material slots.\nEnable a slot in WetPart mode first."))
-                           .Justification(ETextJustify::Center)
-                           .AutoWrapText(true)
-                           .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                           .Visibility_Lambda([this]()
-                                              { return LayerItems.IsEmpty() ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })]]];
+            + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+              [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TransparencyLayers", "Transparency Target Parts"))]
+            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+              [SNew(SButton)
+                .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+                .ToolTipText(LOCTEXT("RemoveTargetPartTooltip", "Remove the selected Transparency Target Part and its editable data."))
+                .IsEnabled(this, &SWetClothingTransparencyBakePanel::CanRemoveSelectedLayer)
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleRemoveLayerClicked)
+                [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]
+        + SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride_Lambda([this]() { return TransparencyTargetPartsListHeight; })[SAssignNew(LayerListView, SListView<FLayerItemPtr>).ListItemsSource(&LayerItems).OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateLayerRow).OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged)]]
+        ;
 }
 
 void SWetClothingTransparencyBakePanel::HandleTransparencyTargetPartsResized(const float NewHeight)
@@ -3611,38 +4138,47 @@ void SWetClothingTransparencyBakePanel::HandleTransparencyTargetPartsResized(con
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildSameMeshSourceSection()
 {
     TSharedRef<SVerticalBox> Box = SNew(SVerticalBox);
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
-        [SNew(SBox)
-             .HeightOverride_Lambda([this]()
-                                    { return FMath::Clamp(static_cast<float>(InnerSourceSlotItems.Num()) * 56.0f, 0.0f, 280.0f); })
-                 [SAssignNew(InnerSourceListView, SListView<TSharedPtr<int32>>)
-                      .ListItemsSource(&InnerSourceSlotItems)
-                      .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateInnerSourceRow)]];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,6)
+    [
+        SNew(SBox)
+        .HeightOverride_Lambda([this]()
+        {
+            return FMath::Clamp(static_cast<float>(InnerSourceSlotItems.Num()) * 56.0f, 0.0f, 280.0f);
+        })
+        [
+            SAssignNew(InnerSourceListView, SListView<TSharedPtr<int32>>)
+            .ListItemsSource(&InnerSourceSlotItems)
+            .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateInnerSourceRow)
+        ]
+    ];
     Box->AddSlot().AutoHeight()
-        [SNew(SButton).HAlign(HAlign_Center).ToolTipText(LOCTEXT("AddInnerSlotTooltip", "Add a material slot to the Inner Source priority list.")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleAddInnerSlotClicked)[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Plus")))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("AddInnerSlot", "Add Inner Source Part"))]]];
+    [SNew(SButton).HAlign(HAlign_Center).ToolTipText(LOCTEXT("AddInnerSlotTooltip", "Add a material slot to the Inner Source priority list.")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleAddInnerSlotClicked)
+        [SNew(SHorizontalBox)
+            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0,0,4,0)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Plus")))]
+            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("AddInnerSlot", "Add Inner Source Part"))]]];
     return Box;
 }
 
 TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateInnerSourceRow(
-    TSharedPtr<int32>                 Item,
+    TSharedPtr<int32> Item,
     const TSharedRef<STableViewBase>& OwnerTable)
 {
-    const int32                              PriorityIndex = Item.IsValid() ? *Item : INDEX_NONE;
+    const int32 PriorityIndex = Item.IsValid() ? *Item : INDEX_NONE;
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    const int32                              MaterialSlotIndex = Layer != nullptr &&
-                                            Layer->SameMeshSource.InnerSlotPriority.IsValidIndex(PriorityIndex)
-                                                                     ? Layer->SameMeshSource.InnerSlotPriority[PriorityIndex].MaterialSlotIndex
-                                                                     : INDEX_NONE;
+    const int32 MaterialSlotIndex = Layer != nullptr &&
+        Layer->SameMeshSource.InnerSlotPriority.IsValidIndex(PriorityIndex)
+        ? Layer->SameMeshSource.InnerSlotPriority[PriorityIndex].MaterialSlotIndex
+        : INDEX_NONE;
 
     TSharedRef<SWidget> ThumbnailWidget =
         SNew(SBorder)
-            .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
-            .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
+        .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+        .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const USkeletalMesh*     Mesh = Asset != nullptr ? Asset->GetDWCSkeletalMesh() : nullptr;
-    UMaterialInterface*      Material = Mesh != nullptr && Mesh->GetMaterials().IsValidIndex(MaterialSlotIndex)
-                                            ? Mesh->GetMaterials()[MaterialSlotIndex].MaterialInterface
-                                            : nullptr;
+    const USkeletalMesh* Mesh = Asset != nullptr ? Asset->GetDWCSkeletalMesh() : nullptr;
+    UMaterialInterface* Material = Mesh != nullptr && Mesh->GetMaterials().IsValidIndex(MaterialSlotIndex)
+        ? Mesh->GetMaterials()[MaterialSlotIndex].MaterialInterface
+        : nullptr;
     if (Material != nullptr && ThumbnailPool.IsValid())
     {
         TSharedPtr<FAssetThumbnail>& Thumbnail = MaterialSlotThumbnails.FindOrAdd(MaterialSlotIndex);
@@ -3657,95 +4193,169 @@ TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateInnerSourceRow(
 
     return SNew(STableRow<TSharedPtr<int32>>, OwnerTable)
         .Padding(FMargin(0.0f, 0.0f, 0.0f, 6.0f))
-            [SNew(SBorder)
-                 .Padding(FMargin(4.0f, 3.0f))
-                 .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
-                     [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)[SNew(SBox).WidthOverride(44.0f).HeightOverride(44.0f)[ThumbnailWidget]] + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center).Padding(0, 0, 4, 0)[SNew(SComboBox<FMaterialSlotItemPtr>).OptionsSource(&MaterialSlotItems).InitiallySelectedItem(FindMaterialSlotItem(MaterialSlotIndex)).OnGenerateWidget_Lambda([](const FMaterialSlotItemPtr& SlotItem)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                 { return SNew(STextBlock).Text(SlotItem.IsValid() ? FText::Format(LOCTEXT("InnerSourceMaterialOption", "[{0}] {1}"), FText::AsNumber(SlotItem->SlotIndex), FText::FromName(SlotItem->SlotName)) : LOCTEXT("MissingInnerSourceMaterialOption", "Missing")); })
-                                                                                                                                                                                                                                                                                      .OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleInnerMaterialSlotChanged, PriorityIndex)[SNew(STextBlock).Text_Lambda([this, PriorityIndex]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                {
+        [
+            SNew(SBorder)
+            .Padding(FMargin(4.0f, 3.0f))
+            .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0,0,6,0)
+                [SNew(SBox).WidthOverride(44.0f).HeightOverride(44.0f)[ThumbnailWidget]]
+                + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center).Padding(0,0,4,0)
+                [
+                    SNew(SComboBox<FMaterialSlotItemPtr>)
+                    .OptionsSource(&MaterialSlotItems)
+                    .InitiallySelectedItem(FindMaterialSlotItem(MaterialSlotIndex))
+                    .OnGenerateWidget_Lambda([](const FMaterialSlotItemPtr& SlotItem)
+                    {
+                        return SNew(STextBlock).Text(SlotItem.IsValid()
+                            ? FText::Format(LOCTEXT("InnerSourceMaterialOption", "[{0}] {1}"), FText::AsNumber(SlotItem->SlotIndex), FText::FromName(SlotItem->SlotName))
+                            : LOCTEXT("MissingInnerSourceMaterialOption", "Missing"));
+                    })
+                    .OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleInnerMaterialSlotChanged, PriorityIndex)
+                    [
+                        SNew(STextBlock).Text_Lambda([this, PriorityIndex]()
+                        {
                             const FWetClothingTransparencyLayerData* SelectedLayer = GetSelectedLayer();
                             if (SelectedLayer == nullptr || !SelectedLayer->SameMeshSource.InnerSlotPriority.IsValidIndex(PriorityIndex))
                             {
                                 return LOCTEXT("MissingInnerPart", "Missing");
                             }
                             const FWetClothingTransparencyInnerSlot& InnerSlot = SelectedLayer->SameMeshSource.InnerSlotPriority[PriorityIndex];
-                            return FText::Format(LOCTEXT("InnerSourceMaterialLabel", "[{0}] {1}"), FText::AsNumber(InnerSlot.MaterialSlotIndex), FText::FromName(InnerSlot.MaterialSlotName)); })]] +
-                      SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)[SNew(SBox).WidthOverride(62.0f)[SNew(SComboBox<TSharedPtr<int32>>).OptionsSource(&UVChannelItems).InitiallySelectedItem(Layer != nullptr && Layer->SameMeshSource.InnerSlotPriority.IsValidIndex(PriorityIndex) ? FindUVChannelItem(Layer->SameMeshSource.InnerSlotPriority[PriorityIndex].SourceUVChannel) : nullptr).OnGenerateWidget(this, &SWetClothingTransparencyBakePanel::GenerateUVChannelComboItem).OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleInnerUVChannelChanged, PriorityIndex)[SNew(STextBlock).Text_Lambda([this, PriorityIndex]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       {
+                            return FText::Format(LOCTEXT("InnerSourceMaterialLabel", "[{0}] {1}"), FText::AsNumber(InnerSlot.MaterialSlotIndex), FText::FromName(InnerSlot.MaterialSlotName));
+                        })
+                    ]
+                ]
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0,0,4,0)
+                [
+                    SNew(SBox).WidthOverride(62.0f)
+                    [
+                        SNew(SComboBox<TSharedPtr<int32>>)
+                        .OptionsSource(&UVChannelItems)
+                        .InitiallySelectedItem(Layer != nullptr && Layer->SameMeshSource.InnerSlotPriority.IsValidIndex(PriorityIndex)
+                            ? FindUVChannelItem(Layer->SameMeshSource.InnerSlotPriority[PriorityIndex].SourceUVChannel)
+                            : nullptr)
+                        .OnGenerateWidget(this, &SWetClothingTransparencyBakePanel::GenerateUVChannelComboItem)
+                        .OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleInnerUVChannelChanged, PriorityIndex)
+                        [
+                            SNew(STextBlock).Text_Lambda([this, PriorityIndex]()
+                            {
                                 const FWetClothingTransparencyLayerData* SelectedLayer = GetSelectedLayer();
                                 const int32 UVChannel = SelectedLayer != nullptr && SelectedLayer->SameMeshSource.InnerSlotPriority.IsValidIndex(PriorityIndex)
                                     ? SelectedLayer->SameMeshSource.InnerSlotPriority[PriorityIndex].SourceUVChannel
                                     : 0;
-                                return FText::Format(LOCTEXT("InnerUV", "UV {0}"), FText::AsNumber(UVChannel)); })]]] +
-                      SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                          [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ToolTipText(LOCTEXT("MoveInnerUpTooltip", "Move this source earlier in the priority order.")).IsEnabled_Lambda([PriorityIndex]()
-                                                                                                                                                                                                            { return PriorityIndex > 0; })
-                               .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleMoveInnerSlotClicked, PriorityIndex, -1)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.ArrowUp")))]] +
-                      SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                          [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ToolTipText(LOCTEXT("MoveInnerDownTooltip", "Move this source later in the priority order.")).IsEnabled_Lambda([this, PriorityIndex]()
-                                                                                                                                                                                                            { const FWetClothingTransparencyLayerData* SelectedLayer = GetSelectedLayer(); return SelectedLayer != nullptr && PriorityIndex + 1 < SelectedLayer->SameMeshSource.InnerSlotPriority.Num(); })
-                               .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleMoveInnerSlotClicked, PriorityIndex, 1)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.ArrowDown")))]] +
-                      SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                          [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ToolTipText(LOCTEXT("DeleteInnerTooltip", "Remove this Inner Source Part.")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleRemoveInnerSlotClicked, PriorityIndex)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]];
+                                return FText::Format(LOCTEXT("InnerUV", "UV {0}"), FText::AsNumber(UVChannel));
+                            })
+                        ]
+                    ]
+                ]
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+                [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ToolTipText(LOCTEXT("MoveInnerUpTooltip", "Move this source earlier in the priority order.")).IsEnabled_Lambda([PriorityIndex]() { return PriorityIndex > 0; }).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleMoveInnerSlotClicked, PriorityIndex, -1)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.ArrowUp")))]]
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+                [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ToolTipText(LOCTEXT("MoveInnerDownTooltip", "Move this source later in the priority order.")).IsEnabled_Lambda([this, PriorityIndex]() { const FWetClothingTransparencyLayerData* SelectedLayer = GetSelectedLayer(); return SelectedLayer != nullptr && PriorityIndex + 1 < SelectedLayer->SameMeshSource.InnerSlotPriority.Num(); }).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleMoveInnerSlotClicked, PriorityIndex, 1)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.ArrowDown")))]]
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+                [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ToolTipText(LOCTEXT("DeleteInnerTooltip", "Remove this Inner Source Part.")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleRemoveInnerSlotClicked, PriorityIndex)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]
+            ]
+        ];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildOtherMeshSourceSection()
 {
     return BuildLabeledControl(LOCTEXT("SourceBlueprint", "Source Blueprint"),
-                               SNew(SClassPropertyEntryBox).MetaClass(AActor::StaticClass()).AllowAbstract(false).AllowNone(true).SelectedClass(this, &SWetClothingTransparencyBakePanel::GetSelectedSourceClass).OnSetClass(this, &SWetClothingTransparencyBakePanel::HandleSourceClassChanged));
+        SNew(SClassPropertyEntryBox).MetaClass(AActor::StaticClass()).AllowAbstract(false).AllowNone(true).SelectedClass(this, &SWetClothingTransparencyBakePanel::GetSelectedSourceClass).OnSetClass(this, &SWetClothingTransparencyBakePanel::HandleSourceClassChanged));
 }
 
-TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildManualBaseRevealSourceSection()
+TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildExternalMeshSourceSection()
 {
     return SNew(SVerticalBox)
         + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
-          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("ManualColorSource", "Base Reveal"))]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
-          [SNew(SSeparator)]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
-          [SNew(SHorizontalBox)
-               + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                 [SNew(SBox)
-                      .WidthOverride(118.0f)
-                      [SNew(STextBlock).Text(LOCTEXT("ManualBaseColorLabel", "Color"))]]
-               + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
-                 [SNew(SButton)
-                      .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
-                      .ContentPadding(0)
-                      .ToolTipText(LOCTEXT("ManualBaseRevealColorTooltip", "Choose the color visible through this wet target surface."))
-                      .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleManualBaseColorClicked)
-                      [SNew(SColorBlock)
-                           .Color_Lambda([this]()
-                                         {
-                                             const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-                                             return Layer != nullptr ? Layer->ManualColorSource.BaseRevealColor : FLinearColor::White;
-                                         })
-                           .Size(FVector2D(38.0f, 38.0f))
-                           .ShowBackgroundForAlpha(false)]]
-               + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-                 [SNew(SButton)
-                      .HAlign(HAlign_Center)
-                      .ToolTipText(LOCTEXT("ManualPickUVIslandTooltip", "Choose a reference color texture and sample one of its UV islands."))
-                      .Text(LOCTEXT("ManualPickUVIslandButton", "Pick From UV Island"))
-                      .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleManualPickBaseColorFromUVIslandClicked)]]
-        + SVerticalBox::Slot().AutoHeight()
           [BuildLabeledControl(
-              LOCTEXT("ManualInitialAlpha", "Initial Alpha"),
-              SNew(SNumericEntryBox<float>)
-                  .MinValue(0.0f)
-                  .MaxValue(1.0f)
-                  .Value(this, &SWetClothingTransparencyBakePanel::GetManualInitialTransparencyAlpha)
-                  .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleManualInitialTransparencyAlphaCommitted))];
+              LOCTEXT("ExternalSourceMesh", "External Skeletal Mesh"),
+              SNew(SObjectPropertyEntryBox)
+                  .AllowedClass(USkeletalMesh::StaticClass())
+                  .AllowClear(true)
+                  .ObjectPath(this, &SWetClothingTransparencyBakePanel::GetExternalSourceMeshPath)
+                  .OnObjectChanged(this, &SWetClothingTransparencyBakePanel::HandleExternalSourceMeshChanged))]
+        + SVerticalBox::Slot().AutoHeight()
+          [BuildEmptyAssetRow(LOCTEXT(
+              "ExternalSourceMeshTransformHint",
+              "The external mesh is projected in reference pose. Its Bake Transform and optional source-slot priority are stored on the selected Transparency Layer; an empty slot list uses every external material slot."))];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildManualSourceSection()
 {
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("ManualColorSource", "Base Reveal Color Source"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
+          [SNew(STextBlock)
+           .Text(LOCTEXT("ManualColorSourceDescription", "Choose one representative reveal color. Select Color uses Unreal's color picker and screen eyedropper; Pick From UV Island averages only texels covered by the selected island."))
+           .AutoWrapText(true)
+           .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [SNew(SHorizontalBox)
+              + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 0.0f, 10.0f, 0.0f)
+              [SNew(SColorBlock)
+               .Color_Lambda([this]()
+               {
+                   const FWetClothingTransparencyLayerData* SelectedLayer = GetSelectedLayer();
+                   return SelectedLayer != nullptr
+                       ? SelectedLayer->ManualColorSource.BaseRevealColor
+                       : FLinearColor::White;
+               })
+               .Size(FVector2D(112.0f, 112.0f))
+               .ShowBackgroundForAlpha(false)]
+              + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Top)
+              [SNew(SVerticalBox)
+               + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                 [SNew(SButton)
+                  .ToolTipText(LOCTEXT("ManualBaseRevealColorTooltip", "Choose the color directly or use Unreal's screen eyedropper."))
+                  .Text(LOCTEXT("ManualBaseRevealColorButton", "Select Color / Eyedropper"))
+                  .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleManualBaseColorClicked)]
+               + SVerticalBox::Slot().AutoHeight()
+                 [SNew(SButton)
+                  .ToolTipText(LOCTEXT("ManualPickUVIslandTooltip", "Choose a reference color texture and average only valid texels inside one UV island."))
+                  .Text(LOCTEXT("ManualPickUVIslandButton", "Pick From UV Island"))
+                  .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleManualPickBaseColorFromUVIslandClicked)]
+               + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
+                 [SNew(STextBlock)
+                  .Text_Lambda([this]()
+                  {
+                      const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+                      if (Layer == nullptr)
+                      {
+                          return FText::GetEmpty();
+                      }
+                      return Layer->ManualColorSource.SourceMode ==
+                              EDWCTransparencyManualRevealSourceMode::UVIslandAverage
+                          ? FText::Format(
+                              LOCTEXT("ManualUVIslandSourceStatus", "Source: UV Island Average (Slot {0}, UV {1}, Island {2})"),
+                              FText::AsNumber(Layer->ManualColorSource.SampledMaterialSlotIndex),
+                              FText::AsNumber(Layer->ManualColorSource.SampledUVChannelIndex),
+                              FText::AsNumber(Layer->ManualColorSource.SampledUVIslandID))
+                          : LOCTEXT("ManualAuthoredColorSourceStatus", "Source: Authored Color / Eyedropper");
+                  })
+                  .AutoWrapText(true)
+                  .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
+               + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 4.0f)
+                 [SNew(STextBlock)
+                  .Text(LOCTEXT("ManualInitialAlpha", "Initial Transparency Alpha"))
+                  .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
+               + SVerticalBox::Slot().AutoHeight()
+                 [SNew(SNumericEntryBox<float>)
+                  .MinValue(0.0f)
+                  .MaxValue(1.0f)
+                  .Value(this, &SWetClothingTransparencyBakePanel::GetManualInitialTransparencyAlpha)
+                  .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleManualInitialTransparencyAlphaCommitted)]]];
+}
+
+TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealColorEditingSection()
+{
     RefreshRevealColorStrokeList();
     auto RevealModeButton = [this](
-                                EDWCTransparencyRevealColorBrushMode Mode,
-                                const FText&                         Label,
-                                const FText&                         Tooltip)
+        EDWCTransparencyRevealColorBrushMode Mode,
+        const FText& Label,
+        const FText& Tooltip)
     {
         return SNew(SCheckBox)
             .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
@@ -3753,24 +4363,48 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildManualSourceSection(
             .ToolTipText(Tooltip)
             .IsChecked(this, &SWetClothingTransparencyBakePanel::IsRevealColorPaintModeChecked, Mode)
             .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealColorPaintModeChanged, Mode)
-                [SNew(STextBlock).Text(Label)];
+            [SNew(STextBlock).Text(Label)];
     };
 
-    TSharedRef<SVerticalBox> Content = SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("ManualColorSource", "Base Reveal"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(SSeparator)] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(118.0f)[SNew(STextBlock).Text(LOCTEXT("ManualBaseColorLabel", "Color"))]] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)[SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ContentPadding(0).ToolTipText(LOCTEXT("ManualBaseRevealColorTooltip", "Choose the color visible through this wet target surface.")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleManualBaseColorClicked)[SNew(SColorBlock).Color_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  { const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer(); return Layer != nullptr ? Layer->ManualColorSource.BaseRevealColor : FLinearColor::White; })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       .Size(FVector2D(38.0f, 38.0f))
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       .ShowBackgroundForAlpha(false)]] +
-                                                                                                                                                                                                                                                                                                                                         SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(SButton).HAlign(HAlign_Center).ToolTipText(LOCTEXT("ManualPickUVIslandTooltip", "Choose a reference color texture and sample one of its UV islands.")).Text(LOCTEXT("ManualPickUVIslandButton", "Pick From UV Island")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleManualPickBaseColorFromUVIslandClicked)]] +
-                                       SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
-                                           [BuildLabeledControl(LOCTEXT("ManualInitialAlpha", "Initial Alpha"),
-                                                                SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(1.0f).Value(this, &SWetClothingTransparencyBakePanel::GetManualInitialTransparencyAlpha).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleManualInitialTransparencyAlphaCommitted))] +
-                                       SVerticalBox::Slot().AutoHeight().Padding(0, 18, 0, 8)
-                                           [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("RevealColorPaint", "Reveal Color Paint"))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SCheckBox).IsChecked(this, &SWetClothingTransparencyBakePanel::IsRevealColorPaintEnabledChecked).OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealColorPaintEnabledChanged)[SNew(STextBlock).Text(LOCTEXT("RevealColorPaintEnabled", "Enabled"))]]] +
-                                       SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(SSeparator)] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[SNew(SBox).Visibility_Lambda([this]()
-                                                                                                                                                                                                     { return GetRevealPaintSettingsFromSession().bEnabled
-                                                                                                                                                                                                                  ? EVisibility::Visible
-                                                                                                                                                                                                                  : EVisibility::Collapsed; })[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[SNew(SWrapBox).UseAllottedSize(true) + SWrapBox::Slot()[RevealModeButton(EDWCTransparencyRevealColorBrushMode::Paint, LOCTEXT("RevealPaintModePaint", "Paint"), LOCTEXT("RevealPaintModePaintTooltip", "Paint the selected reveal color onto the target surface."))] + SWrapBox::Slot()[RevealModeButton(EDWCTransparencyRevealColorBrushMode::EraseToBase, LOCTEXT("RevealPaintModeEraseToBase", "Erase"), LOCTEXT("RevealPaintModeEraseToBaseTooltip", "Restore the target surface back toward its Base Reveal Color."))] + SWrapBox::Slot()[RevealModeButton(EDWCTransparencyRevealColorBrushMode::Smooth, LOCTEXT("RevealPaintModeSmooth", "Smooth"), LOCTEXT("RevealPaintModeSmoothTooltip", "Blend neighboring reveal colors to soften paint transitions."))]] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                {
+    TSharedRef<SVerticalBox> Content = SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("RevealColorPaint", "Reveal Color Paint"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+            [SNew(SCheckBox)
+             .IsChecked(this, &SWetClothingTransparencyBakePanel::IsRevealColorPaintEnabledChecked)
+             .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealColorPaintEnabledChanged)
+             [SNew(STextBlock).Text(LOCTEXT("EnableRevealColorPaint", "Enable Reveal Color Paint"))]]
+        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+            [SNew(SBox)
+             .Visibility_Lambda([this]()
+             {
+                 return GetRevealPaintSettingsFromSession().bEnabled
+                     ? EVisibility::Visible
+                     : EVisibility::Collapsed;
+             })
+             [SNew(SVerticalBox)
+              + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
+                [SNew(SWrapBox).UseAllottedSize(true)
+                 + SWrapBox::Slot()[RevealModeButton(
+                     EDWCTransparencyRevealColorBrushMode::Paint,
+                     LOCTEXT("RevealPaintModePaint", "Paint"),
+                     LOCTEXT("RevealPaintModePaintTooltip", "Paint the selected reveal color onto the target surface."))]
+                 + SWrapBox::Slot()[RevealModeButton(
+                     EDWCTransparencyRevealColorBrushMode::EraseToBase,
+                     LOCTEXT("RevealPaintModeEraseToBase", "Erase to Base"),
+                     LOCTEXT("RevealPaintModeEraseToBaseTooltip", "Restore the target surface back toward its Base Reveal Color."))]
+                 + SWrapBox::Slot()[RevealModeButton(
+                     EDWCTransparencyRevealColorBrushMode::Smooth,
+                     LOCTEXT("RevealPaintModeSmooth", "Smooth"),
+                     LOCTEXT("RevealPaintModeSmoothTooltip", "Blend neighboring reveal colors to soften paint transitions."))]]
+              + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+                [SNew(SHorizontalBox)
+                 + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+                   [SNew(STextBlock)
+                    .AutoWrapText(true)
+                    .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                    .Text_Lambda([this]()
+                    {
                         switch (GetRevealPaintSettingsFromSession().RevealColorMode)
                         {
                         case EDWCTransparencyRevealColorBrushMode::EraseToBase:
@@ -3779,185 +4413,65 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildManualSourceSection(
                             return LOCTEXT("RevealPaintSmoothHelp", "Brush strokes average nearby reveal colors to soften hard color edges.");
                         default:
                             return LOCTEXT("RevealPaintPaintHelp", "Brush strokes apply the selected Paint Color.");
-                        } })] +
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ToolTipText(LOCTEXT("ClearRevealColorPaintTooltip", "Remove all reveal-color paint strokes and restore the target to the Base Reveal Color.")).IsEnabled_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      {
+                        }
+                    })]
+                 + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+                   [SNew(SButton)
+                    .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+                    .ToolTipText(LOCTEXT("ClearRevealColorPaintTooltip", "Remove all reveal-color paint strokes and restore the target to the Base Reveal Color."))
+                    .IsEnabled_Lambda([this]()
+                    {
                         const FWetClothingTransparencyLayerData* SelectedLayer = GetSelectedLayer();
-                        return SelectedLayer != nullptr && !SelectedLayer->RevealColorPaintStrokes.IsEmpty(); })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]] +
-                                                                                                                                                                                                                                                                                                               SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)[SNew(SBox).Visibility_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                  { return GetRevealPaintSettingsFromSession().RevealColorMode == EDWCTransparencyRevealColorBrushMode::Paint
-                                                                                                                                                                                                                                                                                                                                                                                                               ? EVisibility::Visible
-                                                                                                                                                                                                                                                                                                                                                                                                               : EVisibility::Collapsed; })[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(118.0f)[SNew(STextBlock).Text(LOCTEXT("RevealPaintColorLabel", "Paint Color"))]] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ContentPadding(0).ToolTipText(LOCTEXT("SelectRevealPaintColor", "Select Paint Color")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleRevealPaintColorClicked)[SNew(SColorBlock).Color_Lambda([this]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  { return GetRevealPaintSettingsFromSession().RevealColor; })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       .Size(FVector2D(38, 38))
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       .ShowBackgroundForAlpha(false)]]]] +
-                                                                                                                                                                                                                                                                                                               SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)[BuildBrushSizeControl(LOCTEXT("RevealPaintBrushSize", "Size"), EDWCTransparencyBrushSizeTarget::RevealColorPaint)] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)[BuildLabeledControl(LOCTEXT("RevealPaintStrength", "Strength"), SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(1.0f).Value(this, &SWetClothingTransparencyBakePanel::GetRevealPaintStrength).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleRevealPaintStrengthCommitted))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[BuildLabeledControl(LOCTEXT("RevealPaintFalloff", "Falloff"), SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(1.0f).Value(this, &SWetClothingTransparencyBakePanel::GetRevealPaintFalloff).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleRevealPaintFalloffCommitted))] + SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 4)[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)[SNew(STextBlock).Text_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    { return FText::Format(LOCTEXT("RevealColorStrokeHistoryCount", "Reveal Color Strokes   {0} strokes"), FText::AsNumber(RevealColorStrokeItems.Num())); })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))] +
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      SHorizontalBox::Slot().AutoWidth().Padding(4, 0, 0, 0)[SNew(SButton).Text(LOCTEXT("UndoLastRevealColorStroke", "Undo Last Stroke")).IsEnabled_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           { return !RevealColorStrokeItems.IsEmpty(); })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleUndoLastRevealColorStrokeClicked)] +
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      SHorizontalBox::Slot().AutoWidth().Padding(4, 0, 0, 0)[SNew(SButton).Text(LOCTEXT("ClearRevealColorStrokes", "Clear")).IsEnabled_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              { return !RevealColorStrokeItems.IsEmpty(); })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked)]]]];
+                        return SelectedLayer != nullptr && !SelectedLayer->RevealColorPaintStrokes.IsEmpty();
+                    })
+                    .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked)
+                    [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]
+              + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+                [SNew(SBox)
+                 .Visibility_Lambda([this]()
+                 {
+                     return GetRevealPaintSettingsFromSession().RevealColorMode == EDWCTransparencyRevealColorBrushMode::Paint
+                         ? EVisibility::Visible
+                         : EVisibility::Collapsed;
+                 })
+                 [SNew(SHorizontalBox)
+                  + SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+                    [SNew(SColorBlock).Color_Lambda([this] { return GetRevealPaintSettingsFromSession().RevealColor; }).Size(FVector2D(38, 38)).ShowBackgroundForAlpha(false)]
+                  + SHorizontalBox::Slot().FillWidth(1)
+                    [SNew(SButton).Text(LOCTEXT("SelectRevealPaintColor", "Select Paint Color")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleRevealPaintColorClicked)]]]
+              + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+                [BuildBrushSizeControl(LOCTEXT("RevealPaintBrushSize", "Brush Size"), EDWCTransparencyBrushSizeTarget::RevealColorPaint)]
+              + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+                [BuildLabeledControl(LOCTEXT("RevealPaintStrength", "Brush Strength"), SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(1.0f).Value(this, &SWetClothingTransparencyBakePanel::GetRevealPaintStrength).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleRevealPaintStrengthCommitted))]
+              + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
+                [BuildLabeledControl(LOCTEXT("RevealPaintFalloff", "Brush Falloff"), SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(1.0f).Value(this, &SWetClothingTransparencyBakePanel::GetRevealPaintFalloff).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleRevealPaintFalloffCommitted))]
+              + SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 4)
+                [SNew(SHorizontalBox)
+                 + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)
+                   [SNew(STextBlock)
+                    .Text_Lambda([this]()
+                    {
+                        return FText::Format(
+                            LOCTEXT("RevealColorStrokeHistoryCount", "Reveal Color Strokes ({0})"),
+                            FText::AsNumber(RevealColorStrokeItems.Num()));
+                    })
+                    .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
+                 + SHorizontalBox::Slot().AutoWidth().Padding(4, 0, 0, 0)
+                   [SNew(SButton)
+                    .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+                    .ToolTipText(LOCTEXT("UndoLastRevealColorStrokeTooltip", "Remove the most recent reveal-color stroke for this material slot."))
+                    .IsEnabled_Lambda([this]() { return !RevealColorStrokeItems.IsEmpty(); })
+                    .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleUndoLastRevealColorStrokeClicked)
+                    [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Undo")))]]]
+              + SVerticalBox::Slot().AutoHeight()
+                [SNew(SBox)
+                 .HeightOverride(150.0f)
+                 [SAssignNew(RevealColorStrokeListView, SListView<TSharedPtr<FGuid>>)
+                  .ListItemsSource(&RevealColorStrokeItems)
+                  .SelectionMode(ESelectionMode::Single)
+                  .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateRevealColorStrokeRow)]]]];
 
     return Content;
-}
-
-TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealColorPaintSection()
-{
-    RefreshRevealColorStrokeList();
-
-    auto RevealModeButton = [this](
-                                EDWCTransparencyRevealColorBrushMode Mode,
-                                const FText&                         Label,
-                                const FText&                         Tooltip)
-    {
-        return SNew(SCheckBox)
-            .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
-            .Type(ESlateCheckBoxType::ToggleButton)
-            .ToolTipText(Tooltip)
-            .IsChecked(this, &SWetClothingTransparencyBakePanel::IsRevealColorPaintModeChecked, Mode)
-            .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealColorPaintModeChanged, Mode)
-                [SNew(STextBlock).Text(Label)];
-    };
-
-    TSharedRef<SWidget> BrushSizeControl =
-        BuildVerticalLabeledControl(
-            LOCTEXT("RevealPaintBrushSizeStage3", "Brush Size"),
-            SNew(SHorizontalBox)
-                + SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-                  [SNew(SBox)
-                       .WidthOverride(90.0f)
-                       [SNew(SNumericEntryBox<float>)
-                            .MinValue(0.1f)
-                            .MaxValue(100.0f)
-                            .Value_Lambda([this]()
-                                          { return TOptional<float>(GetRevealPaintSizeCm()); })
-                            .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleBrushSizeChanged, EDWCTransparencyBrushSizeTarget::RevealColorPaint)
-                            .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushSizeCommitted, EDWCTransparencyBrushSizeTarget::RevealColorPaint)]]
-                + SHorizontalBox::Slot().FillWidth(1.0f)
-                  [SAssignNew(RevealPaintSizeComboButton, SComboButton)
-                       .ToolTipText(LOCTEXT("RevealPaintBrushSizePresetTooltip", "Choose a brush size preset."))
-                       .MenuContent()[BuildBrushSizeMenu(EDWCTransparencyBrushSizeTarget::RevealColorPaint)]
-                       .ButtonContent()
-                       [SNew(STextBlock)
-                            .Text(this, &SWetClothingTransparencyBakePanel::GetRevealPaintSizeDisplayText)]]);
-
-    return SNew(SVerticalBox)
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
-          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("RevealColorPaint", "Reveal Color Paint"))]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
-          [SNew(SCheckBox)
-               .IsChecked(this, &SWetClothingTransparencyBakePanel::IsRevealColorPaintEnabledChecked)
-               .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealColorPaintEnabledChanged)
-               [SNew(STextBlock).Text(LOCTEXT("EnableRevealColorPaint", "Enable Reveal Color Paint"))]]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
-          [SNew(SWrapBox)
-               .UseAllottedSize(true)
-               + SWrapBox::Slot()
-                 [RevealModeButton(
-                     EDWCTransparencyRevealColorBrushMode::Paint,
-                     LOCTEXT("RevealPaintModePaint", "Paint"),
-                     LOCTEXT("RevealPaintModePaintTooltip", "Paint the selected reveal color onto the target surface."))]
-               + SWrapBox::Slot()
-                 [RevealModeButton(
-                     EDWCTransparencyRevealColorBrushMode::EraseToBase,
-                     LOCTEXT("RevealPaintModeEraseToBaseStage3", "Erase to Base"),
-                     LOCTEXT("RevealPaintModeEraseToBaseTooltip", "Restore the target surface back toward its Base Reveal Color."))]
-               + SWrapBox::Slot()
-                 [RevealModeButton(
-                     EDWCTransparencyRevealColorBrushMode::Smooth,
-                     LOCTEXT("RevealPaintModeSmooth", "Smooth"),
-                     LOCTEXT("RevealPaintModeSmoothTooltip", "Blend neighboring reveal colors to soften paint transitions."))]]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
-          [SNew(SHorizontalBox)
-               + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-                 [SNew(STextBlock)
-                      .AutoWrapText(true)
-                      .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                      .Text_Lambda([this]()
-                                   {
-                                       switch (GetRevealPaintSettingsFromSession().RevealColorMode)
-                                       {
-                                       case EDWCTransparencyRevealColorBrushMode::EraseToBase:
-                                           return LOCTEXT("RevealPaintEraseHelp", "Brush strokes restore painted areas toward the Base Reveal Color.");
-                                       case EDWCTransparencyRevealColorBrushMode::Smooth:
-                                           return LOCTEXT("RevealPaintSmoothHelp", "Brush strokes average nearby reveal colors to soften hard color edges.");
-                                       default:
-                                           return LOCTEXT("RevealPaintPaintHelp", "Brush strokes apply the selected Paint Color.");
-                                       }
-                                   })]
-               + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)
-                 [SNew(SButton)
-                      .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
-                      .ToolTipText(LOCTEXT("ClearRevealColorPaintTooltip", "Remove all reveal-color paint strokes and restore the target to the Base Reveal Color."))
-                      .IsEnabled_Lambda([this]()
-                                       { return !RevealColorStrokeItems.IsEmpty(); })
-                      .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked)
-                      [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
-          [SNew(SBox)
-               .Visibility_Lambda([this]()
-                                  { return GetRevealPaintSettingsFromSession().RevealColorMode == EDWCTransparencyRevealColorBrushMode::Paint
-                                               ? EVisibility::Visible
-                                               : EVisibility::Collapsed; })
-               [SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 10, 0)
-                      [SNew(SBox)
-                           .WidthOverride(48.0f)
-                           .HeightOverride(48.0f)
-                           [SNew(SColorBlock)
-                                .Color_Lambda([this]()
-                                              { return GetRevealPaintSettingsFromSession().RevealColor; })
-                                .ShowBackgroundForAlpha(false)]]
-                    + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-                      [SNew(SButton)
-                           .HAlign(HAlign_Left)
-                           .ContentPadding(FMargin(16.0f, 10.0f))
-                           .ToolTipText(LOCTEXT("SelectRevealPaintColor", "Select Paint Color"))
-                           .Text(LOCTEXT("SelectPaintColorButton", "Select Paint Color"))
-                           .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleRevealPaintColorClicked)]]]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
-          [BrushSizeControl]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
-          [BuildVerticalLabeledControl(
-              LOCTEXT("RevealPaintStrength", "Brush Strength"),
-              SNew(SNumericEntryBox<float>)
-                  .MinValue(0.0f)
-                  .MaxValue(1.0f)
-                  .Value(this, &SWetClothingTransparencyBakePanel::GetRevealPaintStrength)
-                  .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleRevealPaintStrengthCommitted))]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 16)
-          [BuildVerticalLabeledControl(
-              LOCTEXT("RevealPaintFalloff", "Brush Falloff"),
-              SNew(SNumericEntryBox<float>)
-                  .MinValue(0.0f)
-                  .MaxValue(1.0f)
-                  .Value(this, &SWetClothingTransparencyBakePanel::GetRevealPaintFalloff)
-                  .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleRevealPaintFalloffCommitted))]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
-          [SNew(STextBlock)
-               .Text_Lambda([this]()
-                            { return FText::Format(LOCTEXT("RevealColorStrokeHistoryCount", "Reveal Color Strokes ({0})"), FText::AsNumber(RevealColorStrokeItems.Num())); })
-               .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
-        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 18)
-          [SNew(SBox)
-               .HeightOverride(220.0f)
-               [SNew(SOverlay)
-                    + SOverlay::Slot()
-                      [SAssignNew(RevealColorStrokeListView, SListView<TSharedPtr<FGuid>>)
-                           .ListItemsSource(&RevealColorStrokeItems)
-                           .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateRevealColorStrokeRow)]
-                    + SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(16.0f)
-                      [SNew(STextBlock)
-                           .Text(LOCTEXT("NoRevealColorStrokes", "No reveal color strokes."))
-                           .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                           .Visibility_Lambda([this]()
-                                              { return RevealColorStrokeItems.IsEmpty()
-                                                           ? EVisibility::HitTestInvisible
-                                                           : EVisibility::Collapsed; })]]];
 }
 
 FReply SWetClothingTransparencyBakePanel::HandleManualBaseColorClicked()
@@ -3989,19 +4503,41 @@ FReply SWetClothingTransparencyBakePanel::HandleManualPickBaseColorFromUVIslandC
     }
 
     const TSharedRef<SWindow> DialogWindow = SNew(SWindow)
-                                                 .Title(LOCTEXT("UVIslandColorPickerTitle", "Pick Base Reveal Color From UV Island"))
-                                                 .ClientSize(FVector2D(900.0f, 760.0f))
-                                                 .SupportsMinimize(false)
-                                                 .SupportsMaximize(false);
+        .Title(LOCTEXT("UVIslandColorPickerTitle", "Pick Base Reveal Color From UV Island"))
+        .ClientSize(FVector2D(900.0f, 760.0f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
 
     DialogWindow->SetContent(
         SNew(SDWCTransparencyUVIslandColorPicker)
-            .ParentWindow(DialogWindow)
-            .InitialMesh(Asset->GetDWCSkeletalMesh())
-            .InitialOriginalUVChannel(Asset->GetOriginalUVChannelIndex())
-            .OnColorAccepted(FOnDWCTransparencyUVIslandColorAccepted::CreateSP(
-                this,
-                &SWetClothingTransparencyBakePanel::HandleManualBaseColorCommitted)));
+        .ParentWindow(DialogWindow)
+        .InitialMesh(Asset->GetSourceSkeletalMesh())
+        .InitialOriginalUVChannel(Asset->GetOriginalUVChannelIndex())
+        .OnColorAccepted(FOnDWCTransparencyUVIslandColorAccepted::CreateLambda(
+            [WeakPanel = TWeakPtr<SWetClothingTransparencyBakePanel>(SharedThis(this))]
+            (const FDWCTransparencyUVIslandColorSelection& Selection)
+            {
+                const TSharedPtr<SWetClothingTransparencyBakePanel> Panel = WeakPanel.Pin();
+                if (!Panel.IsValid())
+                {
+                    return;
+                }
+                Panel->EditSelectedLayer(
+                    LOCTEXT("SetManualUVIslandRevealColor", "Set UV Island Reveal Color"),
+                    [&Selection](FWetClothingTransparencyLayerData& TargetLayer)
+                    {
+                        TargetLayer.ManualColorSource.SourceMode =
+                            EDWCTransparencyManualRevealSourceMode::UVIslandAverage;
+                        TargetLayer.ManualColorSource.BaseRevealColor = Selection.Color;
+                        TargetLayer.ManualColorSource.SampledColorTexture = Selection.Texture.Get();
+                        TargetLayer.ManualColorSource.SampledMaterialSlotIndex = Selection.MaterialSlotIndex;
+                        TargetLayer.ManualColorSource.SampledUVChannelIndex = Selection.UVChannelIndex;
+                        TargetLayer.ManualColorSource.SampledUVIslandID = Selection.UVIslandID;
+                    },
+                    false);
+                Panel->AutoBakeResults.Remove(Panel->SelectedLayerGuid);
+                Panel->RefreshViewportContext();
+            })));
 
     FSlateApplication::Get().AddModalWindow(
         DialogWindow,
@@ -4022,11 +4558,17 @@ void SWetClothingTransparencyBakePanel::HandleManualBaseColorCommitted(FLinearCo
         LOCTEXT("SetManualBaseRevealColor", "Set Transparency Base Reveal Color"),
         [NewColor](FWetClothingTransparencyLayerData& TargetLayer)
         {
+            TargetLayer.ManualColorSource.SourceMode =
+                EDWCTransparencyManualRevealSourceMode::AuthoredColor;
             TargetLayer.ManualColorSource.BaseRevealColor = NewColor;
+            TargetLayer.ManualColorSource.SampledColorTexture.Reset();
+            TargetLayer.ManualColorSource.SampledMaterialSlotIndex = INDEX_NONE;
+            TargetLayer.ManualColorSource.SampledUVChannelIndex = INDEX_NONE;
+            TargetLayer.ManualColorSource.SampledUVIslandID = INDEX_NONE;
         },
         false);
 
-    EnsureManualRevealWorkingMap(true);
+    AutoBakeResults.Remove(SelectedLayerGuid);
     RefreshViewportContext();
 }
 
@@ -4046,8 +4588,7 @@ void SWetClothingTransparencyBakePanel::HandleRevealPaintColorCommitted(FLinearC
 {
     NewColor.A = 1.0f;
     FDWCTransparencyPaintSettings Settings = GetRevealPaintSettingsFromSession();
-    if (Settings.RevealColor.Equals(NewColor))
-        return;
+    if (Settings.RevealColor.Equals(NewColor)) return;
     Settings.RevealColor = NewColor;
     DispatchRevealPaintState(MoveTemp(Settings));
     Invalidate(EInvalidateWidgetReason::Paint);
@@ -4056,20 +4597,20 @@ void SWetClothingTransparencyBakePanel::HandleRevealPaintColorCommitted(FLinearC
 ECheckBoxState SWetClothingTransparencyBakePanel::IsRevealColorPaintEnabledChecked() const
 {
     return GetRevealPaintSettingsFromSession().bEnabled
-               ? ECheckBoxState::Checked
-               : ECheckBoxState::Unchecked;
+        ? ECheckBoxState::Checked
+        : ECheckBoxState::Unchecked;
 }
 
 ECheckBoxState SWetClothingTransparencyBakePanel::IsRevealColorPaintModeChecked(
     const EDWCTransparencyRevealColorBrushMode Mode) const
 {
     return GetRevealPaintSettingsFromSession().RevealColorMode == Mode
-               ? ECheckBoxState::Checked
-               : ECheckBoxState::Unchecked;
+        ? ECheckBoxState::Checked
+        : ECheckBoxState::Unchecked;
 }
 
 void SWetClothingTransparencyBakePanel::HandleRevealColorPaintModeChanged(
-    const ECheckBoxState                       NewState,
+    const ECheckBoxState NewState,
     const EDWCTransparencyRevealColorBrushMode Mode)
 {
     if (NewState != ECheckBoxState::Checked)
@@ -4089,14 +4630,14 @@ void SWetClothingTransparencyBakePanel::HandleRevealColorPaintModeChanged(
 
 void SWetClothingTransparencyBakePanel::HandleRevealColorPaintEnabledChanged(ECheckBoxState NewState)
 {
-    const bool                    bEnabled = NewState == ECheckBoxState::Checked;
+    const bool bEnabled = NewState == ECheckBoxState::Checked;
     FDWCTransparencyPaintSettings Settings = GetRevealPaintSettingsFromSession();
     if (Settings.bEnabled == bEnabled)
     {
         return;
     }
 
-    // The toggle only gates stroke writes.  The Stage 3 reveal target and its
+    // The toggle only gates stroke writes.  The Stage 2 reveal target and its
     // working map are derived from the layer/stage context, not from this UI.
     Settings.bEnabled = bEnabled;
     DispatchRevealPaintState(MoveTemp(Settings));
@@ -4113,29 +4654,18 @@ FText SWetClothingTransparencyBakePanel::GetRevealPaintSizeDisplayText() const
 }
 TOptional<float> SWetClothingTransparencyBakePanel::GetRevealPaintStrength() const { return GetRevealPaintSettingsFromSession().Strength; }
 TOptional<float> SWetClothingTransparencyBakePanel::GetRevealPaintFalloff() const { return GetRevealPaintSettingsFromSession().Falloff; }
-void             SWetClothingTransparencyBakePanel::HandleRevealPaintStrengthCommitted(float Value, ETextCommit::Type)
-{
-    FDWCTransparencyPaintSettings Settings = GetRevealPaintSettingsFromSession();
-    Settings.Strength = Value;
-    DispatchRevealPaintState(MoveTemp(Settings));
-}
-void SWetClothingTransparencyBakePanel::HandleRevealPaintFalloffCommitted(float Value, ETextCommit::Type)
-{
-    FDWCTransparencyPaintSettings Settings = GetRevealPaintSettingsFromSession();
-    Settings.Falloff = Value;
-    DispatchRevealPaintState(MoveTemp(Settings));
-}
+void SWetClothingTransparencyBakePanel::HandleRevealPaintStrengthCommitted(float Value, ETextCommit::Type) { FDWCTransparencyPaintSettings Settings = GetRevealPaintSettingsFromSession(); Settings.Strength = Value; DispatchRevealPaintState(MoveTemp(Settings)); }
+void SWetClothingTransparencyBakePanel::HandleRevealPaintFalloffCommitted(float Value, ETextCommit::Type) { FDWCTransparencyPaintSettings Settings = GetRevealPaintSettingsFromSession(); Settings.Falloff = Value; DispatchRevealPaintState(MoveTemp(Settings)); }
 
 FReply SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked()
 {
-    if (AuthoringController.IsValid())
-        AuthoringController->CancelActiveInteraction(true);
+    if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Layer == nullptr)
     {
         return FReply::Handled();
     }
-    const int32                               SlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
+    const int32 SlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     TArray<FDWCTransparencyRevealColorStroke> InvalidatedStrokes;
     for (const FDWCTransparencyRevealColorStroke& Stroke : Layer->RevealColorPaintStrokes)
     {
@@ -4145,17 +4675,16 @@ FReply SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked()
         }
     }
     if (EditRevealColorStrokeHistory(
-            LOCTEXT("ClearRevealColorPaint", "Clear Reveal Color Paint"),
-            FGuid(),
-            [SlotIndex](FWetClothingTransparencyLayerData& MutableLayer)
-            {
-                return MutableLayer.RevealColorPaintStrokes.RemoveAll(
-                           [SlotIndex](const FDWCTransparencyRevealColorStroke& Stroke)
-                           {
-                               return Stroke.MaterialSlotIndex == SlotIndex;
-                           }) > 0;
-            }) &&
-        PreviewViewport.IsValid())
+        LOCTEXT("ClearRevealColorPaint", "Clear Reveal Color Paint"),
+        FGuid(),
+        [SlotIndex](FWetClothingTransparencyLayerData& MutableLayer)
+        {
+            return MutableLayer.RevealColorPaintStrokes.RemoveAll(
+                [SlotIndex](const FDWCTransparencyRevealColorStroke& Stroke)
+                {
+                    return Stroke.MaterialSlotIndex == SlotIndex;
+                }) > 0;
+        }) && PreviewViewport.IsValid())
     {
         PreviewViewport->ReplayRevealColorStrokeHistory(InvalidatedStrokes);
     }
@@ -4163,8 +4692,8 @@ FReply SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked()
 }
 
 bool SWetClothingTransparencyBakePanel::EditRevealColorStrokeHistory(
-    const FText&                                           TransactionText,
-    const FGuid                                            StrokeGuid,
+    const FText& TransactionText,
+    const FGuid StrokeGuid,
     TFunctionRef<bool(FWetClothingTransparencyLayerData&)> Edit)
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
@@ -4172,13 +4701,13 @@ bool SWetClothingTransparencyBakePanel::EditRevealColorStrokeHistory(
     {
         return false;
     }
-    const FGuid               LayerGuid = Layer->LayerGuid;
+    const FGuid LayerGuid = Layer->LayerGuid;
     FDWCEditorAuthoringChange Change;
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
-                    EDWCEditorAuthoringImpact::ElementList |
-                    EDWCEditorAuthoringImpact::PreviewIncremental |
-                    EDWCEditorAuthoringImpact::TransparencyFinalBake;
+        EDWCEditorAuthoringImpact::ElementList |
+        EDWCEditorAuthoringImpact::PreviewIncremental |
+        EDWCEditorAuthoringImpact::TransparencyFinalBake;
     Change.MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     Change.LayerGuid = LayerGuid;
     Change.ElementGuid = StrokeGuid;
@@ -4205,15 +4734,14 @@ bool SWetClothingTransparencyBakePanel::EditRevealColorStrokeHistory(
 
 FReply SWetClothingTransparencyBakePanel::HandleUndoLastRevealColorStrokeClicked()
 {
-    if (AuthoringController.IsValid())
-        AuthoringController->CancelActiveInteraction(true);
+    if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Layer == nullptr)
     {
         return FReply::Handled();
     }
     const int32 SlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
-    FGuid       LastStrokeGuid;
+    FGuid LastStrokeGuid;
     for (int32 Index = Layer->RevealColorPaintStrokes.Num() - 1; Index >= 0; --Index)
     {
         if (Layer->RevealColorPaintStrokes[Index].MaterialSlotIndex == SlotIndex)
@@ -4231,33 +4759,31 @@ FReply SWetClothingTransparencyBakePanel::HandleUndoLastRevealColorStrokeClicked
 
 FReply SWetClothingTransparencyBakePanel::HandleDeleteRevealColorStrokeClicked(const FGuid StrokeGuid)
 {
-    if (AuthoringController.IsValid())
-        AuthoringController->CancelActiveInteraction(true);
+    if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const FDWCTransparencyRevealColorStroke* Stroke = Layer != nullptr
-                                                          ? Layer->RevealColorPaintStrokes.FindByPredicate(
-                                                                [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
-                                                                {
-                                                                    return Candidate.StrokeGuid == StrokeGuid;
-                                                                })
-                                                          : nullptr;
+        ? Layer->RevealColorPaintStrokes.FindByPredicate(
+            [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
+            {
+                return Candidate.StrokeGuid == StrokeGuid;
+            })
+        : nullptr;
     if (Stroke == nullptr)
     {
         return FReply::Handled();
     }
-    const TArray<FDWCTransparencyRevealColorStroke> InvalidatedStrokes = { *Stroke };
+    const TArray<FDWCTransparencyRevealColorStroke> InvalidatedStrokes = {*Stroke};
     if (EditRevealColorStrokeHistory(
-            LOCTEXT("DeleteRevealColorStroke", "Delete Reveal Color Stroke"),
-            StrokeGuid,
-            [StrokeGuid](FWetClothingTransparencyLayerData& MutableLayer)
-            {
-                return MutableLayer.RevealColorPaintStrokes.RemoveAll(
-                           [StrokeGuid](const FDWCTransparencyRevealColorStroke& Stroke)
-                           {
-                               return Stroke.StrokeGuid == StrokeGuid;
-                           }) > 0;
-            }) &&
-        PreviewViewport.IsValid())
+        LOCTEXT("DeleteRevealColorStroke", "Delete Reveal Color Stroke"),
+        StrokeGuid,
+        [StrokeGuid](FWetClothingTransparencyLayerData& MutableLayer)
+        {
+            return MutableLayer.RevealColorPaintStrokes.RemoveAll(
+                [StrokeGuid](const FDWCTransparencyRevealColorStroke& Stroke)
+                {
+                    return Stroke.StrokeGuid == StrokeGuid;
+                }) > 0;
+        }) && PreviewViewport.IsValid())
     {
         PreviewViewport->ReplayRevealColorStrokeHistory(InvalidatedStrokes);
     }
@@ -4266,61 +4792,59 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteRevealColorStrokeClicked(c
 
 void SWetClothingTransparencyBakePanel::HandleRevealColorStrokeEnabledChanged(
     const ECheckBoxState NewState,
-    const FGuid          StrokeGuid)
+    const FGuid StrokeGuid)
 {
-    if (AuthoringController.IsValid())
-        AuthoringController->CancelActiveInteraction(true);
+    if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const FDWCTransparencyRevealColorStroke* ExistingStroke = Layer != nullptr
-                                                                  ? Layer->RevealColorPaintStrokes.FindByPredicate(
-                                                                        [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
-                                                                        {
-                                                                            return Candidate.StrokeGuid == StrokeGuid;
-                                                                        })
-                                                                  : nullptr;
+        ? Layer->RevealColorPaintStrokes.FindByPredicate(
+            [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
+            {
+                return Candidate.StrokeGuid == StrokeGuid;
+            })
+        : nullptr;
     if (ExistingStroke == nullptr)
     {
         return;
     }
-    const TArray<FDWCTransparencyRevealColorStroke> InvalidatedStrokes = { *ExistingStroke };
-    const bool                                      bEnabled = NewState == ECheckBoxState::Checked;
+    const TArray<FDWCTransparencyRevealColorStroke> InvalidatedStrokes = {*ExistingStroke};
+    const bool bEnabled = NewState == ECheckBoxState::Checked;
     if (EditRevealColorStrokeHistory(
-            LOCTEXT("ToggleRevealColorStroke", "Toggle Reveal Color Stroke"),
-            StrokeGuid,
-            [StrokeGuid, bEnabled](FWetClothingTransparencyLayerData& MutableLayer)
+        LOCTEXT("ToggleRevealColorStroke", "Toggle Reveal Color Stroke"),
+        StrokeGuid,
+        [StrokeGuid, bEnabled](FWetClothingTransparencyLayerData& MutableLayer)
+        {
+            FDWCTransparencyRevealColorStroke* Stroke =
+                MutableLayer.RevealColorPaintStrokes.FindByPredicate(
+                    [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
+                    {
+                        return Candidate.StrokeGuid == StrokeGuid;
+                    });
+            if (Stroke == nullptr || Stroke->bEnabled == bEnabled)
             {
-                FDWCTransparencyRevealColorStroke* Stroke =
-                    MutableLayer.RevealColorPaintStrokes.FindByPredicate(
-                        [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
-                        {
-                            return Candidate.StrokeGuid == StrokeGuid;
-                        });
-                if (Stroke == nullptr || Stroke->bEnabled == bEnabled)
-                {
-                    return false;
-                }
-                Stroke->bEnabled = bEnabled;
-                return true;
-            }) &&
-        PreviewViewport.IsValid())
+                return false;
+            }
+            Stroke->bEnabled = bEnabled;
+            return true;
+        }) && PreviewViewport.IsValid())
     {
         PreviewViewport->ReplayRevealColorStrokeHistory(InvalidatedStrokes);
     }
 }
 
 TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateRevealColorStrokeRow(
-    TSharedPtr<FGuid>                 Item,
+    TSharedPtr<FGuid> Item,
     const TSharedRef<STableViewBase>& OwnerTable)
 {
-    const FGuid                              StrokeGuid = Item.IsValid() ? *Item : FGuid();
+    const FGuid StrokeGuid = Item.IsValid() ? *Item : FGuid();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const FDWCTransparencyRevealColorStroke* Stroke = Layer != nullptr
-                                                          ? Layer->RevealColorPaintStrokes.FindByPredicate(
-                                                                [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
-                                                                {
-                                                                    return Candidate.StrokeGuid == StrokeGuid;
-                                                                })
-                                                          : nullptr;
+        ? Layer->RevealColorPaintStrokes.FindByPredicate(
+            [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
+            {
+                return Candidate.StrokeGuid == StrokeGuid;
+            })
+        : nullptr;
     if (Stroke == nullptr)
     {
         return SNew(STableRow<TSharedPtr<FGuid>>, OwnerTable)
@@ -4333,9 +4857,37 @@ TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateRevealColorStro
         FText::AsNumber(Stroke->Samples.Num()));
     return SNew(STableRow<TSharedPtr<FGuid>>, OwnerTable)
         [SNew(SBorder)
-             .Padding(FMargin(4, 3))
-             .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
-                 [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 5, 0)[SNew(SCheckBox).IsChecked(Stroke->bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealColorStrokeEnabledChanged, StrokeGuid)] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)[SNew(SBox).WidthOverride(18).HeightOverride(18).Visibility(Stroke->BrushMode == EDWCTransparencyRevealColorBrushMode::Paint ? EVisibility::Visible : EVisibility::Collapsed)[SNew(SColorBlock).Color(Stroke->PaintColor).ShowBackgroundForAlpha(false)]] + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)[SNew(STextBlock).Text(Label)] + SHorizontalBox::Slot().AutoWidth()[SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ToolTipText(LOCTEXT("DeleteRevealColorStrokeTooltip", "Delete this reveal-color stroke.")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleDeleteRevealColorStrokeClicked, StrokeGuid)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]];
+         .Padding(FMargin(4, 3))
+         .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
+         [SNew(SHorizontalBox)
+          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 5, 0)
+            [SNew(SCheckBox)
+             .IsChecked(Stroke->bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
+             .OnCheckStateChanged(
+                 this,
+                 &SWetClothingTransparencyBakePanel::HandleRevealColorStrokeEnabledChanged,
+                 StrokeGuid)]
+          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+            [SNew(SBox)
+             .WidthOverride(18)
+             .HeightOverride(18)
+             .Visibility(Stroke->BrushMode == EDWCTransparencyRevealColorBrushMode::Paint
+                 ? EVisibility::Visible
+                 : EVisibility::Collapsed)
+             [SNew(SColorBlock)
+              .Color(Stroke->PaintColor)
+              .ShowBackgroundForAlpha(false)]]
+          + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)
+            [SNew(STextBlock).Text(Label)]
+          + SHorizontalBox::Slot().AutoWidth()
+            [SNew(SButton)
+             .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+             .ToolTipText(LOCTEXT("DeleteRevealColorStrokeTooltip", "Delete this reveal-color stroke."))
+             .OnClicked(
+                 this,
+                 &SWetClothingTransparencyBakePanel::HandleDeleteRevealColorStrokeClicked,
+                 StrokeGuid)
+             [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]];
 }
 
 void SWetClothingTransparencyBakePanel::PushRevealColorPaintSettingsToViewport()
@@ -4354,19 +4906,19 @@ TOptional<float> SWetClothingTransparencyBakePanel::GetManualInitialTransparency
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     return Layer != nullptr
-               ? TOptional<float>(Layer->ManualColorSource.InitialTransparencyAlpha)
-               : TOptional<float>();
+        ? TOptional<float>(Layer->ManualColorSource.InitialTransparencyAlpha)
+        : TOptional<float>();
 }
 
 void SWetClothingTransparencyBakePanel::HandleManualInitialTransparencyAlphaCommitted(
     const float NewValue,
     ETextCommit::Type)
 {
-    const float                              ClampedValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    const float ClampedValue = FMath::Clamp(NewValue, 0.0f, 1.0f);
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Layer == nullptr || FMath::IsNearlyEqual(
-                                Layer->ManualColorSource.InitialTransparencyAlpha,
-                                ClampedValue))
+            Layer->ManualColorSource.InitialTransparencyAlpha,
+            ClampedValue))
     {
         return;
     }
@@ -4379,39 +4931,44 @@ void SWetClothingTransparencyBakePanel::HandleManualInitialTransparencyAlphaComm
         },
         false);
 
-    EnsureManualRevealWorkingMap(true);
+    AutoBakeResults.Remove(SelectedLayerGuid);
     RefreshViewportContext();
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRaySettingsSection()
 {
-    TSharedRef<SVerticalBox>     Box = SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("RaySettings", "Ray Settings"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(SSeparator)];
+    TSharedRef<SVerticalBox> Box = SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("RaySettings", "Ray Settings"))];
     using FSettingMember = float FWetClothingTransparencyRaySettings::*;
-    auto                         AddFloat = [this, &Box](
-                        const FText&   Label,
-                        const FText&   TransactionText,
-                        FSettingMember Member,
-                        const float    MinimumValue = 0.0f)
+    auto AddFloat = [this, &Box](
+        const FText& Label,
+        const FText& TransactionText,
+        FSettingMember Member,
+        const float MinimumValue = 0.0f)
     {
-        Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
-            [BuildVerticalLabeledControl(
+        Box->AddSlot().AutoHeight().Padding(0,0,0,6)
+        [
+            BuildLabeledControl(
                 Label,
                 SNew(SNumericEntryBox<float>)
-                    .MinValue(MinimumValue)
-                    .Value_Lambda([this, Member]() -> TOptional<float>
-                                  {
+                .MinValue(MinimumValue)
+                .Value_Lambda([this, Member]() -> TOptional<float>
+                {
                     const FWetClothingTransparencyLayerData* SelectedLayer = GetSelectedLayer();
                     return SelectedLayer != nullptr
                         ? TOptional<float>(SelectedLayer->RaySettings.*Member)
-                        : TOptional<float>(); })
-                    .OnValueCommitted_Lambda([this, TransactionText, Member, MinimumValue](float NewValue, ETextCommit::Type)
-                                             { EditSelectedLayer(
-                                                   TransactionText,
-                                                   [Member, NewValue, MinimumValue](auto& TargetLayer)
-                                                   {
-                                                       TargetLayer.RaySettings.*Member = FMath::Max(MinimumValue, NewValue);
-                                                   },
-                                                   false); }))];
+                        : TOptional<float>();
+                })
+                .OnValueCommitted_Lambda([this, TransactionText, Member, MinimumValue](float NewValue, ETextCommit::Type)
+                {
+                    EditSelectedLayer(
+                        TransactionText,
+                        [Member, NewValue, MinimumValue](auto& TargetLayer)
+                        {
+                            TargetLayer.RaySettings.*Member = FMath::Max(MinimumValue, NewValue);
+                        },
+                        false);
+                }))
+        ];
     };
     AddFloat(
         LOCTEXT("RayStartOffset", "Ray Start Offset"),
@@ -4428,27 +4985,22 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRaySettingsSection()
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBakeSettingsSection(const bool bShowResolution)
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    TSharedRef<SVerticalBox> Box = SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("BakeSettings", "Bake Settings"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(SSeparator)];
-    if (Asset == nullptr)
-        return Box;
+    TSharedRef<SVerticalBox> Box = SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("BakeSettings", "Bake Settings"))];
+    if (Asset == nullptr) return Box;
     if (bShowResolution)
     {
-        Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)[BuildVerticalLabeledControl(LOCTEXT("BakeResolution", "Resolution"), SNew(SNumericEntryBox<int32>).MinValue(16).MaxValue(4096).Value(Asset->Authored.TransparencyData.TransparencyBakeResolution).OnValueCommitted_Lambda([this](int32 V, ETextCommit::Type)
-                                                                                                                                                                                                                                                                          { EditGlobalSettings(LOCTEXT("SetTransparencyResolution", "Set Transparency Resolution"), [V](auto& D)
-                                                                                                                                                                                                                                                                                               { D.TransparencyBakeResolution = FMath::Clamp(V, 16, 4096); }); }))];
+        Box->AddSlot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("BakeResolution", "Resolution"), SNew(SNumericEntryBox<int32>).MinValue(16).MaxValue(4096).Value(Asset->Authored.TransparencyData.TransparencyBakeResolution).OnValueCommitted_Lambda([this](int32 V, ETextCommit::Type){ EditGlobalSettings(LOCTEXT("SetTransparencyResolution", "Set Transparency Resolution"), [V](auto& D){ D.TransparencyBakeResolution = FMath::Clamp(V,16,4096); }); }))];
     }
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)[BuildVerticalLabeledControl(LOCTEXT("PaddingPixels", "Padding Pixels"), SNew(SNumericEntryBox<int32>).MinValue(0).MaxValue(64).Value(Asset->Authored.TransparencyData.TransparencyPaddingPixels).OnValueCommitted_Lambda([this](int32 V, ETextCommit::Type)
-                                                                                                                                                                                                                                                                     { EditFinalBakeSettings(LOCTEXT("SetTransparencyPadding", "Set Transparency Padding"), [V](auto& D)
-                                                                                                                                                                                                                                                                                             { const int32 NewValue = FMath::Clamp(V,0,64); if (D.TransparencyPaddingPixels == NewValue) return false; D.TransparencyPaddingPixels = NewValue; return true; }, EDWCTransparencyFinalPreviewRefresh::None); }))];
-    Box->AddSlot().AutoHeight()[BuildVerticalLabeledControl(LOCTEXT("EdgeFeather", "Edge Feather Pixels"), SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(32.0f).Value(Asset->Authored.TransparencyData.TransparencyEdgeFeatherPixels).OnValueCommitted_Lambda([this](float V, ETextCommit::Type)
-                                                                                                                                                                                                                                                              { EditFinalBakeSettings(LOCTEXT("SetTransparencyFeather", "Set Transparency Edge Feather"), [V](auto& D)
-                                                                                                                                                                                                                                                                                      { const float NewValue = FMath::Clamp(V,0.0f,32.0f); if (FMath::IsNearlyEqual(D.TransparencyEdgeFeatherPixels, NewValue)) return false; D.TransparencyEdgeFeatherPixels = NewValue; return true; }, EDWCTransparencyFinalPreviewRefresh::OuterEdgeFeather); }))];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("PaddingPixels", "Padding Pixels"), SNew(SNumericEntryBox<int32>).MinValue(0).MaxValue(64).Value(Asset->Authored.TransparencyData.TransparencyPaddingPixels).OnValueCommitted_Lambda([this](int32 V, ETextCommit::Type){ EditFinalBakeSettings(LOCTEXT("SetTransparencyPadding", "Set Transparency Padding"), [V](auto& D){ const int32 NewValue = FMath::Clamp(V,0,64); if (D.TransparencyPaddingPixels == NewValue) return false; D.TransparencyPaddingPixels = NewValue; return true; }, EDWCTransparencyFinalPreviewRefresh::None); }))];
+    Box->AddSlot().AutoHeight()[BuildLabeledControl(LOCTEXT("EdgeFeather", "Edge Feather Pixels"), SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(32.0f).Value(Asset->Authored.TransparencyData.TransparencyEdgeFeatherPixels).OnValueCommitted_Lambda([this](float V, ETextCommit::Type){ EditFinalBakeSettings(LOCTEXT("SetTransparencyFeather", "Set Transparency Edge Feather"), [V](auto& D){ const float NewValue = FMath::Clamp(V,0.0f,32.0f); if (FMath::IsNearlyEqual(D.TransparencyEdgeFeatherPixels, NewValue)) return false; D.TransparencyEdgeFeatherPixels = NewValue; return true; }, EDWCTransparencyFinalPreviewRefresh::OuterEdgeFeather); }))];
     return Box;
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyBrushSection()
 {
-    TSharedRef<SVerticalBox> Box = SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TransparencyBrush", "Transparency Brush"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(SSeparator)];
+    TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+        [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TransparencyBrush", "Transparency Brush"))];
 
     auto ModeButton = [this](EDWCTransparencyBrushMode Mode, const FText& Label, const FText& Tooltip)
     {
@@ -4458,81 +5010,100 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyBrushSec
             .ToolTipText(Tooltip)
             .IsChecked(this, &SWetClothingTransparencyBakePanel::IsBrushModeChecked, Mode)
             .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleBrushModeChanged, Mode)
-                [SNew(STextBlock).Text(Label)];
+            [SNew(STextBlock).Text(Label)];
     };
 
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 8)
-        [SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth()[ModeButton(EDWCTransparencyBrushMode::Apply, LOCTEXT("BrushApply", "Apply"), LOCTEXT("BrushApplyTooltip", "Increase transparency alpha."))] + SHorizontalBox::Slot().AutoWidth().Padding(3, 0, 0, 0)[ModeButton(EDWCTransparencyBrushMode::Erase, LOCTEXT("BrushErase", "Erase"), LOCTEXT("BrushEraseTooltip", "Reduce transparency alpha."))] + SHorizontalBox::Slot().AutoWidth().Padding(3, 0, 0, 0)[ModeButton(EDWCTransparencyBrushMode::SetValue, LOCTEXT("BrushSet", "Set"), LOCTEXT("BrushSetTooltip", "Paint toward the target alpha."))] + SHorizontalBox::Slot().AutoWidth().Padding(3, 0, 0, 0)[ModeButton(EDWCTransparencyBrushMode::Smooth, LOCTEXT("BrushSmooth", "Smooth"), LOCTEXT("BrushSmoothTooltip", "Smooth neighboring edited alpha."))]] + SHorizontalBox::Slot().AutoWidth().Padding(10, 0, 0, 0)[ModeButton(EDWCTransparencyBrushMode::ResetToAuto, LOCTEXT("BrushReset", "Reset"), LOCTEXT("BrushResetTooltip", "Restore the automatic alpha."))]];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,8)
+    [SNew(SWrapBox).UseAllottedSize(true)
+        + SWrapBox::Slot()[ModeButton(EDWCTransparencyBrushMode::Apply, LOCTEXT("BrushApply", "Apply"), LOCTEXT("BrushApplyTooltip", "Increase transparency alpha."))]
+        + SWrapBox::Slot()[ModeButton(EDWCTransparencyBrushMode::Erase, LOCTEXT("BrushErase", "Erase"), LOCTEXT("BrushEraseTooltip", "Reduce transparency alpha."))]
+        + SWrapBox::Slot()[ModeButton(EDWCTransparencyBrushMode::SetValue, LOCTEXT("BrushSet", "Set"), LOCTEXT("BrushSetTooltip", "Paint toward the target alpha."))]
+        + SWrapBox::Slot()[ModeButton(EDWCTransparencyBrushMode::Smooth, LOCTEXT("BrushSmooth", "Smooth"), LOCTEXT("BrushSmoothTooltip", "Smooth neighboring edited alpha."))]
+        + SWrapBox::Slot()[ModeButton(EDWCTransparencyBrushMode::ResetToAuto, LOCTEXT("BrushReset", "Reset"), LOCTEXT("BrushResetTooltip", "Restore the automatic alpha."))]];
 
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
-        [BuildBrushSizeControl(LOCTEXT("BrushSize", "Size"), EDWCTransparencyBrushSizeTarget::TransparencyBrush)];
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)[BuildLabeledControl(LOCTEXT("BrushStrength", "Strength"),
-                                                                        SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(1.0f).Value(this, &SWetClothingTransparencyBakePanel::GetBrushStrength).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushStrengthCommitted))];
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)[BuildLabeledControl(LOCTEXT("BrushFalloff", "Falloff"),
-                                                                        SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(1.0f).Value(this, &SWetClothingTransparencyBakePanel::GetBrushFalloff).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushFalloffCommitted))];
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)[BuildLabeledControl(LOCTEXT("BrushSpacing", "Spacing"),
-                                                                        SNew(SNumericEntryBox<float>).MinValue(0.01f).MaxValue(2.0f).Value(this, &SWetClothingTransparencyBakePanel::GetBrushSpacing).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushSpacingCommitted))];
-    Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
-        [SNew(SBox)
-             .Visibility_Lambda([this]()
-                                { return BrushMode == EDWCTransparencyBrushMode::SetValue
-                                             ? EVisibility::Visible
-                                             : EVisibility::Collapsed; })
-                 [BuildLabeledControl(
-                     LOCTEXT("BrushTargetAlpha", "Target Alpha"),
-                     SNew(SNumericEntryBox<float>)
-                         .MinValue(0.0f)
-                         .MaxValue(1.0f)
-                         .Value(this, &SWetClothingTransparencyBakePanel::GetBrushTargetAlpha)
-                         .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushTargetAlphaCommitted))]];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,6)
+        [BuildBrushSizeControl(LOCTEXT("BrushSize", "Brush Size"), EDWCTransparencyBrushSizeTarget::TransparencyBrush)];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("BrushStrength", "Strength"),
+        SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(1.0f).Value(this, &SWetClothingTransparencyBakePanel::GetBrushStrength).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushStrengthCommitted))];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("BrushFalloff", "Falloff"),
+        SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(1.0f).Value(this, &SWetClothingTransparencyBakePanel::GetBrushFalloff).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushFalloffCommitted))];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("BrushSpacing", "Spacing"),
+        SNew(SNumericEntryBox<float>).MinValue(0.01f).MaxValue(2.0f).Value(this, &SWetClothingTransparencyBakePanel::GetBrushSpacing).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushSpacingCommitted))];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,6)
+    [
+        SNew(SBox)
+        .Visibility_Lambda([this]()
+        {
+            return BrushMode == EDWCTransparencyBrushMode::SetValue
+                ? EVisibility::Visible
+                : EVisibility::Collapsed;
+        })
+        [
+            BuildLabeledControl(
+                LOCTEXT("BrushTargetAlpha", "Target Alpha"),
+                SNew(SNumericEntryBox<float>)
+                .MinValue(0.0f)
+                .MaxValue(1.0f)
+                .Value(this, &SWetClothingTransparencyBakePanel::GetBrushTargetAlpha)
+                .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushTargetAlphaCommitted))
+        ]
+    ];
 
-    Box->AddSlot().AutoHeight().Padding(0, 2, 0, 6)
-        [SAssignNew(TransparencyStrokeListContainer, SBox)
-             [BuildTransparencyStrokeList()]];
+    Box->AddSlot().AutoHeight().Padding(0,2,0,6)
+    [SAssignNew(TransparencyStrokeListContainer, SBox)
+        [BuildTransparencyStrokeList()]];
 
     return Box;
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBrushSizeControl(
-    const FText&                          Label,
+    const FText& Label,
     const EDWCTransparencyBrushSizeTarget Target)
 {
-    TSharedPtr<SComboButton> SizeComboButton;
-    TSharedRef<SWidget>      PresetButton =
-        SAssignNew(SizeComboButton, SComboButton)
-            .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
-            .ToolTipText(LOCTEXT("TransparencyBrushSizePresetTooltip", "Choose a brush size preset."))
-            .MenuContent()[BuildBrushSizeMenu(Target)]
-            .ButtonContent()[SNew(STextBlock).Text(FText::FromString(TEXT("▼")))];
+    TSharedPtr<SComboButton> NewComboButton;
+    TSharedRef<SWidget> Control = SNew(SHorizontalBox)
+        + SHorizontalBox::Slot()
+            .AutoWidth()
+            [SNew(SBox)
+                .WidthOverride(72.0f)
+                [SNew(SSpinBox<float>)
+                    .MinValue(0.1f)
+                    .MaxValue(100.0f)
+                    .Value_Lambda([this, Target]()
+                    {
+                        return Target == EDWCTransparencyBrushSizeTarget::RevealColorPaint
+                            ? GetRevealPaintSizeCm()
+                            : GetBrushSizeCm();
+                    })
+                    .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleBrushSizeChanged, Target)
+                    .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushSizeCommitted, Target)]]
+        + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+            [SAssignNew(NewComboButton, SComboButton)
+                .HasDownArrow(true)
+                .ContentPadding(FMargin(8.0f, 2.0f))
+                .ButtonContent()
+                [SNew(STextBlock)
+                    .Text_Lambda([this, Target]()
+                    {
+                        return Target == EDWCTransparencyBrushSizeTarget::RevealColorPaint
+                            ? GetRevealPaintSizeDisplayText()
+                            : GetBrushSizeDisplayText();
+                    })]
+                .MenuContent()
+                [BuildBrushSizeMenu(Target)]];
 
     if (Target == EDWCTransparencyBrushSizeTarget::RevealColorPaint)
     {
-        RevealPaintSizeComboButton = SizeComboButton;
+        RevealPaintSizeComboButton = NewComboButton;
     }
     else
     {
-        TransparencyBrushSizeComboButton = SizeComboButton;
+        TransparencyBrushSizeComboButton = NewComboButton;
     }
 
-    return BuildLabeledControl(
-        Label,
-        SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SSpinBox<float>).MinValue(0.1f).MaxValue(100.0f).Value_Lambda([this, Target]()
-                                                                                                                                         { return Target == EDWCTransparencyBrushSizeTarget::RevealColorPaint
-                                                                                                                                                      ? GetRevealPaintSizeCm()
-                                                                                                                                                      : GetBrushSizeCm(); })
-                                                                          .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleBrushSizeChanged, Target)
-                                                                          .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleBrushSizeCommitted, Target)] +
-            SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(5.0f, 0.0f)[SNew(STextBlock).Text(LOCTEXT("TransparencyBrushCmUnit", "cm"))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 0.0f, 0.0f, 0.0f)[PresetButton] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).Visibility_Lambda([this, Target]()
-                                                                                                                                                                                                                                                                                                                                                                                                                  {
-                const float Current = Target == EDWCTransparencyBrushSizeTarget::RevealColorPaint
-                    ? GetRevealPaintSizeCm() : GetBrushSizeCm();
-                return FMath::IsNearlyEqual(Current, DWCTransparencyDefaultBrushSizeCm)
-                    ? EVisibility::Hidden : EVisibility::Visible; })
-                                                                                                                                                                                                                                                                                                                                  .ToolTipText(LOCTEXT("ResetTransparencyBrushSize", "Reset Size to default."))
-                                                                                                                                                                                                                                                                                                                                  .OnClicked_Lambda([this, Target]()
-                                                                                                                                                                                                                                                                                                                                                    {
-                HandleBrushSizeChanged(DWCTransparencyDefaultBrushSizeCm, Target);
-                return FReply::Handled(); })[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("PropertyWindow.DiffersFromDefault")))]]);
+    return BuildLabeledControl(Label, Control);
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBrushSizeMenu(
@@ -4544,9 +5115,9 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBrushSizeMenu(
         25.0f, 30.0f, 40.0f, 50.0f, 60.0f, 70.0f, 80.0f, 100.0f
     };
 
-    constexpr int32               ColumnCount = 8;
+    constexpr int32 ColumnCount = 8;
     TSharedRef<SUniformGridPanel> Grid = SNew(SUniformGridPanel)
-                                             .SlotPadding(FMargin(2.0f, 2.0f));
+        .SlotPadding(FMargin(2.0f, 2.0f));
 
     for (int32 PresetIndex = 0; PresetIndex < UE_ARRAY_COUNT(BrushSizePresetsCm); ++PresetIndex)
     {
@@ -4557,117 +5128,103 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBrushSizeMenu(
 
         Grid->AddSlot(Column, Row)
             [SNew(SButton)
-                 .ContentPadding(FMargin(3.0f, 2.0f))
-                 .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleBrushSizePresetClicked, PresetSizeCm, Target)
-                     [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)[SNew(SBox).HeightOverride(24.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(FText::FromString(TEXT("\u25CF"))).Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), static_cast<float>(DotFontSize))).ColorAndOpacity(FSlateColor(FLinearColor::White))]] + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)[SNew(STextBlock).Text(FormatDWCTransparencyBrushSizeCm(PresetSizeCm))]]];
+                .ContentPadding(FMargin(3.0f, 2.0f))
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleBrushSizePresetClicked, PresetSizeCm, Target)
+                [SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .HAlign(HAlign_Center)
+                        [SNew(SBox)
+                            .HeightOverride(24.0f)
+                            .VAlign(VAlign_Center)
+                            [SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("\u25CF")))
+                                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), DotFontSize))
+                                .ColorAndOpacity(FSlateColor(FLinearColor::White))]]
+                    + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .HAlign(HAlign_Center)
+                        [SNew(STextBlock)
+                            .Text(FormatDWCTransparencyBrushSizeCm(PresetSizeCm))]]];
     }
 
     return SNew(SBorder)
         .Padding(4.0f)
         .BorderImage(FAppStyle::GetBrush(TEXT("Menu.Background")))
-            [Grid];
+        [Grid];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyStrokeList()
 {
-    FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    const int32                        BaselineStrokeCount = GetCurrentBaselineStrokeCount();
-    const int32                        NewStrokeCount = Layer != nullptr ? FMath::Max(Layer->EditableStrokes.Num() - BaselineStrokeCount, 0) : 0;
-
     TSharedRef<SVerticalBox> Box = SNew(SVerticalBox);
-    Box->AddSlot().AutoHeight().Padding(0, 2, 0, 6)
-        [SNew(SHorizontalBox)
-             + SHorizontalBox::Slot().FillWidth(1.0f).Padding(0, 0, 3, 0)
-               [SNew(SButton)
-                    .HAlign(HAlign_Center)
-                    .Text(LOCTEXT("UndoLastStroke", "Undo Last Stroke"))
-                    .IsEnabled(NewStrokeCount > 0)
-                    .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleUndoLastStrokeClicked)]
-             + SHorizontalBox::Slot().FillWidth(1.0f).Padding(3, 0, 0, 0)
-               [SNew(SButton)
-                    .HAlign(HAlign_Center)
-                    .Text(LOCTEXT("ClearStrokes", "Clear"))
-                    .IsEnabled(NewStrokeCount > 0)
-                    .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleClearStrokesClicked)]];
+    FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    const int32 BaselineStrokeCount = GetCurrentBaselineStrokeCount();
+    const int32 NewStrokeCount = Layer != nullptr
+        ? FMath::Max(Layer->EditableStrokes.Num() - BaselineStrokeCount, 0)
+        : 0;
+    Box->AddSlot().AutoHeight().Padding(0,2,0,6)
+    [SNew(SHorizontalBox)
+        + SHorizontalBox::Slot().FillWidth(1).Padding(0,0,4,0)
+        [SNew(SButton).Text(LOCTEXT("UndoLastStroke", "Undo Last Stroke")).IsEnabled(NewStrokeCount > 0).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleUndoLastStrokeClicked)]
+        + SHorizontalBox::Slot().FillWidth(1)
+        [SNew(SButton).Text(LOCTEXT("ClearStrokes", "Clear")).IsEnabled(NewStrokeCount > 0).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleClearStrokesClicked)]];
 
     if (Layer == nullptr || NewStrokeCount == 0)
     {
-        Box->AddSlot().AutoHeight()
-            [SNew(STextBlock)
-                 .Text(LOCTEXT("NoTransparencyStrokes", "No manual transparency strokes."))
-                 .ColorAndOpacity(FSlateColor::UseSubduedForeground())];
-        return Box;
+        const bool bUsingBakedBaseline = BaselineStrokeCount > 0 ||
+            (AutoBakeResults.Contains(SelectedLayerGuid) &&
+             AutoBakeResults[SelectedLayerGuid].IsValid() &&
+             AutoBakeResults[SelectedLayerGuid]->bIsFinalBakedBaseline);
+        Box->AddSlot().AutoHeight()[BuildEmptyAssetRow(
+            bUsingBakedBaseline
+                ? LOCTEXT("NoNewTransparencyStrokes", "No new edits. Reset restores the loaded baked baseline.")
+                : LOCTEXT("NoTransparencyStrokes", "No manual transparency strokes."))];
     }
-
-    TMap<EDWCTransparencyBrushMode, int32> ModeStrokeCounts;
-    const int32 TargetSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
-    for (int32 StrokeIndex = BaselineStrokeCount; StrokeIndex < Layer->EditableStrokes.Num(); ++StrokeIndex)
+    else
     {
-        const FDWCTransparencyBrushStroke& Stroke = Layer->EditableStrokes[StrokeIndex];
-        if (Stroke.MaterialSlotIndex != TargetSlotIndex)
+        TMap<EDWCTransparencyBrushMode, int32> StrokeNumberByMode;
+        for (int32 StrokeIndex = BaselineStrokeCount; StrokeIndex < Layer->EditableStrokes.Num(); ++StrokeIndex)
         {
-            continue;
+            const FDWCTransparencyBrushStroke& Stroke = Layer->EditableStrokes[StrokeIndex];
+            const int32 StrokeNumber = ++StrokeNumberByMode.FindOrAdd(Stroke.BrushMode);
+            const FText StrokeLabel = FText::FromString(FString::Printf(
+                TEXT("%s %d"),
+                GetTransparencyStrokeModeLabel(Stroke.BrushMode),
+                StrokeNumber));
+            Box->AddSlot().AutoHeight().Padding(0,0,0,3)
+            [SNew(SBorder).Padding(4).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
+                [SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0,0,5,0)
+                    [SNew(SCheckBox).IsChecked(Stroke.bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleStrokeEnabledChanged, Stroke.StrokeGuid)]
+                    + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)
+                    [SNew(STextBlock).Text(StrokeLabel)]
+                    + SHorizontalBox::Slot().AutoWidth()
+                    [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ToolTipText(LOCTEXT("DeleteStrokeTooltip", "Delete this stroke.")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleDeleteStrokeClicked, Stroke.StrokeGuid)
+                        [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]];
         }
-
-        int32& ModeStrokeCount = ModeStrokeCounts.FindOrAdd(Stroke.BrushMode);
-        ++ModeStrokeCount;
-        const FText StrokeLabel = !Stroke.DisplayName.IsEmpty()
-                                      ? FText::FromString(Stroke.DisplayName)
-                                      : FText::Format(
-                                            LOCTEXT("TransparencyStrokeFallbackLabel", "{0} {1}"),
-                                            FText::FromString(GetTransparencyStrokeModeLabel(Stroke.BrushMode)),
-                                            FText::AsNumber(ModeStrokeCount));
-
-        Box->AddSlot().AutoHeight().Padding(0, 0, 0, 2)
-            [SNew(SBorder)
-                 .Padding(FMargin(4, 3))
-                 .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
-                     [SNew(SHorizontalBox)
-                          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
-                            [SNew(SCheckBox)
-                                 .IsChecked(Stroke.bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
-                                 .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleStrokeEnabledChanged, Stroke.StrokeGuid)]
-                          + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-                            [SNew(STextBlock)
-                                 .Text(StrokeLabel)
-                                 .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]
-                          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                            [SNew(SButton)
-                                 .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
-                                 .ToolTipText(LOCTEXT("DeleteTransparencyStrokeTooltip", "Delete this transparency stroke."))
-                                 .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleDeleteStrokeClicked, Stroke.StrokeGuid)
-                                 [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]];
     }
-
     return Box;
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildGeneratedOutputsSection()
 {
-    const TSharedPtr<FDWCTransparencyAutoBakeResult>* WorkingResult = AutoBakeResults.Find(SelectedLayerGuid);
-    const bool                                        bPreviewReady = WorkingResult != nullptr && WorkingResult->IsValid();
-    const int32                                       TargetTexelCount = bPreviewReady ? (*WorkingResult)->OuterSampleCount : 0;
-    const FWetClothingTransparencyLayerData*          Layer = GetSelectedLayer();
-    const bool                                        bBaked = FindExactBakedTransparencyMap(WetClothingAsset.Get(), Layer) != nullptr;
-
-    return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("GeneratedOutputs", "Generated Output"))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)[SNew(SSeparator)] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)[SNew(STextBlock).Text(bPreviewReady ? LOCTEXT("TransparencyPreviewMapReady", "✓ Preview Map Ready") : LOCTEXT("TransparencyPreviewMapMissing", "⚠ Preview Map Not Ready")).ColorAndOpacity(bPreviewReady ? FSlateColor(FLinearColor(0.35f, 0.85f, 0.45f)) : FSlateColor(FLinearColor(1.0f, 0.72f, 0.18f)))] + SVerticalBox::Slot().AutoHeight().Padding(18, 0, 0, 8)[SNew(STextBlock).Visibility(bPreviewReady ? EVisibility::Visible : EVisibility::Collapsed).Text(FText::Format(LOCTEXT("TransparencyPreviewTargetTexels", "{0} target texels"), FText::AsNumber(TargetTexelCount))).ColorAndOpacity(FSlateColor::UseSubduedForeground())] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[SNew(STextBlock).Text(bBaked ? LOCTEXT("TransparencyMapBaked", "✓ Transparency Map Baked") : LOCTEXT("TransparencyMapNotBaked", "⚠ Transparency Map Not Baked")).ColorAndOpacity(bBaked ? FSlateColor(FLinearColor(0.35f, 0.85f, 0.45f)) : FSlateColor(FLinearColor(1.0f, 0.72f, 0.18f)))] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)[SNew(SBox).Visibility(bBaked ? EVisibility::Visible : EVisibility::Collapsed)[BuildPackedTransparencyMapSection()]] + SVerticalBox::Slot().AutoHeight()[SNew(SButton).HAlign(HAlign_Center).Text(LOCTEXT("BakeTransparencyMap", "Bake Transparency Map")).ToolTipText(this, &SWetClothingTransparencyBakePanel::GetBakeEditedTooltipText).IsEnabled(this, &SWetClothingTransparencyBakePanel::IsBakeEditedEnabled).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleBakeEditedTransparencyMapClicked)];
+    return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("GeneratedOutputs", "Generated Output"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)[SNew(SBorder).Padding(FMargin(8,6)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
+            [SNew(STextBlock).AutoWrapText(true).Text(this, &SWetClothingTransparencyBakePanel::GetStatusText).ColorAndOpacity(this, &SWetClothingTransparencyBakePanel::GetStatusColor)]]
+        + SVerticalBox::Slot().AutoHeight()[BuildPackedTransparencyMapSection()];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPackedTransparencyMapSection()
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    TSharedRef<SVerticalBox>                 Box = SNew(SVerticalBox);
-    if (Layer == nullptr || Layer->BakedMaps.Num() == 0)
-    {
-        Box->AddSlot().AutoHeight()[BuildEmptyAssetRow(LOCTEXT("NoPackedMap", "No packed Transparency Map."))];
-        return Box;
-    }
+    TSharedRef<SVerticalBox> Box = SNew(SVerticalBox);
+    if (Layer == nullptr || Layer->BakedMaps.Num() == 0) { Box->AddSlot().AutoHeight()[BuildEmptyAssetRow(LOCTEXT("NoPackedMap", "No packed Transparency Map."))]; return Box; }
     for (const auto& Map : Layer->BakedMaps)
     {
         const FText BakeState = Map.BakeGuid.IsValid() && !Map.BuildSignature.IsEmpty()
-                                    ? LOCTEXT("PackedMapReady", "Ready")
-                                    : LOCTEXT("PackedMapStale", "Stale");
-        Box->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
+            ? LOCTEXT("PackedMapReady", "Ready")
+            : LOCTEXT("PackedMapStale", "Stale");
+        Box->AddSlot().AutoHeight().Padding(0,0,0,6)
             [BuildAssetSummaryRow(
                 Map.TransparencyMap,
                 FText::FromString(GetNameSafe(Map.TransparencyMap)),
@@ -4685,52 +5242,64 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPackedTransparencyMa
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPreviewSettingsSection()
 {
-    static const FSlateRoundedBoxBrush PreviewControlsBackgroundBrush(
-        FLinearColor(0.025f, 0.025f, 0.025f, 0.86f), 6.0f,
-        FLinearColor(0.22f, 0.22f, 0.22f, 0.9f), 1.0f);
-
-    return SNew(SBox).WidthOverride(310.0f)
-        [SNew(SBorder).Padding(8.0f).BorderImage(&PreviewControlsBackgroundBrush)
-             [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 5)[SNew(SBorder).BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header"))).Padding(FMargin(8, 6))[SNew(STextBlock).Text(LOCTEXT("PreviewDisplayHeading", "Display")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]] + SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 3)[SNew(STextBlock).Text(LOCTEXT("PreviewAppearanceHeading", "Appearance")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold"))).ColorAndOpacity(FSlateColor::UseSubduedForeground())] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(112.0f)[SNew(STextBlock).Text(LOCTEXT("PreviewWetnessShort", "Wetness"))]] + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SSlider).MinValue(0).MaxValue(100).Value(this, &SWetClothingTransparencyBakePanel::GetWetnessPreviewPercent).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWetnessPreviewChanged)]] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 5)[BuildLabeledControl(LOCTEXT("TransparencyPreviewStrengthShort", "Transparency"), SNew(SNumericEntryBox<float>).IsEnabled_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           { const TSharedPtr<FDWCTransparencyAutoBakeResult>* R = AutoBakeResults.Find(SelectedLayerGuid); return R == nullptr || !R->IsValid() || !(*R)->bIsFinalBakedBaseline; })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .MinValue(0.0f)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .MaxValue(8.0f)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .Value(this, &SWetClothingTransparencyBakePanel::GetTransparencyPreviewStrength)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthChanged)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthCommitted))] +
-              SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 3)[SNew(STextBlock).Text(LOCTEXT("WrinkleOverlayHeading", "Wrinkle Overlay")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold"))).ColorAndOpacity(FSlateColor::UseSubduedForeground())] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)[SNew(SCheckBox).IsChecked(this, &SWetClothingTransparencyBakePanel::GetShowSavedWrinkleState).OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleShowSavedWrinkleChanged).ToolTipText(LOCTEXT("ShowSavedWrinkleTooltip", "Show the wrinkle normal texture currently selected for runtime."))[SNew(STextBlock).Text(LOCTEXT("ShowSavedWrinkleShort", "Saved Wrinkle"))]] + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionStrengthShort", "Strength"), SNew(SNumericEntryBox<float>).IsEnabled_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              { const TSharedPtr<FDWCTransparencyAutoBakeResult>* R = AutoBakeResults.Find(SelectedLayerGuid); const bool bCan = R == nullptr || !R->IsValid() || !(*R)->bIsFinalBakedBaseline; return bCan && GetShowSavedWrinkleState() == ECheckBoxState::Checked; })
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   .MinValue(0.0f)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   .MaxValue(5.0f)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   .Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleSuppressionStrength)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthChanged)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthCommitted))] +
-              SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionThresholdShort", "Mask Threshold"), SNew(SNumericEntryBox<float>).IsEnabled_Lambda([this]()
-                                                                                                                                                                                                      { const TSharedPtr<FDWCTransparencyAutoBakeResult>* R = AutoBakeResults.Find(SelectedLayerGuid); const bool bCan = R == nullptr || !R->IsValid() || !(*R)->bIsFinalBakedBaseline; return bCan && GetShowSavedWrinkleState() == ECheckBoxState::Checked; })
-                                                                                                                                                           .MinValue(0.0f)
-                                                                                                                                                           .MaxValue(1.0f)
-                                                                                                                                                           .Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleMaskThreshold)
-                                                                                                                                                           .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskThresholdChanged)
-                                                                                                                                                           .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskThresholdCommitted))] +
-              SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 5)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionSoftnessShort", "Mask Softness"), SNew(SNumericEntryBox<float>).IsEnabled_Lambda([this]()
-                                                                                                                                                                                                    { const TSharedPtr<FDWCTransparencyAutoBakeResult>* R = AutoBakeResults.Find(SelectedLayerGuid); const bool bCan = R == nullptr || !R->IsValid() || !(*R)->bIsFinalBakedBaseline; return bCan && GetShowSavedWrinkleState() == ECheckBoxState::Checked; })
-                                                                                                                                                         .MinValue(0.0f)
-                                                                                                                                                         .MaxValue(1.0f)
-                                                                                                                                                         .Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleMaskSoftness)
-                                                                                                                                                         .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskSoftnessChanged)
-                                                                                                                                                         .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskSoftnessCommitted))] +
-              SVerticalBox::Slot().AutoHeight().Padding(0, 3, 0, 5)[BuildLabeledControl(LOCTEXT("TransparencyVisualizationLabel", "Visualization"), SNew(SComboBox<TSharedPtr<EDWCTransparencyVisualizationMode>>).OptionsSource(&VisualizationModeItems).InitiallySelectedItem(FindVisualizationModeItem(SelectedVisualizationMode)).OnGenerateWidget(this, &SWetClothingTransparencyBakePanel::GenerateVisualizationModeComboItem).OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleVisualizationModeChanged)[SNew(STextBlock).Text_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               { return GetVisualizationModeLabel(SelectedVisualizationMode); })])] +
-              SVerticalBox::Slot().AutoHeight().Padding(0, 3, 0, 3)[SNew(STextBlock).Text(LOCTEXT("VisibleMeshesHeading", "Visible Meshes")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold"))).ColorAndOpacity(FSlateColor::UseSubduedForeground())] + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).Padding(0, 0, 3, 0)[BuildPreviewModeButton(EWetClothingTransparencyPreviewMode::TargetMeshOnly, LOCTEXT("TargetMeshPreview", "Target Mesh"))] + SHorizontalBox::Slot().FillWidth(1.0f)[BuildPreviewModeButton(EWetClothingTransparencyPreviewMode::FullBlueprint, LOCTEXT("AllWettableSlotsPreview", "All Wettable Slots"))]]]];
+    const TSharedPtr<FDWCTransparencySourcePayload>* WorkingResult = AutoBakeResults.Find(SelectedLayerGuid);
+    const bool bCanRecomputeFinalSettings = WorkingResult == nullptr ||
+        !WorkingResult->IsValid() ||
+        !(*WorkingResult)->bIsFinalBakedBaseline;
+    return SNew(SBorder).Padding(10).BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))[SNew(SVerticalBox)
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("PreviewSettings", "Preview Settings"))]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,3)[SNew(STextBlock).Text(LOCTEXT("PreviewWetnessLabel", "Preview Wetness"))]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[SNew(SSlider).MinValue(0).MaxValue(100).Value(this, &SWetClothingTransparencyBakePanel::GetWetnessPreviewPercent).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWetnessPreviewChanged)]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("TransparencyPreviewStrengthLabel", "Transparency Strength"),
+          SNew(SNumericEntryBox<float>).IsEnabled(bCanRecomputeFinalSettings).MinValue(0.0f).MaxValue(8.0f).Value(this, &SWetClothingTransparencyBakePanel::GetTransparencyPreviewStrength).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthChanged).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthCommitted))]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+        [SNew(SCheckBox)
+            .IsChecked(this, &SWetClothingTransparencyBakePanel::GetShowSavedWrinkleState)
+            .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleShowSavedWrinkleChanged)
+            .ToolTipText(LOCTEXT("ShowSavedWrinkleTooltip", "Show the wrinkle normal texture currently selected for runtime. Live Wrinkle Editor hover and stroke data are not included."))
+            [SNew(STextBlock).Text(LOCTEXT("ShowSavedWrinkle", "Show Saved Wrinkle"))]]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionStrengthLabel", "Wrinkle Suppression Strength"),
+          SNew(SNumericEntryBox<float>).IsEnabled(bCanRecomputeFinalSettings).MinValue(0.0f).MaxValue(5.0f).Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleSuppressionStrength).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthChanged).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthCommitted))]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionThresholdLabel", "Wrinkle Mask Threshold"),
+          SNew(SNumericEntryBox<float>)
+              .IsEnabled(bCanRecomputeFinalSettings)
+              .MinValue(0.0f).MaxValue(1.0f)
+              .Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleMaskThreshold)
+              .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskThresholdChanged)
+              .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskThresholdCommitted))]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionSoftnessLabel", "Wrinkle Mask Softness"),
+          SNew(SNumericEntryBox<float>)
+              .IsEnabled(bCanRecomputeFinalSettings)
+              .MinValue(0.0f).MaxValue(1.0f)
+              .Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleMaskSoftness)
+              .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskSoftnessChanged)
+              .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskSoftnessCommitted))]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("TransparencyVisualizationLabel", "Visualization"),
+          SNew(SComboBox<TSharedPtr<EDWCTransparencyVisualizationMode>>)
+              .OptionsSource(&VisualizationModeItems)
+              .InitiallySelectedItem(FindVisualizationModeItem(SelectedVisualizationMode))
+              .OnGenerateWidget(this, &SWetClothingTransparencyBakePanel::GenerateVisualizationModeComboItem)
+              .OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleVisualizationModeChanged)
+              [SNew(STextBlock).Text_Lambda([this](){ return GetVisualizationModeLabel(SelectedVisualizationMode); })])]
+      + SVerticalBox::Slot().AutoHeight()[SNew(SHorizontalBox)
+        + SHorizontalBox::Slot().AutoWidth().Padding(0,0,4,0)[BuildPreviewModeButton(EWetClothingTransparencyPreviewMode::TargetMeshOnly, LOCTEXT("TargetMeshPreview", "Target Mesh"))]
+        + SHorizontalBox::Slot().AutoWidth()[BuildPreviewModeButton(EWetClothingTransparencyPreviewMode::FullBlueprint, LOCTEXT("AllWettableSlotsPreview", "All Wettable Slots"))]]];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyPreviewSection()
 {
-    TSharedRef<SWidget> Content = FWCAEditorWidgets::BuildPreviewSection(
-        SNew(SOverlay) + SOverlay::Slot()[SAssignNew(PreviewViewport, SWetClothingTransparencyPreviewViewport).WetClothingAsset(WetClothingAsset.Get()).WorkerJobScheduler(WorkerJobScheduler).SessionStore(SessionStore).SpatialQueryService(SpatialQueryService).TextureWorkspace(TextureWorkspace).PreviewCommitCoordinator(PreviewCommitCoordinator).RenderUploadQueue(RenderUploadQueue)] + SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Top).Padding(14.0f, 42.0f, 14.0f, 14.0f)[SNew(SBox).Visibility_Lambda([this]()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          { return GetCurrentStage() == EDWCTransparencyEditorStage::BakeOutput ? EVisibility::Visible : EVisibility::Collapsed; })[BuildPreviewSettingsSection()]],
-        FOnWetClothingPreviewFocusClicked::CreateSP(this, &SWetClothingTransparencyBakePanel::HandleFocusPreviewClicked));
-
+    TSharedRef<SWidget> Content = SNew(SBorder).Padding(12)[SNew(SVerticalBox)
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1)[SNew(STextBlock).Text(LOCTEXT("Preview", "Preview")).Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))] + SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("FocusMesh", "Focus Mesh")).OnClicked(this, &SWetClothingTransparencyBakePanel::HandleFocusPreviewClicked)]]
+      + SVerticalBox::Slot().FillHeight(1)
+        [SAssignNew(PreviewViewport, SWetClothingTransparencyPreviewViewport)
+            .WetClothingAsset(WetClothingAsset.Get())
+            .WorkerJobScheduler(WorkerJobScheduler)
+            .SessionStore(SessionStore)
+            .WrinkleSuppressionCoverageService(WrinkleSuppressionCoverageService)
+            .SpatialQueryService(SpatialQueryService)
+            .TextureWorkspace(TextureWorkspace)
+            .PreviewCommitCoordinator(PreviewCommitCoordinator)
+            .RenderUploadQueue(RenderUploadQueue)]];
     if (AuthoringController.IsValid())
     {
         AuthoringController->AttachViewport(PreviewViewport);
@@ -4741,25 +5310,23 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyPreviewS
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPreviewModeButton(EWetClothingTransparencyPreviewMode Mode, const FText& Label)
 {
-    return SNew(SCheckBox).Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton")).Type(ESlateCheckBoxType::ToggleButton).IsEnabled_Lambda([this, Mode]()
-                                                                                                                                              { return Mode != EWetClothingTransparencyPreviewMode::FullBlueprint || CanUseFullBlueprintPreview(); })
-        .IsChecked(this, &SWetClothingTransparencyBakePanel::IsPreviewModeChecked, Mode)
-        .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandlePreviewModeChanged, Mode)[SNew(STextBlock).Text(Label)];
+    return SNew(SCheckBox).Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton")).Type(ESlateCheckBoxType::ToggleButton)
+        .IsEnabled_Lambda([this, Mode](){ return Mode != EWetClothingTransparencyPreviewMode::FullBlueprint || CanUseFullBlueprintPreview(); })
+        .IsChecked(this, &SWetClothingTransparencyBakePanel::IsPreviewModeChecked, Mode).OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandlePreviewModeChanged, Mode)[SNew(STextBlock).Text(Label)];
 }
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildAssetSummaryRow(
-    UObject*                             Asset,
-    const FText&                         Label,
-    const FText&                         Detail,
+    UObject* Asset,
+    const FText& Label,
+    const FText& Detail,
     TArray<TSharedPtr<FAssetThumbnail>>& ThumbnailStorage)
 {
     TSharedRef<SWidget> Thumbnail = SNew(SBox).WidthOverride(44).HeightOverride(44)[SNullWidget::NullWidget];
-    if (Asset != nullptr && ThumbnailPool.IsValid())
-    {
-        TSharedPtr<FAssetThumbnail> T = MakeShared<FAssetThumbnail>(Asset, 44, 44, ThumbnailPool);
-        ThumbnailStorage.Add(T);
-        Thumbnail = T->MakeThumbnailWidget(FAssetThumbnailConfig());
-    }
-    return SNew(SBorder).Padding(4).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))[SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth()[Thumbnail] + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center).Padding(6, 0, 0, 0)[SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(Label).AutoWrapText(true)] + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(Detail).ColorAndOpacity(FSlateColor::UseSubduedForeground()).AutoWrapText(true)]]];
+    if (Asset != nullptr && ThumbnailPool.IsValid()) { TSharedPtr<FAssetThumbnail> T = MakeShared<FAssetThumbnail>(Asset,44,44,ThumbnailPool); ThumbnailStorage.Add(T); Thumbnail = T->MakeThumbnailWidget(FAssetThumbnailConfig()); }
+    return SNew(SBorder).Padding(4).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))[SNew(SHorizontalBox)
+      + SHorizontalBox::Slot().AutoWidth()[Thumbnail]
+      + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center).Padding(6,0,0,0)[SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(Label).AutoWrapText(true)]
+        + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(Detail).ColorAndOpacity(FSlateColor::UseSubduedForeground()).AutoWrapText(true)]]];
 }
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildEmptyAssetRow(const FText& Label) const
 {
@@ -4768,8 +5335,7 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildEmptyAssetRow(const 
 
 void SWetClothingTransparencyBakePanel::RefreshViewportContext()
 {
-    if (bPreviewSuspended || !PreviewViewport.IsValid())
-        return;
+    if (bPreviewSuspended || !PreviewViewport.IsValid()) return;
     // The panel owns the controller while the viewport can be rebuilt by the
     // preview session. Rebind on every context push so slot/stage transitions
     // cannot leave the interactive tool talking to an expired viewport.
@@ -4778,14 +5344,14 @@ void SWetClothingTransparencyBakePanel::RefreshViewportContext()
         AuthoringController->AttachViewport(PreviewViewport);
         PreviewViewport->SetAuthoringController(AuthoringController);
     }
-    const FWetClothingTransparencyLayerData*  Layer = GetSelectedLayer();
-    const EDWCTransparencyEditorStage         CurrentStage = GetCurrentStage();
-    const EDWCTransparencySourceType          SourceType = Layer != nullptr
-                                                               ? Layer->SourceType
-                                                               : EDWCTransparencySourceType::SameMeshMaterialSlots;
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    const EDWCTransparencyEditorStage CurrentStage = GetCurrentStage();
+    const EDWCTransparencySourceType SourceType = Layer != nullptr
+        ? Layer->SourceType
+        : EDWCTransparencySourceType::SameMeshMaterialSlots;
     const EWetClothingTransparencyPreviewMode RequestedPreviewMode =
         PreviewViewport->GetPreviewMode();
-    const bool                                              bRevealPaintEnabled = GetRevealPaintSettingsFromSession().bEnabled;
+    const bool bRevealPaintEnabled = GetRevealPaintSettingsFromSession().bEnabled;
     DWCTransparencyWorkflow::FDWCTransparencyPreviewContext PreviewContext =
         DWCTransparencyWorkflow::ResolvePreviewContext(
             CurrentStage,
@@ -4801,17 +5367,16 @@ void SWetClothingTransparencyBakePanel::RefreshViewportContext()
     // relevant; only that resource is prepared here.
     if (PreviewContext.PaintTarget == EDWCTransparencyPaintTarget::RevealColor)
     {
-        EnsureManualRevealWorkingMap();
+        EnsureRevealEditingWorkingMap();
     }
-    else if (PreviewContext.PaintTarget == EDWCTransparencyPaintTarget::FinalAlpha ||
-             CurrentStage == EDWCTransparencyEditorStage::BakeOutput)
+    else if (PreviewContext.PaintTarget == EDWCTransparencyPaintTarget::FinalAlpha)
     {
         EnsureFinalEditingWorkingMap();
     }
 
     const bool bHasWorkingMap = Layer != nullptr &&
-                                AutoBakeResults.Contains(Layer->LayerGuid) &&
-                                AutoBakeResults.FindChecked(Layer->LayerGuid).IsValid();
+        AutoBakeResults.Contains(Layer->LayerGuid) &&
+        AutoBakeResults.FindChecked(Layer->LayerGuid).IsValid();
     PreviewContext = DWCTransparencyWorkflow::ResolvePreviewContext(
         CurrentStage,
         SourceType,
@@ -4824,14 +5389,14 @@ void SWetClothingTransparencyBakePanel::RefreshViewportContext()
 
     PreviewViewport->SetPreviewMode(PreviewContext.PreviewMode);
     PreviewViewport->SetTransparencyEditContext(SelectedLayerGuid,
-                                                Layer != nullptr ? Layer->TargetSurface.OuterMaterialSlotIndex : INDEX_NONE,
-                                                GetTransparencyDataUVChannel(),
-                                                Layer != nullptr ? Layer->TargetSurface.UVAddressMode : EDWCTransparencyUVAddressMode::Clamp,
-                                                PreviewContext.PaintTarget);
+        Layer != nullptr ? Layer->TargetSurface.OuterMaterialSlotIndex : INDEX_NONE,
+        GetTransparencyDataUVChannel(),
+        Layer != nullptr ? Layer->TargetSurface.UVAddressMode : EDWCTransparencyUVAddressMode::Clamp,
+        PreviewContext.PaintTarget);
 
-    const TSharedPtr<FDWCTransparencyAutoBakeResult>* Result = Layer != nullptr
-                                                                   ? AutoBakeResults.Find(Layer->LayerGuid)
-                                                                   : nullptr;
+    const TSharedPtr<FDWCTransparencySourcePayload>* Result = Layer != nullptr
+        ? AutoBakeResults.Find(Layer->LayerGuid)
+        : nullptr;
     if (Result != nullptr && Result->IsValid())
     {
         PreviewViewport->SetAutoBakePreviewResult(*Result);

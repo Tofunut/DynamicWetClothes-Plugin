@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
 
 #include "Algo/Sort.h"
@@ -15,13 +14,58 @@
 
 namespace
 {
-    const FName     SpatialCacheNamespace(TEXT("SpatialQuery"));
+    const FName SpatialCacheNamespace(TEXT("SpatialQuery"));
     constexpr int32 BVHLeafTriangleCount = 8;
+    constexpr int64 FallbackTopologyVertexBase = static_cast<int64>(MAX_uint32) + 1;
+
+    struct FQuantizedSurfaceVertexKey
+    {
+        FIntVector Position = FIntVector::ZeroValue;
+        FIntVector Normal = FIntVector::ZeroValue;
+
+        bool operator==(const FQuantizedSurfaceVertexKey& Other) const
+        {
+            return Position == Other.Position && Normal == Other.Normal;
+        }
+    };
+
+    uint32 GetTypeHash(const FQuantizedSurfaceVertexKey& Key)
+    {
+        return HashCombine(GetTypeHash(Key.Position), GetTypeHash(Key.Normal));
+    }
+
+    struct FTopologyEdgeKey
+    {
+        int64 VertexA = INDEX_NONE;
+        int64 VertexB = INDEX_NONE;
+
+        bool operator==(const FTopologyEdgeKey& Other) const
+        {
+            return VertexA == Other.VertexA && VertexB == Other.VertexB;
+        }
+    };
+
+    uint32 GetTypeHash(const FTopologyEdgeKey& Key)
+    {
+        const uint32 HashA = static_cast<uint32>(Key.VertexA) ^
+            static_cast<uint32>(static_cast<uint64>(Key.VertexA) >> 32);
+        const uint32 HashB = static_cast<uint32>(Key.VertexB) ^
+            static_cast<uint32>(static_cast<uint64>(Key.VertexB) >> 32);
+        return HashCombine(HashA, HashB);
+    }
+
+    struct FTopologyEdgeReference
+    {
+        int32 TriangleIndex = INDEX_NONE;
+        int32 EdgeIndex = INDEX_NONE;
+        FVector2f UVAtA = FVector2f::ZeroVector;
+        FVector2f UVAtB = FVector2f::ZeroVector;
+    };
 
     uint64 MakeTriangleLookupKey(const int32 MaterialSlotIndex, const int32 TriangleID)
     {
         return (static_cast<uint64>(static_cast<uint32>(MaterialSlotIndex)) << 32) |
-               static_cast<uint32>(TriangleID);
+            static_cast<uint32>(TriangleID);
     }
 
     FVector3f AnyPerpendicular(const FVector3f& Normal)
@@ -45,7 +89,7 @@ namespace
     }
 
     bool DoesSegmentIntersectBox(
-        const FBox3f&    Box,
+        const FBox3f& Box,
         const FVector3f& SegmentStart,
         const FVector3f& SegmentEnd)
     {
@@ -55,8 +99,8 @@ namespace
         }
 
         const FVector3f Delta = SegmentEnd - SegmentStart;
-        float           Entry = 0.0f;
-        float           Exit = 1.0f;
+        float Entry = 0.0f;
+        float Exit = 1.0f;
         for (int32 Axis = 0; Axis < 3; ++Axis)
         {
             if (FMath::IsNearlyZero(Delta[Axis]))
@@ -90,28 +134,28 @@ namespace
         const FVector3f& A,
         const FVector3f& B,
         const FVector3f& C,
-        float&           OutSegmentT,
-        FVector3f&       OutBarycentric)
+        float& OutSegmentT,
+        FVector3f& OutBarycentric)
     {
         const FVector3f SegmentDelta = SegmentEnd - SegmentStart;
         const FVector3f EdgeAB = B - A;
         const FVector3f EdgeAC = C - A;
         const FVector3f P = FVector3f::CrossProduct(SegmentDelta, EdgeAC);
-        const float     Determinant = FVector3f::DotProduct(EdgeAB, P);
+        const float Determinant = FVector3f::DotProduct(EdgeAB, P);
         if (FMath::Abs(Determinant) <= UE_SMALL_NUMBER)
         {
             return false;
         }
 
-        const float     InverseDeterminant = 1.0f / Determinant;
+        const float InverseDeterminant = 1.0f / Determinant;
         const FVector3f T = SegmentStart - A;
-        const float     BarycentricB = FVector3f::DotProduct(T, P) * InverseDeterminant;
+        const float BarycentricB = FVector3f::DotProduct(T, P) * InverseDeterminant;
         if (BarycentricB < -UE_KINDA_SMALL_NUMBER || BarycentricB > 1.0f + UE_KINDA_SMALL_NUMBER)
         {
             return false;
         }
         const FVector3f Q = FVector3f::CrossProduct(T, EdgeAB);
-        const float     BarycentricC = FVector3f::DotProduct(SegmentDelta, Q) * InverseDeterminant;
+        const float BarycentricC = FVector3f::DotProduct(SegmentDelta, Q) * InverseDeterminant;
         if (BarycentricC < -UE_KINDA_SMALL_NUMBER ||
             BarycentricB + BarycentricC > 1.0f + UE_KINDA_SMALL_NUMBER)
         {
@@ -137,7 +181,7 @@ namespace
         const FVector2f V0 = B - A;
         const FVector2f V1 = C - A;
         const FVector2f V2 = Point - A;
-        const float     Denominator = V0.X * V1.Y - V1.X * V0.Y;
+        const float Denominator = V0.X * V1.Y - V1.X * V0.Y;
         if (FMath::Abs(Denominator) <= UE_SMALL_NUMBER)
         {
             return FVector3f(-1.0f, -1.0f, -1.0f);
@@ -151,8 +195,39 @@ namespace
     {
         constexpr float Tolerance = 0.0001f;
         return Barycentric.X >= -Tolerance &&
-               Barycentric.Y >= -Tolerance &&
-               Barycentric.Z >= -Tolerance;
+            Barycentric.Y >= -Tolerance &&
+            Barycentric.Z >= -Tolerance;
+    }
+
+    void ComputeSurfaceUVFrame(FDWCEditorSpatialTriangle& Triangle)
+    {
+        const FVector3f Edge1 = Triangle.LocalPositions[1] - Triangle.LocalPositions[0];
+        const FVector3f Edge2 = Triangle.LocalPositions[2] - Triangle.LocalPositions[0];
+        const FVector2f UVEdge1 = Triangle.UVs[1] - Triangle.UVs[0];
+        const FVector2f UVEdge2 = Triangle.UVs[2] - Triangle.UVs[0];
+        const float Determinant = UVEdge1.X * UVEdge2.Y - UVEdge1.Y * UVEdge2.X;
+        if (FMath::Abs(Determinant) <= UE_SMALL_NUMBER)
+        {
+            Triangle.LocalSurfaceAxisU = Triangle.LocalTangent;
+            Triangle.LocalSurfaceAxisV = Triangle.LocalBitangent;
+            Triangle.SurfaceUnitsPerUV = FVector2f::ZeroVector;
+            return;
+        }
+
+        const float InverseDeterminant = 1.0f / Determinant;
+        const FVector3f DPDU = (Edge1 * UVEdge2.Y - Edge2 * UVEdge1.Y) * InverseDeterminant;
+        const FVector3f DPDV = (Edge2 * UVEdge1.X - Edge1 * UVEdge2.X) * InverseDeterminant;
+        Triangle.SurfaceUnitsPerUV = FVector2f(DPDU.Size(), DPDV.Size());
+        Triangle.LocalSurfaceAxisU = DPDU.GetSafeNormal();
+        Triangle.LocalSurfaceAxisV = DPDV.GetSafeNormal();
+        if (Triangle.LocalSurfaceAxisU.IsNearlyZero())
+        {
+            Triangle.LocalSurfaceAxisU = Triangle.LocalTangent;
+        }
+        if (Triangle.LocalSurfaceAxisV.IsNearlyZero())
+        {
+            Triangle.LocalSurfaceAxisV = Triangle.LocalBitangent;
+        }
     }
 
     float WrapUV(const float Value)
@@ -162,9 +237,9 @@ namespace
 
     void FillProjectedSurface(
         const FDWCEditorSpatialTriangle& Triangle,
-        const FVector3f&                 Barycentric,
-        const FTransform&                ComponentTransform,
-        FDWCEditorProjectedSurface&      OutSurface)
+        const FVector3f& Barycentric,
+        const FTransform& ComponentTransform,
+        FDWCEditorProjectedSurface& OutSurface)
     {
         const FVector3f LocalPosition =
             Triangle.LocalPositions[0] * Barycentric.X +
@@ -174,17 +249,51 @@ namespace
         OutSurface.TriangleID = Triangle.TriangleID;
         OutSurface.UVIslandID = Triangle.UVIslandID;
         OutSurface.Barycentric = FVector(Barycentric);
+        OutSurface.UV = FVector2D(
+            Triangle.UVs[0] * Barycentric.X +
+            Triangle.UVs[1] * Barycentric.Y +
+            Triangle.UVs[2] * Barycentric.Z);
+        const FVector3f SmoothNormal = (
+            Triangle.LocalNormals[0] * Barycentric.X +
+            Triangle.LocalNormals[1] * Barycentric.Y +
+            Triangle.LocalNormals[2] * Barycentric.Z).GetSafeNormal(
+                UE_SMALL_NUMBER,
+                Triangle.LocalNormal);
+        const FVector3f InterpolatedTangent =
+            Triangle.LocalTangents[0] * Barycentric.X +
+            Triangle.LocalTangents[1] * Barycentric.Y +
+            Triangle.LocalTangents[2] * Barycentric.Z;
+        const FVector3f InterpolatedBitangent =
+            Triangle.LocalBitangents[0] * Barycentric.X +
+            Triangle.LocalBitangents[1] * Barycentric.Y +
+            Triangle.LocalBitangents[2] * Barycentric.Z;
+        FVector3f SurfaceFrameU;
+        FVector3f SurfaceFrameV;
+        FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
+            SmoothNormal,
+            InterpolatedTangent,
+            InterpolatedBitangent,
+            SurfaceFrameU,
+            SurfaceFrameV);
+
+        OutSurface.LocalPosition = FVector(LocalPosition);
+        OutSurface.LocalNormal = FVector(SmoothNormal);
+        OutSurface.LocalTangent = FVector(SurfaceFrameU);
+        OutSurface.LocalBitangent = FVector(SurfaceFrameV);
+        OutSurface.LocalSurfaceAxisU = FVector(Triangle.LocalSurfaceAxisU);
+        OutSurface.LocalSurfaceAxisV = FVector(Triangle.LocalSurfaceAxisV);
+        OutSurface.LocalSurfaceFrameU = FVector(SurfaceFrameU);
+        OutSurface.LocalSurfaceFrameV = FVector(SurfaceFrameV);
+        OutSurface.SurfaceUnitsPerUV = Triangle.SurfaceUnitsPerUV;
         OutSurface.WorldPosition = ComponentTransform.TransformPosition(FVector(LocalPosition));
-        OutSurface.WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalNormal))
-                                     .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-        OutSurface.WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalTangent))
-                                      .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
-        OutSurface.WorldBitangent = FVector::CrossProduct(
-                                        OutSurface.WorldNormal,
-                                        OutSurface.WorldTangent)
-                                        .GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+        OutSurface.WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(SmoothNormal))
+            .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+        OutSurface.WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(SurfaceFrameU))
+            .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+        OutSurface.WorldBitangent = ComponentTransform.TransformVectorNoScale(FVector(SurfaceFrameV))
+            .GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
     }
-} // namespace
+}
 
 FName FDWCEditorSpatialData::StaticCacheTypeName()
 {
@@ -195,10 +304,10 @@ FName FDWCEditorSpatialData::StaticCacheTypeName()
 uint64 FDWCEditorSpatialData::GetAllocatedSizeBytes() const
 {
     uint64 Bytes = static_cast<uint64>(Triangles.GetAllocatedSize()) +
-                   static_cast<uint64>(TriangleLookup.GetAllocatedSize()) +
-                   static_cast<uint64>(BVHTriangleIndices.GetAllocatedSize()) +
-                   static_cast<uint64>(BVHNodes.GetAllocatedSize()) +
-                   static_cast<uint64>(UVTriangleGrid.GetAllocatedSize());
+        static_cast<uint64>(TriangleLookup.GetAllocatedSize()) +
+        static_cast<uint64>(BVHTriangleIndices.GetAllocatedSize()) +
+        static_cast<uint64>(BVHNodes.GetAllocatedSize()) +
+        static_cast<uint64>(UVTriangleGrid.GetAllocatedSize());
     for (const TArray<int32>& Cell : UVTriangleGrid)
     {
         Bytes += static_cast<uint64>(Cell.GetAllocatedSize());
@@ -214,10 +323,10 @@ FDWCEditorSpatialQueryService::FDWCEditorSpatialQueryService(
 
 FDWCEditorSpatialHandle FDWCEditorSpatialQueryService::Acquire(
     const UWetClothingAsset* WetClothingAsset,
-    USkeletalMesh*           Mesh,
-    const int32              UVChannelIndex,
-    const int32              MaterialSlotIndex,
-    FString*                 OutError)
+    USkeletalMesh* Mesh,
+    const int32 UVChannelIndex,
+    const int32 MaterialSlotIndex,
+    FString* OutError)
 {
     FDWCEditorSpatialLease Lease = AcquireLease(
         WetClothingAsset,
@@ -230,15 +339,15 @@ FDWCEditorSpatialHandle FDWCEditorSpatialQueryService::Acquire(
 
 FDWCEditorSpatialLease FDWCEditorSpatialQueryService::AcquireLease(
     const UWetClothingAsset* WetClothingAsset,
-    USkeletalMesh*           Mesh,
-    const int32              UVChannelIndex,
-    const int32              MaterialSlotIndex,
-    FString*                 OutError)
+    USkeletalMesh* Mesh,
+    const int32 UVChannelIndex,
+    const int32 MaterialSlotIndex,
+    FString* OutError)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorSpatialQueryService_Acquire);
     check(IsInGameThread());
 
-    constexpr int32                     LODIndex = 0;
+    constexpr int32 LODIndex = 0;
     const TOptional<FDWCEditorCacheKey> CacheKey = MakeCacheKey(
         WetClothingAsset,
         Mesh,
@@ -281,10 +390,10 @@ FDWCEditorSpatialLease FDWCEditorSpatialQueryService::AcquireLease(
 
 bool FDWCEditorSpatialQueryService::TraceSurface(
     const FDWCEditorSpatialHandle& Handle,
-    const USkeletalMeshComponent*  MeshComponent,
-    const FVector&                 RayOrigin,
-    const FVector&                 RayDirection,
-    FDWCEditorSurfaceHit&          OutHit) const
+    const USkeletalMeshComponent* MeshComponent,
+    const FVector& RayOrigin,
+    const FVector& RayDirection,
+    FDWCEditorSurfaceHit& OutHit) const
 {
     OutHit = FDWCEditorSurfaceHit();
     if (!Handle.IsValid() || Handle->Triangles.IsEmpty() || MeshComponent == nullptr)
@@ -299,10 +408,10 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
     }
 
     const FTransform ComponentTransform = MeshComponent->GetComponentTransform();
-    const FVector3f  LocalRayOrigin(ComponentTransform.InverseTransformPosition(RayOrigin));
-    const FVector3f  LocalRayEnd(ComponentTransform.InverseTransformPosition(
+    const FVector3f LocalRayOrigin(ComponentTransform.InverseTransformPosition(RayOrigin));
+    const FVector3f LocalRayEnd(ComponentTransform.InverseTransformPosition(
         RayOrigin + Direction * 1000000.0f));
-    float            BestSegmentT = TNumericLimits<float>::Max();
+    float BestSegmentT = TNumericLimits<float>::Max();
 
     auto TestTriangle = [&](const FDWCEditorSpatialTriangle& Triangle)
     {
@@ -312,7 +421,7 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
             return;
         }
 
-        float     SegmentT = 0.0f;
+        float SegmentT = 0.0f;
         FVector3f Barycentric = FVector3f::ZeroVector;
         if (!IntersectLocalTriangle(
                 LocalRayOrigin,
@@ -331,8 +440,31 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
             Triangle.LocalPositions[0] * Barycentric.X +
             Triangle.LocalPositions[1] * Barycentric.Y +
             Triangle.LocalPositions[2] * Barycentric.Z;
+        const FVector3f SmoothNormal = (
+            Triangle.LocalNormals[0] * Barycentric.X +
+            Triangle.LocalNormals[1] * Barycentric.Y +
+            Triangle.LocalNormals[2] * Barycentric.Z).GetSafeNormal(
+                UE_SMALL_NUMBER,
+                Triangle.LocalNormal);
+        const FVector3f InterpolatedTangent =
+            Triangle.LocalTangents[0] * Barycentric.X +
+            Triangle.LocalTangents[1] * Barycentric.Y +
+            Triangle.LocalTangents[2] * Barycentric.Z;
+        const FVector3f InterpolatedBitangent =
+            Triangle.LocalBitangents[0] * Barycentric.X +
+            Triangle.LocalBitangents[1] * Barycentric.Y +
+            Triangle.LocalBitangents[2] * Barycentric.Z;
+        FVector3f SurfaceFrameU;
+        FVector3f SurfaceFrameV;
+        BuildStableSurfaceFrame(
+            SmoothNormal,
+            InterpolatedTangent,
+            InterpolatedBitangent,
+            SurfaceFrameU,
+            SurfaceFrameV);
+
         const FVector WorldPosition = ComponentTransform.TransformPosition(FVector(LocalPosition));
-        FVector       WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalNormal)).GetSafeNormal();
+        FVector WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(SmoothNormal)).GetSafeNormal();
         if (WorldNormal.IsNearlyZero())
         {
             WorldNormal = FVector::UpVector;
@@ -341,7 +473,7 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
         {
             WorldNormal *= -1.0f;
         }
-        FVector WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalTangent)).GetSafeNormal();
+        FVector WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(SurfaceFrameU)).GetSafeNormal();
         WorldTangent = (WorldTangent - WorldNormal * FVector::DotProduct(WorldTangent, WorldNormal)).GetSafeNormal();
         if (WorldTangent.IsNearlyZero())
         {
@@ -364,9 +496,14 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
         OutHit.WorldTangent = WorldTangent;
         OutHit.WorldBitangent = WorldBitangent;
         OutHit.LocalPosition = FVector(LocalPosition);
-        OutHit.LocalNormal = FVector(Triangle.LocalNormal);
-        OutHit.LocalTangent = FVector(Triangle.LocalTangent);
-        OutHit.LocalBitangent = FVector(Triangle.LocalBitangent);
+        OutHit.LocalNormal = FVector(SmoothNormal);
+        OutHit.LocalTangent = FVector(SurfaceFrameU);
+        OutHit.LocalBitangent = FVector(SurfaceFrameV);
+        OutHit.LocalSurfaceAxisU = FVector(Triangle.LocalSurfaceAxisU);
+        OutHit.LocalSurfaceAxisV = FVector(Triangle.LocalSurfaceAxisV);
+        OutHit.LocalSurfaceFrameU = FVector(SurfaceFrameU);
+        OutHit.LocalSurfaceFrameV = FVector(SurfaceFrameV);
+        OutHit.SurfaceUnitsPerUV = Triangle.SurfaceUnitsPerUV;
         OutHit.UV = FVector2D(
             Triangle.UVs[0] * Barycentric.X +
             Triangle.UVs[1] * Barycentric.Y +
@@ -407,10 +544,8 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
         }
         else
         {
-            if (Node.LeftChildIndex != INDEX_NONE)
-                NodeStack.Add(Node.LeftChildIndex);
-            if (Node.RightChildIndex != INDEX_NONE)
-                NodeStack.Add(Node.RightChildIndex);
+            if (Node.LeftChildIndex != INDEX_NONE) NodeStack.Add(Node.LeftChildIndex);
+            if (Node.RightChildIndex != INDEX_NONE) NodeStack.Add(Node.RightChildIndex);
         }
     }
 
@@ -425,9 +560,9 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
 }
 
 void FDWCEditorSpatialQueryService::FindSurfacesAtUV(
-    const FDWCEditorSpatialHandle&      Handle,
-    const USkeletalMeshComponent*       MeshComponent,
-    const FVector2D&                    UV,
+    const FDWCEditorSpatialHandle& Handle,
+    const USkeletalMeshComponent* MeshComponent,
+    const FVector2D& UV,
     TArray<FDWCEditorProjectedSurface>& OutSurfaces) const
 {
     OutSurfaces.Reset();
@@ -437,22 +572,22 @@ void FDWCEditorSpatialQueryService::FindSurfacesAtUV(
     }
 
     const FVector2D QueryUV(
-        UV.X >= 0.0 && UV.X <= 1.0 ? UV.X : WrapUV(static_cast<float>(UV.X)),
-        UV.Y >= 0.0 && UV.Y <= 1.0 ? UV.Y : WrapUV(static_cast<float>(UV.Y)));
-    const int32          CellX = IntCastChecked<int32>(FMath::Clamp(
+        UV.X >= 0.0 && UV.X <= 1.0 ? UV.X : WrapUV(UV.X),
+        UV.Y >= 0.0 && UV.Y <= 1.0 ? UV.Y : WrapUV(UV.Y));
+    const int32 CellX = FMath::Clamp(
         FMath::FloorToInt(QueryUV.X * FDWCEditorSpatialData::UVGridResolution),
         0,
-        FDWCEditorSpatialData::UVGridResolution - 1));
-    const int32          CellY = IntCastChecked<int32>(FMath::Clamp(
+        FDWCEditorSpatialData::UVGridResolution - 1);
+    const int32 CellY = FMath::Clamp(
         FMath::FloorToInt(QueryUV.Y * FDWCEditorSpatialData::UVGridResolution),
         0,
-        FDWCEditorSpatialData::UVGridResolution - 1));
-    const int32          CellIndex = CellY * FDWCEditorSpatialData::UVGridResolution + CellX;
+        FDWCEditorSpatialData::UVGridResolution - 1);
+    const int32 CellIndex = CellY * FDWCEditorSpatialData::UVGridResolution + CellX;
     const TArray<int32>* Candidates = Handle->UVTriangleGrid.IsValidIndex(CellIndex)
-                                          ? &Handle->UVTriangleGrid[CellIndex]
-                                          : nullptr;
-    const FVector2f      QueryUV2f(QueryUV);
-    const FTransform     ComponentTransform = MeshComponent->GetComponentTransform();
+        ? &Handle->UVTriangleGrid[CellIndex]
+        : nullptr;
+    const FVector2f QueryUV2f(QueryUV);
+    const FTransform ComponentTransform = MeshComponent->GetComponentTransform();
 
     auto TestTriangle = [&](const FDWCEditorSpatialTriangle& Triangle)
     {
@@ -503,13 +638,19 @@ void FDWCEditorSpatialQueryService::FindSurfacesAtUV(
 
 bool FDWCEditorSpatialQueryService::ResolveTriangleAnchor(
     const FDWCEditorSpatialHandle& Handle,
-    const USkeletalMeshComponent*  MeshComponent,
-    const int32                    MaterialSlotIndex,
-    const int32                    TriangleID,
-    const FVector3f&               Barycentric,
-    FDWCEditorProjectedSurface&    OutSurface) const
+    const USkeletalMeshComponent* MeshComponent,
+    const int32 MaterialSlotIndex,
+    const int32 TriangleID,
+    const FVector3f& Barycentric,
+    FDWCEditorProjectedSurface& OutSurface) const
 {
     if (!Handle.IsValid() || MeshComponent == nullptr)
+    {
+        return false;
+    }
+
+    FVector3f NormalizedBarycentric;
+    if (!NormalizeSurfaceAnchor(Barycentric, NormalizedBarycentric))
     {
         return false;
     }
@@ -523,10 +664,119 @@ bool FDWCEditorSpatialQueryService::ResolveTriangleAnchor(
 
     FillProjectedSurface(
         Handle->Triangles[*TriangleIndex],
-        Barycentric,
+        NormalizedBarycentric,
         MeshComponent->GetComponentTransform(),
         OutSurface);
     return true;
+}
+
+bool FDWCEditorSpatialQueryService::ResolveUniqueSurfaceAtUV(
+    const FDWCEditorSpatialHandle& Handle,
+    const USkeletalMeshComponent* MeshComponent,
+    const FVector2D& UV,
+    FDWCEditorProjectedSurface& OutSurface) const
+{
+    TArray<FDWCEditorProjectedSurface> QueryResults;
+    FindSurfacesAtUV(Handle, MeshComponent, UV, QueryResults);
+    if (QueryResults.Num() != 1)
+    {
+        return false;
+    }
+    OutSurface = MoveTemp(QueryResults[0]);
+    return true;
+}
+
+bool FDWCEditorSpatialQueryService::GetTriangleEdgeTopology(
+    const FDWCEditorSpatialHandle& Handle,
+    const int32 MaterialSlotIndex,
+    const int32 TriangleID,
+    const int32 EdgeIndex,
+    FDWCEditorTriangleEdgeTopology& OutTopology) const
+{
+    OutTopology = FDWCEditorTriangleEdgeTopology();
+    if (!Handle.IsValid() || EdgeIndex < 0 || EdgeIndex >= 3)
+    {
+        return false;
+    }
+    const int32* TriangleIndex = Handle->TriangleLookup.Find(
+        MakeTriangleLookupKey(MaterialSlotIndex, TriangleID));
+    if (TriangleIndex == nullptr || !Handle->Triangles.IsValidIndex(*TriangleIndex))
+    {
+        return false;
+    }
+    const FDWCEditorSpatialTriangle& Triangle = Handle->Triangles[*TriangleIndex];
+    OutTopology.TriangleIndex = *TriangleIndex;
+    OutTopology.EdgeIndex = EdgeIndex;
+    OutTopology.AdjacentTriangleIndex = Triangle.AdjacentTriangleIndices[EdgeIndex];
+    OutTopology.EdgeType = Triangle.EdgeTypes[EdgeIndex];
+    return true;
+}
+
+bool FDWCEditorSpatialQueryService::NormalizeSurfaceAnchor(
+    const FVector3f& Barycentric,
+    FVector3f& OutNormalizedBarycentric)
+{
+    constexpr float Tolerance = 0.001f;
+    if (!FMath::IsFinite(Barycentric.X) ||
+        !FMath::IsFinite(Barycentric.Y) ||
+        !FMath::IsFinite(Barycentric.Z) ||
+        Barycentric.X < -Tolerance ||
+        Barycentric.Y < -Tolerance ||
+        Barycentric.Z < -Tolerance)
+    {
+        return false;
+    }
+
+    OutNormalizedBarycentric = FVector3f(
+        FMath::Max(0.0f, Barycentric.X),
+        FMath::Max(0.0f, Barycentric.Y),
+        FMath::Max(0.0f, Barycentric.Z));
+    const float Sum = OutNormalizedBarycentric.X +
+        OutNormalizedBarycentric.Y + OutNormalizedBarycentric.Z;
+    if (!FMath::IsFinite(Sum) || Sum <= UE_SMALL_NUMBER)
+    {
+        return false;
+    }
+    OutNormalizedBarycentric /= Sum;
+    return true;
+}
+
+bool FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
+    const FVector3f& SurfaceNormal,
+    const FVector3f& PreferredDirection,
+    const FVector3f& PreferredBitangent,
+    FVector3f& OutFrameU,
+    FVector3f& OutFrameV)
+{
+    const FVector3f Normal = SurfaceNormal.GetSafeNormal();
+    if (Normal.IsNearlyZero())
+    {
+        OutFrameU = FVector3f::ZeroVector;
+        OutFrameV = FVector3f::ZeroVector;
+        return false;
+    }
+
+    OutFrameU = PreferredDirection -
+        Normal * FVector3f::DotProduct(PreferredDirection, Normal);
+    OutFrameU.Normalize();
+    if (OutFrameU.IsNearlyZero())
+    {
+        OutFrameU = AnyPerpendicular(Normal);
+    }
+
+    OutFrameV = FVector3f::CrossProduct(Normal, OutFrameU).GetSafeNormal();
+    if (OutFrameV.IsNearlyZero())
+    {
+        OutFrameU = AnyPerpendicular(Normal);
+        OutFrameV = FVector3f::CrossProduct(Normal, OutFrameU).GetSafeNormal();
+    }
+    if (!PreferredBitangent.IsNearlyZero() &&
+        FVector3f::DotProduct(OutFrameV, PreferredBitangent) < 0.0f)
+    {
+        OutFrameU *= -1.0f;
+        OutFrameV *= -1.0f;
+    }
+    return !OutFrameU.IsNearlyZero() && !OutFrameV.IsNearlyZero();
 }
 
 void FDWCEditorSpatialQueryService::InvalidateMesh(const USkeletalMesh* Mesh)
@@ -552,10 +802,10 @@ void FDWCEditorSpatialQueryService::ResetDiagnosticCounters()
 
 TOptional<FDWCEditorCacheKey> FDWCEditorSpatialQueryService::MakeCacheKey(
     const UWetClothingAsset* WetClothingAsset,
-    const USkeletalMesh*     Mesh,
-    const int32              LODIndex,
-    const int32              UVChannelIndex,
-    const int32              MaterialSlotIndex)
+    const USkeletalMesh* Mesh,
+    const int32 LODIndex,
+    const int32 UVChannelIndex,
+    const int32 MaterialSlotIndex)
 {
     if (Mesh == nullptr || UVChannelIndex == INDEX_NONE || MaterialSlotIndex == INDEX_NONE)
     {
@@ -602,12 +852,12 @@ TOptional<FDWCEditorCacheKey> FDWCEditorSpatialQueryService::MakeCacheKey(
 
 bool FDWCEditorSpatialQueryService::BuildSpatialData(
     const UWetClothingAsset* WetClothingAsset,
-    USkeletalMesh*           Mesh,
-    const int32              LODIndex,
-    const int32              UVChannelIndex,
-    const int32              MaterialSlotIndex,
-    FDWCEditorSpatialData&   OutData,
-    FString*                 OutError)
+    USkeletalMesh* Mesh,
+    const int32 LODIndex,
+    const int32 UVChannelIndex,
+    const int32 MaterialSlotIndex,
+    FDWCEditorSpatialData& OutData,
+    FString* OutError)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorSpatialQueryService_BuildSpatialData);
 
@@ -629,12 +879,12 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
     }
 
     const FDWCDataUVLODMetadata* DataUVMetadata = WetClothingAsset != nullptr
-                                                      ? WetClothingAsset->FindDataUVMetadataForLOD(LODIndex)
-                                                      : nullptr;
-    bool                         bUseStoredIslandIDs = DataUVMetadata != nullptr &&
-                               DataUVMetadata->bIsValid &&
-                               DataUVMetadata->UVChannelIndex == UVChannelIndex &&
-                               !DataUVMetadata->DataUVIslandIDByTriangleID.IsEmpty();
+        ? WetClothingAsset->FindDataUVMetadataForLOD(LODIndex)
+        : nullptr;
+    bool bUseStoredIslandIDs = DataUVMetadata != nullptr &&
+        DataUVMetadata->bIsValid &&
+        DataUVMetadata->UVChannelIndex == UVChannelIndex &&
+        !DataUVMetadata->DataUVIslandIDByTriangleID.IsEmpty();
     if (bUseStoredIslandIDs)
     {
         for (const FWCAUVPreviewSourceTriangle& Triangle : SourceTriangles)
@@ -674,6 +924,8 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
     OutData.UVChannelIndex = UVChannelIndex;
     OutData.MaterialSlotIndex = MaterialSlotIndex;
     OutData.Triangles.Reserve(SourceTriangles.Num());
+    TMap<FQuantizedSurfaceVertexKey, int64> WeldedTopologyVertexIDs;
+    int64 NextFallbackTopologyVertexID = FallbackTopologyVertexBase;
     for (const FWCAUVPreviewSourceTriangle& Source : SourceTriangles)
     {
         FDWCEditorSpatialTriangle& Triangle = OutData.Triangles.AddDefaulted_GetRef();
@@ -681,42 +933,90 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
         Triangle.TriangleID = Source.TriangleID;
         const int32* FallbackIslandID = FallbackIslandIDByTriangleID.Find(Source.TriangleID);
         Triangle.UVIslandID = bUseStoredIslandIDs
-                                  ? DataUVMetadata->DataUVIslandIDByTriangleID[Source.TriangleID]
-                                  : (FallbackIslandID != nullptr ? *FallbackIslandID : INDEX_NONE);
+            ? DataUVMetadata->DataUVIslandIDByTriangleID[Source.TriangleID]
+            : (FallbackIslandID != nullptr ? *FallbackIslandID : INDEX_NONE);
         for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
         {
             Triangle.LocalPositions[CornerIndex] = Source.LocalPositions[CornerIndex];
             Triangle.UVs[CornerIndex] = Source.UVs[CornerIndex];
+            Triangle.LocalNormals[CornerIndex] = Source.LocalNormals[CornerIndex].GetSafeNormal();
+            Triangle.LocalTangents[CornerIndex] = Source.LocalTangents[CornerIndex];
+            Triangle.LocalBitangents[CornerIndex] = Source.LocalBitangents[CornerIndex];
+            if (Source.ImportedVertexIndices[CornerIndex] != INDEX_NONE)
+            {
+                Triangle.TopologyVertexIDs[CornerIndex] = Source.ImportedVertexIndices[CornerIndex];
+            }
+            else
+            {
+                const FVector3f Position = Source.LocalPositions[CornerIndex];
+                const FVector3f Normal = Source.LocalNormals[CornerIndex].GetSafeNormal();
+                FQuantizedSurfaceVertexKey VertexKey;
+                VertexKey.Position = FIntVector(
+                    FMath::RoundToInt(Position.X * 1000.0f),
+                    FMath::RoundToInt(Position.Y * 1000.0f),
+                    FMath::RoundToInt(Position.Z * 1000.0f));
+                VertexKey.Normal = FIntVector(
+                    FMath::RoundToInt(Normal.X * 1000.0f),
+                    FMath::RoundToInt(Normal.Y * 1000.0f),
+                    FMath::RoundToInt(Normal.Z * 1000.0f));
+                int64& TopologyVertexID = WeldedTopologyVertexIDs.FindOrAdd(VertexKey, INDEX_NONE);
+                if (TopologyVertexID == INDEX_NONE)
+                {
+                    TopologyVertexID = NextFallbackTopologyVertexID++;
+                }
+                Triangle.TopologyVertexIDs[CornerIndex] = TopologyVertexID;
+            }
             Triangle.LocalBounds += Triangle.LocalPositions[CornerIndex];
             Triangle.UVBounds += Triangle.UVs[CornerIndex];
         }
 
         Triangle.LocalNormal = FVector3f::CrossProduct(
-                                   Triangle.LocalPositions[1] - Triangle.LocalPositions[0],
-                                   Triangle.LocalPositions[2] - Triangle.LocalPositions[0])
-                                   .GetSafeNormal();
+            Triangle.LocalPositions[1] - Triangle.LocalPositions[0],
+            Triangle.LocalPositions[2] - Triangle.LocalPositions[0]).GetSafeNormal();
         if (Triangle.LocalNormal.IsNearlyZero())
         {
             Triangle.LocalNormal = FVector3f(0.0f, 0.0f, 1.0f);
         }
-        Triangle.LocalTangent =
-            (Triangle.LocalPositions[1] - Triangle.LocalPositions[0]).GetSafeNormal();
-        Triangle.LocalTangent = (Triangle.LocalTangent - Triangle.LocalNormal *
-                                                             FVector3f::DotProduct(Triangle.LocalTangent, Triangle.LocalNormal))
-                                    .GetSafeNormal();
+        FVector3f TangentSum = FVector3f::ZeroVector;
+        FVector3f BitangentSum = FVector3f::ZeroVector;
+        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+        {
+            const FVector3f CornerNormal = Source.LocalNormals[CornerIndex].GetSafeNormal(
+                UE_SMALL_NUMBER,
+                Triangle.LocalNormal);
+            FVector3f& CornerTangent = Triangle.LocalTangents[CornerIndex];
+            CornerTangent = (CornerTangent - CornerNormal *
+                FVector3f::DotProduct(CornerTangent, CornerNormal)).GetSafeNormal();
+            if (CornerTangent.IsNearlyZero())
+            {
+                CornerTangent = AnyPerpendicular(CornerNormal);
+            }
+
+            FVector3f& CornerBitangent = Triangle.LocalBitangents[CornerIndex];
+            const float Handedness = FVector3f::DotProduct(
+                FVector3f::CrossProduct(CornerNormal, CornerTangent),
+                CornerBitangent) < 0.0f ? -1.0f : 1.0f;
+            CornerBitangent = FVector3f::CrossProduct(
+                CornerNormal,
+                CornerTangent).GetSafeNormal() * Handedness;
+            TangentSum += CornerTangent;
+            BitangentSum += CornerBitangent;
+        }
+
+        Triangle.LocalTangent = TangentSum.GetSafeNormal();
         if (Triangle.LocalTangent.IsNearlyZero())
         {
-            Triangle.LocalTangent = AnyPerpendicular(Triangle.LocalNormal);
+            Triangle.LocalTangent = Triangle.LocalTangents[0];
         }
-        Triangle.LocalBitangent = FVector3f::CrossProduct(
-                                      Triangle.LocalNormal,
-                                      Triangle.LocalTangent)
-                                      .GetSafeNormal();
+        Triangle.LocalBitangent = BitangentSum.GetSafeNormal();
         if (Triangle.LocalBitangent.IsNearlyZero())
         {
-            Triangle.LocalBitangent = AnyPerpendicular(Triangle.LocalNormal);
+            Triangle.LocalBitangent = Triangle.LocalBitangents[0];
         }
+        ComputeSurfaceUVFrame(Triangle);
     }
+
+    BuildTriangleTopology(OutData);
 
     OutData.TriangleLookup.Reserve(OutData.Triangles.Num());
     OutData.BVHTriangleIndices.Reserve(OutData.Triangles.Num());
@@ -754,7 +1054,8 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
         {
             for (int32 CellX = MinCellX; CellX <= MaxCellX; ++CellX)
             {
-                OutData.UVTriangleGrid[CellY * FDWCEditorSpatialData::UVGridResolution + CellX].Add(TriangleIndex);
+                OutData.UVTriangleGrid[
+                    CellY * FDWCEditorSpatialData::UVGridResolution + CellX].Add(TriangleIndex);
             }
         }
     }
@@ -763,8 +1064,8 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
     BuildNode = [&OutData, &BuildNode](const int32 FirstIndex, const int32 TriangleCount)
     {
         const int32 NodeIndex = OutData.BVHNodes.AddDefaulted();
-        FBox3f      Bounds(ForceInit);
-        FBox3f      CenterBounds(ForceInit);
+        FBox3f Bounds(ForceInit);
+        FBox3f CenterBounds(ForceInit);
         for (int32 Offset = 0; Offset < TriangleCount; ++Offset)
         {
             const FDWCEditorSpatialTriangle& Triangle =
@@ -780,16 +1081,18 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
             return NodeIndex;
         }
 
-        const FVector3f   Extent = CenterBounds.GetExtent();
-        const int32       SplitAxis = Extent.Y > Extent.X
-                                          ? (Extent.Z > Extent.Y ? 2 : 1)
-                                          : (Extent.Z > Extent.X ? 2 : 0);
+        const FVector3f Extent = CenterBounds.GetExtent();
+        const int32 SplitAxis = Extent.Y > Extent.X
+            ? (Extent.Z > Extent.Y ? 2 : 1)
+            : (Extent.Z > Extent.X ? 2 : 0);
         TArrayView<int32> Range(
             OutData.BVHTriangleIndices.GetData() + FirstIndex,
             TriangleCount);
         Algo::Sort(Range, [&OutData, SplitAxis](const int32 A, const int32 B)
-                   { return OutData.Triangles[A].LocalBounds.GetCenter()[SplitAxis] <
-                            OutData.Triangles[B].LocalBounds.GetCenter()[SplitAxis]; });
+        {
+            return OutData.Triangles[A].LocalBounds.GetCenter()[SplitAxis] <
+                OutData.Triangles[B].LocalBounds.GetCenter()[SplitAxis];
+        });
 
         const int32 LeftCount = TriangleCount / 2;
         const int32 LeftChild = BuildNode(FirstIndex, LeftCount);
@@ -801,4 +1104,80 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
     };
     BuildNode(0, OutData.BVHTriangleIndices.Num());
     return true;
+}
+
+void FDWCEditorSpatialQueryService::BuildTriangleTopology(FDWCEditorSpatialData& OutData)
+{
+    TMap<FTopologyEdgeKey, TArray<FTopologyEdgeReference, TInlineAllocator<2>>> EdgeReferences;
+    EdgeReferences.Reserve(OutData.Triangles.Num() * 3);
+
+    for (int32 TriangleIndex = 0; TriangleIndex < OutData.Triangles.Num(); ++TriangleIndex)
+    {
+        FDWCEditorSpatialTriangle& Triangle = OutData.Triangles[TriangleIndex];
+        for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
+        {
+            Triangle.AdjacentTriangleIndices[EdgeIndex] = INDEX_NONE;
+            Triangle.EdgeTypes[EdgeIndex] = EDWCEditorSpatialEdgeType::Boundary;
+            const int32 StartCorner = EdgeIndex;
+            const int32 EndCorner = (EdgeIndex + 1) % 3;
+            const int64 StartVertexID = Triangle.TopologyVertexIDs[StartCorner];
+            const int64 EndVertexID = Triangle.TopologyVertexIDs[EndCorner];
+            if (StartVertexID == INDEX_NONE || EndVertexID == INDEX_NONE || StartVertexID == EndVertexID)
+            {
+                Triangle.EdgeTypes[EdgeIndex] = EDWCEditorSpatialEdgeType::Blocked;
+                continue;
+            }
+
+            FTopologyEdgeKey EdgeKey;
+            EdgeKey.VertexA = FMath::Min(StartVertexID, EndVertexID);
+            EdgeKey.VertexB = FMath::Max(StartVertexID, EndVertexID);
+            FTopologyEdgeReference& Reference = EdgeReferences.FindOrAdd(EdgeKey).AddDefaulted_GetRef();
+            Reference.TriangleIndex = TriangleIndex;
+            Reference.EdgeIndex = EdgeIndex;
+            const bool bStartIsA = StartVertexID == EdgeKey.VertexA;
+            Reference.UVAtA = Triangle.UVs[bStartIsA ? StartCorner : EndCorner];
+            Reference.UVAtB = Triangle.UVs[bStartIsA ? EndCorner : StartCorner];
+        }
+    }
+
+    constexpr float UVTolerance = 1.0e-5f;
+    for (const TPair<FTopologyEdgeKey, TArray<FTopologyEdgeReference, TInlineAllocator<2>>>& Pair : EdgeReferences)
+    {
+        const TArray<FTopologyEdgeReference, TInlineAllocator<2>>& References = Pair.Value;
+        if (References.Num() == 1)
+        {
+            continue;
+        }
+        if (References.Num() != 2 || References[0].TriangleIndex == References[1].TriangleIndex)
+        {
+            for (const FTopologyEdgeReference& Reference : References)
+            {
+                if (OutData.Triangles.IsValidIndex(Reference.TriangleIndex))
+                {
+                    OutData.Triangles[Reference.TriangleIndex].EdgeTypes[Reference.EdgeIndex] =
+                        EDWCEditorSpatialEdgeType::Blocked;
+                }
+            }
+            continue;
+        }
+
+        const FTopologyEdgeReference& ReferenceA = References[0];
+        const FTopologyEdgeReference& ReferenceB = References[1];
+        FDWCEditorSpatialTriangle& TriangleA = OutData.Triangles[ReferenceA.TriangleIndex];
+        FDWCEditorSpatialTriangle& TriangleB = OutData.Triangles[ReferenceB.TriangleIndex];
+        const bool bDifferentIslands =
+            TriangleA.UVIslandID != INDEX_NONE && TriangleB.UVIslandID != INDEX_NONE &&
+            TriangleA.UVIslandID != TriangleB.UVIslandID;
+        const bool bDifferentUVs =
+            !ReferenceA.UVAtA.Equals(ReferenceB.UVAtA, UVTolerance) ||
+            !ReferenceA.UVAtB.Equals(ReferenceB.UVAtB, UVTolerance);
+        const EDWCEditorSpatialEdgeType EdgeType = bDifferentIslands || bDifferentUVs
+            ? EDWCEditorSpatialEdgeType::UVSeam
+            : EDWCEditorSpatialEdgeType::Regular;
+
+        TriangleA.AdjacentTriangleIndices[ReferenceA.EdgeIndex] = ReferenceB.TriangleIndex;
+        TriangleA.EdgeTypes[ReferenceA.EdgeIndex] = EdgeType;
+        TriangleB.AdjacentTriangleIndices[ReferenceB.EdgeIndex] = ReferenceA.TriangleIndex;
+        TriangleB.EdgeTypes[ReferenceB.EdgeIndex] = EdgeType;
+    }
 }

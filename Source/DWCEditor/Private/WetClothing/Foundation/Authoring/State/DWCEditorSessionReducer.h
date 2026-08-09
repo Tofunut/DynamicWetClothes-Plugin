@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #pragma once
 
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionAction.h"
@@ -14,6 +13,11 @@ class FDWCEditorSessionReducer
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetWrinkleCrossPreviewAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSelectTransparencyLayerAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetTransparencyStageAction& Action);
+    static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCInitializeTransparencyCharacterTypeAction& Action);
+    static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSelectTransparencyCharacterTypeDraftAction& Action);
+    static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCCancelTransparencyCharacterTypeDraftAction& Action);
+    static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCCommitTransparencyCharacterTypeSucceededAction& Action);
+    static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCReconcileTransparencyCharacterTypeAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCInitializeTransparencyPreviewSettingsAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetTransparencyPreviewAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetTransparencyPaintAction& Action);

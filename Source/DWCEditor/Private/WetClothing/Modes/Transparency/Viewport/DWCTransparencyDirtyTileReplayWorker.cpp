@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyDirtyTileReplayWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
@@ -10,17 +9,17 @@ namespace
 {
     void ComposeAlphaRegions(
         const FDWCTransparencyDirtyTileReplayJobInput& Input,
-        const FDWCTransparencyAlphaTileStore&          AlphaStore,
-        TArray<FDWCEditorBGRA8RegionPayload>&          OutRegions)
+        const FDWCTransparencyAlphaTileStore& AlphaStore,
+        TArray<FDWCEditorBGRA8RegionPayload>& OutRegions)
     {
         FDWCTransparencyPixelComposeContext Context;
-        Context.AutoResult = Input.AutoResult.Get();
+        Context.SourcePayload = Input.SourcePayload.Get();
         Context.ManualAlphaTileStore = &AlphaStore;
         Context.VisualizationMode = Input.VisualizationMode;
         Context.bDeferPresentationToMaterial = true;
         Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
-                                         ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
-                                         : KINDA_SMALL_NUMBER;
+            ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.SourcePayload)
+            : KINDA_SMALL_NUMBER;
 
         for (const FDWCTransparencyAlphaComposeTileSnapshot& Tile : Input.AlphaComposeTiles)
         {
@@ -33,7 +32,7 @@ namespace
                 for (int32 X = Tile.Rect.Min.X; X < Tile.Rect.Max.X; ++X)
                 {
                     const int32 LocalIndex = (Y - Tile.Rect.Min.Y) * Tile.Rect.Width() + X - Tile.Rect.Min.X;
-                    const int32 PixelIndex = Y * Input.AutoResult->Resolution.X + X;
+                    const int32 PixelIndex = Y * Input.SourcePayload->Resolution.X + X;
                     Region.Pixels[LocalIndex] = FDWCTransparencyComposite::ComposeVisualizationPixel(
                         Context,
                         PixelIndex,
@@ -51,12 +50,12 @@ namespace
     }
 
     bool BuildAlphaReplay(
-        FDWCTransparencyDirtyTileReplayJobInput&                            Input,
-        FDWCTransparencyDirtyTileReplayJobResult&                           Output,
+        FDWCTransparencyDirtyTileReplayJobInput& Input,
+        FDWCTransparencyDirtyTileReplayJobResult& Output,
         const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
     {
         FDWCTransparencyAlphaTileStore WorkingStore;
-        WorkingStore.Initialize(Input.AutoResult->Resolution);
+        WorkingStore.Initialize(Input.SourcePayload->Resolution);
         WorkingStore.SnapshotTiles(Input.DirtyTileCoordinates, Output.AlphaTiles);
 
         const int32 FirstStroke = FMath::Clamp(Input.BaselineStrokeCount, 0, Input.AlphaStrokes.Num());
@@ -72,7 +71,7 @@ namespace
                 continue;
             }
             FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
-                *Input.AutoResult,
+                *Input.SourcePayload,
                 Stroke,
                 Stroke.Samples,
                 Input.DirtyTileCoordinates,
@@ -80,7 +79,7 @@ namespace
         }
 
         FDWCTransparencyAlphaTileStore FinalStore;
-        FinalStore.Initialize(Input.AutoResult->Resolution);
+        FinalStore.Initialize(Input.SourcePayload->Resolution);
         if (!FinalStore.Commit(FinalStore.GetRevision(), Output.AlphaTiles))
         {
             Output.Error = TEXT("The replayed transparency alpha tiles are invalid.");
@@ -92,11 +91,11 @@ namespace
 
     void ComposeRevealRegions(
         const FDWCTransparencyDirtyTileReplayJobInput& Input,
-        const FDWCTransparencyRevealColorTileStore&    RevealStore,
-        TArray<FDWCEditorBGRA8RegionPayload>&          OutRegions)
+        const FDWCTransparencyRevealColorTileStore& RevealStore,
+        TArray<FDWCEditorBGRA8RegionPayload>& OutRegions)
     {
         FDWCTransparencyAlphaTileStore AlphaStore;
-        AlphaStore.Initialize(Input.AutoResult->Resolution);
+        AlphaStore.Initialize(Input.SourcePayload->Resolution);
         TArray<FDWCTransparencyAlphaTilePayload> AlphaPayloads;
         for (const FDWCTransparencyRevealColorComposeTileSnapshot& Tile : Input.RevealComposeTiles)
         {
@@ -112,14 +111,14 @@ namespace
         }
 
         FDWCTransparencyPixelComposeContext Context;
-        Context.AutoResult = Input.AutoResult.Get();
+        Context.SourcePayload = Input.SourcePayload.Get();
         Context.RevealColorTileStore = &RevealStore;
         Context.ManualAlphaTileStore = &AlphaStore;
         Context.VisualizationMode = Input.VisualizationMode;
         Context.bDeferPresentationToMaterial = true;
         Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
-                                         ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
-                                         : KINDA_SMALL_NUMBER;
+            ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.SourcePayload)
+            : KINDA_SMALL_NUMBER;
 
         for (const FDWCTransparencyRevealColorComposeTileSnapshot& Tile : Input.RevealComposeTiles)
         {
@@ -132,7 +131,7 @@ namespace
                 for (int32 X = Tile.Rect.Min.X; X < Tile.Rect.Max.X; ++X)
                 {
                     const int32 LocalIndex = (Y - Tile.Rect.Min.Y) * Tile.Rect.Width() + X - Tile.Rect.Min.X;
-                    const int32 PixelIndex = Y * Input.AutoResult->Resolution.X + X;
+                    const int32 PixelIndex = Y * Input.SourcePayload->Resolution.X + X;
                     Region.Pixels[LocalIndex] = FDWCTransparencyComposite::ComposeVisualizationPixel(
                         Context,
                         PixelIndex,
@@ -148,15 +147,15 @@ namespace
     }
 
     bool BuildRevealReplay(
-        FDWCTransparencyDirtyTileReplayJobInput&                            Input,
-        FDWCTransparencyDirtyTileReplayJobResult&                           Output,
+        FDWCTransparencyDirtyTileReplayJobInput& Input,
+        FDWCTransparencyDirtyTileReplayJobResult& Output,
         const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
     {
         FDWCTransparencyRevealColorTileStore WorkingStore;
-        WorkingStore.Initialize(Input.AutoResult->Resolution);
+        WorkingStore.Initialize(Input.SourcePayload->Resolution);
         WorkingStore.SnapshotTiles(
             Input.DirtyTileCoordinates,
-            MakeArrayView(Input.AutoResult->InnerColorBuffer),
+            MakeArrayView(Input.SourcePayload->InnerColorBuffer),
             Output.RevealColorTiles);
 
         for (const FDWCTransparencyRevealColorStroke& Stroke : Input.RevealColorStrokes)
@@ -170,7 +169,7 @@ namespace
                 continue;
             }
             FDWCTransparencyBrushRasterizer::RasterizeRevealColorSamplesToTiles(
-                *Input.AutoResult,
+                *Input.SourcePayload,
                 Stroke,
                 Stroke.Samples,
                 Input.BaseRevealColor,
@@ -179,11 +178,11 @@ namespace
         }
 
         FDWCTransparencyRevealColorTileStore FinalStore;
-        FinalStore.Initialize(Input.AutoResult->Resolution);
+        FinalStore.Initialize(Input.SourcePayload->Resolution);
         if (!FinalStore.Commit(
                 FinalStore.GetRevision(),
                 Output.RevealColorTiles,
-                MakeArrayView(Input.AutoResult->InnerColorBuffer)))
+                MakeArrayView(Input.SourcePayload->InnerColorBuffer)))
         {
             Output.Error = TEXT("The replayed transparency reveal-color tiles are invalid.");
             return false;
@@ -191,19 +190,19 @@ namespace
         ComposeRevealRegions(Input, FinalStore, Output.PreviewRegions);
         return true;
     }
-} // namespace
+}
 
 FDWCEditorWorkerMemoryEstimate FDWCTransparencyDirtyTileReplayWorker::EstimateMemory(
     const FDWCTransparencyDirtyTileReplayJobInput& Input)
 {
     FDWCEditorWorkerMemoryEstimate Estimate;
-    const uint64                   TilePixels = static_cast<uint64>(Input.DirtyTileCoordinates.Num()) *
-                              FDWCTransparencyAlphaTileStore::TileSize * FDWCTransparencyAlphaTileStore::TileSize;
+    const uint64 TilePixels = static_cast<uint64>(Input.DirtyTileCoordinates.Num()) *
+        FDWCTransparencyAlphaTileStore::TileSize * FDWCTransparencyAlphaTileStore::TileSize;
     Estimate.WorkingBytes = Input.Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                                ? TilePixels * 2ull
-                                : TilePixels * sizeof(FColor);
+        ? TilePixels * 2ull
+        : TilePixels * sizeof(FColor);
     Estimate.OutputBytes = TilePixels * (sizeof(FColor) +
-                                         (Input.Target == EDWCTransparencyDirtyReplayTarget::Alpha ? 2ull : sizeof(FColor)));
+        (Input.Target == EDWCTransparencyDirtyReplayTarget::Alpha ? 2ull : sizeof(FColor)));
     for (const FDWCTransparencyBrushStroke& Stroke : Input.AlphaStrokes)
     {
         Estimate.SnapshotBytes += Stroke.Samples.GetAllocatedSize();
@@ -217,7 +216,7 @@ FDWCEditorWorkerMemoryEstimate FDWCTransparencyDirtyTileReplayWorker::EstimateMe
 
 TSharedPtr<FDWCTransparencyDirtyTileReplayJobResult, ESPMode::ThreadSafe>
 FDWCTransparencyDirtyTileReplayWorker::Build(
-    FDWCTransparencyDirtyTileReplayJobInput&&                           Input,
+    FDWCTransparencyDirtyTileReplayJobInput&& Input,
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& CancellationToken)
 {
     TSharedPtr<FDWCTransparencyDirtyTileReplayJobResult, ESPMode::ThreadSafe> Output =
@@ -225,7 +224,7 @@ FDWCTransparencyDirtyTileReplayWorker::Build(
     Output->Target = Input.Target;
     Output->ExpectedStoreRevision = Input.ExpectedStoreRevision;
     Output->PreviewTarget = Input.PreviewTarget;
-    if (!Input.AutoResult.IsValid() || Input.DirtyTileCoordinates.IsEmpty() || CancellationToken->IsCanceled())
+    if (!Input.SourcePayload.IsValid() || Input.DirtyTileCoordinates.IsEmpty() || CancellationToken->IsCanceled())
     {
         Output->bSucceeded = false;
         Output->Error = TEXT("The transparency dirty-tile replay snapshot is unavailable.");
@@ -233,8 +232,8 @@ FDWCTransparencyDirtyTileReplayWorker::Build(
     }
 
     const bool bBuilt = Input.Target == EDWCTransparencyDirtyReplayTarget::Alpha
-                            ? BuildAlphaReplay(Input, *Output, CancellationToken)
-                            : BuildRevealReplay(Input, *Output, CancellationToken);
+        ? BuildAlphaReplay(Input, *Output, CancellationToken)
+        : BuildRevealReplay(Input, *Output, CancellationToken);
     Output->bSucceeded = bBuilt && !CancellationToken->IsCanceled();
     if (!Output->bSucceeded && Output->Error.IsEmpty())
     {

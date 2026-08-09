@@ -1,5 +1,4 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,14 +11,14 @@ struct FDWCSurfaceGraphBuildResult;
 class FWetWrinklePreviewGraphExtension
 {
   public:
-    static constexpr uint32 GraphSchemaVersion = 1;
+    static constexpr uint32 GraphSchemaVersion = 2;
 
     static bool ExtendGraph(
-        UMaterial*                         Material,
+        UMaterial* Material,
         const FDWCSurfaceGraphBuildResult& SurfaceGraph,
-        FString&                           OutErrorMessage);
+        FString& OutErrorMessage);
 
     static void InitializeMID(
-        int32                     MaterialSlotIndex,
+        int32 MaterialSlotIndex,
         UMaterialInstanceDynamic& PreviewMID);
 };

@@ -1,9 +1,9 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
 
+#include "WetClothing/Modes/Wrinkle/Authoring/WetWrinkleBrushConstants.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionStore.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -28,11 +28,21 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
     TestTrue(
         TEXT("A brush action requests control synchronization"),
         EnumHasAnyFlags(BrushEffects, EDWCEditorSessionEffect::SyncControls));
-    TestEqual(TEXT("Brush radius is normalized"), State.Wrinkle.Brush.BrushRadiusUV, 0.5f);
+    TestEqual(
+        TEXT("Brush radius is normalized"),
+        State.Wrinkle.Brush.BrushRadiusUV,
+        WetWrinkleBrushConstants::MaxRadiusUV);
     TestEqual(TEXT("Brush strength is normalized"), State.Wrinkle.Brush.Strength, 4.0f);
     TestEqual(TEXT("Brush falloff is normalized"), State.Wrinkle.Brush.Falloff, 0.0f);
     TestEqual(TEXT("Preview wetness is normalized"), State.Wrinkle.Brush.PreviewWetness, 1.0f);
-    TestEqual(TEXT("Display size is normalized"), State.Wrinkle.BrushSizeCm, 100.0f);
+    TestEqual(
+        TEXT("Display size is normalized"),
+        State.Wrinkle.BrushSizeCm,
+        WetWrinkleBrushConstants::MaxSizeCm);
+    TestEqual(
+        TEXT("Display UV size is normalized"),
+        State.Wrinkle.BrushSizeUV,
+        WetWrinkleBrushConstants::MaxRadiusUV);
 
     FDWCInitializeTransparencyPreviewSettingsAction InitializeTransparency;
     InitializeTransparency.Settings.TransparencyStrength = 0.8f;
@@ -88,13 +98,13 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         0.0f);
 
     const FGuid LayerGuid = FGuid::NewGuid();
-    FDWCEditorSessionReducer::Reduce(State, FDWCSelectTransparencyLayerAction{ LayerGuid });
+    FDWCEditorSessionReducer::Reduce(State, FDWCSelectTransparencyLayerAction{LayerGuid});
     FDWCReconcileAuthoringAction Reconcile;
     Reconcile.AuthoringRevision = 7;
     Reconcile.Domain = EDWCEditorAuthoringDomain::Transparency;
     Reconcile.Impact = EDWCEditorAuthoringImpact::ElementList |
-                       EDWCEditorAuthoringImpact::Preview |
-                       EDWCEditorAuthoringImpact::Details;
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::Details;
     const EDWCEditorSessionEffect ReconcileEffects =
         FDWCEditorSessionReducer::Reduce(State, Reconcile);
 
@@ -121,7 +131,7 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         FDWCSelectWrinkleElementAction{
             WrinkleElementGuid,
             EWetWrinkleElementType::ProceduralRidgeStroke,
-            2 });
+            2});
     FDWCReconcileAuthoringAction PreserveWrinkleSelection;
     PreserveWrinkleSelection.AuthoringRevision = 8;
     PreserveWrinkleSelection.Domain = EDWCEditorAuthoringDomain::Wrinkle;
@@ -152,7 +162,7 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
     IncrementalReconcile.AuthoringRevision = 10;
     IncrementalReconcile.Domain = EDWCEditorAuthoringDomain::Wrinkle;
     IncrementalReconcile.Impact = EDWCEditorAuthoringImpact::ElementList |
-                                  EDWCEditorAuthoringImpact::PreviewIncremental;
+        EDWCEditorAuthoringImpact::PreviewIncremental;
     const EDWCEditorSessionEffect IncrementalEffects =
         FDWCEditorSessionReducer::Reduce(State, IncrementalReconcile);
     TestTrue(
@@ -175,7 +185,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCEditorSessionStoreDispatchTest::RunTest(const FString& Parameters)
 {
     TSharedRef<FDWCEditorSessionStore> Store = MakeShared<FDWCEditorSessionStore>();
-    int32                              NotificationCount = 0;
+    int32 NotificationCount = 0;
     Store->OnChanged().AddLambda(
         [&Store, &NotificationCount](
             const FDWCEditorSessionState& State,
@@ -185,11 +195,11 @@ bool FDWCEditorSessionStoreDispatchTest::RunTest(const FString& Parameters)
             ++NotificationCount;
             if (Revision == 1)
             {
-                Store->Dispatch(FDWCSetWrinkleCrossPreviewAction{ false });
+                Store->Dispatch(FDWCSetWrinkleCrossPreviewAction{false});
             }
         });
 
-    Store->Dispatch(FDWCActivateEditorModeAction{ EWCAEditorMode::WrinkleEdit });
+    Store->Dispatch(FDWCActivateEditorModeAction{EWCAEditorMode::WrinkleEdit});
     TestEqual(TEXT("Nested dispatch is drained after the current notification"), NotificationCount, 2);
     TestEqual(TEXT("Each changed action advances one session revision"), Store->GetRevision(), uint64(2));
     TestEqual(
@@ -200,7 +210,7 @@ bool FDWCEditorSessionStoreDispatchTest::RunTest(const FString& Parameters)
         TEXT("The queued action updates cross-preview state"),
         Store->GetState().Wrinkle.bShowBakedTransparency);
 
-    Store->Dispatch(FDWCActivateEditorModeAction{ EWCAEditorMode::WrinkleEdit });
+    Store->Dispatch(FDWCActivateEditorModeAction{EWCAEditorMode::WrinkleEdit});
     TestEqual(TEXT("A no-op action does not notify"), NotificationCount, 2);
     TestEqual(TEXT("A no-op action does not advance revision"), Store->GetRevision(), uint64(2));
     return true;

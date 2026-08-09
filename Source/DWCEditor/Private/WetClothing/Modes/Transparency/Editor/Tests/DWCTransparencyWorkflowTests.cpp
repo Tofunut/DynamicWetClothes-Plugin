@@ -1,10 +1,12 @@
-// Copyright 2026 Team Tofunut. All Rights Reserved.
-
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
 
+#include "DataAssets/WetClothingAsset.h"
+#include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionReducer.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
 #include "WetClothing/Modes/Transparency/Editor/DWCTransparencyWorkflowPolicy.h"
 
 namespace
@@ -15,7 +17,7 @@ namespace
     {
         return EnumHasAnyFlags(Effects, Expected);
     }
-} // namespace
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyWorkflowInputRoutingTest,
@@ -36,12 +38,18 @@ bool FDWCTransparencyWorkflowInputRoutingTest::RunTest(const FString& Parameters
             true,
             false,
             EDWCTransparencySourceType::SameMeshMaterialSlots));
-    TestFalse(
-        TEXT("The planned multi-mesh structure cannot continue to Stage 2"),
+    TestTrue(
+        TEXT("The Blueprint multi-mesh structure can continue to Stage 2"),
         DWCTransparencyWorkflow::CanContinueToGeneration(
             true,
             true,
             EDWCTransparencySourceType::OtherSkeletalMeshComponents));
+    TestTrue(
+        TEXT("The external skeletal mesh structure can continue to Stage 2"),
+        DWCTransparencyWorkflow::CanContinueToGeneration(
+            true,
+            true,
+            EDWCTransparencySourceType::ExternalSkeletalMesh));
 
     TestEqual(
         TEXT("Stage 1 never enables painting"),
@@ -56,33 +64,27 @@ bool FDWCTransparencyWorkflowInputRoutingTest::RunTest(const FString& Parameters
             EDWCTransparencySourceType::SameMeshMaterialSlots),
         EDWCTransparencyPaintTarget::None);
     TestEqual(
-        TEXT("Stage 2 manual color does not enable a brush"),
+        TEXT("Stage 2 manual color only authors the source"),
         DWCTransparencyWorkflow::ResolvePaintTarget(
             EDWCTransparencyEditorStage::MapGeneration,
             EDWCTransparencySourceType::ManualColorOrTexture),
         EDWCTransparencyPaintTarget::None);
     TestEqual(
-        TEXT("Stage 3 same-mesh exposes a reveal paint target"),
+        TEXT("Stage 3 exposes a reveal target for every source type"),
         DWCTransparencyWorkflow::ResolvePaintTarget(
-            EDWCTransparencyEditorStage::FinalEditing,
+            EDWCTransparencyEditorStage::RevealEditing,
             EDWCTransparencySourceType::SameMeshMaterialSlots),
         EDWCTransparencyPaintTarget::RevealColor);
     TestEqual(
-        TEXT("Stage 3 manual color exposes a reveal paint target"),
+        TEXT("Stage 4 always routes to alpha painting"),
         DWCTransparencyWorkflow::ResolvePaintTarget(
             EDWCTransparencyEditorStage::FinalEditing,
-            EDWCTransparencySourceType::ManualColorOrTexture),
-        EDWCTransparencyPaintTarget::RevealColor);
-    TestEqual(
-        TEXT("Stage 4 routes to alpha painting"),
-        DWCTransparencyWorkflow::ResolvePaintTarget(
-            EDWCTransparencyEditorStage::BakeOutput,
             EDWCTransparencySourceType::ManualColorOrTexture),
         EDWCTransparencyPaintTarget::FinalAlpha);
 
     const DWCTransparencyWorkflow::FDWCTransparencyPreviewContext RevealContext =
         DWCTransparencyWorkflow::ResolvePreviewContext(
-            EDWCTransparencyEditorStage::FinalEditing,
+            EDWCTransparencyEditorStage::RevealEditing,
             EDWCTransparencySourceType::ManualColorOrTexture,
             EDWCTransparencyVisualizationMode::Final,
             EWetClothingTransparencyPreviewMode::FullBlueprint,
@@ -91,19 +93,19 @@ bool FDWCTransparencyWorkflowInputRoutingTest::RunTest(const FString& Parameters
             true,
             false);
     TestEqual(TEXT("Stage 3 derives reveal visualization"),
-              RevealContext.VisualizationMode,
-              EDWCTransparencyVisualizationMode::InnerColor);
+        RevealContext.VisualizationMode,
+        EDWCTransparencyVisualizationMode::InnerColor);
     TestEqual(TEXT("Stage 3 derives target-mesh preview"),
-              RevealContext.PreviewMode,
-              EWetClothingTransparencyPreviewMode::TargetMeshOnly);
-    TestTrue(TEXT("Stage 3 keeps its reveal working map"),
-             RevealContext.bUseManualRevealWorkingMap);
+        RevealContext.PreviewMode,
+        EWetClothingTransparencyPreviewMode::TargetMeshOnly);
+    TestTrue(TEXT("Stage 3 keeps its source working map"),
+        RevealContext.bUseRevealWorkingMap);
     TestFalse(TEXT("Disabled Reveal Paint keeps the reveal target but disables writes"),
-              RevealContext.bEnableRevealColorPainting);
+        RevealContext.bEnableRevealColorPainting);
 
     const DWCTransparencyWorkflow::FDWCTransparencyPreviewContext FinalContext =
         DWCTransparencyWorkflow::ResolvePreviewContext(
-            EDWCTransparencyEditorStage::BakeOutput,
+            EDWCTransparencyEditorStage::FinalEditing,
             EDWCTransparencySourceType::ManualColorOrTexture,
             EDWCTransparencyVisualizationMode::AutoAlpha,
             EWetClothingTransparencyPreviewMode::FullBlueprint,
@@ -112,16 +114,16 @@ bool FDWCTransparencyWorkflowInputRoutingTest::RunTest(const FString& Parameters
             false,
             true);
     TestEqual(TEXT("Stage 4 derives final-alpha painting"),
-              FinalContext.PaintTarget,
-              EDWCTransparencyPaintTarget::FinalAlpha);
+        FinalContext.PaintTarget,
+        EDWCTransparencyPaintTarget::FinalAlpha);
     TestEqual(TEXT("Stage 4 preserves the requested visualization"),
-              FinalContext.VisualizationMode,
-              EDWCTransparencyVisualizationMode::AutoAlpha);
+        FinalContext.VisualizationMode,
+        EDWCTransparencyVisualizationMode::AutoAlpha);
     TestTrue(TEXT("Stage 4 enables alpha painting when a working map exists"),
-             FinalContext.bEnableFinalAlphaPainting);
+        FinalContext.bEnableFinalAlphaPainting);
 
-    FDWCEditorSessionState               State;
-    const FGuid                          LayerGuid = FGuid::NewGuid();
+    FDWCEditorSessionState State;
+    const FGuid LayerGuid = FGuid::NewGuid();
     FDWCSetTransparencyEditContextAction InitialContext;
     InitialContext.Context.LayerGuid = LayerGuid;
     InitialContext.Context.MaterialSlotIndex = 7;
@@ -134,15 +136,15 @@ bool FDWCTransparencyWorkflowInputRoutingTest::RunTest(const FString& Parameters
     const EDWCEditorSessionEffect PaintTargetEffects =
         FDWCEditorSessionReducer::Reduce(State, PaintTargetOnlyChange);
     TestTrue(TEXT("Paint-target transition updates preview parameters"),
-             HasEffect(PaintTargetEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
+        HasEffect(PaintTargetEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
     TestFalse(TEXT("Paint-target transition does not rebuild hit topology"),
-              HasEffect(PaintTargetEffects, EDWCEditorSessionEffect::RebuildHitTopology));
+        HasEffect(PaintTargetEffects, EDWCEditorSessionEffect::RebuildHitTopology));
 
     FDWCSetTransparencyEditContextAction SlotChange = PaintTargetOnlyChange;
     SlotChange.Context.MaterialSlotIndex = 8;
     const EDWCEditorSessionEffect SlotEffects = FDWCEditorSessionReducer::Reduce(State, SlotChange);
     TestTrue(TEXT("Material-slot transition rebuilds hit topology"),
-             HasEffect(SlotEffects, EDWCEditorSessionEffect::RebuildHitTopology));
+        HasEffect(SlotEffects, EDWCEditorSessionEffect::RebuildHitTopology));
     return true;
 }
 
@@ -154,31 +156,31 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCTransparencyWorkflowPersistentStateTest::RunTest(const FString& Parameters)
 {
     FDWCEditorSessionState State;
-    const FGuid            FirstLayerGuid = FGuid::NewGuid();
-    const FGuid            SecondLayerGuid = FGuid::NewGuid();
+    const FGuid FirstLayerGuid = FGuid::NewGuid();
+    const FGuid SecondLayerGuid = FGuid::NewGuid();
 
     const EDWCEditorSessionEffect FirstStageEffects = FDWCEditorSessionReducer::Reduce(
         State,
-        FDWCSetTransparencyStageAction{ FirstLayerGuid, EDWCTransparencyEditorStage::MapGeneration });
+        FDWCSetTransparencyStageAction{FirstLayerGuid, EDWCTransparencyEditorStage::MapGeneration});
     TestTrue(TEXT("A new layer stage refreshes stage content"),
-             HasEffect(FirstStageEffects, EDWCEditorSessionEffect::RefreshStageContent));
+        HasEffect(FirstStageEffects, EDWCEditorSessionEffect::RefreshStageContent));
 
     const EDWCEditorSessionEffect RepeatedStageEffects = FDWCEditorSessionReducer::Reduce(
         State,
-        FDWCSetTransparencyStageAction{ FirstLayerGuid, EDWCTransparencyEditorStage::MapGeneration });
+        FDWCSetTransparencyStageAction{FirstLayerGuid, EDWCTransparencyEditorStage::MapGeneration});
     TestEqual(TEXT("Reapplying the active stage does not recreate stage content"),
-              RepeatedStageEffects,
-              EDWCEditorSessionEffect::None);
+        RepeatedStageEffects,
+        EDWCEditorSessionEffect::None);
 
     FDWCEditorSessionReducer::Reduce(
         State,
-        FDWCSetTransparencyStageAction{ SecondLayerGuid, EDWCTransparencyEditorStage::BakeOutput });
+        FDWCSetTransparencyStageAction{SecondLayerGuid, EDWCTransparencyEditorStage::FinalEditing});
     TestEqual(TEXT("The first layer retains its Stage 2 selection"),
-              State.Transparency.StageByLayer.FindRef(FirstLayerGuid),
-              EDWCTransparencyEditorStage::MapGeneration);
-    TestEqual(TEXT("The second layer keeps its independent Stage 4 selection"),
-              State.Transparency.StageByLayer.FindRef(SecondLayerGuid),
-              EDWCTransparencyEditorStage::BakeOutput);
+        State.Transparency.StageByLayer.FindRef(FirstLayerGuid),
+        EDWCTransparencyEditorStage::MapGeneration);
+    TestEqual(TEXT("The second layer keeps its independent Stage 3 selection"),
+        State.Transparency.StageByLayer.FindRef(SecondLayerGuid),
+        EDWCTransparencyEditorStage::FinalEditing);
 
     FDWCSetTransparencyPaintAction AlphaPaint;
     AlphaPaint.Paint.bRevealColorPaint = false;
@@ -198,15 +200,15 @@ bool FDWCTransparencyWorkflowPersistentStateTest::RunTest(const FString& Paramet
     TestEqual(TEXT("Alpha brush settings remain independent"), State.Transparency.Paint.Strength, 0.25f);
     TestEqual(TEXT("Reveal brush settings remain independent"), State.Transparency.RevealPaint.Strength, 0.75f);
     TestTrue(TEXT("Reveal-paint reducer marks the reveal layer explicitly"),
-             State.Transparency.RevealPaint.bRevealColorPaint);
+        State.Transparency.RevealPaint.bRevealColorPaint);
     TestTrue(TEXT("Reveal-paint reducer uses the fixed reveal spacing"),
-             FMath::IsNearlyEqual(State.Transparency.RevealPaint.Spacing, 0.25f));
+        FMath::IsNearlyEqual(State.Transparency.RevealPaint.Spacing, 0.25f));
     TestTrue(TEXT("Reveal-paint reducer retains full reveal coverage"),
-             FMath::IsNearlyEqual(State.Transparency.RevealPaint.TargetAlpha, 1.0f));
+        FMath::IsNearlyEqual(State.Transparency.RevealPaint.TargetAlpha, 1.0f));
     TestTrue(TEXT("Reveal-paint reducer forces opaque reveal color"),
-             FMath::IsNearlyEqual(State.Transparency.RevealPaint.RevealColor.A, 1.0f));
+        FMath::IsNearlyEqual(State.Transparency.RevealPaint.RevealColor.A, 1.0f));
     TestTrue(TEXT("Reveal-paint state changes update the viewport through the session"),
-             HasEffect(RevealPaintEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
+        HasEffect(RevealPaintEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
     return true;
 }
 
@@ -218,12 +220,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCTransparencyWorkflowRevealLifecycleTest::RunTest(const FString& Parameters)
 {
     FDWCEditorSessionState State;
-    const FGuid            LayerGuid = FGuid::NewGuid();
+    const FGuid LayerGuid = FGuid::NewGuid();
 
-    FDWCSetTransparencyStageAction Stage3Action;
-    Stage3Action.LayerGuid = LayerGuid;
-    Stage3Action.Stage = EDWCTransparencyEditorStage::FinalEditing;
-    FDWCEditorSessionReducer::Reduce(State, Stage3Action);
+    FDWCSetTransparencyStageAction Stage2Action;
+    Stage2Action.LayerGuid = LayerGuid;
+    Stage2Action.Stage = EDWCTransparencyEditorStage::RevealEditing;
+    FDWCEditorSessionReducer::Reduce(State, Stage2Action);
 
     FDWCSetTransparencyEditContextAction RevealContextAction;
     RevealContextAction.Context.LayerGuid = LayerGuid;
@@ -239,10 +241,10 @@ bool FDWCTransparencyWorkflowRevealLifecycleTest::RunTest(const FString& Paramet
     const EDWCEditorSessionEffect EnableEffects =
         FDWCEditorSessionReducer::Reduce(State, EnableRevealAction);
     TestTrue(TEXT("Enabling Reveal Paint updates preview parameters"),
-             HasEffect(EnableEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
+        HasEffect(EnableEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
     TestEqual(TEXT("Stage 3 keeps the reveal paint target"),
-              State.Transparency.EditContext.PaintTarget,
-              EDWCTransparencyPaintTarget::RevealColor);
+        State.Transparency.EditContext.PaintTarget,
+        EDWCTransparencyPaintTarget::RevealColor);
 
     FDWCSetTransparencyPaintAction DisableRevealAction = EnableRevealAction;
     DisableRevealAction.Paint = State.Transparency.RevealPaint;
@@ -250,31 +252,159 @@ bool FDWCTransparencyWorkflowRevealLifecycleTest::RunTest(const FString& Paramet
     const EDWCEditorSessionEffect DisableEffects =
         FDWCEditorSessionReducer::Reduce(State, DisableRevealAction);
     TestTrue(TEXT("Disabling Reveal Paint updates preview parameters"),
-             HasEffect(DisableEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
+        HasEffect(DisableEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
     TestFalse(TEXT("Disabling Reveal Paint changes only the write gate"),
-              State.Transparency.RevealPaint.bEnabled);
+        State.Transparency.RevealPaint.bEnabled);
     TestEqual(TEXT("Disabling Reveal Paint does not clear the reveal target"),
-              State.Transparency.EditContext.PaintTarget,
-              EDWCTransparencyPaintTarget::RevealColor);
+        State.Transparency.EditContext.PaintTarget,
+        EDWCTransparencyPaintTarget::RevealColor);
 
     FDWCSetTransparencyStageAction Stage4Action;
     Stage4Action.LayerGuid = LayerGuid;
-    Stage4Action.Stage = EDWCTransparencyEditorStage::BakeOutput;
+    Stage4Action.Stage = EDWCTransparencyEditorStage::FinalEditing;
     const EDWCEditorSessionEffect Stage4Effects =
         FDWCEditorSessionReducer::Reduce(State, Stage4Action);
     TestTrue(TEXT("Stage 4 refreshes stage content"),
-             HasEffect(Stage4Effects, EDWCEditorSessionEffect::RefreshStageContent));
+        HasEffect(Stage4Effects, EDWCEditorSessionEffect::RefreshStageContent));
 
     FDWCSetTransparencyEditContextAction FinalContextAction = RevealContextAction;
     FinalContextAction.Context.PaintTarget = EDWCTransparencyPaintTarget::FinalAlpha;
     const EDWCEditorSessionEffect FinalContextEffects =
         FDWCEditorSessionReducer::Reduce(State, FinalContextAction);
     TestTrue(TEXT("Stage 4 context updates preview parameters"),
-             HasEffect(FinalContextEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
+        HasEffect(FinalContextEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
     TestEqual(TEXT("Stage 4 switches to final-alpha painting"),
-              State.Transparency.EditContext.PaintTarget,
-              EDWCTransparencyPaintTarget::FinalAlpha);
+        State.Transparency.EditContext.PaintTarget,
+        EDWCTransparencyPaintTarget::FinalAlpha);
 
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyCharacterTypeDraftCommitTest,
+    "DWC.Editor.Transparency.Workflow.CharacterTypeDraftCommit",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyCharacterTypeDraftCommitTest::RunTest(const FString& Parameters)
+{
+    FDWCEditorSessionState State;
+    FDWCInitializeTransparencyCharacterTypeAction Initialize;
+    Initialize.SavedType = EDWCTransparencySourceType::SameMeshMaterialSlots;
+    Initialize.bSavedTypeConfigured = true;
+    FDWCEditorSessionReducer::Reduce(State, Initialize);
+
+    const EDWCEditorSessionEffect DraftEffects = FDWCEditorSessionReducer::Reduce(
+        State,
+        FDWCSelectTransparencyCharacterTypeDraftAction{
+            EDWCTransparencySourceType::ManualColorOrTexture});
+    TestEqual(TEXT("Selecting a type changes only the draft"),
+        State.Transparency.SavedCharacterType,
+        EDWCTransparencySourceType::SameMeshMaterialSlots);
+    TestEqual(TEXT("The selected type is retained in the session draft"),
+        State.Transparency.DraftCharacterType,
+        EDWCTransparencySourceType::ManualColorOrTexture);
+    TestTrue(TEXT("A different draft is marked dirty"),
+        State.Transparency.bCharacterTypeDraftDirty);
+    TestFalse(TEXT("Draft selection does not rebuild preview content"),
+        HasEffect(DraftEffects, EDWCEditorSessionEffect::RebuildPreviewContent));
+    TestFalse(TEXT("Draft selection does not rebuild preview materials"),
+        HasEffect(DraftEffects, EDWCEditorSessionEffect::RebuildPreviewMaterials));
+
+    FDWCEditorSessionReducer::Reduce(
+        State,
+        FDWCCancelTransparencyCharacterTypeDraftAction{});
+    TestEqual(TEXT("Cancel restores the saved type"),
+        State.Transparency.DraftCharacterType,
+        EDWCTransparencySourceType::SameMeshMaterialSlots);
+    TestFalse(TEXT("Cancel clears dirty state"),
+        State.Transparency.bCharacterTypeDraftDirty);
+
+    FDWCEditorSessionReducer::Reduce(
+        State,
+        FDWCSelectTransparencyCharacterTypeDraftAction{
+            EDWCTransparencySourceType::ManualColorOrTexture});
+    FDWCEditorSessionReducer::Reduce(
+        State,
+        FDWCCommitTransparencyCharacterTypeSucceededAction{
+            EDWCTransparencySourceType::ManualColorOrTexture});
+    TestEqual(TEXT("Successful commit updates the saved snapshot"),
+        State.Transparency.SavedCharacterType,
+        EDWCTransparencySourceType::ManualColorOrTexture);
+    TestFalse(TEXT("Successful commit clears dirty state"),
+        State.Transparency.bCharacterTypeDraftDirty);
+
+    FDWCEditorSessionReducer::Reduce(
+        State,
+        FDWCSelectTransparencyCharacterTypeDraftAction{
+            EDWCTransparencySourceType::SameMeshMaterialSlots});
+    FDWCEditorSessionReducer::Reduce(
+        State,
+        FDWCReconcileTransparencyCharacterTypeAction{
+            EDWCTransparencySourceType::ManualColorOrTexture,
+            true});
+    TestEqual(TEXT("Reconcile preserves an active draft"),
+        State.Transparency.DraftCharacterType,
+        EDWCTransparencySourceType::SameMeshMaterialSlots);
+
+    FWetClothingTransparencyData TransparencyData;
+    TransparencyData.CharacterStructureType = EDWCTransparencySourceType::SameMeshMaterialSlots;
+    TransparencyData.bCharacterStructureTypeConfigured = true;
+    FWetClothingTransparencyLayerData& Layer =
+        TransparencyData.TransparencyLayers.AddDefaulted_GetRef();
+    Layer.LayerGuid = FGuid::NewGuid();
+    Layer.SourceType = EDWCTransparencySourceType::SameMeshMaterialSlots;
+    Layer.SameMeshSource.InnerSlotPriority.AddDefaulted();
+    Layer.RevealColorPaintStrokes.AddDefaulted();
+    Layer.EditableStrokes.AddDefaulted();
+    Layer.BakedMaps.AddDefaulted();
+
+    DWCTransparencyWorkflow::ApplyCharacterTypeCommit(
+        TransparencyData,
+        EDWCTransparencySourceType::ManualColorOrTexture);
+    TestEqual(TEXT("Commit synchronizes every existing layer"),
+        Layer.SourceType,
+        EDWCTransparencySourceType::ManualColorOrTexture);
+    TestEqual(TEXT("Commit clears previous type-specific source settings"),
+        Layer.SameMeshSource.InnerSlotPriority.Num(),
+        0);
+    TestEqual(TEXT("Commit preserves reveal strokes"), Layer.RevealColorPaintStrokes.Num(), 1);
+    TestEqual(TEXT("Commit preserves alpha strokes"), Layer.EditableStrokes.Num(), 1);
+    TestEqual(TEXT("Commit preserves the last baked result for stale inspection"),
+        Layer.BakedMaps.Num(),
+        1);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyFinalBaselineBakeSourceTest,
+    "DWC.Editor.Transparency.Bake.RejectsFinalBakedBaseline",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyFinalBaselineBakeSourceTest::RunTest(const FString& Parameters)
+{
+    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    FWetClothingTransparencyLayerData Layer;
+    Layer.LayerGuid = FGuid::NewGuid();
+    Layer.TargetSurface.OuterMaterialSlotIndex = 2;
+
+    TSharedRef<FDWCTransparencySourcePayload> FinalBaseline =
+        MakeShared<FDWCTransparencySourcePayload>();
+    FinalBaseline->LayerGuid = Layer.LayerGuid;
+    FinalBaseline->MaterialSlotIndex = 2;
+    FinalBaseline->bIsFinalBakedBaseline = true;
+
+    FDWCTransparencyEditedMapBakeSnapshot Snapshot;
+    FString Error;
+    const bool bBuilt = FDWCTransparencyEditedMapBaker::BuildSnapshot(
+        *Asset,
+        Layer,
+        FinalBaseline,
+        Snapshot,
+        Error);
+
+    TestFalse(TEXT("A final baked map is never accepted as a canonical bake source"), bBuilt);
+    TestTrue(TEXT("The failure explains that canonical working data must be rebuilt"),
+        Error.Contains(TEXT("canonical working map")));
     return true;
 }
 

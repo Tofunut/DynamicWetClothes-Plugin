@@ -131,6 +131,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void                        RefreshStageContent();
     void                        RefreshMapGenerationSettings();
     void                        RefreshFinalEditingContent();
+    void                        RefreshBakeOutputContent();
     void                        RefreshInnerSourceSlotItems();
     void                        RequestRefresh(EDWCTransparencyPanelRefreshFlags Flags);
     EActiveTimerReturnType      HandleDeferredRefresh(double CurrentTime, float DeltaTime);
@@ -279,6 +280,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedRef<SWidget> BuildStructureSetupStage();
     TSharedRef<SWidget> BuildMapGenerationStage();
     TSharedRef<SWidget> BuildFinalEditingStage();
+    TSharedRef<SWidget> BuildBakeOutputStage();
     TSharedRef<SWidget> BuildFinalEditingNotice();
     TSharedRef<SWidget> BuildSourceTypeCard(
         EDWCTransparencySourceType SourceType,
@@ -289,7 +291,9 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedRef<SWidget> BuildTransparencyLayersSection();
     TSharedRef<SWidget> BuildSameMeshSourceSection();
     TSharedRef<SWidget> BuildOtherMeshSourceSection();
+    TSharedRef<SWidget> BuildManualBaseRevealSourceSection();
     TSharedRef<SWidget> BuildManualSourceSection();
+    TSharedRef<SWidget> BuildRevealColorPaintSection();
     TSharedRef<SWidget> BuildRaySettingsSection();
     TSharedRef<SWidget> BuildBakeSettingsSection(bool bShowResolution);
     TSharedRef<SWidget> BuildTransparencyBrushSection();
@@ -326,6 +330,8 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<class SBox>                              FinalEditingNoticeContainer;
     TSharedPtr<class SBox>                              FinalEditingPreviewSettingsContainer;
     TSharedPtr<class SBox>                              FinalEditingGeneratedOutputsContainer;
+    TSharedPtr<class SBox>                              BakeOutputNoticeContainer;
+    TSharedPtr<class SBox>                              BakeOutputGeneratedOutputsContainer;
     TSharedPtr<class SBox>                              TransparencyStrokeListContainer;
     TArray<TSharedPtr<FGuid>>                           RevealColorStrokeItems;
     TSharedPtr<class SListView<TSharedPtr<FGuid>>>      RevealColorStrokeListView;

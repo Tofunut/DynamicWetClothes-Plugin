@@ -49,7 +49,8 @@ enum class EDWCTransparencyEditorStage : uint8
 {
     StructureSetup,
     MapGeneration,
-    FinalEditing
+    FinalEditing,
+    BakeOutput
 };
 
 enum class EDWCTransparencyPaintTarget : uint8

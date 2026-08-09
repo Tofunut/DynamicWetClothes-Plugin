@@ -7,7 +7,6 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInterface.h"
-#include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
 #include "WetClothing/Modes/Transparency/MaterialBake/DWCTransparencyMaterialColorBakeCache.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
@@ -208,45 +207,6 @@ namespace
             return false;
         }
         return true;
-    }
-
-    float ApplyTextureAddress(const float Coordinate, const TextureAddress AddressMode)
-    {
-        switch (AddressMode)
-        {
-        case TA_Wrap:
-            return FMath::Frac(Coordinate);
-        case TA_Mirror:
-        {
-            const float Wrapped = FMath::Frac(Coordinate * 0.5f) * 2.0f;
-            return Wrapped <= 1.0f ? Wrapped : 2.0f - Wrapped;
-        }
-        case TA_Clamp:
-        default:
-            return FMath::Clamp(Coordinate, 0.0f, 1.0f);
-        }
-    }
-
-    FLinearColor SampleTextureBilinear(const FWetClothingTextureReadback& TextureData, const FVector2D& UV)
-    {
-        if (!TextureData.IsValid())
-        {
-            return FLinearColor::White;
-        }
-
-        const float U = ApplyTextureAddress(static_cast<float>(UV.X), TextureData.AddressX);
-        const float V = ApplyTextureAddress(static_cast<float>(UV.Y), TextureData.AddressY);
-        const float X = U * static_cast<float>(TextureData.Width - 1);
-        const float Y = V * static_cast<float>(TextureData.Height - 1);
-        const int32 X0 = FMath::FloorToInt(X);
-        const int32 Y0 = FMath::FloorToInt(Y);
-        const int32 X1 = FMath::Min(X0 + 1, TextureData.Width - 1);
-        const int32 Y1 = FMath::Min(Y0 + 1, TextureData.Height - 1);
-        const float AlphaX = X - static_cast<float>(X0);
-        const float AlphaY = Y - static_cast<float>(Y0);
-        const FLinearColor C0 = FMath::Lerp(TextureData.GetLinearColor(X0, Y0), TextureData.GetLinearColor(X1, Y0), AlphaX);
-        const FLinearColor C1 = FMath::Lerp(TextureData.GetLinearColor(X0, Y1), TextureData.GetLinearColor(X1, Y1), AlphaX);
-        return FMath::Lerp(C0, C1, AlphaY);
     }
 
     float CalculateAutoAlpha(const FWetClothingTransparencyRaySettings& Settings, const FDWCRevealBakeRayHit& Hit)
@@ -1004,13 +964,6 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
     if (Layer.SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
         FDWCTransparencyType1SourceBindings SourceBindings;
-        if (!FDWCTransparencyType1SourceProvider::BuildBindings(
-                WetClothingAsset, Layer, SourceBindings, OutErrorMessage))
-        {
-            return false;
-        }
-        Snapshot.Warnings.Append(MoveTemp(SourceBindings.Warnings));
-        Snapshot.SourceColorsByLayerId = MoveTemp(SourceBindings.ColorsBySourceLayerId);
         Snapshot.SourceSurfaces.Reserve(Layer.SameMeshSource.InnerSlotPriority.Num());
         for (int32 PriorityIndex = 0; PriorityIndex < Layer.SameMeshSource.InnerSlotPriority.Num(); ++PriorityIndex)
         {
@@ -1036,6 +989,15 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
                 continue;
             }
 
+            FString BindingError;
+            if (!FDWCTransparencyType1SourceProvider::AddValidatedBinding(
+                    WetClothingAsset, InnerSlot, PriorityIndex, SourceSurface,
+                    SourceBindings, BindingError))
+            {
+                OutErrorMessage = BindingError;
+                return false;
+            }
+
             FDWCTransparencySourceHitStats& Stats = Snapshot.SeedResult.SourceStats.AddDefaulted_GetRef();
             Stats.PriorityIndex = PriorityIndex;
             Stats.MaterialSlotIndex = InnerSlot.MaterialSlotIndex;
@@ -1043,16 +1005,16 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
             Snapshot.StatsIndexBySourceLayerId.Add(SourceLayerId, Snapshot.SeedResult.SourceStats.Num() - 1);
             Snapshot.PriorityBySourceLayerId.Add(SourceLayerId, PriorityIndex);
 
-            if (!Snapshot.SourceColorsByLayerId.Contains(SourceLayerId))
-            {
-                OutErrorMessage = FString::Printf(
-                    TEXT("Inner Source Part '%s' has no exact GPU material-color bake."),
-                    *InnerSlot.MaterialSlotName.ToString());
-                return false;
-            }
             SourceSurface.SkeletalMesh = nullptr;
             Snapshot.SourceSurfaces.Add(MoveTemp(SourceSurface));
         }
+        if (SourceBindings.ColorsBySourceLayerId.IsEmpty())
+        {
+            OutErrorMessage = TEXT("No valid Type 1 Inner Source Part could be prepared.");
+            return false;
+        }
+        Snapshot.Warnings.Append(MoveTemp(SourceBindings.Warnings));
+        Snapshot.SourceColorsByLayerId = MoveTemp(SourceBindings.ColorsBySourceLayerId);
     }
     else
     {
@@ -1061,24 +1023,6 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
         const int32 SourceColorResolution = Resolution;
         for (const FDWCTransparencyProjectionSource& Source : ProviderSources.Sources)
         {
-            TSharedPtr<const FDWCTransparencyMaterialColorBakeResult> SourceColor;
-            if (Source.Layer.bCanBeRevealSource)
-            {
-                FString BakeError;
-                SourceColor = FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
-                    WetClothingAsset, *Source.Layer.SkeletalMesh, *Source.EffectiveMaterial,
-                    Source.Layer.BakeTransform, Source.MaterialSlotIndex,
-                    Source.Layer.SourceUVChannel, SourceColorResolution, BakeError);
-                if (!SourceColor.IsValid())
-                {
-                    OutErrorMessage = FString::Printf(
-                        TEXT("Source '%s' slot '%s' could not bake Base Color: %s"),
-                        *Source.Layer.ComponentDisplayName.ToString(),
-                        *Source.MaterialSlotName.ToString(), *BakeError);
-                    return false;
-                }
-            }
-
             FDWCRevealBakeSurface SourceSurface;
             if (!BuildResolvedSlotSurface(
                     Source.Layer, LODIndex, Source.Layer.SourceUVChannel,
@@ -1092,6 +1036,20 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
             }
             if (Source.Layer.bCanBeRevealSource)
             {
+                FString BakeError;
+                TSharedPtr<const FDWCTransparencyMaterialColorBakeResult> SourceColor =
+                    FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
+                        WetClothingAsset, *Source.Layer.SkeletalMesh, *Source.EffectiveMaterial,
+                        Source.Layer.BakeTransform, Source.MaterialSlotIndex,
+                        Source.Layer.SourceUVChannel, SourceColorResolution, BakeError);
+                if (!SourceColor.IsValid())
+                {
+                    OutErrorMessage = FString::Printf(
+                        TEXT("Source '%s' slot '%s' could not bake Base Color after its surface was validated: %s"),
+                        *Source.Layer.ComponentDisplayName.ToString(),
+                        *Source.MaterialSlotName.ToString(), *BakeError);
+                    return false;
+                }
                 Snapshot.SourceColorsByLayerId.Add(Source.Layer.LayerId, MoveTemp(SourceColor));
                 FDWCTransparencySourceHitStats& Stats = Snapshot.SeedResult.SourceStats.AddDefaulted_GetRef();
                 Stats.PriorityIndex = Source.PriorityIndex;
@@ -1255,7 +1213,7 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
             SourceColor != nullptr && SourceColor->IsValid())
         {
             SourcePayload.InnerColorBuffer[PixelIndex] =
-                SampleTextureBilinear((*SourceColor)->TextureData, Hit.SourceUV).ToFColor(true);
+                (*SourceColor)->Sample(Hit.SourceUV).ToFColor(true);
         }
         else
         {

@@ -5,7 +5,8 @@
 
 class UWetClothingAsset;
 struct FDWCTransparencyMaterialColorBakeResult;
-struct FWetClothingTransparencyLayerData;
+struct FDWCRevealBakeSurface;
+struct FWetClothingTransparencyInnerSlot;
 
 /** Material-color dependencies prepared on the game thread for a Type 1 projection job. */
 struct FDWCTransparencyType1SourceBindings
@@ -23,9 +24,11 @@ struct FDWCTransparencyType1SourceBindings
 class FDWCTransparencyType1SourceProvider
 {
   public:
-    static bool BuildBindings(
+    static bool AddValidatedBinding(
         UWetClothingAsset& Asset,
-        const FWetClothingTransparencyLayerData& Layer,
+        const FWetClothingTransparencyInnerSlot& InnerSlot,
+        int32 PriorityIndex,
+        const FDWCRevealBakeSurface& SourceSurface,
         FDWCTransparencyType1SourceBindings& OutBindings,
         FString& OutError);
 };

@@ -14,21 +14,25 @@ struct FDWCTransparencySourcePayload;
 class FDWCTransparencyTempAssetStore
 {
   public:
-    static UTexture2D* FindCurrentSourceMaterialColor(
+    static bool FindCurrentSourceMaterialColor(
         const UWetClothingAsset& Asset,
         const USkeletalMesh& SourceMesh,
         int32 MaterialSlotIndex,
         int32 SourceUVChannel,
-        int32 Resolution,
+        int32 LogicalResolution,
         const FString& MaterialBakeSignature,
-        bool bLoadIfNeeded);
+        bool bLoadIfNeeded,
+        FDWCTransparencyMaterialColorCacheReference& OutReference,
+        UTexture2D*& OutTexture);
 
     static bool CommitSourceMaterialColor(
         UWetClothingAsset& Asset,
         USkeletalMesh& SourceMesh,
         int32 MaterialSlotIndex,
         int32 SourceUVChannel,
-        FIntPoint Resolution,
+        FIntPoint LogicalResolution,
+        FIntPoint PhysicalResolution,
+        EDWCTransparencyMaterialColorPayloadKind PayloadKind,
         const FString& MaterialBakeSignature,
         TConstArrayView<FColor> Pixels,
         bool bSRGB,

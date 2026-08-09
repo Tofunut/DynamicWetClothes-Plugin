@@ -5,6 +5,7 @@
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "Engine/SkeletalMesh.h"
 #include "WetClothing/Modes/Transparency/MaterialBake/DWCTransparencyMaterialColorBakeCache.h"
+#include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurface.h"
 
 namespace
 {
@@ -31,14 +32,15 @@ uint64 FDWCTransparencyType1SourceBindings::GetAllocatedBytes() const
     return Bytes;
 }
 
-bool FDWCTransparencyType1SourceProvider::BuildBindings(
+bool FDWCTransparencyType1SourceProvider::AddValidatedBinding(
     UWetClothingAsset& Asset,
-    const FWetClothingTransparencyLayerData& Layer,
+    const FWetClothingTransparencyInnerSlot& InnerSlot,
+    const int32 PriorityIndex,
+    const FDWCRevealBakeSurface& SourceSurface,
     FDWCTransparencyType1SourceBindings& OutBindings,
     FString& OutError)
 {
     check(IsInGameThread());
-    OutBindings = FDWCTransparencyType1SourceBindings();
     OutError.Reset();
     USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
     if (SourceMesh == nullptr)
@@ -47,34 +49,61 @@ bool FDWCTransparencyType1SourceProvider::BuildBindings(
         return false;
     }
 
-    const int32 Resolution = FMath::Clamp(
-        Asset.Authored.TransparencyData.TransparencyBakeResolution, 16, 4096);
-    for (int32 PriorityIndex = 0; PriorityIndex < Layer.SameMeshSource.InnerSlotPriority.Num(); ++PriorityIndex)
+    bool bHasUsableGeometry = false;
+    bool bHasUsableUV = false;
+    for (const FDWCRevealBakeSurfaceTriangle& Triangle : SourceSurface.Triangles)
     {
-        const FWetClothingTransparencyInnerSlot& Inner =
-            Layer.SameMeshSource.InnerSlotPriority[PriorityIndex];
-        if (Inner.MaterialSlotIndex == INDEX_NONE)
+        const bool bFiniteGeometry =
+            !Triangle.Positions[0].ContainsNaN() &&
+            !Triangle.Positions[1].ContainsNaN() &&
+            !Triangle.Positions[2].ContainsNaN() &&
+            !Triangle.Normals[0].ContainsNaN() &&
+            !Triangle.Normals[1].ContainsNaN() &&
+            !Triangle.Normals[2].ContainsNaN();
+        const bool bFiniteUV =
+            FMath::IsFinite(Triangle.UVs[0].X) && FMath::IsFinite(Triangle.UVs[0].Y) &&
+            FMath::IsFinite(Triangle.UVs[1].X) && FMath::IsFinite(Triangle.UVs[1].Y) &&
+            FMath::IsFinite(Triangle.UVs[2].X) && FMath::IsFinite(Triangle.UVs[2].Y);
+        if (!bFiniteGeometry || !bFiniteUV)
         {
             continue;
         }
-        FString BakeError;
-        TSharedPtr<const FDWCTransparencyMaterialColorBakeResult> Result =
-            FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
-                Asset, *SourceMesh, Inner.MaterialSlotIndex, Inner.SourceUVChannel,
-                Resolution, BakeError);
-        if (!Result.IsValid())
-        {
-            OutError = FString::Printf(
-                TEXT("Inner Source Part '%s' could not bake its original material Base Color: %s"),
-                *Inner.MaterialSlotName.ToString(), *BakeError);
-            return false;
-        }
-        OutBindings.ColorsBySourceLayerId.Add(MakeSourceLayerId(PriorityIndex), MoveTemp(Result));
+        const FVector Edge01 = Triangle.Positions[1] - Triangle.Positions[0];
+        const FVector Edge02 = Triangle.Positions[2] - Triangle.Positions[0];
+        bHasUsableGeometry |= FVector::CrossProduct(Edge01, Edge02).SizeSquared() > UE_SMALL_NUMBER;
+        const FVector2D UVEdge01 = Triangle.UVs[1] - Triangle.UVs[0];
+        const FVector2D UVEdge02 = Triangle.UVs[2] - Triangle.UVs[0];
+        bHasUsableUV |= FMath::Abs(UVEdge01.X * UVEdge02.Y - UVEdge01.Y * UVEdge02.X) > UE_SMALL_NUMBER;
     }
-    if (OutBindings.ColorsBySourceLayerId.IsEmpty())
+    if (SourceSurface.Triangles.IsEmpty() || !bHasUsableGeometry)
     {
-        OutError = TEXT("No Type 1 source material color could be prepared.");
+        OutError = FString::Printf(
+            TEXT("Inner Source Part '%s' has no usable LOD 0 surface triangles."),
+            *InnerSlot.MaterialSlotName.ToString());
         return false;
     }
+
+    const int32 Resolution = FMath::Clamp(
+        Asset.Authored.TransparencyData.TransparencyBakeResolution, 16, 4096);
+    FString BakeError;
+    TSharedPtr<const FDWCTransparencyMaterialColorBakeResult> Result =
+        FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
+            Asset, *SourceMesh, InnerSlot.MaterialSlotIndex, InnerSlot.SourceUVChannel,
+            Resolution, BakeError);
+    if (!Result.IsValid())
+    {
+        OutError = FString::Printf(
+            TEXT("Inner Source Part '%s' could not bake its original material Base Color: %s"),
+            *InnerSlot.MaterialSlotName.ToString(), *BakeError);
+        return false;
+    }
+    if (Result->PayloadKind == EDWCTransparencyMaterialColorPayloadKind::Texture && !bHasUsableUV)
+    {
+        OutError = FString::Printf(
+            TEXT("Inner Source Part '%s' uses a texture Base Color but its selected UV channel has no usable area."),
+            *InnerSlot.MaterialSlotName.ToString());
+        return false;
+    }
+    OutBindings.ColorsBySourceLayerId.Add(MakeSourceLayerId(PriorityIndex), MoveTemp(Result));
     return true;
 }

@@ -87,6 +87,14 @@ enum class EDWCTransparencyManualRevealSourceMode : uint8
     UVIslandAverage UMETA(DisplayName = "UV Island Average")
 };
 
+/** Physical representation retained for an evaluated source material color. */
+UENUM()
+enum class EDWCTransparencyMaterialColorPayloadKind : uint8
+{
+    Texture,
+    ConstantColor
+};
+
 /** Shared editor cache entry for a source material evaluated in its original UV space. */
 USTRUCT()
 struct DWC_API FDWCTransparencyMaterialColorCacheReference
@@ -103,7 +111,16 @@ struct DWC_API FDWCTransparencyMaterialColorCacheReference
     int32 SourceUVChannel = 0;
 
     UPROPERTY()
+    /** Requested Stage 2 resolution. This remains the cache's logical sampling resolution. */
     int32 Resolution = 0;
+
+    /** Actual dimensions stored in Texture. Uniform material output may be represented as 1x1. */
+    UPROPERTY()
+    FIntPoint PayloadResolution = FIntPoint::ZeroValue;
+
+    UPROPERTY()
+    EDWCTransparencyMaterialColorPayloadKind PayloadKind =
+        EDWCTransparencyMaterialColorPayloadKind::Texture;
 
     UPROPERTY()
     FString MaterialBakeSignature;

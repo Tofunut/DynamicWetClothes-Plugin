@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataAssets/WetClothingTransparencyData.h"
 #include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
 
@@ -15,7 +16,7 @@ struct FDWCTransparencyMaterialColorBakeKey
     FSoftObjectPath SourceMeshPath;
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 SourceUVChannel = 0;
-    int32 Resolution = 0;
+    int32 LogicalResolution = 0;
     FString MaterialBakeSignature;
 
     bool IsValid() const;
@@ -27,12 +28,29 @@ struct FDWCTransparencyMaterialColorBakeKey
 struct FDWCTransparencyMaterialColorBakeResult
 {
     FDWCTransparencyMaterialColorBakeKey Key;
+    EDWCTransparencyMaterialColorPayloadKind PayloadKind =
+        EDWCTransparencyMaterialColorPayloadKind::Texture;
+    FIntPoint LogicalResolution = FIntPoint::ZeroValue;
+    FIntPoint PhysicalResolution = FIntPoint::ZeroValue;
     FWetClothingTextureReadback TextureData;
     uint64 AllocatedBytes = 0;
     bool bLoadedFromPersistentCache = false;
     TSharedPtr<FDWCEditorMemoryLease, ESPMode::ThreadSafe> MemoryLease;
 
-    bool IsValid() const { return Key.IsValid() && TextureData.IsValid(); }
+    bool InitializePayload(
+        EDWCTransparencyMaterialColorPayloadKind InPayloadKind,
+        FIntPoint InLogicalResolution,
+        FIntPoint InPhysicalResolution,
+        TArray<FColor>&& InPixels,
+        bool bSRGB,
+        FString& OutError);
+    bool InitializePayloadFromReadback(
+        EDWCTransparencyMaterialColorPayloadKind InPayloadKind,
+        FIntPoint InLogicalResolution,
+        FWetClothingTextureReadback&& InTextureData,
+        FString& OutError);
+    bool IsValid() const;
+    FLinearColor Sample(const FVector2D& UV) const;
 };
 
 /**

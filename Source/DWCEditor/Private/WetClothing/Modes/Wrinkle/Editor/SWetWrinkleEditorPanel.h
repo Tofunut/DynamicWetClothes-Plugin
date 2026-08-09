@@ -172,9 +172,9 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     ECheckBoxState GetFlipFoldSideCheckState() const;
     void HandleFlipFoldSideChanged(ECheckBoxState NewState);
     EVisibility GetPatchToolVisibility() const;
-    EVisibility GetSurfaceDecalSettingsVisibility() const;
-    ECheckBoxState GetPatchProjectionModeCheckState(EWetWrinklePatchProjectionMode Mode) const;
-    void HandlePatchProjectionModeChanged(ECheckBoxState NewState, EWetWrinklePatchProjectionMode Mode);
+    EVisibility GetPatchProjectionSettingsVisibility() const;
+    ECheckBoxState GetCrossUVSeamsCheckState() const;
+    void HandleCrossUVSeamsChanged(ECheckBoxState NewState);
     void HandleProjectionDepthChanged(float NewValue);
     void HandleProjectionAngleChanged(float NewValue);
     void HandleProjectionDepthSoftnessChanged(float NewValue);

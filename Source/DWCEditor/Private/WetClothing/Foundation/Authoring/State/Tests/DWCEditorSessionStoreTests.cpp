@@ -126,12 +126,18 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         5.0f);
 
     const FGuid WrinkleElementGuid = FGuid::NewGuid();
-    FDWCEditorSessionReducer::Reduce(
+    const EDWCEditorSessionEffect SelectionEffects = FDWCEditorSessionReducer::Reduce(
         State,
         FDWCSelectWrinkleElementAction{
             WrinkleElementGuid,
             EWetWrinkleElementType::ProceduralRidgeStroke,
             2});
+    TestTrue(
+        TEXT("Selecting a wrinkle synchronizes selection state"),
+        EnumHasAnyFlags(SelectionEffects, EDWCEditorSessionEffect::SyncSelection));
+    TestFalse(
+        TEXT("Selecting a wrinkle does not resend unchanged brush preview settings"),
+        EnumHasAnyFlags(SelectionEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
     FDWCReconcileAuthoringAction PreserveWrinkleSelection;
     PreserveWrinkleSelection.AuthoringRevision = 8;
     PreserveWrinkleSelection.Domain = EDWCEditorAuthoringDomain::Wrinkle;
@@ -213,6 +219,79 @@ bool FDWCEditorSessionStoreDispatchTest::RunTest(const FString& Parameters)
     Store->Dispatch(FDWCActivateEditorModeAction{EWCAEditorMode::WrinkleEdit});
     TestEqual(TEXT("A no-op action does not notify"), NotificationCount, 2);
     TestEqual(TEXT("A no-op action does not advance revision"), Store->GetRevision(), uint64(2));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorWrinkleEditContextAtomicityTest,
+    "DWC.Editor.Authoring.Session.WrinkleEditContextAtomicity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorWrinkleEditContextAtomicityTest::RunTest(const FString& Parameters)
+{
+    TSharedRef<FDWCEditorSessionStore> Store = MakeShared<FDWCEditorSessionStore>();
+
+    FDWCSetWrinkleBrushAction InitialBrush;
+    InitialBrush.Brush.MaterialSlotIndex = 14;
+    InitialBrush.Brush.UVChannelIndex = 2;
+    InitialBrush.Effects = EDWCEditorSessionEffect::None;
+    Store->Dispatch(InitialBrush);
+
+    const FGuid SelectedPatchGuid = FGuid::NewGuid();
+    Store->Dispatch(FDWCSelectWrinkleElementAction{
+        SelectedPatchGuid,
+        EWetWrinkleElementType::Patch,
+        INDEX_NONE});
+
+    int32 NotificationCount = 0;
+    bool bObservedMixedState = false;
+    EDWCEditorSessionEffect ObservedEffects = EDWCEditorSessionEffect::None;
+    Store->OnChanged().AddLambda(
+        [&NotificationCount, &bObservedMixedState, &ObservedEffects](
+            const FDWCEditorSessionState& State,
+            const EDWCEditorSessionEffect Effects,
+            uint64)
+        {
+            ++NotificationCount;
+            ObservedEffects = Effects;
+            bObservedMixedState |=
+                State.Wrinkle.Brush.MaterialSlotIndex == 12 &&
+                State.Wrinkle.SelectedElementGuid.IsValid();
+        });
+
+    FDWCSetWrinkleEditContextAction SelectNewSlot;
+    SelectNewSlot.MaterialSlotIndex = 12;
+    SelectNewSlot.UVChannelIndex = 3;
+    SelectNewSlot.bClearElementSelection = true;
+    Store->Dispatch(SelectNewSlot);
+
+    TestEqual(
+        TEXT("A slot transition emits one canonical session notification"),
+        NotificationCount,
+        1);
+    TestFalse(
+        TEXT("Observers never receive the new slot with the previous slot selection"),
+        bObservedMixedState);
+    TestEqual(
+        TEXT("The new material slot is committed"),
+        Store->GetState().Wrinkle.Brush.MaterialSlotIndex,
+        12);
+    TestEqual(
+        TEXT("The new Data UV is committed with the material slot"),
+        Store->GetState().Wrinkle.Brush.UVChannelIndex,
+        3);
+    TestFalse(
+        TEXT("A hidden element selection is cleared in the same transition"),
+        Store->GetState().Wrinkle.SelectedElementGuid.IsValid());
+    TestTrue(
+        TEXT("The transition rebuilds viewport hit topology"),
+        EnumHasAnyFlags(ObservedEffects, EDWCEditorSessionEffect::RebuildHitTopology));
+    TestTrue(
+        TEXT("The transition synchronizes element selection"),
+        EnumHasAnyFlags(ObservedEffects, EDWCEditorSessionEffect::SyncSelection));
+    TestTrue(
+        TEXT("The transition refreshes the slot-filtered element list"),
+        EnumHasAnyFlags(ObservedEffects, EDWCEditorSessionEffect::RefreshElementList));
     return true;
 }
 

@@ -4,7 +4,6 @@
 #include "CoreMinimal.h"
 #include "WetClothingWrinkleData.generated.h"
 
-class UTexture;
 class UTexture2D;
 
 UENUM(BlueprintType)
@@ -77,9 +76,6 @@ struct DWC_API FWetWrinklePatchPlacement
     FVector2f SurfaceHalfExtentLocal = FVector2f::ZeroVector;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
-    TObjectPtr<UTexture> SourceTexture = nullptr;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
     FVector2D PositionUV = FVector2D::ZeroVector;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0"))
@@ -100,26 +96,6 @@ struct DWC_API FWetWrinklePatchPlacement
     // Canonical normal source for patch preview and bake.
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
     TObjectPtr<UTexture2D> WrinkleNormalTexture = nullptr;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
-    int32 AffectedWetPartID = INDEX_NONE;
-
-#if WITH_EDITORONLY_DATA
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    bool bHasEditorSurface = false;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    FVector EditorSurfaceLocalPosition = FVector::ZeroVector;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    FVector EditorSurfaceLocalNormal = FVector::UpVector;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    FVector EditorSurfaceLocalTangent = FVector::ForwardVector;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    FVector EditorSurfaceLocalBitangent = FVector::RightVector;
-#endif
 
     bool HasValidSurfaceAnchor() const
     {
@@ -317,30 +293,11 @@ struct DWC_API FWetWrinkleBakeSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake", meta = (ClampMin = "16", ClampMax = "4096"))
-    int32 DefaultResolution = 1024;
-
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake", meta = (ClampMin = "0", ClampMax = "64"))
     int32 PaddingPixels = 8;
 
-    // Legacy serialized switches. A wrinkle bake now always produces both the
-    // runtime normal texture and the authoring-only separation mask.
-    UPROPERTY(meta = (DeprecatedProperty))
-    bool bBakeNormalMap = true;
-
-    UPROPERTY(meta = (DeprecatedProperty))
-    bool bBakeMask = true;
-
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake")
     bool bIncludeDisabledPatches = false;
-};
-
-UENUM(BlueprintType)
-enum class EDWCWrinkleAlphaSemantic : uint8
-{
-    None,
-    NormalDeviationCoverage_DEPRECATED UMETA(Hidden),
-    ConvexSeparation
 };
 
 UENUM(BlueprintType)
@@ -367,17 +324,6 @@ struct DWC_API FWetWrinkleBakedMapSet
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     TObjectPtr<UTexture2D> BakedWrinkleMask = nullptr;
 #endif
-
-    // Legacy normal-alpha metadata. New bakes store separation only in
-    // BakedWrinkleMask and keep the normal texture alpha unused.
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked", meta = (DeprecatedProperty))
-    bool bHasCoverageAlpha = false;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked", meta = (DeprecatedProperty))
-    EDWCWrinkleAlphaSemantic AlphaSemantic = EDWCWrinkleAlphaSemantic::None;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked", meta = (DeprecatedProperty))
-    int32 AlphaBuildVersion = 0;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     int32 Resolution = 1024;
@@ -415,9 +361,6 @@ struct DWC_API FWetWrinkleResolvedNormalMap
     UTexture2D* Texture = nullptr;
     EDWCWrinkleNormalSource Source = EDWCWrinkleNormalSource::Baked;
     int32 MaterialSlotIndex = INDEX_NONE;
-    bool bHasCoverageAlpha = false;
-    EDWCWrinkleAlphaSemantic AlphaSemantic = EDWCWrinkleAlphaSemantic::None;
-
     bool IsValid() const
     {
         return Texture != nullptr && MaterialSlotIndex != INDEX_NONE;
@@ -497,18 +440,12 @@ struct DWC_API FWetClothingWrinkleData
         {
             Result.Source = EDWCWrinkleNormalSource::CustomTexture;
             Result.Texture = RuntimeSource->CustomWrinkleNormalMap.Get();
-            Result.bHasCoverageAlpha = RuntimeSource->bUseAlphaAsConvexSeparation && Result.Texture != nullptr;
-            Result.AlphaSemantic = Result.bHasCoverageAlpha
-                                       ? EDWCWrinkleAlphaSemantic::ConvexSeparation
-                                       : EDWCWrinkleAlphaSemantic::None;
             return Result;
         }
 
         if (const FWetWrinkleBakedMapSet* BakedMap = FindBakedWrinkleMap(MaterialSlotIndex))
         {
             Result.Texture = BakedMap->BakedWrinkleNormalMap.Get();
-            Result.bHasCoverageAlpha = BakedMap->bHasCoverageAlpha;
-            Result.AlphaSemantic = BakedMap->AlphaSemantic;
         }
         return Result;
     }

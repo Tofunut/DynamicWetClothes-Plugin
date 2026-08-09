@@ -2620,7 +2620,6 @@ bool UWetClothingAsset::InitializeNewAsset(
     Metadata.SetupSettings = NormalizedSettings;
     // The source mesh is immutable input. A dedicated prepared mesh is created by the DWC UV Channel build service.
     Metadata.DWCSkeletalMesh = nullptr;
-    Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
     Metadata.OriginalUVChannelIndex = Metadata.SetupSettings.OriginalUVChannelIndex;
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
@@ -2708,7 +2707,6 @@ bool UWetClothingAsset::ApplySetupSettings(
     Metadata.SetupSettings.OriginalUVChannelIndex = Metadata.OriginalUVChannelIndex;
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
-    Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
 
     if ( bDataUVTargetChanged)

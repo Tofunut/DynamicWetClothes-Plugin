@@ -65,11 +65,16 @@ struct FDWCEditorSurfaceNormalPatchInput
 struct FDWCEditorProjectedNormalPatchCommand
 {
     TArray<FDWCEditorSurfacePatchFragment> Fragments;
-    FDWCEditorSurfacePatchProjectionHandle SharedProjection;
+    FDWCEditorSurfacePatchProjectionLease ProjectionLease;
     FDWCEditorNormalSourceSnapshot NormalSource;
     FDWCEditorScalarSourceSnapshot CoverageSource;
     float Strength = 0.0f;
     float Falloff = 0.0f;
+    bool bUseSurfaceProjectionFilter = false;
+    float ProjectionDepthLocal = 0.0f;
+    float MaxSurfaceAngleRadians = 0.0f;
+    float ProjectionDepthSoftness = 0.0f;
+    float ProjectionAngleSoftness = 0.0f;
 
     bool IsValid() const
     {
@@ -78,13 +83,24 @@ struct FDWCEditorProjectedNormalPatchCommand
 
     const TArray<FDWCEditorSurfacePatchFragment>& GetFragments() const
     {
-        return SharedProjection.IsValid() ? SharedProjection->Fragments : Fragments;
+        return ProjectionLease.IsValid() ? ProjectionLease->Fragments : Fragments;
     }
 
     uint64 GetAllocatedSizeBytes() const
     {
         // Shared projection memory is accounted by the projection cache service.
         return Fragments.GetAllocatedSize();
+    }
+
+    uint64 GetPrivateProjectionBytes() const
+    {
+        return GetAllocatedSizeBytes() +
+            ProjectionLease.GetPrivateBytes();
+    }
+
+    uint64 GetSharedProjectionResidentBytes() const
+    {
+        return ProjectionLease.GetSharedResidentBytes();
     }
 };
 

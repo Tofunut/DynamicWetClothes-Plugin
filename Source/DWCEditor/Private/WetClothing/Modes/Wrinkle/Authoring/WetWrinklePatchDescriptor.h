@@ -5,7 +5,6 @@
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "WetClothing/Foundation/Raster/DWCEditorRasterTypes.h"
 
-class UTexture;
 class UTexture2D;
 struct FWetWrinkleBrushSettings;
 struct FWetWrinklePatchPlacement;
@@ -25,11 +24,7 @@ struct FDWCEditorWrinklePatchDescriptor
     FVector3f SurfaceFrameU = FVector3f(1.0f, 0.0f, 0.0f);
     FVector3f SurfaceFrameV = FVector3f(0.0f, 1.0f, 0.0f);
     FVector2f SurfaceHalfExtentLocal = FVector2f::ZeroVector;
-    EWetWrinklePatchProjectionMode ProjectionMode = EWetWrinklePatchProjectionMode::NonUVSeam;
-    float ProjectionDepthLocal = 3.0f;
-    float MaxSurfaceAngleDegrees = 70.0f;
-    float ProjectionDepthSoftness = 0.2f;
-    float ProjectionAngleSoftness = 0.1f;
+    FDWCEditorSurfacePatchProjectionSettings ProjectionSettings;
     FVector2f AnchorUV = FVector2f::ZeroVector;
     // Retained only for the UV-panel marker. Projection size comes from SurfaceHalfExtentLocal.
     float DisplayRadiusUV = 0.0f;
@@ -48,6 +43,16 @@ struct FDWCEditorWrinklePatchDescriptor
 class FDWCEditorWrinklePatchDescriptorBuilder final
 {
   public:
+    static FDWCEditorSurfacePatchProjectionSettings BuildProjectionSettings(
+        EWetWrinklePatchProjectionMode AuthoredMode,
+        float ProjectionDepthLocal,
+        float MaxSurfaceAngleDegrees,
+        float ProjectionDepthSoftness,
+        float ProjectionAngleSoftness);
+
+    static EWetWrinklePatchProjectionMode ResolveAuthoredProjectionMode(
+        EDWCEditorSurfacePatchBoundaryPolicy BoundaryPolicy);
+
     static bool BuildFromHit(
         const FWetWrinkleSurfaceHit& Hit,
         const FWetWrinkleBrushSettings& Brush,
@@ -67,6 +72,14 @@ class FDWCEditorWrinklePatchDescriptorBuilder final
         FDWCEditorSurfaceNormalPatchInput& OutInput,
         FString* OutError = nullptr);
 
+    static bool BuildRasterInputFromSources(
+        const FDWCEditorWrinklePatchDescriptor& Descriptor,
+        const FDWCEditorSpatialHandle& SpatialHandle,
+        const FDWCEditorNormalSourceSnapshot& NormalSource,
+        const FDWCEditorScalarSourceSnapshot& CoverageSource,
+        FDWCEditorSurfaceNormalPatchInput& OutInput,
+        FString* OutError = nullptr);
+
     static bool BuildProjectionRequest(
         const FDWCEditorWrinklePatchDescriptor& Descriptor,
         const FDWCEditorSpatialHandle& SpatialHandle,
@@ -75,7 +88,6 @@ class FDWCEditorWrinklePatchDescriptorBuilder final
 
     static bool BuildPlacement(
         const FDWCEditorWrinklePatchDescriptor& Descriptor,
-        UTexture* SourceTexture,
         FWetWrinklePatchPlacement& OutPlacement,
         FString* OutError = nullptr);
 };

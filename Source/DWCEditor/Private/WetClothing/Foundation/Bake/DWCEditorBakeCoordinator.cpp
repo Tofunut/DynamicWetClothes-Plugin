@@ -14,6 +14,7 @@
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionCacheService.h"
+#include "WetClothing/Foundation/TextureAccess/WetWrinkleTextureRasterUtils.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCWrinkleSuppressionCoverageService.h"
 
@@ -198,7 +199,7 @@ bool FDWCEditorBakeCoordinator::RequestWrinkleBake(
     ActiveWrinkleBatch = Batch;
     Operation->SetPhase(EDWCEditorBuildOperationPhase::Preparing);
 
-    Batch->Settings.Resolution = TargetAsset->Authored.WrinkleData.BakeSettings.DefaultResolution;
+    Batch->Settings.Resolution = TargetAsset->GetWrinkleMapResolution();
     Batch->Settings.PaddingPixels = TargetAsset->Authored.WrinkleData.BakeSettings.PaddingPixels;
     Batch->Settings.bIncludeDisabledPatches = TargetAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches;
     Batch->PendingMaterialSlotIndices = MoveTemp(MaterialSlotIndices);
@@ -247,8 +248,12 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
         Descriptor.DomainRevision = Scheduler->GetCurrentDomainRevision(Descriptor.Domain);
         Descriptor.Priority = EDWCEditorWorkerJobPriority::UserInitiated;
         Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
-        const uint64 PixelCount = static_cast<uint64>(Batch->Settings.Resolution) *
-            static_cast<uint64>(Batch->Settings.Resolution);
+        const FIntPoint FinalTextureSize =
+            WetWrinkleTextureRaster::ResolveFinalTextureSize(Batch->Settings.Resolution);
+        const FIntPoint WorkingTextureSize =
+            WetWrinkleTextureRaster::ResolveWorkingTextureSize(FinalTextureSize);
+        const uint64 PixelCount = static_cast<uint64>(WorkingTextureSize.X) *
+            static_cast<uint64>(WorkingTextureSize.Y);
         Descriptor.MemoryEstimate.WorkingBytes = PixelCount * sizeof(FVector4f);
         Descriptor.DebugName = FString::Printf(TEXT("Wrinkle bake slot %d"), MaterialSlotIndex);
 

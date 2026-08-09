@@ -363,6 +363,14 @@ class DWC_API UWetClothingAsset : public UDataAsset
     UFUNCTION(BlueprintPure, Category = "Wet Clothing|Mesh")
     int32 GetDWCDataUVChannelIndex() const { return Metadata.DWCDataUVChannelIndex; }
 
+    /** Returns the canonical wrinkle output resolution configured by WCA setup. */
+    UFUNCTION(BlueprintPure, Category = "Wet Clothing|Texture Resolutions")
+    int32 GetWrinkleMapResolution() const
+    {
+        return DWCMapResolution::ToInt(
+            DWCMapResolution::FromInt(Metadata.SetupSettings.GetWrinkleMapResolution()));
+    }
+
     const FDWCDataUVLODMetadata*             FindDataUVMetadataForLOD(int32 LODIndex) const;
     bool                                     HasValidDataUVForLOD(int32 LODIndex) const;
     int32                                    GetDataUVMetadataLODCount() const { return Derived.Inline.DataUVMetadata.Num(); }

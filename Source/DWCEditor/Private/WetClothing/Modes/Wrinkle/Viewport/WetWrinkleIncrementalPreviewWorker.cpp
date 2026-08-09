@@ -5,6 +5,7 @@
 #include "WetClothing/Foundation/Raster/DWCEditorNormalRasterCore.h"
 #include "WetClothing/Foundation/Raster/DWCEditorRasterPostProcess.h"
 #include "WetClothing/Foundation/Raster/DWCEditorSurfacePatchRasterBuilder.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjector.h"
 #include "WetClothing/Modes/Wrinkle/Stroke/WetProceduralRidgeRasterizer.h"
 
 namespace
@@ -277,33 +278,23 @@ FDWCEditorWorkerMemoryEstimate FWetWrinkleIncrementalPreviewWorker::EstimateProj
     const FIntPoint /*TextureSize*/)
 {
     FDWCEditorWorkerMemoryEstimate Estimate;
-    if (SurfaceInput.NormalSource.Texture.RawData.IsValid())
-    {
-        Estimate.ResidentSharedBytes = SurfaceInput.NormalSource.Texture.RawData->GetAllocatedSize();
-    }
     Estimate.SnapshotBytes = sizeof(FWetWrinkleProjectedHoverPreviewJobInput);
-    // Phase A owns only projection output and projection scratch. Raster
-    // buffers are admitted from the exact dirty-region plan after projection.
-    Estimate.WorkingBytes = SurfaceInput.Projection.MaxResultBytes;
-    Estimate.ScratchBytes = SurfaceInput.Projection.MaxWorkingSetBytes;
+    const FDWCEditorSurfacePatchProjectionMemoryEstimate ProjectionEstimate =
+        FDWCEditorSurfacePatchProjector::EstimateAdmissionMemory(SurfaceInput.Projection);
+    Estimate.WorkingBytes = ProjectionEstimate.IntermediateBytes > MAX_uint64 - ProjectionEstimate.ResultBytes
+        ? MAX_uint64
+        : ProjectionEstimate.IntermediateBytes + ProjectionEstimate.ResultBytes;
+    Estimate.ScratchBytes = ProjectionEstimate.WorkingSetBytes;
     return Estimate;
 }
 
-uint64 FWetWrinkleProjectedHoverRasterPlan::GetRetainedSizeBytes() const
+uint64 FWetWrinkleProjectedHoverRasterPlan::GetPrivateRetainedSizeBytes() const
 {
     uint64 Bytes = sizeof(*this) + Commands.GetAllocatedSize() + Regions.GetAllocatedSize() +
         RegionFragmentIndices.GetAllocatedSize() + CurrentOutputRects.GetAllocatedSize();
     for (const FWetWrinkleIncrementalCommand& Command : Commands)
     {
-        Bytes += Command.ProjectedPatch.GetAllocatedSizeBytes();
-        if (Command.ProjectedPatch.SharedProjection.IsValid())
-        {
-            Bytes += Command.ProjectedPatch.SharedProjection->GetAllocatedSizeBytes();
-        }
-        if (Command.ProjectedPatch.NormalSource.Texture.RawData.IsValid())
-        {
-            Bytes += Command.ProjectedPatch.NormalSource.Texture.RawData->GetAllocatedSize();
-        }
+        Bytes += Command.ProjectedPatch.GetPrivateProjectionBytes();
     }
     for (const TArray<int32>& FragmentIndices : RegionFragmentIndices)
     {
@@ -312,11 +303,25 @@ uint64 FWetWrinkleProjectedHoverRasterPlan::GetRetainedSizeBytes() const
     return Bytes;
 }
 
+uint64 FWetWrinkleProjectedHoverRasterPlan::GetSharedResidentSizeBytes() const
+{
+    uint64 Bytes = 0;
+    for (const FWetWrinkleIncrementalCommand& Command : Commands)
+    {
+        Bytes += Command.ProjectedPatch.GetSharedProjectionResidentBytes();
+        if (Command.ProjectedPatch.NormalSource.Texture.RawData.IsValid())
+        {
+            Bytes += Command.ProjectedPatch.NormalSource.Texture.RawData->GetAllocatedSize();
+        }
+    }
+    return Bytes;
+}
+
 FDWCEditorWorkerMemoryEstimate FWetWrinkleIncrementalPreviewWorker::EstimateProjectedHoverRasterMemory(
     const FWetWrinkleProjectedHoverRasterPlan& Plan)
 {
     FDWCEditorWorkerMemoryEstimate Estimate;
-    Estimate.SnapshotBytes = Plan.GetRetainedSizeBytes() +
+    Estimate.SnapshotBytes = Plan.GetPrivateRetainedSizeBytes() +
         static_cast<uint64>(Plan.Regions.Num()) *
             (sizeof(FWetWrinkleIncrementalRegionSnapshot) + sizeof(FDWCEditorNormalRegionPayload));
     uint64 LargestOutputPixels = 0;
@@ -563,9 +568,21 @@ FWetWrinkleIncrementalPreviewWorker::BuildProjectedHoverProjectionPhase(
         Diagnostics.ProjectionMs =
             (FPlatformTime::Seconds() - ProjectionStartSeconds) * 1000.0;
         Diagnostics.ProjectedFragmentCount = Command.ProjectedPatch.GetFragments().Num();
-        Diagnostics.VisitedTriangleCount = Command.ProjectedPatch.SharedProjection.IsValid()
-            ? Command.ProjectedPatch.SharedProjection->VisitedTriangleCount
+        Diagnostics.VisitedTriangleCount = Command.ProjectedPatch.ProjectionLease.IsValid()
+            ? Command.ProjectedPatch.ProjectionLease->VisitedTriangleCount
             : Diagnostics.ProjectedFragmentCount;
+        Diagnostics.ProjectionWorkingSetBytes = Command.ProjectedPatch.ProjectionLease.IsValid()
+            ? Command.ProjectedPatch.ProjectionLease->PeakWorkingSetBytes
+            : 0;
+        Diagnostics.ProjectionPrivateResultBytes =
+            Command.ProjectedPatch.GetPrivateProjectionBytes();
+        Diagnostics.SharedResidentBytes =
+            Command.ProjectedPatch.GetSharedProjectionResidentBytes();
+        if (Command.ProjectedPatch.NormalSource.Texture.RawData.IsValid())
+        {
+            Diagnostics.SharedResidentBytes +=
+                Command.ProjectedPatch.NormalSource.Texture.RawData->GetAllocatedSize();
+        }
     }
     if (CancellationToken->IsCanceled())
     {
@@ -832,9 +849,6 @@ FWetWrinkleIncrementalPreviewWorker::BuildProjectedHoverProjectionPhase(
     Plan.RegionFragmentIndices = MoveTemp(RegionFragmentIndices);
     Plan.CurrentOutputRects = MoveTemp(CurrentOutputRects);
     Plan.Target = Input.Target;
-    Plan.bTouchesUVSeam =
-        Plan.Commands[0].ProjectedPatch.SharedProjection.IsValid() &&
-        Plan.Commands[0].ProjectedPatch.SharedProjection->bTouchesUVSeam;
     Plan.bUseSparseRegions = bUseSparseRegions;
     Plan.bCollectPerformanceDiagnostics = Input.bCollectPerformanceDiagnostics;
     if (DiagnosticsPtr != nullptr)
@@ -847,7 +861,7 @@ FWetWrinkleIncrementalPreviewWorker::BuildProjectedHoverProjectionPhase(
     const FDWCEditorWorkerMemoryEstimate RasterEstimate =
         EstimateProjectedHoverRasterMemory(Plan);
     FDWCEditorWorkerMemoryEstimate RetainedEstimate;
-    RetainedEstimate.SnapshotBytes = Plan.GetRetainedSizeBytes();
+    RetainedEstimate.SnapshotBytes = Plan.GetPrivateRetainedSizeBytes();
     if (Plan.bCollectPerformanceDiagnostics)
     {
         Plan.PerformanceDiagnostics.RetainedPhaseBytes = RetainedEstimate.GetTotalBytes();
@@ -888,6 +902,9 @@ FWetWrinkleIncrementalPreviewWorker::BuildProjectedHoverRasterPhase(
     RasterInput.TextureSize = Plan.TextureSize;
     RasterInput.WorkingTextureSize = Plan.WorkingTextureSize;
     RasterInput.bClearRegionsToFlat = true;
+    check(Plan.Commands.Num() == 1 && Plan.Commands[0].ProjectedPatch.IsValid());
+    FDWCEditorProjectedNormalPatchCommand PresentedProjectedPatch =
+        Plan.Commands[0].ProjectedPatch;
     RasterInput.Commands = MoveTemp(Plan.Commands);
     RasterInput.Target = Plan.Target;
     const double AllocationStartSeconds = DiagnosticsPtr != nullptr
@@ -933,7 +950,7 @@ FWetWrinkleIncrementalPreviewWorker::BuildProjectedHoverRasterPhase(
         if (Result->bSucceeded)
         {
             Result->ProjectedOutputRects = MoveTemp(Plan.CurrentOutputRects);
-            Result->bTouchesUVSeam = Plan.bTouchesUVSeam;
+            Result->PresentedProjectedPatch = MoveTemp(PresentedProjectedPatch);
         }
         if (DiagnosticsPtr != nullptr)
         {

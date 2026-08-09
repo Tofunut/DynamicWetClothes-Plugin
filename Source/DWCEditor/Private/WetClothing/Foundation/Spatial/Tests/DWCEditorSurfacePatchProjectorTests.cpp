@@ -88,6 +88,34 @@ namespace DWCEditorSurfacePatchProjectorTestsPrivate
         return Data;
     }
 
+    TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> BuildDepthCrossingTriangle()
+    {
+        TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
+            MakeShared<FDWCEditorSpatialData, ESPMode::ThreadSafe>();
+        Data->LODIndex = 0;
+        Data->UVChannelIndex = 2;
+        Data->MaterialSlotIndex = 4;
+
+        FDWCEditorSpatialTriangle& Triangle = Data->Triangles.AddDefaulted_GetRef();
+        Triangle.MaterialSlotIndex = 4;
+        Triangle.TriangleID = 20;
+        Triangle.UVIslandID = 1;
+        Triangle.LocalPositions[0] = FVector3f(-1.0f, -1.0f, -1.0f);
+        Triangle.LocalPositions[1] = FVector3f(1.0f, -1.0f, 1.0f);
+        Triangle.LocalPositions[2] = FVector3f(0.0f, 1.0f, 1.0f);
+        Triangle.UVs[0] = FVector2f(0.05f, 0.05f);
+        Triangle.UVs[1] = FVector2f(0.95f, 0.05f);
+        Triangle.UVs[2] = FVector2f(0.5f, 0.95f);
+        Triangle.TopologyVertexIDs[0] = 20;
+        Triangle.TopologyVertexIDs[1] = 21;
+        Triangle.TopologyVertexIDs[2] = 22;
+        FinalizeTriangle(Triangle);
+
+        FDWCEditorSpatialQueryService::BuildTriangleTopology(*Data);
+        Data->TriangleLookup.Add(MakeTriangleLookupKey(4, 20), 0);
+        return Data;
+    }
+
     TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> BuildLargeSeamedGrid(
         const int32 QuadsPerAxis = 24,
         const int32 ColumnsPerIsland = 4)
@@ -181,6 +209,8 @@ namespace DWCEditorSurfacePatchProjectorTestsPrivate
         Request.AnchorBarycentric = FVector3f(0.34f, 0.33f, 0.33f);
         Request.SurfaceHalfExtentLocal = FVector2f(0.49f, 0.46f);
         Request.RotationRadians = RotationRadians;
+        Request.BoundaryPolicy =
+            EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly;
         return Request;
     }
 
@@ -195,6 +225,8 @@ namespace DWCEditorSurfacePatchProjectorTestsPrivate
         // An anisotropic footprint verifies that physical unfolding happens before
         // source-coordinate normalization.
         Request.SurfaceHalfExtentLocal = FVector2f(0.6f, 0.3f);
+        Request.BoundaryPolicy =
+            EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly;
         return Request;
     }
 
@@ -224,6 +256,21 @@ namespace DWCEditorSurfacePatchProjectorTestsPrivate
         return FVector2f(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
     }
 
+    float FindDepthForTopologyVertex(
+        const FDWCEditorSpatialTriangle& Triangle,
+        const FDWCEditorSurfacePatchFragment& Fragment,
+        const int64 TopologyVertexID)
+    {
+        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+        {
+            if (Triangle.TopologyVertexIDs[CornerIndex] == TopologyVertexID)
+            {
+                return Fragment.SignedProjectionDepth[CornerIndex];
+            }
+        }
+        return TNumericLimits<float>::Max();
+    }
+
     FDWCEditorNormalSourceSnapshot MakeNormalSource()
     {
         FDWCEditorNormalSourceSnapshot Source;
@@ -251,25 +298,6 @@ namespace DWCEditorSurfacePatchProjectorTestsPrivate
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FDWCEditorSurfacePatchNonUvSeamWarningTest,
-    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.NonUvSeamReportsNearbySeam",
-    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FDWCEditorSurfacePatchNonUvSeamWarningTest::RunTest(const FString&)
-{
-    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
-    const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
-        BuildTwoTriangleSurface(true);
-    const FDWCEditorSurfacePatchProjectionResult Result =
-        FDWCEditorSurfacePatchProjector::Project(MakeRequest(Data));
-
-    TestTrue(TEXT("Non UV Seam projection succeeds on the anchor island"), Result.IsSuccess());
-    TestEqual(TEXT("Non UV Seam projection remains on one island"), Result.Fragments.Num(), 1);
-    TestTrue(TEXT("The projection result reports the nearby UV seam"), Result.bTouchesUVSeam);
-    return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorSurfaceDecalProjectionTest,
     "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.DecalCrossesUvSeam",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -279,8 +307,7 @@ bool FDWCEditorSurfaceDecalProjectionTest::RunTest(const FString&)
     using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
     const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data = BuildTwoTriangleSurface(true);
     FDWCEditorSurfacePatchProjectionRequest Request = MakeRequest(Data);
-    Request.bUseSurfaceDecalProjection = true;
-    Request.bAllowUVSeamTraversal = true;
+    Request.BoundaryPolicy = EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
     Request.ProjectionDepthLocal = 0.25f;
     Request.MaxSurfaceAngleDegrees = 70.0f;
     Request.ProjectionDepthSoftness = 0.2f;
@@ -307,8 +334,120 @@ bool FDWCEditorSurfaceDecalProjectionTest::RunTest(const FString&)
                 FindCoordinateForTopologyVertex(Data->Triangles[1], *FragmentB, SharedVertexID);
             TestTrue(TEXT("Decal coordinates are continuous across the physical seam"),
                 CoordinateA.Equals(CoordinateB, UE_KINDA_SMALL_NUMBER));
+            TestTrue(TEXT("Decal depth is continuous across the physical seam"),
+                FMath::IsNearlyEqual(
+                    FindDepthForTopologyVertex(Data->Triangles[0], *FragmentA, SharedVertexID),
+                    FindDepthForTopologyVertex(Data->Triangles[1], *FragmentB, SharedVertexID),
+                    UE_KINDA_SMALL_NUMBER));
         }
     }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSurfaceDecalInteriorIntersectionTest,
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.DecalInteriorIntersection",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSurfaceDecalInteriorIntersectionTest::RunTest(const FString&)
+{
+    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
+    const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
+        BuildDepthCrossingTriangle();
+    FDWCEditorSurfaceNormalPatchInput Input;
+    Input.Projection.SpatialHandle = Data;
+    Input.Projection.MaterialSlotIndex = 4;
+    Input.Projection.AnchorTriangleID = 20;
+    Input.Projection.AnchorBarycentric = FVector3f(0.5f, 0.25f, 0.25f);
+    Input.Projection.SurfaceHalfExtentLocal = FVector2f(0.35f, 0.35f);
+    Input.Projection.ProjectionDepthLocal = 0.25f;
+    Input.Projection.MaxSurfaceAngleDegrees = 70.0f;
+    Input.Projection.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
+    Input.Projection.bCollectDetailedDiagnostics = true;
+    Input.NormalSource = MakeNormalSource();
+    Input.CoverageSource = MakeCoverageSource();
+    Input.Strength = 1.0f;
+
+    const FDWCEditorSurfacePatchProjectionResult Projection =
+        FDWCEditorSurfacePatchProjector::Project(Input.Projection);
+    TestTrue(TEXT("A triangle whose interior crosses the decal volume is projected"),
+        Projection.IsSuccess());
+    TestEqual(TEXT("The interior-only triangle emits one fragment"),
+        Projection.Fragments.Num(), 1);
+    TestEqual(TEXT("The diagnostic records an interior footprint candidate"),
+        Projection.Diagnostics.InteriorFootprintCandidateCount, 1);
+    TestEqual(TEXT("The diagnostic records an interior depth candidate"),
+        Projection.Diagnostics.InteriorDepthCandidateCount, 1);
+
+    FDWCEditorProjectedNormalPatchCommand Command;
+    FString Error;
+    TestTrue(TEXT("The interior projection builds a shared raster command"),
+        FDWCEditorSurfacePatchRasterBuilder::BuildProjectedPatchCommand(
+            Input, Command, &Error));
+    TestTrue(TEXT("The raster command enables exact surface filtering"),
+        Command.bUseSurfaceProjectionFilter);
+    TestTrue(TEXT("The raster command preserves projection depth"),
+        FMath::IsNearlyEqual(Command.ProjectionDepthLocal, 0.25f));
+
+    FDWCEditorNormalRasterSurface Surface;
+    TestTrue(TEXT("The exact-filter raster surface initializes"),
+        Surface.Initialize(FIntPoint(128, 128), true));
+    FDWCEditorProjectedRasterDiagnostics RasterDiagnostics;
+    const FDWCEditorRasterResult RasterResult =
+        FDWCEditorNormalRasterCore::RasterizeProjectedPatch(
+            Command, Surface, nullptr, nullptr, &RasterDiagnostics);
+    TestTrue(TEXT("The triangle interior contributes pixels"), RasterResult.bAffectedPixels);
+    TestTrue(TEXT("Per-texel depth filtering rejects pixels outside the depth slab"),
+        RasterResult.AffectedPixelCount > 0 &&
+        static_cast<uint64>(RasterResult.AffectedPixelCount) <
+            RasterDiagnostics.CandidatePixelCount);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSurfaceDecalPerTexelAngleTest,
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.DecalPerTexelAngle",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSurfaceDecalPerTexelAngleTest::RunTest(const FString&)
+{
+    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
+    FDWCEditorProjectedNormalPatchCommand Command;
+    FDWCEditorSurfacePatchFragment& Fragment = Command.Fragments.AddDefaulted_GetRef();
+    Fragment.TargetUVs[0] = FVector2f(0.0f, 0.0f);
+    Fragment.TargetUVs[1] = FVector2f(1.0f, 0.0f);
+    Fragment.TargetUVs[2] = FVector2f(0.0f, 1.0f);
+    Fragment.PatchCoordinates[0] = FVector2f(-0.5f, -0.5f);
+    Fragment.PatchCoordinates[1] = FVector2f(0.5f, -0.5f);
+    Fragment.PatchCoordinates[2] = FVector2f(-0.5f, 0.5f);
+    Fragment.TargetUVBounds += Fragment.TargetUVs[0];
+    Fragment.TargetUVBounds += Fragment.TargetUVs[1];
+    Fragment.TargetUVBounds += Fragment.TargetUVs[2];
+    const float TiltRadians = FMath::DegreesToRadians(80.0f);
+    const FVector3f TiltedNormal(FMath::Sin(TiltRadians), 0.0f, FMath::Cos(TiltRadians));
+    Fragment.SurfaceNormalInProjectorSpace[0] = FVector3f(0.0f, 0.0f, 1.0f);
+    Fragment.SurfaceNormalInProjectorSpace[1] = TiltedNormal;
+    Fragment.SurfaceNormalInProjectorSpace[2] = TiltedNormal;
+
+    Command.NormalSource = MakeNormalSource();
+    Command.CoverageSource = MakeCoverageSource();
+    Command.Strength = 1.0f;
+    Command.bUseSurfaceProjectionFilter = true;
+    Command.ProjectionDepthLocal = 1.0f;
+    Command.MaxSurfaceAngleRadians = FMath::DegreesToRadians(45.0f);
+    Command.ProjectionAngleSoftness = 0.0f;
+
+    FDWCEditorNormalRasterSurface Surface;
+    TestTrue(TEXT("The angle-filter raster surface initializes"),
+        Surface.Initialize(FIntPoint(64, 64), true));
+    const FDWCEditorRasterResult Result =
+        FDWCEditorNormalRasterCore::RasterizeProjectedPatch(Command, Surface);
+    TestTrue(TEXT("The aligned part of the triangle is rasterized"), Result.bAffectedPixels);
+    TestTrue(TEXT("A texel near the aligned corner keeps wrinkle coverage"),
+        Surface.Coverage[8 * Surface.Size.X + 8] > 0.0f);
+    TestTrue(TEXT("A texel near the over-angle corner is rejected"),
+        Surface.Coverage[5 * Surface.Size.X + 50] <= UE_SMALL_NUMBER);
     return true;
 }
 
@@ -322,8 +461,7 @@ bool FDWCEditorSurfacePatchSeamProjectionTest::RunTest(const FString& Parameters
     using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
     const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data = BuildTwoTriangleSurface(true);
     FDWCEditorSurfacePatchProjectionRequest Request = MakeRequest(Data);
-    Request.bUseSurfaceDecalProjection = true;
-    Request.bAllowUVSeamTraversal = true;
+    Request.BoundaryPolicy = EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
     const FDWCEditorSurfacePatchProjectionResult Result =
         FDWCEditorSurfacePatchProjector::Project(Request);
     const FDWCEditorSurfacePatchProjectionResult RepeatedResult =
@@ -388,8 +526,6 @@ bool FDWCEditorSurfacePatchStopsAtUvSeamTest::RunTest(const FString&)
     using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
     const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data = BuildTwoTriangleSurface(true);
     FDWCEditorSurfacePatchProjectionRequest Request = MakeRequest(Data);
-    Request.bUseSurfaceDecalProjection = false;
-    Request.bAllowUVSeamTraversal = false;
 
     const FDWCEditorSurfacePatchProjectionResult Result =
         FDWCEditorSurfacePatchProjector::Project(Request);
@@ -399,6 +535,100 @@ bool FDWCEditorSurfacePatchStopsAtUvSeamTest::RunTest(const FString&)
     TestEqual(TEXT("Non-UV-seam unfolding does not traverse a UV seam"), Result.TraversedSeamCount, 0);
     TestNotNull(TEXT("The anchor triangle remains projected"), FindFragment(Result, 10));
     TestNull(TEXT("The seam-adjacent triangle is excluded"), FindFragment(Result, 11));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSurfaceDecalBoundaryPolicyTest,
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.DecalBoundaryPolicy",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSurfaceDecalBoundaryPolicyTest::RunTest(const FString&)
+{
+    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
+    const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
+        BuildTwoTriangleSurface(true);
+
+    FDWCEditorSurfacePatchProjectionRequest AnchorIslandRequest = MakeRequest(Data);
+    AnchorIslandRequest.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly;
+    const FDWCEditorSurfacePatchProjectionResult AnchorIslandResult =
+        FDWCEditorSurfacePatchProjector::Project(AnchorIslandRequest);
+    TestTrue(TEXT("The anchor-island decal projection succeeds"),
+        AnchorIslandResult.IsSuccess());
+    TestEqual(TEXT("The anchor-island decal emits only the anchor triangle"),
+        AnchorIslandResult.Fragments.Num(), 1);
+    TestEqual(TEXT("The anchor-island decal reports one affected island"),
+        AnchorIslandResult.AffectedUVIslandIDs.Num(), 1);
+    TestEqual(TEXT("The anchor-island decal traverses no UV seam"),
+        AnchorIslandResult.TraversedSeamCount, 0);
+    TestNull(TEXT("The seam-adjacent triangle is excluded by policy"),
+        FindFragment(AnchorIslandResult, 11));
+
+    FDWCEditorSurfacePatchProjectionRequest CrossSeamRequest = AnchorIslandRequest;
+    CrossSeamRequest.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
+    const FDWCEditorSurfacePatchProjectionResult CrossSeamResult =
+        FDWCEditorSurfacePatchProjector::Project(CrossSeamRequest);
+    TestTrue(TEXT("The cross-seam decal projection succeeds"), CrossSeamResult.IsSuccess());
+    TestEqual(TEXT("The cross-seam decal emits both physical triangles"),
+        CrossSeamResult.Fragments.Num(), 2);
+    TestEqual(TEXT("The cross-seam decal reports both UV islands"),
+        CrossSeamResult.AffectedUVIslandIDs.Num(), 2);
+    TestTrue(TEXT("The cross-seam decal records a seam traversal"),
+        CrossSeamResult.TraversedSeamCount > 0);
+
+    FDWCEditorSurfacePatchProjectionCacheService Cache(8ull * 1024ull * 1024ull);
+    FDWCEditorSurfacePatchProjectionLease AnchorLease;
+    FDWCEditorSurfacePatchProjectionLease CrossLease;
+    FString Error;
+    TestTrue(TEXT("The anchor-island decal enters the projection cache"),
+        Cache.Resolve(
+            AnchorIslandRequest,
+            EDWCEditorSurfacePatchCachePolicy::Persistent,
+            AnchorLease,
+            &Error));
+    TestTrue(TEXT("The cross-seam decal enters a distinct projection cache entry"),
+        Cache.Resolve(
+            CrossSeamRequest,
+            EDWCEditorSurfacePatchCachePolicy::Persistent,
+            CrossLease,
+            &Error));
+    TestTrue(TEXT("Boundary policies do not alias immutable projection geometry"),
+        AnchorLease.Get() != CrossLease.Get());
+    TestEqual(TEXT("The cache owns one geometry entry per boundary policy"),
+        Cache.GetDiagnostics().EntryCount, 2);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSurfacePatchProjectionContractTest,
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.BoundaryContract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSurfacePatchProjectionContractTest::RunTest(const FString&)
+{
+    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
+    const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
+        BuildTwoTriangleSurface(true);
+
+    FDWCEditorSurfacePatchProjectionRequest InvalidPolicyRequest = MakeRequest(Data);
+    InvalidPolicyRequest.BoundaryPolicy = EDWCEditorSurfacePatchBoundaryPolicy::Invalid;
+    FString Error;
+    TestFalse(TEXT("An unspecified boundary policy is rejected"),
+        FDWCEditorSurfacePatchProjector::ValidateProjectionContract(
+            InvalidPolicyRequest, &Error));
+    TestFalse(TEXT("An unspecified boundary policy cannot project"),
+        FDWCEditorSurfacePatchProjector::Project(InvalidPolicyRequest).IsSuccess());
+
+    FDWCEditorSurfacePatchProjectionRequest CrossSeamRequest = MakeRequest(Data);
+    CrossSeamRequest.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
+    TestTrue(TEXT("The decal contract accepts cross-seam traversal"),
+        FDWCEditorSurfacePatchProjector::ValidateProjectionContract(
+            CrossSeamRequest, &Error));
+    TestTrue(TEXT("The cross-seam boundary contract projects"),
+        FDWCEditorSurfacePatchProjector::Project(CrossSeamRequest).IsSuccess());
     return true;
 }
 
@@ -421,8 +651,7 @@ bool FDWCEditorSurfacePatchRenderTangentReorientationTest::RunTest(const FString
     }
 
     FDWCEditorSurfacePatchProjectionRequest Request = MakeRequest(Data);
-    Request.bUseSurfaceDecalProjection = true;
-    Request.bAllowUVSeamTraversal = true;
+    Request.BoundaryPolicy = EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
     const FDWCEditorSurfacePatchProjectionResult Result =
         FDWCEditorSurfacePatchProjector::Project(Request);
     const FDWCEditorSurfacePatchFragment* FragmentA = FindFragment(Result, 10);
@@ -462,8 +691,8 @@ bool FDWCEditorSurfacePatchSharedRasterCommandTest::RunTest(const FString& Param
     const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data = BuildTwoTriangleSurface(true);
     FDWCEditorSurfaceNormalPatchInput Input;
     Input.Projection = MakeRequest(Data);
-    Input.Projection.bUseSurfaceDecalProjection = true;
-    Input.Projection.bAllowUVSeamTraversal = true;
+    Input.Projection.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
     Input.NormalSource = MakeNormalSource();
     Input.CoverageSource = MakeCoverageSource();
     Input.Strength = 1.0f;
@@ -544,8 +773,8 @@ bool FDWCEditorSurfacePatchBudgetAndCancellationTest::RunTest(const FString& Par
     using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
     const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data = BuildTwoTriangleSurface(true);
     FDWCEditorSurfacePatchProjectionRequest BudgetRequest = MakeRequest(Data);
-    BudgetRequest.bUseSurfaceDecalProjection = true;
-    BudgetRequest.bAllowUVSeamTraversal = true;
+    BudgetRequest.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
     BudgetRequest.MaxVisitedTriangles = 1;
     const FDWCEditorSurfacePatchProjectionResult BudgetResult =
         FDWCEditorSurfacePatchProjector::Project(BudgetRequest);
@@ -596,8 +825,7 @@ bool FDWCEditorLargeSurfacePatchProjectionTest::RunTest(const FString&)
     using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
     const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data = BuildLargeSeamedGrid();
     FDWCEditorSurfacePatchProjectionRequest Request = MakeLargeRequest(Data);
-    Request.bUseSurfaceDecalProjection = true;
-    Request.bAllowUVSeamTraversal = true;
+    Request.BoundaryPolicy = EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
     const FDWCEditorSurfacePatchProjectionResult First =
         FDWCEditorSurfacePatchProjector::Project(Request);
     const FDWCEditorSurfacePatchProjectionResult Second =
@@ -632,33 +860,32 @@ bool FDWCEditorSurfacePatchProjectionCachePolicyTest::RunTest(const FString&)
     const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data = BuildLargeSeamedGrid();
     const FDWCEditorSurfacePatchProjectionRequest FirstRequest = MakeLargeRequest(Data, 0.1f);
     FDWCEditorSurfacePatchProjectionCacheService Cache;
-    FDWCEditorSurfacePatchProjectionHandle FirstGeometry;
+    FDWCEditorSurfacePatchProjectionLease FirstGeometry;
     TestTrue(TEXT("First persistent projection succeeds"), Cache.Resolve(
         FirstRequest, EDWCEditorSurfacePatchCachePolicy::Persistent, FirstGeometry));
-    TestEqual(TEXT("The first projection caches one chart and one geometry"),
-        Cache.GetEntryCount(), 2);
+    TestEqual(TEXT("The first projection caches one geometry"),
+        Cache.GetEntryCount(), 1);
 
-    FDWCEditorSurfacePatchProjectionHandle ReusedGeometry;
+    FDWCEditorSurfacePatchProjectionLease ReusedGeometry;
     TestTrue(TEXT("Identical persistent projection resolves"), Cache.Resolve(
-        FirstRequest, EDWCEditorSurfacePatchCachePolicy::Persistent, ReusedGeometry));
+        FirstRequest,
+        EDWCEditorSurfacePatchCachePolicy::Persistent,
+        ReusedGeometry));
     TestTrue(TEXT("Identical request reuses immutable geometry"),
         FirstGeometry.Get() == ReusedGeometry.Get());
+    TestTrue(TEXT("A reused geometry reports cache residency"), ReusedGeometry.IsCacheResident());
     ReusedGeometry.Reset();
 
     FDWCEditorSurfacePatchProjectionRequest SecondRequest = MakeLargeRequest(Data, 0.7f);
-    FDWCEditorSurfacePatchProjectionHandle SecondGeometry;
-    TestTrue(TEXT("A rotated request resolves from the shared chart"), Cache.Resolve(
+    FDWCEditorSurfacePatchProjectionLease SecondGeometry;
+    TestTrue(TEXT("A rotated request resolves as distinct geometry"), Cache.Resolve(
         SecondRequest, EDWCEditorSurfacePatchCachePolicy::Persistent, SecondGeometry));
     FDWCEditorSurfacePatchProjectionCacheDiagnostics Diagnostics = Cache.GetDiagnostics();
-    TestEqual(TEXT("Two rotations share one chart and own two final geometries"),
-        Diagnostics.EntryCount, 3);
-    TestEqual(TEXT("Only one island-local chart remains resident"),
-        Diagnostics.ChartEntryCount, 1);
-    TestTrue(TEXT("Rotation-only changes hit the chart cache"),
-        Diagnostics.ChartHitCount >= 1);
+    TestEqual(TEXT("Two rotations own two final geometries"),
+        Diagnostics.EntryCount, 2);
 
     FDWCEditorSurfacePatchProjectionRequest ReadOnlyRequest = MakeLargeRequest(Data, 1.1f);
-    FDWCEditorSurfacePatchProjectionHandle ReadOnlyGeometry;
+    FDWCEditorSurfacePatchProjectionLease ReadOnlyGeometry;
     const int32 EntryCountBeforeReadOnly = Cache.GetEntryCount();
     TestTrue(TEXT("Read-only hover projection succeeds"), Cache.Resolve(
         ReadOnlyRequest,
@@ -667,20 +894,219 @@ bool FDWCEditorSurfacePatchProjectionCachePolicyTest::RunTest(const FString&)
     TestEqual(TEXT("Read-only hover does not admit final geometry"),
         Cache.GetEntryCount(), EntryCountBeforeReadOnly);
     Diagnostics = Cache.GetDiagnostics();
-    TestTrue(TEXT("Read-only hover reuses an existing persistent chart"),
-        Diagnostics.ReadOnlyHitCount >= 1);
-    TestTrue(TEXT("Read-only hover records its uncached final-geometry miss"),
+    TestTrue(TEXT("Read-only hover records its uncached geometry miss"),
         Diagnostics.ReadOnlyMissCount >= 1);
-    TestEqual(TEXT("Geometry and chart byte accounting matches the hard total"),
-        Diagnostics.GeometryUsedBytes + Diagnostics.ChartUsedBytes,
-        Diagnostics.UsedBytes);
+    TestFalse(TEXT("An ephemeral read-only miss is not reported as cache resident"),
+        ReadOnlyGeometry.IsCacheResident());
+    TestEqual(TEXT("Active geometry byte accounting matches the hard total"),
+        Diagnostics.ActiveBytes, Diagnostics.UsedBytes);
 
-    FDWCEditorSurfacePatchProjectionHandle HoverGeometry;
+    FDWCEditorSurfacePatchProjectionLease HoverGeometry;
     const int32 EntryCountBeforeHover = Cache.GetEntryCount();
     TestTrue(TEXT("Ephemeral hover projection succeeds"), Cache.Resolve(
         MakeLargeRequest(Data, 1.1f), EDWCEditorSurfacePatchCachePolicy::Ephemeral, HoverGeometry));
     TestEqual(TEXT("Ephemeral hover does not consume persistent cache entries"),
         Cache.GetEntryCount(), EntryCountBeforeHover);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSurfacePatchProjectionCanonicalCacheKeyTest,
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.CanonicalGeometryCacheKey",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSurfacePatchProjectionCanonicalCacheKeyTest::RunTest(const FString&)
+{
+    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
+    const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data = BuildLargeSeamedGrid();
+    FDWCEditorSurfacePatchProjectionRequest BaseRequest = MakeLargeRequest(Data, 0.2f);
+    BaseRequest.BoundaryPolicy = EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly;
+
+    FDWCEditorSurfacePatchProjectionCacheService Cache;
+    FDWCEditorSurfacePatchProjectionLease BaseGeometry;
+    TestTrue(TEXT("The base surface decal projection resolves"), Cache.Resolve(
+        BaseRequest,
+        EDWCEditorSurfacePatchCachePolicy::Persistent,
+        BaseGeometry));
+
+    FDWCEditorSurfacePatchProjectionRequest RasterOnlyRequest = BaseRequest;
+    RasterOnlyRequest.MaxSurfaceAngleDegrees = 45.0f;
+    RasterOnlyRequest.ProjectionDepthSoftness = 0.75f;
+    RasterOnlyRequest.ProjectionAngleSoftness = 0.6f;
+    FDWCEditorSurfacePatchProjectionLease RasterOnlyGeometry;
+    TestTrue(TEXT("Raster-only projection settings resolve"), Cache.Resolve(
+        RasterOnlyRequest,
+        EDWCEditorSurfacePatchCachePolicy::Persistent,
+        RasterOnlyGeometry));
+    TestTrue(TEXT("Raster-only settings reuse the same projected geometry"),
+        BaseGeometry.Get() == RasterOnlyGeometry.Get());
+
+    FDWCEditorSurfacePatchProjectionRequest DepthRequest = BaseRequest;
+    DepthRequest.ProjectionDepthLocal *= 1.5f;
+    FDWCEditorSurfacePatchProjectionLease DepthGeometry;
+    TestTrue(TEXT("A different projection depth resolves"), Cache.Resolve(
+        DepthRequest,
+        EDWCEditorSurfacePatchCachePolicy::Persistent,
+        DepthGeometry));
+    TestTrue(TEXT("Projection depth owns a distinct geometry key"),
+        BaseGeometry.Get() != DepthGeometry.Get());
+
+    FDWCEditorSurfacePatchProjectionRequest BoundaryRequest = BaseRequest;
+    BoundaryRequest.BoundaryPolicy = EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
+    FDWCEditorSurfacePatchProjectionLease BoundaryGeometry;
+    TestTrue(TEXT("A different boundary policy resolves"), Cache.Resolve(
+        BoundaryRequest,
+        EDWCEditorSurfacePatchCachePolicy::Persistent,
+        BoundaryGeometry));
+    TestTrue(TEXT("Boundary policy owns a distinct geometry key"),
+        BaseGeometry.Get() != BoundaryGeometry.Get());
+
+    FDWCEditorSurfacePatchProjectionRequest DetailedRequest = BaseRequest;
+    DetailedRequest.bCollectDetailedDiagnostics = true;
+    FDWCEditorSurfacePatchProjectionLease DetailedGeometry;
+    TestTrue(TEXT("A detailed request upgrades the geometry-equivalent cache entry"), Cache.Resolve(
+        DetailedRequest,
+        EDWCEditorSurfacePatchCachePolicy::Persistent,
+        DetailedGeometry));
+    TestTrue(TEXT("The upgraded entry contains detailed diagnostics"),
+        DetailedGeometry.IsValid() && DetailedGeometry->Diagnostics.bDetailed);
+
+    FDWCEditorSurfacePatchProjectionLease ReusedDetailedGeometry;
+    TestTrue(TEXT("A basic request reuses the detailed geometry entry"), Cache.Resolve(
+        BaseRequest,
+        EDWCEditorSurfacePatchCachePolicy::Persistent,
+        ReusedDetailedGeometry));
+    TestTrue(TEXT("Detailed geometry satisfies the basic request"),
+        DetailedGeometry.Get() == ReusedDetailedGeometry.Get());
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSurfacePatchProjectionCacheLifetimeTest,
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.CacheLifetimeContract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSurfacePatchProjectionCacheLifetimeTest::RunTest(const FString&)
+{
+    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
+    const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
+        BuildLargeSeamedGrid();
+    const FDWCEditorSurfacePatchProjectionRequest Request = MakeLargeRequest(Data, 0.25f);
+    const TSharedRef<FDWCEditorResourceGovernor> Governor =
+        MakeShared<FDWCEditorResourceGovernor>();
+
+    FDWCEditorSurfacePatchProjectionLease ConsumerLease;
+    {
+        TUniquePtr<FDWCEditorSurfacePatchProjectionCacheService> Cache =
+            MakeUnique<FDWCEditorSurfacePatchProjectionCacheService>(
+                Governor,
+                FGuid::NewGuid());
+        TestTrue(TEXT("A persistent projection returns a lease"), Cache->Resolve(
+            Request,
+            EDWCEditorSurfacePatchCachePolicy::Persistent,
+            ConsumerLease));
+        TestTrue(TEXT("The persistent result owns cache residency"),
+            ConsumerLease.IsCacheResident());
+        const uint64 GeometryResidentBytes = ConsumerLease.GetSharedResidentBytes();
+        TestTrue(TEXT("The resident lease reports its reservation"),
+            GeometryResidentBytes > 0);
+
+        Cache->Reset();
+        const FDWCEditorSurfacePatchProjectionCacheDiagnostics ResetDiagnostics =
+            Cache->GetDiagnostics();
+        TestEqual(TEXT("Reset immediately removes active cache keys"),
+            Cache->GetEntryCount(), 0);
+        TestEqual(TEXT("The externally leased projection becomes retired"),
+            ResetDiagnostics.RetiredEntryCount, 1);
+        TestEqual(TEXT("Retired geometry remains physically budgeted"),
+            ResetDiagnostics.RetiredPinnedBytes, GeometryResidentBytes);
+        TestTrue(TEXT("The retired lease still exposes immutable geometry"),
+            ConsumerLease.IsValid() && !ConsumerLease->Fragments.IsEmpty());
+        TestEqual(TEXT("The resource governor retains the retired reservation"),
+            Governor->GetDiagnostics().GlobalCPUUsedBytes,
+            GeometryResidentBytes);
+
+        FDWCEditorSurfacePatchProjectionLease RebuiltLease;
+        TestTrue(TEXT("The invalidated key can be rebuilt"), Cache->Resolve(
+            Request,
+            EDWCEditorSurfacePatchCachePolicy::Persistent,
+            RebuiltLease));
+        TestTrue(TEXT("Reset never returns the retired geometry as a cache hit"),
+            RebuiltLease.Get() != ConsumerLease.Get());
+        RebuiltLease.Reset();
+        Cache->Reset();
+
+        Cache.Reset();
+        TestTrue(TEXT("The geometry survives cache service destruction"),
+            ConsumerLease.IsValid() && !ConsumerLease->Fragments.IsEmpty());
+        TestEqual(TEXT("Service destruction does not release a consumer-owned reservation"),
+            Governor->GetDiagnostics().GlobalCPUUsedBytes,
+            GeometryResidentBytes);
+    }
+
+    ConsumerLease.Reset();
+    TestEqual(TEXT("The final lease release returns all shared-cache bytes"),
+        Governor->GetDiagnostics().GlobalCPUUsedBytes,
+        0ull);
+
+    {
+        FDWCEditorSurfacePatchProjectionCacheService Cache(
+            Governor,
+            FGuid::NewGuid());
+        FDWCEditorSurfacePatchProjectionLease UnpinnedLease;
+        TestTrue(TEXT("A second persistent projection succeeds"), Cache.Resolve(
+            Request,
+            EDWCEditorSurfacePatchCachePolicy::Persistent,
+            UnpinnedLease));
+        UnpinnedLease.Reset();
+        Cache.Reset();
+        TestEqual(TEXT("Reset immediately frees entries with no consumer lease"),
+            Governor->GetDiagnostics().GlobalCPUUsedBytes,
+            0ull);
+    }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSurfacePatchProjectionAdmissionMemoryTest,
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.AdmissionMemoryBounds",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSurfacePatchProjectionAdmissionMemoryTest::RunTest(const FString&)
+{
+    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
+    const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
+        BuildLargeSeamedGrid(24, 24);
+
+    FDWCEditorSurfacePatchProjectionRequest NonSeamRequest = MakeLargeRequest(Data, 0.0f);
+    const FDWCEditorSurfacePatchProjectionMemoryEstimate NonSeamEstimate =
+        FDWCEditorSurfacePatchProjector::EstimateAdmissionMemory(NonSeamRequest);
+    TestEqual(TEXT("Non-seam admission uses the spatial triangle upper bound"),
+        NonSeamEstimate.TriangleUpperBound, Data->Triangles.Num());
+    TestEqual(TEXT("Non-seam admission has no intermediate chart"),
+        NonSeamEstimate.IntermediateBytes, 0ull);
+    TestTrue(TEXT("Non-seam working memory remains below its hard limit"),
+        NonSeamEstimate.WorkingSetBytes <= NonSeamRequest.MaxWorkingSetBytes);
+    TestTrue(TEXT("Non-seam final result remains below its hard limit"),
+        NonSeamEstimate.ResultBytes <= NonSeamRequest.MaxResultBytes);
+
+    FDWCEditorSurfacePatchProjectionRequest SeamRequest = NonSeamRequest;
+    SeamRequest.BoundaryPolicy = EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
+    SeamRequest.MaxVisitedTriangles = 32;
+    SeamRequest.MaxWorkingSetBytes = 4096;
+    SeamRequest.MaxResultBytes = 8192;
+    const FDWCEditorSurfacePatchProjectionMemoryEstimate SeamEstimate =
+        FDWCEditorSurfacePatchProjector::EstimateAdmissionMemory(SeamRequest);
+    TestEqual(TEXT("UV-seam admission honors the explicit triangle limit"),
+        SeamEstimate.TriangleUpperBound, 32);
+    TestEqual(TEXT("UV-seam admission has no island-chart intermediate"),
+        SeamEstimate.IntermediateBytes, 0ull);
+    TestTrue(TEXT("UV-seam working memory is clamped by the hard limit"),
+        SeamEstimate.WorkingSetBytes <= SeamRequest.MaxWorkingSetBytes);
+    TestTrue(TEXT("UV-seam result memory is clamped by the hard limit"),
+        SeamEstimate.ResultBytes <= SeamRequest.MaxResultBytes);
+    TestTrue(TEXT("A bounded UV-seam request reserves less than the non-seam full topology"),
+        SeamEstimate.GetTotalBytes() < NonSeamEstimate.GetTotalBytes());
     return true;
 }
 
@@ -699,17 +1125,15 @@ bool FDWCEditorProjectedHoverWorkerLifecycleTest::RunTest(const FString&)
 
     FDWCEditorSurfaceNormalPatchInput SurfaceInput;
     SurfaceInput.Projection = MakeLargeRequest(Data, 0.37f);
-    SurfaceInput.Projection.bUseSurfaceDecalProjection = false;
-    SurfaceInput.Projection.bAllowUVSeamTraversal = false;
     SurfaceInput.NormalSource = MakeNormalSource();
     SurfaceInput.CoverageSource = MakeCoverageSource();
     SurfaceInput.Strength = 0.8f;
     SurfaceInput.Falloff = 0.2f;
 
-    // Seed the persistent chart exactly as a committed preview or bake would.
+    // Seed persistent geometry exactly as a committed preview or bake would.
     FDWCEditorSurfacePatchProjectionRequest SeedRequest = SurfaceInput.Projection;
     SeedRequest.RotationRadians = 0.1f;
-    FDWCEditorSurfacePatchProjectionHandle PersistentGeometry;
+    FDWCEditorSurfacePatchProjectionLease PersistentGeometry;
     TestTrue(TEXT("Persistent projection seed succeeds"), Cache->Resolve(
         SeedRequest,
         EDWCEditorSurfacePatchCachePolicy::Persistent,
@@ -730,16 +1154,23 @@ bool FDWCEditorProjectedHoverWorkerLifecycleTest::RunTest(const FString&)
             HoverInput.SurfaceInput,
             HoverInput.WorkingTextureSize,
             HoverInput.TextureSize);
-    const uint64 RasterPhaseBytes =
-        256ull * 256ull * (sizeof(uint32) + sizeof(FColor));
-    TestEqual(TEXT("Hover reserves the persistent projection result bound"),
+    const FDWCEditorSurfacePatchProjectionMemoryEstimate ProjectionEstimate =
+        FDWCEditorSurfacePatchProjector::EstimateAdmissionMemory(SurfaceInput.Projection);
+    TestEqual(TEXT("Hover reserves the topology-bounded projection results"),
         HoverEstimate.WorkingBytes,
-        SurfaceInput.Projection.MaxResultBytes);
-    TestEqual(TEXT("Hover reserves the peak sequential scratch phase"),
+        ProjectionEstimate.IntermediateBytes + ProjectionEstimate.ResultBytes);
+    TestEqual(TEXT("Hover reserves the topology-bounded projection scratch"),
         HoverEstimate.ScratchBytes,
-        FMath::Max(SurfaceInput.Projection.MaxWorkingSetBytes, RasterPhaseBytes));
+        ProjectionEstimate.WorkingSetBytes);
     TestEqual(TEXT("Hover does not double count sequential encoded output"),
         HoverEstimate.OutputBytes,
+        0ull);
+    TestTrue(TEXT("The topology-bound admission is smaller than both hard safety maxima"),
+        HoverEstimate.GetTotalBytes() <
+            SurfaceInput.Projection.MaxResultBytes +
+            SurfaceInput.Projection.MaxWorkingSetBytes);
+    TestEqual(TEXT("Shared normal readback is not charged to worker-private admission"),
+        HoverEstimate.ResidentSharedBytes,
         0ull);
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> Token =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
@@ -750,6 +1181,9 @@ bool FDWCEditorProjectedHoverWorkerLifecycleTest::RunTest(const FString&)
         Result.IsValid() && !Result->ProjectedOutputRects.IsEmpty());
     TestTrue(TEXT("Hover worker produces encoded region payloads"),
         Result.IsValid() && !Result->Regions.IsEmpty());
+    TestTrue(TEXT("A successful hover worker retains the exact projected commit payload"),
+        Result.IsValid() && Result->PresentedProjectedPatch.IsSet() &&
+        Result->PresentedProjectedPatch->IsValid());
     TestTrue(TEXT("Hover worker returns opt-in performance diagnostics"),
         Result.IsValid() && Result->HoverDiagnostics.IsSet());
     if (Result.IsValid() && Result->HoverDiagnostics.IsSet())
@@ -759,6 +1193,12 @@ bool FDWCEditorProjectedHoverWorkerLifecycleTest::RunTest(const FString&)
         TestEqual(TEXT("Diagnostics preserve the request id"), Diagnostics.RequestId, 17ull);
         TestTrue(TEXT("Diagnostics count projected fragments"),
             Diagnostics.ProjectedFragmentCount > 0);
+        TestTrue(TEXT("Projection private output stays within its admitted result bound"),
+            Diagnostics.ProjectionPrivateResultBytes <= HoverEstimate.WorkingBytes);
+        TestTrue(TEXT("Projection working memory stays within its admitted scratch bound"),
+            Diagnostics.ProjectionWorkingSetBytes <= HoverEstimate.ScratchBytes);
+        TestTrue(TEXT("Diagnostics report externally owned shared residency"),
+            Diagnostics.SharedResidentBytes > 0);
         TestTrue(TEXT("Diagnostics count candidate raster pixels"),
             Diagnostics.CandidatePixelCount > 0);
         TestTrue(TEXT("Diagnostics count encoded output pixels"),
@@ -785,6 +1225,8 @@ bool FDWCEditorProjectedHoverWorkerLifecycleTest::RunTest(const FString&)
     TestTrue(TEXT("Canceled hover worker returns a terminal result"), CanceledResult.IsValid());
     TestFalse(TEXT("Canceled hover worker never produces a committable payload"),
         CanceledResult.IsValid() && CanceledResult->bSucceeded);
+    TestFalse(TEXT("Canceled hover worker does not retain a projected commit payload"),
+        CanceledResult.IsValid() && CanceledResult->PresentedProjectedPatch.IsSet());
     TestEqual(TEXT("Cancellation leaves persistent cache ownership unchanged"),
         Cache->GetEntryCount(), PersistentEntries);
 
@@ -807,6 +1249,19 @@ bool FDWCEditorProjectedHoverWorkerLifecycleTest::RunTest(const FString&)
     TArray<FColor> ReferencePixels;
     FDWCEditorRasterPostProcess::EncodeNormalPixels(ReferenceSurface, ReferencePixels);
     TestEqual(TEXT("Reference bake pixels encode"), ReferencePixels.Num(), 256 * 256);
+    if (Result.IsValid() && Result->PresentedProjectedPatch.IsSet())
+    {
+        FDWCEditorNormalRasterSurface PresentedSurface;
+        TestTrue(TEXT("Presented payload parity surface initializes"),
+            PresentedSurface.Initialize(FIntPoint(256, 256), false));
+        TestTrue(TEXT("Presented payload parity raster affects pixels"),
+            FDWCEditorNormalRasterCore::RasterizeProjectedPatch(
+                Result->PresentedProjectedPatch.GetValue(), PresentedSurface).bAffectedPixels);
+        TArray<FColor> PresentedPixels;
+        FDWCEditorRasterPostProcess::EncodeNormalPixels(PresentedSurface, PresentedPixels);
+        TestTrue(TEXT("Presented hover payload matches the reference bake command"),
+            PresentedPixels == ReferencePixels);
+    }
     if (Result.IsValid())
     {
         for (const FDWCEditorNormalRegionPayload& Region : Result->Regions)
@@ -836,7 +1291,7 @@ bool FDWCEditorProjectedHoverWorkerLifecycleTest::RunTest(const FString&)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorSurfacePatchProjectionBoundedCacheTest,
-    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.BoundedClassAwareCache",
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.BoundedGeometryCache",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FDWCEditorSurfacePatchProjectionBoundedCacheTest::RunTest(const FString&)
@@ -847,39 +1302,35 @@ bool FDWCEditorSurfacePatchProjectionBoundedCacheTest::RunTest(const FString&)
     const FDWCEditorSurfacePatchProjectionRequest FirstRequest = MakeLargeRequest(Data, 0.1f);
 
     FDWCEditorSurfacePatchProjectionCacheService MeasuringCache;
-    FDWCEditorSurfacePatchProjectionHandle MeasuringGeometry;
+    FDWCEditorSurfacePatchProjectionLease MeasuringGeometry;
     TestTrue(TEXT("Measuring projection succeeds"), MeasuringCache.Resolve(
         FirstRequest, EDWCEditorSurfacePatchCachePolicy::Persistent, MeasuringGeometry));
     MeasuringGeometry.Reset();
     const FDWCEditorSurfacePatchProjectionCacheDiagnostics Measured =
         MeasuringCache.GetDiagnostics();
-    TestTrue(TEXT("Measuring cache owns chart bytes"), Measured.ChartUsedBytes > 0);
-    TestTrue(TEXT("Measuring cache owns geometry bytes"), Measured.GeometryUsedBytes > 0);
+    TestTrue(TEXT("Measuring cache owns geometry bytes"), Measured.UsedBytes > 0);
 
-    const uint64 TightBudget = Measured.ChartUsedBytes + Measured.GeometryUsedBytes +
-        FMath::Max<uint64>(Measured.GeometryUsedBytes / 2, 1);
+    const uint64 TightBudget = Measured.UsedBytes +
+        FMath::Max<uint64>(Measured.UsedBytes / 2, 1);
     FDWCEditorSurfacePatchProjectionCacheService TightCache(TightBudget);
-    FDWCEditorSurfacePatchProjectionHandle FirstGeometry;
+    FDWCEditorSurfacePatchProjectionLease FirstGeometry;
     TestTrue(TEXT("First tight-budget projection succeeds"), TightCache.Resolve(
         FirstRequest, EDWCEditorSurfacePatchCachePolicy::Persistent, FirstGeometry));
     FirstGeometry.Reset();
 
-    FDWCEditorSurfacePatchProjectionHandle SecondGeometry;
+    FDWCEditorSurfacePatchProjectionLease SecondGeometry;
     TestTrue(TEXT("Second tight-budget rotation succeeds"), TightCache.Resolve(
         MakeLargeRequest(Data, 0.8f),
         EDWCEditorSurfacePatchCachePolicy::Persistent,
         SecondGeometry));
     const FDWCEditorSurfacePatchProjectionCacheDiagnostics Diagnostics =
         TightCache.GetDiagnostics();
-    TestTrue(TEXT("Combined projection cache obeys its hard byte budget"),
+    TestTrue(TEXT("Projection cache obeys its hard byte budget"),
         Diagnostics.UsedBytes <= Diagnostics.BudgetBytes);
-    TestEqual(TEXT("Class byte accounting remains exact after pressure"),
-        Diagnostics.GeometryUsedBytes + Diagnostics.ChartUsedBytes,
-        Diagnostics.UsedBytes);
-    TestEqual(TEXT("Reusable chart survives rotation pressure"),
-        Diagnostics.ChartEntryCount, 1);
-    TestTrue(TEXT("Pressure evicts final geometry before the reusable chart"),
-        Diagnostics.GeometryEvictionCount >= 1 && Diagnostics.ChartEvictionCount == 0);
+    TestEqual(TEXT("Only the latest geometry remains after pressure"),
+        Diagnostics.EntryCount, 1);
+    TestTrue(TEXT("Pressure evicts the least-recently-used geometry"),
+        Diagnostics.EvictionCount >= 1);
     return true;
 }
 
@@ -921,14 +1372,6 @@ bool FDWCEditorSurfacePatchContinuityDiagnosticsTest::RunTest(const FString&)
         Result.Diagnostics.DiscontinuousSharedEdgeCount, 0);
     TestTrue(TEXT("Projection diagnostics record candidate triangles"),
         Result.Diagnostics.CandidateTriangleCount >= Result.Fragments.Num());
-    TestTrue(TEXT("Detailed Non UV Seam diagnostics report the product island chart"),
-        Result.Diagnostics.bIslandChartBuildAttempted);
-    TestTrue(TEXT("The product island chart succeeds"),
-        Result.Diagnostics.bIslandChartBuildSucceeded);
-    TestEqual(TEXT("The product chart shares four physical vertices"),
-        Result.Diagnostics.IslandChartVertexCount, 4);
-    TestEqual(TEXT("The product chart contains both triangles"),
-        Result.Diagnostics.IslandChartTriangleCount, 2);
 
     FDWCEditorSurfacePatchFragment* FragmentB = Result.Fragments.FindByPredicate(
         [](const FDWCEditorSurfacePatchFragment& Fragment)
@@ -965,8 +1408,8 @@ bool FDWCEditorLargeSurfacePatchPreviewBakeParityTest::RunTest(const FString&)
     const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data = BuildLargeSeamedGrid();
     FDWCEditorSurfaceNormalPatchInput Input;
     Input.Projection = MakeLargeRequest(Data);
-    Input.Projection.bUseSurfaceDecalProjection = true;
-    Input.Projection.bAllowUVSeamTraversal = true;
+    Input.Projection.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
     Input.NormalSource = MakeNormalSource();
     Input.CoverageSource = MakeCoverageSource();
     Input.Strength = 0.8f;
@@ -983,7 +1426,7 @@ bool FDWCEditorLargeSurfacePatchPreviewBakeParityTest::RunTest(const FString&)
         Input, BakeCommand, &Error, nullptr, &Cache,
         EDWCEditorSurfacePatchCachePolicy::Persistent));
     TestTrue(TEXT("Preview and bake share the same projected geometry"),
-        PreviewCommand.SharedProjection.Get() == BakeCommand.SharedProjection.Get());
+        PreviewCommand.ProjectionLease.Get() == BakeCommand.ProjectionLease.Get());
 
     const FIntPoint Size(256, 256);
     FDWCEditorNormalRasterSurface PreviewSurface;
@@ -1012,19 +1455,19 @@ bool FDWCEditorLargeSurfacePatchPreviewBakeParityTest::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FDWCEditorNonUvSeamSharedChartPreviewBakeParityTest,
-    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.NonUvSeamSharedChartPreviewBakeParity",
+    FDWCEditorNonUvSeamAnchorDecalPreviewBakeParityTest,
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.NonUvSeamAnchorDecalPreviewBakeParity",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FDWCEditorNonUvSeamSharedChartPreviewBakeParityTest::RunTest(const FString&)
+bool FDWCEditorNonUvSeamAnchorDecalPreviewBakeParityTest::RunTest(const FString&)
 {
     using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
     const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
         BuildLargeSeamedGrid(24, 24);
     FDWCEditorSurfaceNormalPatchInput Input;
     Input.Projection = MakeLargeRequest(Data, 0.43f);
-    Input.Projection.bUseSurfaceDecalProjection = false;
-    Input.Projection.bAllowUVSeamTraversal = false;
+    Input.Projection.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly;
     Input.Projection.bCollectDetailedDiagnostics = true;
     Input.NormalSource = MakeNormalSource();
     Input.CoverageSource = MakeCoverageSource();
@@ -1035,7 +1478,7 @@ bool FDWCEditorNonUvSeamSharedChartPreviewBakeParityTest::RunTest(const FString&
     FDWCEditorProjectedNormalPatchCommand PreviewCommand;
     FDWCEditorProjectedNormalPatchCommand BakeCommand;
     FString Error;
-    TestTrue(TEXT("Non UV Seam preview command builds from the shared chart"),
+    TestTrue(TEXT("Non UV Seam preview command builds from the anchor-island decal"),
         FDWCEditorSurfacePatchRasterBuilder::BuildProjectedPatchCommand(
             Input, PreviewCommand, &Error, nullptr, &Cache,
             EDWCEditorSurfacePatchCachePolicy::Persistent));
@@ -1043,20 +1486,22 @@ bool FDWCEditorNonUvSeamSharedChartPreviewBakeParityTest::RunTest(const FString&
         FDWCEditorSurfacePatchRasterBuilder::BuildProjectedPatchCommand(
             Input, BakeCommand, &Error, nullptr, &Cache,
             EDWCEditorSurfacePatchCachePolicy::Persistent));
-    if (!PreviewCommand.SharedProjection.IsValid() ||
-        !BakeCommand.SharedProjection.IsValid())
+    if (!PreviewCommand.ProjectionLease.IsValid() ||
+        !BakeCommand.ProjectionLease.IsValid())
     {
-        AddError(FString::Printf(TEXT("Shared-chart parity command failed: %s"), *Error));
+        AddError(FString::Printf(TEXT("Anchor-decal parity command failed: %s"), *Error));
         return false;
     }
     TestTrue(TEXT("Preview and bake lease identical immutable projection geometry"),
-        PreviewCommand.SharedProjection.Get() == BakeCommand.SharedProjection.Get());
+        PreviewCommand.ProjectionLease.Get() == BakeCommand.ProjectionLease.Get());
+    TestTrue(TEXT("Non UV Seam preview uses the decal projection filter"),
+        PreviewCommand.bUseSurfaceProjectionFilter);
+    TestTrue(TEXT("Non UV Seam bake uses the decal projection filter"),
+        BakeCommand.bUseSurfaceProjectionFilter);
     TestEqual(TEXT("Non UV Seam projection stays on one UV island"),
-        PreviewCommand.SharedProjection->AffectedUVIslandIDs.Num(), 1);
+        PreviewCommand.ProjectionLease->AffectedUVIslandIDs.Num(), 1);
     TestEqual(TEXT("Non UV Seam projection traverses no UV seam"),
-        PreviewCommand.SharedProjection->TraversedSeamCount, 0);
-    TestEqual(TEXT("Shared chart output has no internal coordinate crack"),
-        PreviewCommand.SharedProjection->Diagnostics.DiscontinuousSharedEdgeCount, 0);
+        PreviewCommand.ProjectionLease->TraversedSeamCount, 0);
 
     FDWCEditorNormalRasterSurface PreviewSurface;
     FDWCEditorNormalRasterSurface BakeSurface;
@@ -1074,40 +1519,8 @@ bool FDWCEditorNonUvSeamSharedChartPreviewBakeParityTest::RunTest(const FString&
         PreviewSurface.Coverage == BakeSurface.Coverage);
 
     const FDWCEditorSurfacePatchProjectionCacheDiagnostics Diagnostics = Cache.GetDiagnostics();
-    TestEqual(TEXT("The parity path owns one reusable island chart"),
-        Diagnostics.ChartEntryCount, 1);
     TestEqual(TEXT("The parity path owns one final projection geometry"),
-        Diagnostics.EntryCount - Diagnostics.ChartEntryCount, 1);
-    return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FDWCEditorSurfacePatchProjectionModeContractTest,
-    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.ModeContract",
-    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FDWCEditorSurfacePatchProjectionModeContractTest::RunTest(const FString&)
-{
-    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
-    const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
-        BuildTwoTriangleSurface(true);
-    FDWCEditorSurfacePatchProjectionRequest InvalidNonUv = MakeRequest(Data);
-    InvalidNonUv.bAllowUVSeamTraversal = true;
-    FString Error;
-    TestFalse(TEXT("Non UV Seam cannot silently enable UV seam traversal"),
-        FDWCEditorSurfacePatchProjector::ValidateProjectionModeContract(
-            InvalidNonUv, &Error));
-    TestFalse(TEXT("The invalid Non UV Seam request cannot project"),
-        FDWCEditorSurfacePatchProjector::Project(InvalidNonUv).IsSuccess());
-
-    FDWCEditorSurfacePatchProjectionRequest InvalidDecal = MakeRequest(Data);
-    InvalidDecal.bUseSurfaceDecalProjection = true;
-    InvalidDecal.bAllowUVSeamTraversal = false;
-    TestFalse(TEXT("Surface Decal cannot silently disable UV seam traversal"),
-        FDWCEditorSurfacePatchProjector::ValidateProjectionModeContract(
-            InvalidDecal, &Error));
-    TestFalse(TEXT("The invalid Surface Decal request cannot project"),
-        FDWCEditorSurfacePatchProjector::Project(InvalidDecal).IsSuccess());
+        Diagnostics.EntryCount, 1);
     return true;
 }
 

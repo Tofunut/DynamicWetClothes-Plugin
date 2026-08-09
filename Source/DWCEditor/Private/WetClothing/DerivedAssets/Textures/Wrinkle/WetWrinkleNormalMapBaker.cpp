@@ -126,10 +126,14 @@ namespace
         bool bValid = false;
     };
 
-    struct FWetWrinkleBakeSurfacePatchInput
+    struct FWetWrinkleBakePatchCommandInput
     {
         FGuid PatchGuid;
         FString DisplayName;
+        EWetWrinklePatchProjectionMode AuthoredMode =
+            EWetWrinklePatchProjectionMode::NonUVSeam;
+        EDWCEditorSurfacePatchBoundaryPolicy BoundaryPolicy =
+            EDWCEditorSurfacePatchBoundaryPolicy::Invalid;
         FDWCEditorSurfaceNormalPatchInput RasterInput;
 
         uint64 GetAllocatedSizeBytes() const
@@ -137,6 +141,26 @@ namespace
             return DisplayName.GetAllocatedSize();
         }
     };
+
+    const TCHAR* GetAuthoredProjectionModeName(const EWetWrinklePatchProjectionMode Mode)
+    {
+        return Mode == EWetWrinklePatchProjectionMode::SurfaceDecal
+            ? TEXT("UVSeam")
+            : TEXT("NonUVSeam");
+    }
+
+    const TCHAR* GetBoundaryPolicyName(const EDWCEditorSurfacePatchBoundaryPolicy Policy)
+    {
+        switch (Policy)
+        {
+        case EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly:
+            return TEXT("AnchorUVIslandOnly");
+        case EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams:
+            return TEXT("CrossUVSeams");
+        default:
+            return TEXT("Invalid");
+        }
+    }
 
     float WrapUnit(float Value)
     {
@@ -270,7 +294,7 @@ struct FWetWrinkleNormalMapBakeSnapshot::FImpl
     int32 PaddingPixels = 0;
     FIntPoint FinalTextureSize = FIntPoint::ZeroValue;
     FIntPoint WorkingTextureSize = FIntPoint::ZeroValue;
-    TArray<FWetWrinkleBakeSurfacePatchInput> SurfacePatches;
+    TArray<FWetWrinkleBakePatchCommandInput> PatchCommandInputs;
     TArray<FWetProceduralRidgeStroke> ProceduralRidgeStrokes;
     FDWCEditorSpatialLease SpatialLease;
     TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService> SurfacePatchProjectionCache;
@@ -279,8 +303,6 @@ struct FWetWrinkleNormalMapBakeSnapshot::FImpl
     FString BuildSignature;
     uint32 SurfaceProjectionAlgorithmVersion =
         DWCEditorSurfacePatchProjectionVersion::SurfaceProjection;
-    uint32 IslandLocalChartAlgorithmVersion =
-        DWCEditorSurfacePatchProjectionVersion::IslandLocalChart;
     uint32 ProjectedRasterAlgorithmVersion =
         DWCEditorSurfacePatchProjectionVersion::ProjectedRaster;
     uint64 EstimatedSnapshotBytes = 0;
@@ -480,7 +502,7 @@ bool FWetWrinkleNormalMapBaker::IsMaterialSlotBakeCurrent(
     }
 
     FWetWrinkleNormalMapBakeSettings Settings;
-    Settings.Resolution = WetClothingAsset->Authored.WrinkleData.BakeSettings.DefaultResolution;
+    Settings.Resolution = WetClothingAsset->GetWrinkleMapResolution();
     Settings.PaddingPixels = WetClothingAsset->Authored.WrinkleData.BakeSettings.PaddingPixels;
     Settings.bIncludeDisabledPatches =
         WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches;
@@ -713,9 +735,10 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
             return false;
         }
 
-        FWetWrinkleBakeSurfacePatchInput SurfacePatch;
-        SurfacePatch.PatchGuid = Stamp.PatchGuid;
-        SurfacePatch.DisplayName = Stamp.DisplayName;
+        FWetWrinkleBakePatchCommandInput PatchCommandInput;
+        PatchCommandInput.PatchGuid = Stamp.PatchGuid;
+        PatchCommandInput.DisplayName = Stamp.DisplayName;
+        PatchCommandInput.AuthoredMode = Stamp.ProjectionMode;
         FDWCEditorWrinklePatchDescriptor PatchDescriptor;
         FString DescriptorError;
         if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
@@ -727,35 +750,37 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
                 DescriptorError.IsEmpty() ? TEXT("invalid descriptor") : *DescriptorError);
             return false;
         }
-        if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildProjectionRequest(
+        FDWCEditorNormalSourceSnapshot NormalSourceSnapshot;
+        NormalSourceSnapshot.Texture = NormalSource->Readback;
+        NormalSourceSnapshot.bFlipGreenChannel = NormalSource->bFlipGreenChannel;
+        FDWCEditorScalarSourceSnapshot CoverageSourceSnapshot;
+        CoverageSourceSnapshot.Size = SeparationEntry->Buffer.Size;
+        CoverageSourceSnapshot.Values = SeparationEntry->SharedValues;
+        if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInputFromSources(
                 PatchDescriptor,
                 SpatialHandle,
-                SurfacePatch.RasterInput.Projection,
+                NormalSourceSnapshot,
+                CoverageSourceSnapshot,
+                PatchCommandInput.RasterInput,
                 &DescriptorError))
         {
             OutErrorMessage = FString::Printf(
-                TEXT("Could not build the surface projection contract for patch '%s': %s"),
+                TEXT("Could not build the boundary-aware decal command input for patch '%s': %s"),
                 Stamp.DisplayName.IsEmpty() ? TEXT("Unnamed Patch") : *Stamp.DisplayName,
                 DescriptorError.IsEmpty() ? TEXT("invalid descriptor") : *DescriptorError);
             return false;
         }
-        if (!FDWCEditorSurfacePatchProjector::ValidateProjectionModeContract(
-                SurfacePatch.RasterInput.Projection, &DescriptorError))
+        PatchCommandInput.BoundaryPolicy =
+            PatchCommandInput.RasterInput.Projection.BoundaryPolicy;
+        if (PatchCommandInput.BoundaryPolicy ==
+                EDWCEditorSurfacePatchBoundaryPolicy::Invalid)
         {
             OutErrorMessage = FString::Printf(
-                TEXT("Wrinkle patch '%s' (%s) has an invalid projection mode contract: %s"),
-                Stamp.DisplayName.IsEmpty() ? TEXT("Unnamed Patch") : *Stamp.DisplayName,
-                *Stamp.PatchGuid.ToString(EGuidFormats::Digits),
-                DescriptorError.IsEmpty() ? TEXT("contradictory projection flags") : *DescriptorError);
+                TEXT("Patch '%s' did not resolve to a valid boundary-aware decal command."),
+                Stamp.DisplayName.IsEmpty() ? TEXT("Unnamed Patch") : *Stamp.DisplayName);
             return false;
         }
-        SurfacePatch.RasterInput.NormalSource.Texture = NormalSource->Readback;
-        SurfacePatch.RasterInput.NormalSource.bFlipGreenChannel = NormalSource->bFlipGreenChannel;
-        SurfacePatch.RasterInput.CoverageSource.Size = SeparationEntry->Buffer.Size;
-        SurfacePatch.RasterInput.CoverageSource.Values = SeparationEntry->SharedValues;
-        SurfacePatch.RasterInput.Strength = Stamp.Strength;
-        SurfacePatch.RasterInput.Falloff = Stamp.Falloff;
-        Snapshot.SurfacePatches.Add(MoveTemp(SurfacePatch));
+        Snapshot.PatchCommandInputs.Add(MoveTemp(PatchCommandInput));
     }
 
     for (const FWetProceduralRidgeStroke* Stroke : Group.ProceduralRidgeStrokes)
@@ -766,7 +791,7 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
         }
     }
 
-    if (Snapshot.SurfacePatches.IsEmpty() && Snapshot.ProceduralRidgeStrokes.IsEmpty())
+    if (Snapshot.PatchCommandInputs.IsEmpty() && Snapshot.ProceduralRidgeStrokes.IsEmpty())
     {
         OutErrorMessage = TEXT("The selected material slot has no readable wrinkle input.");
         return false;
@@ -840,11 +865,12 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
     const uint64 DilationWorkingBytes = static_cast<uint64>(FinalTextureSize.X) * FinalTextureSize.Y *
         (sizeof(uint8) + sizeof(int32) * 2);
     Snapshot.EstimatedSnapshotBytes = Snapshot.IslandMask.GetAllocatedSize() +
-        Snapshot.SurfacePatches.GetAllocatedSize() + Snapshot.ProceduralRidgeStrokes.GetAllocatedSize();
+        Snapshot.PatchCommandInputs.GetAllocatedSize() +
+        Snapshot.ProceduralRidgeStrokes.GetAllocatedSize();
     Snapshot.EstimatedWorkingBytes = WorkingSurfaceBytes + FinalSurfaceBytes + DilationWorkingBytes;
     Snapshot.EstimatedResultBytes = ResultPixelsBytes;
     TSet<const void*> CountedSourceBuffers;
-    for (const FWetWrinkleBakeSurfacePatchInput& Patch : Snapshot.SurfacePatches)
+    for (const FWetWrinkleBakePatchCommandInput& Patch : Snapshot.PatchCommandInputs)
     {
         Snapshot.EstimatedSnapshotBytes += Patch.GetAllocatedSizeBytes();
         const FDWCEditorNormalSourceSnapshot& NormalSource = Patch.RasterInput.NormalSource;
@@ -867,17 +893,20 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
     {
         Snapshot.EstimatedSnapshotBytes += Stroke.Points.GetAllocatedSize() + Stroke.DisplayName.GetAllocatedSize();
     }
-    if (SpatialHandle.IsValid() && !Snapshot.SurfacePatches.IsEmpty())
+    if (SpatialHandle.IsValid() && !Snapshot.PatchCommandInputs.IsEmpty())
     {
-        const uint64 TriangleCount = static_cast<uint64>(SpatialHandle->Triangles.Num());
-        const uint64 ProjectionScratchBytes = FMath::Min<uint64>(
-            64ull * 1024ull * 1024ull,
-            TriangleCount * 128ull);
-        const uint64 ProjectionResultBytes = FMath::Min<uint64>(
-            64ull * 1024ull * 1024ull,
-            TriangleCount * sizeof(FDWCEditorSurfacePatchFragment));
-        // Projection is performed and released one patch at a time.
-        Snapshot.EstimatedWorkingBytes += ProjectionScratchBytes + ProjectionResultBytes;
+        uint64 MaximumProjectionBytes = 0;
+        for (const FWetWrinkleBakePatchCommandInput& Patch : Snapshot.PatchCommandInputs)
+        {
+            const FDWCEditorSurfacePatchProjectionMemoryEstimate Estimate =
+                FDWCEditorSurfacePatchProjector::EstimateAdmissionMemory(
+                    Patch.RasterInput.Projection);
+            MaximumProjectionBytes = FMath::Max(
+                MaximumProjectionBytes,
+                Estimate.GetTotalBytes());
+        }
+        // Commands are resolved and released serially; the shared cache has its own budget.
+        Snapshot.EstimatedWorkingBytes += MaximumProjectionBytes;
     }
     if (!Snapshot.ProceduralRidgeStrokes.IsEmpty())
     {
@@ -902,15 +931,13 @@ FWetWrinkleNormalMapComputedResult FWetWrinkleNormalMapBaker::ComputeSnapshot(
     const FWetWrinkleNormalMapBakeSnapshot::FImpl& Snapshot = *SnapshotHandle.Impl;
     if (Snapshot.SurfaceProjectionAlgorithmVersion !=
             DWCEditorSurfacePatchProjectionVersion::SurfaceProjection ||
-        Snapshot.IslandLocalChartAlgorithmVersion !=
-            DWCEditorSurfacePatchProjectionVersion::IslandLocalChart ||
         Snapshot.ProjectedRasterAlgorithmVersion !=
             DWCEditorSurfacePatchProjectionVersion::ProjectedRaster)
     {
         Result.Error = TEXT("The wrinkle bake snapshot uses an obsolete surface projection contract.");
         return Result;
     }
-    if (!Snapshot.SurfacePatches.IsEmpty() && !Snapshot.SurfacePatchProjectionCache.IsValid())
+    if (!Snapshot.PatchCommandInputs.IsEmpty() && !Snapshot.SurfacePatchProjectionCache.IsValid())
     {
         Result.Error = TEXT("The wrinkle bake snapshot lost its required surface projection cache.");
         return Result;
@@ -922,13 +949,41 @@ FWetWrinkleNormalMapComputedResult FWetWrinkleNormalMapBaker::ComputeSnapshot(
         return Result;
     }
 
-    for (const FWetWrinkleBakeSurfacePatchInput& SurfacePatch : Snapshot.SurfacePatches)
+    for (const FWetWrinkleBakePatchCommandInput& PatchCommandInput : Snapshot.PatchCommandInputs)
     {
         FDWCEditorRasterResult RasterResult;
         FString ProjectionError;
+        const EDWCEditorSurfacePatchBoundaryPolicy ExpectedBoundaryPolicy =
+            FDWCEditorWrinklePatchDescriptorBuilder::BuildProjectionSettings(
+                PatchCommandInput.AuthoredMode,
+                PatchCommandInput.RasterInput.Projection.ProjectionDepthLocal,
+                PatchCommandInput.RasterInput.Projection.MaxSurfaceAngleDegrees,
+                PatchCommandInput.RasterInput.Projection.ProjectionDepthSoftness,
+                PatchCommandInput.RasterInput.Projection.ProjectionAngleSoftness)
+                .BoundaryPolicy;
+        const FDWCEditorSurfacePatchProjectionRequest& ProjectionRequest =
+            PatchCommandInput.RasterInput.Projection;
+        if (ProjectionRequest.BoundaryPolicy != ExpectedBoundaryPolicy ||
+            PatchCommandInput.BoundaryPolicy != ExpectedBoundaryPolicy ||
+            !FDWCEditorSurfacePatchProjector::ValidateProjectionContract(
+                ProjectionRequest, &ProjectionError))
+        {
+            Result.Error = FString::Printf(
+                TEXT("Wrinkle patch '%s' (%s) in slot %d has an invalid bake command contract. "
+                     "AuthoredMode=%s, Boundary=%s. %s"),
+                PatchCommandInput.DisplayName.IsEmpty()
+                    ? TEXT("Unnamed Patch")
+                    : *PatchCommandInput.DisplayName,
+                *PatchCommandInput.PatchGuid.ToString(EGuidFormats::Digits),
+                Snapshot.MaterialSlotIndex,
+                GetAuthoredProjectionModeName(PatchCommandInput.AuthoredMode),
+                GetBoundaryPolicyName(ProjectionRequest.BoundaryPolicy),
+                ProjectionError.IsEmpty() ? TEXT("") : *ProjectionError);
+            return Result;
+        }
         FDWCEditorProjectedNormalPatchCommand Command;
         if (!FDWCEditorSurfacePatchRasterBuilder::BuildProjectedPatchCommand(
-            SurfacePatch.RasterInput,
+            PatchCommandInput.RasterInput,
             Command,
             &ProjectionError,
             CancellationToken,
@@ -943,15 +998,27 @@ FWetWrinkleNormalMapComputedResult FWetWrinkleNormalMapBaker::ComputeSnapshot(
             else
             {
                 Result.Error = FString::Printf(
-                    TEXT("Wrinkle patch '%s' (%s) in slot %d, mode %d, anchor triangle %d "
-                         "could not be projected for baking: %s"),
-                    SurfacePatch.DisplayName.IsEmpty() ? TEXT("Unnamed Patch") : *SurfacePatch.DisplayName,
-                    *SurfacePatch.PatchGuid.ToString(EGuidFormats::Digits),
+                    TEXT("Wrinkle patch '%s' (%s) in slot %d could not build its decal command. "
+                         "AuthoredMode=%s, Boundary=%s, AnchorTriangle=%d. %s"),
+                    PatchCommandInput.DisplayName.IsEmpty()
+                        ? TEXT("Unnamed Patch")
+                        : *PatchCommandInput.DisplayName,
+                    *PatchCommandInput.PatchGuid.ToString(EGuidFormats::Digits),
                     Snapshot.MaterialSlotIndex,
-                    SurfacePatch.RasterInput.Projection.bUseSurfaceDecalProjection ? 1 : 0,
-                    SurfacePatch.RasterInput.Projection.AnchorTriangleID,
+                    GetAuthoredProjectionModeName(PatchCommandInput.AuthoredMode),
+                    GetBoundaryPolicyName(ProjectionRequest.BoundaryPolicy),
+                    ProjectionRequest.AnchorTriangleID,
                     ProjectionError.IsEmpty() ? TEXT("unknown surface projection error") : *ProjectionError);
             }
+            return Result;
+        }
+        if (!Command.bUseSurfaceProjectionFilter)
+        {
+            Result.Error = FString::Printf(
+                TEXT("Wrinkle patch '%s' produced a non-decal raster command."),
+                PatchCommandInput.DisplayName.IsEmpty()
+                    ? TEXT("Unnamed Patch")
+                    : *PatchCommandInput.DisplayName);
             return Result;
         }
         RasterResult = FDWCEditorNormalRasterCore::RasterizeProjectedPatch(
@@ -966,8 +1033,10 @@ FWetWrinkleNormalMapComputedResult FWetWrinkleNormalMapBaker::ComputeSnapshot(
         {
             Result.Error = FString::Printf(
                 TEXT("Wrinkle patch '%s' (%s) projected successfully but affected no bake pixels."),
-                SurfacePatch.DisplayName.IsEmpty() ? TEXT("Unnamed Patch") : *SurfacePatch.DisplayName,
-                *SurfacePatch.PatchGuid.ToString(EGuidFormats::Digits));
+                PatchCommandInput.DisplayName.IsEmpty()
+                    ? TEXT("Unnamed Patch")
+                    : *PatchCommandInput.DisplayName,
+                *PatchCommandInput.PatchGuid.ToString(EGuidFormats::Digits));
             return Result;
         }
         ++Result.BakedStampCount;
@@ -1106,9 +1175,6 @@ bool FWetWrinkleNormalMapBaker::CommitComputedResult(
     BakedMap->BakedWrinkleMask = MaskTexture;
     BakedMap->Resolution = Snapshot.FinalTextureSize.X;
     BakedMap->PaddingPixels = Snapshot.PaddingPixels;
-    BakedMap->bHasCoverageAlpha = false;
-    BakedMap->AlphaSemantic = EDWCWrinkleAlphaSemantic::None;
-    BakedMap->AlphaBuildVersion = 0;
     BakedMap->BuildSignature = Snapshot.BuildSignature;
     BakedMap->BakeGuid = FGuid::NewGuid();
 
@@ -1164,10 +1230,9 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
     FString Canonical;
     Canonical.Reserve(4096);
     Canonical += FString::Printf(
-        TEXT("DWC.WrinkleNormalMap.v24.SharedIslandChart")
-        TEXT("|SurfaceProjection=%u|IslandLocalChart=%u|ProjectedRaster=%u|"),
+        TEXT("DWC.WrinkleNormalMap.v25.BoundaryAwareDecal")
+        TEXT("|SurfaceProjection=%u|ProjectedRaster=%u|"),
         DWCEditorSurfacePatchProjectionVersion::SurfaceProjection,
-        DWCEditorSurfacePatchProjectionVersion::IslandLocalChart,
         DWCEditorSurfacePatchProjectionVersion::ProjectedRaster);
     const FDWCDataUVLODMetadata* DataUVMetadata =
         WetClothingAsset.FindDataUVMetadataForLOD(Group.LODIndex);
@@ -1200,10 +1265,19 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
         }
 
         const UTexture2D* NormalTexture = Stamp->WrinkleNormalTexture;
+        const FDWCEditorSurfacePatchProjectionSettings ProjectionSettings =
+            FDWCEditorWrinklePatchDescriptorBuilder::BuildProjectionSettings(
+                Stamp->ProjectionMode,
+                Stamp->ProjectionDepthLocal,
+                Stamp->MaxSurfaceAngleDegrees,
+                Stamp->ProjectionDepthSoftness,
+                Stamp->ProjectionAngleSoftness);
         Canonical += FString::Printf(
-            TEXT("|Stamp:%s;Mode=%d;Depth=%.9g;Angle=%.9g;DepthSoft=%.9g;AngleSoft=%.9g;HasAnchor=%d;Anchor=%d,%.9g,%.9g,%.9g;HasFrame=%d;FrameU=%.9g,%.9g,%.9g;FrameV=%.9g,%.9g,%.9g;HasFootprint=%d;HalfExtent=%.9g,%.9g;UV=%.9g,%.9g;Radius=%.9g;Rot=%.9g;Scale=%.9g,%.9g;Strength=%.9g;Falloff=%.9g;NormalSource=%s"),
+            TEXT("|Stamp:%s;Mode=%d;CoreMode=%d;Boundary=%d;Depth=%.9g;Angle=%.9g;DepthSoft=%.9g;AngleSoft=%.9g;HasAnchor=%d;Anchor=%d,%.9g,%.9g,%.9g;HasFrame=%d;FrameU=%.9g,%.9g,%.9g;FrameV=%.9g,%.9g,%.9g;HasFootprint=%d;HalfExtent=%.9g,%.9g;Rot=%.9g;Scale=%.9g,%.9g;Strength=%.9g;Falloff=%.9g;NormalSource=%s"),
             *Stamp->PatchGuid.ToString(EGuidFormats::Digits),
             static_cast<int32>(Stamp->ProjectionMode),
+            DWCEditorSurfacePatchProjectionVersion::SurfaceDecalSignatureId,
+            static_cast<int32>(ProjectionSettings.BoundaryPolicy),
             Stamp->ProjectionDepthLocal,
             Stamp->MaxSurfaceAngleDegrees,
             Stamp->ProjectionDepthSoftness,
@@ -1223,9 +1297,6 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
             Stamp->bHasSurfaceFootprint ? 1 : 0,
             Stamp->SurfaceHalfExtentLocal.X,
             Stamp->SurfaceHalfExtentLocal.Y,
-            Stamp->PositionUV.X,
-            Stamp->PositionUV.Y,
-            Stamp->BrushRadiusUV,
             Stamp->RotationRadians,
             Stamp->Scale.X,
             Stamp->Scale.Y,

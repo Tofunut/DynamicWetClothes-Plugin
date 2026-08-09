@@ -69,6 +69,9 @@ struct FWetWrinkleHoverPerformanceDiagnostics
     uint64 CandidatePixelCount = 0;
     uint64 RowReferenceCount = 0;
     uint64 EstimatedMemoryBytes = 0;
+    uint64 ProjectionWorkingSetBytes = 0;
+    uint64 ProjectionPrivateResultBytes = 0;
+    uint64 SharedResidentBytes = 0;
     uint64 RetainedPhaseBytes = 0;
     uint64 RasterPhaseMemoryBytes = 0;
     uint64 ActualResultBytes = 0;
@@ -133,8 +136,8 @@ struct FWetWrinkleIncrementalPreviewJobResult final : FDWCEditorWorkerJobResult
     uint64 LastSequence = 0;
     uint64 AffectedPixelCount = 0;
     TArray<FIntRect> ProjectedOutputRects;
+    TOptional<FDWCEditorProjectedNormalPatchCommand> PresentedProjectedPatch;
     TOptional<FWetWrinkleHoverPerformanceDiagnostics> HoverDiagnostics;
-    bool bTouchesUVSeam = false;
 };
 
 /** Lightweight admitted hover payload. Projection and region allocation happen on the worker. */
@@ -160,12 +163,12 @@ struct FWetWrinkleProjectedHoverRasterPlan
     TArray<TArray<int32>> RegionFragmentIndices;
     TArray<FIntRect> CurrentOutputRects;
     FDWCEditorPreviewRegionTarget Target;
-    bool bTouchesUVSeam = false;
     bool bUseSparseRegions = false;
     bool bCollectPerformanceDiagnostics = false;
     FWetWrinkleHoverPerformanceDiagnostics PerformanceDiagnostics;
 
-    uint64 GetRetainedSizeBytes() const;
+    uint64 GetPrivateRetainedSizeBytes() const;
+    uint64 GetSharedResidentSizeBytes() const;
 };
 
 class FWetWrinkleIncrementalPreviewWorker final

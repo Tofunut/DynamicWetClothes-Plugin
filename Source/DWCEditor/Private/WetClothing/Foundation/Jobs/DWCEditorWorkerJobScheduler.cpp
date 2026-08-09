@@ -520,25 +520,28 @@ bool FDWCEditorWorkerJobScheduler::CancelTicket(const FDWCEditorWorkerJobTicket&
             Job->Ticket.SessionEpoch == Ticket.SessionEpoch;
     };
 
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PendingAdmissionJobs)
+    const auto CancelNonRunningTicket = [this, &MatchesTicket](
+        TArray<TSharedRef<FQueuedJob, ESPMode::ThreadSafe>>& Jobs)
     {
-        if (MatchesTicket(Job))
+        const int32 JobIndex = Jobs.IndexOfByPredicate(MatchesTicket);
+        if (JobIndex == INDEX_NONE)
         {
-            RequestJobCancellation(Job);
-            FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Canceled, FString());
-            PumpAdmissions();
-            return true;
+            return false;
         }
-    }
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PendingPhaseAdmissionJobs)
+
+        // Keep a strong local owner before finalization removes the array entry.
+        // Never pass a reference to an element of an array that finalization mutates.
+        TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job = Jobs[JobIndex];
+        RequestJobCancellation(Job);
+        FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Canceled, FString());
+        return true;
+    };
+
+    if (CancelNonRunningTicket(PendingAdmissionJobs) ||
+        CancelNonRunningTicket(PendingPhaseAdmissionJobs))
     {
-        if (MatchesTicket(Job))
-        {
-            RequestJobCancellation(Job);
-            FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Canceled, FString());
-            PumpAdmissions();
-            return true;
-        }
+        PumpAdmissions();
+        return true;
     }
     for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PreparingJobs)
     {
@@ -548,19 +551,14 @@ bool FDWCEditorWorkerJobScheduler::CancelTicket(const FDWCEditorWorkerJobTicket&
             return true;
         }
     }
-    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ReadyJobs)
+    if (CancelNonRunningTicket(ReadyJobs))
     {
-        if (MatchesTicket(Job))
-        {
-            RequestJobCancellation(Job);
-            FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Canceled, FString());
-            PumpAdmissions();
-            return true;
-        }
+        PumpAdmissions();
+        return true;
     }
     for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ActiveJobs)
     {
-        if (MatchesTicket(Job))
+        if (MatchesTicket(Job) && !Job->bFinishedNotified)
         {
             RequestJobCancellation(Job);
             return true;
@@ -906,18 +904,17 @@ void FDWCEditorWorkerJobScheduler::HandleWorkerFinished(
         Completion = EDWCEditorWorkerJobCompletion::Applied;
     }
 
-    NotifyFinished(Job, Completion, ResultError);
     Result.Reset();
     Job->Prepare = nullptr;
     Job->Work = nullptr;
     Job->Apply = nullptr;
-    Job->Finished = nullptr;
     Job->CommitFinishedSeconds = FPlatformTime::Seconds();
     if (Job->OperationState == EDWCEditorAsyncOperationState::Committing)
     {
         TransitionJob(Job, EDWCEditorAsyncOperationState::Retiring);
     }
     MarkCompleted(Job, Completion);
+    NotifyFinished(Job, Completion, ResultError);
     ActiveJobs.RemoveSingle(Job);
     Job->MemoryLease.Reset();
     PumpAdmissions();
@@ -1151,7 +1148,7 @@ void FDWCEditorWorkerJobScheduler::CancelJobsByKey(const FDWCEditorWorkerJobKey&
 }
 
 void FDWCEditorWorkerJobScheduler::FinalizeNonRunningJob(
-    const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
+    TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job,
     const EDWCEditorWorkerJobCompletion Completion,
     const FString& Error)
 {
@@ -1160,26 +1157,23 @@ void FDWCEditorWorkerJobScheduler::FinalizeNonRunningJob(
     PendingPhaseAdmissionJobs.RemoveSingle(Job);
     PreparingJobs.RemoveSingle(Job);
     ReadyJobs.RemoveSingle(Job);
-    NotifyFinished(Job, Completion, Error);
     Job->Prepare = nullptr;
     Job->Work = nullptr;
     Job->Apply = nullptr;
-    Job->Finished = nullptr;
     MarkCompleted(Job, Completion);
+    NotifyFinished(Job, Completion, Error);
     Job->MemoryLease.Reset();
 }
 
 void FDWCEditorWorkerJobScheduler::FinalizeDetachedJob(
-    const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
+    TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job,
     const FString& Error)
 {
     check(IsInGameThread());
     RequestJobCancellation(Job);
-    NotifyFinished(Job, EDWCEditorWorkerJobCompletion::Canceled, Error);
     Job->Prepare = nullptr;
     Job->Work = nullptr;
     Job->Apply = nullptr;
-    Job->Finished = nullptr;
     if (Job->CancellationState == EDWCEditorAsyncCancellationState::CancelRequested)
     {
         FDWCEditorAsyncOperationContract::ValidateCancellationTransition(
@@ -1190,11 +1184,12 @@ void FDWCEditorWorkerJobScheduler::FinalizeDetachedJob(
     }
     TransitionJob(Job, EDWCEditorAsyncOperationState::Completed);
     Job->LifecycleState = EDWCEditorWorkerJobLifecycleState::Completed;
+    NotifyFinished(Job, EDWCEditorWorkerJobCompletion::Canceled, Error);
     Job->MemoryLease.Reset();
 }
 
 void FDWCEditorWorkerJobScheduler::NotifyFinished(
-    const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
+    TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job,
     const EDWCEditorWorkerJobCompletion Completion,
     const FString& Error)
 {
@@ -1205,9 +1200,10 @@ void FDWCEditorWorkerJobScheduler::NotifyFinished(
     Job->bFinishedNotified = true;
     Job->Completion = Completion;
     Job->CompletionError = Error;
-    if (Job->Finished)
+    FFinished Finished = MoveTemp(Job->Finished);
+    if (Finished)
     {
-        Job->Finished(Job->Ticket, Completion, Error);
+        Finished(Job->Ticket, Completion, Error);
     }
 }
 

@@ -81,6 +81,26 @@ struct FWetProceduralRidgeTransientPreviewState
     uint64 RequestSerial = 0;
 };
 
+struct FWetWrinklePresentedPatchPayload
+{
+    FDWCEditorWrinklePatchDescriptor Descriptor;
+    FDWCEditorProjectedNormalPatchCommand ProjectedPatch;
+
+    bool IsValid() const
+    {
+        return Descriptor.IsValid() && Descriptor.HasCurrentNormalTextureContent() &&
+            ProjectedPatch.IsValid();
+    }
+};
+
+enum class EWetWrinklePatchHandoffState : uint8
+{
+    Idle,
+    AwaitingAccumulatedCommit,
+    AwaitingAccumulatedUpload,
+    RecoveringFullRebuild
+};
+
 struct FWetWrinklePatchHoverPreviewState
 {
     int32 MaterialSlotIndex = INDEX_NONE;
@@ -95,18 +115,23 @@ struct FWetWrinklePatchHoverPreviewState
     uint64 RequestSerial = 0;
     uint32 RequestHash = 0;
     TOptional<FDWCEditorWrinklePatchDescriptor> RequestedDescriptor;
-    TOptional<FDWCEditorWrinklePatchDescriptor> PresentedDescriptor;
-    TOptional<FDWCEditorWrinklePatchDescriptor> PendingPresentedDescriptor;
+    TOptional<FWetWrinklePresentedPatchPayload> PresentedPayload;
+    TOptional<FWetWrinklePresentedPatchPayload> PendingPresentedPayload;
     FDWCEditorTextureUploadTicket PendingPresentationUpload;
     FDWCEditorTextureUploadObserverHandle PendingPresentationObserver;
     TOptional<FWetWrinkleHoverPerformanceDiagnostics> PendingPerformanceDiagnostics;
-    bool bPendingTouchesUVSeam = false;
     FDWCEditorTextureUploadTicket PendingAccumulatedUpload;
     uint64 PendingAccumulatedSequence = 0;
     uint64 PendingAccumulatedContentRevision = 0;
-    bool bCommitHandoffPending = false;
+    EWetWrinklePatchHandoffState HandoffState = EWetWrinklePatchHandoffState::Idle;
+    int32 HandoffRecoveryAttempts = 0;
     bool bPresentationSwapPending = false;
     bool bBound = false;
+
+    bool IsCommitHandoffPending() const
+    {
+        return HandoffState != EWetWrinklePatchHandoffState::Idle;
+    }
 };
 
 class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDWCEditorSurfaceToolTarget
@@ -147,7 +172,6 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     void SetShowBakedTransparency(bool bInShowBakedTransparency);
     void RefreshStoredStampOverlay(bool bRebuildAccumulatedPreview = true);
     void InvalidateAccumulatedPreviewTextures();
-    void AppendAccumulatedPreviewStamp(const FWetWrinklePatchPlacement& Stamp);
     void AppendAccumulatedPreviewProceduralStroke(const FWetProceduralRidgeStroke& Stroke);
     void SetGeneratedNormalPreviewTexture(
         int32 MaterialSlotIndex,
@@ -238,6 +262,9 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     void QueueAccumulatedIncrementalCommand(
         FWetWrinkleAccumulatedPreviewState& PreviewState,
         FWetWrinkleIncrementalCommand&& Command);
+    bool AppendPresentedPatchToAccumulatedPreview(
+        const FWetWrinklePatchPlacement& Stamp,
+        const FDWCEditorProjectedNormalPatchCommand& ProjectedPatch);
     bool ScheduleAccumulatedIncrementalPreview(FWetWrinkleAccumulatedPreviewState& PreviewState);
     void InvalidateAccumulatedIncrementalState(FWetWrinkleAccumulatedPreviewState& PreviewState);
     void ResetTransientProceduralPreviewResources();
@@ -255,9 +282,12 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     bool CommitPresentedPatch();
     void CompletePatchHoverHandoff(
         int32 MaterialSlotIndex,
+        int32 UVChannelIndex,
         const FDWCEditorTextureUploadTicket& UploadTicket,
         uint64 LastAppliedSequence,
         uint64 AppliedContentRevision = 0);
+    void RecoverPatchHoverHandoff(EDWCEditorPreviewInvalidationReason Reason);
+    void FinishPatchHoverHandoff();
     void ResetPatchHoverPreviewState();
     void ApplyPatchHoverPreviewLayer();
     void RecordPatchHoverDiagnostics(FWetWrinkleHoverPerformanceDiagnostics Diagnostics);
@@ -295,7 +325,6 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     FWetProceduralRidgeTransientPreviewState TransientProceduralPreviewState;
     FWetWrinklePatchHoverPreviewState PatchHoverPreviewState;
     TSharedPtr<STextBlock> OverlayText;
-    bool bNonUVSeamBrushCrossesSeam = false;
     FDWCEditorSpatialLease SpatialLease;
     FDWCEditorSpatialHandle SpatialHandle;
     uint64 PreviewMeshRefreshCount = 0;

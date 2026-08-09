@@ -24,13 +24,13 @@ bool FDWCEditorSurfacePatchRasterBuilder::BuildProjectedPatchCommand(
         return false;
     }
 
-    FDWCEditorSurfacePatchProjectionHandle Geometry;
+    FDWCEditorSurfacePatchProjectionLease ProjectionLease;
     if (ProjectionCache != nullptr)
     {
         if (!ProjectionCache->Resolve(
                 Input.Projection,
                 CachePolicy,
-                Geometry,
+                ProjectionLease,
                 OutError,
                 CancellationToken))
         {
@@ -59,25 +59,26 @@ bool FDWCEditorSurfacePatchRasterBuilder::BuildProjectedPatchCommand(
         NewGeometry->TraversedSeamCount = Projection.TraversedSeamCount;
         NewGeometry->PeakWorkingSetBytes = Projection.PeakWorkingSetBytes;
         NewGeometry->Diagnostics = Projection.Diagnostics;
-        Geometry = MoveTemp(NewGeometry);
+        ProjectionLease.Geometry = MoveTemp(NewGeometry);
     }
 
-    if (Geometry.IsValid() && Geometry->Diagnostics.bDetailed &&
-        Geometry->Diagnostics.HasContinuityIssue())
+    if (ProjectionLease.IsValid() && ProjectionLease->Diagnostics.bDetailed &&
+        ProjectionLease->Diagnostics.HasContinuityIssue())
     {
-        const FDWCEditorSurfacePatchProjectionDiagnostics& Diagnostics = Geometry->Diagnostics;
+        const FDWCEditorSurfacePatchProjectionDiagnostics& Diagnostics =
+            ProjectionLease->Diagnostics;
         UE_LOG(LogDWCWrinkleProjectionDiagnostics, Warning,
             TEXT("Surface projection discontinuity: slot=%d anchor=%d visited=%d fragments=%d "
                  "regular=%d seam=%d boundary=%d blocked=%d internalBoundary=%d internalBlocked=%d "
                  "failedUnfold=%d pathMismatch=%d/%d maxPathError=%.6g "
                  "sharedMismatch=%d/%d maxSharedError=%.6g degenerate=%d flipped=%d "
-                 "projectionMs=%.3f validationMs=%.3f "
-                 "chart={attempted:%s,success:%s,status:%u,vertices:%d,triangles:%d,"
-                 "loopMismatch:%d,maxResidual:%.6g,buildMs:%.3f,workingBytes:%llu,resultBytes:%llu}"),
+                 "interior={footprint:%d,depth:%d} tangentDegenerate=%d "
+                 "projectorVertexMismatch=%d maxProjectorVertexError=%.6g "
+                 "projectionMs=%.3f validationMs=%.3f"),
             Input.Projection.MaterialSlotIndex,
             Input.Projection.AnchorTriangleID,
-            Geometry->VisitedTriangleCount,
-            Geometry->Fragments.Num(),
+            ProjectionLease->VisitedTriangleCount,
+            ProjectionLease->Fragments.Num(),
             Diagnostics.RegularEdgeCount,
             Diagnostics.UVSeamEdgeCount,
             Diagnostics.BoundaryEdgeCount,
@@ -93,24 +94,25 @@ bool FDWCEditorSurfacePatchRasterBuilder::BuildProjectedPatchCommand(
             Diagnostics.MaxSharedCoordinateError,
             Diagnostics.DegenerateFragmentCount,
             Diagnostics.FlippedFragmentCount,
+            Diagnostics.InteriorFootprintCandidateCount,
+            Diagnostics.InteriorDepthCandidateCount,
+            Diagnostics.DegenerateTangentFrameCount,
+            Diagnostics.SharedProjectorVertexMismatchCount,
+            Diagnostics.MaxSharedProjectorVertexError,
             Diagnostics.ProjectionMilliseconds,
-            Diagnostics.ContinuityValidationMilliseconds,
-            Diagnostics.bIslandChartBuildAttempted ? TEXT("true") : TEXT("false"),
-            Diagnostics.bIslandChartBuildSucceeded ? TEXT("true") : TEXT("false"),
-            Diagnostics.IslandChartStatus,
-            Diagnostics.IslandChartVertexCount,
-            Diagnostics.IslandChartTriangleCount,
-            Diagnostics.IslandChartLoopMismatchCount,
-            Diagnostics.IslandChartMaxLoopResidual,
-            Diagnostics.IslandChartBuildMilliseconds,
-            Diagnostics.IslandChartPeakWorkingSetBytes,
-            Diagnostics.IslandChartResultBytes);
+            Diagnostics.ContinuityValidationMilliseconds);
     }
 
-    OutCommand.SharedProjection = MoveTemp(Geometry);
+    OutCommand.ProjectionLease = MoveTemp(ProjectionLease);
     OutCommand.NormalSource = Input.NormalSource;
     OutCommand.CoverageSource = Input.CoverageSource;
     OutCommand.Strength = Input.Strength;
     OutCommand.Falloff = Input.Falloff;
+    OutCommand.bUseSurfaceProjectionFilter = true;
+    OutCommand.ProjectionDepthLocal = Input.Projection.ProjectionDepthLocal;
+    OutCommand.MaxSurfaceAngleRadians =
+        FMath::DegreesToRadians(Input.Projection.MaxSurfaceAngleDegrees);
+    OutCommand.ProjectionDepthSoftness = Input.Projection.ProjectionDepthSoftness;
+    OutCommand.ProjectionAngleSoftness = Input.Projection.ProjectionAngleSoftness;
     return true;
 }

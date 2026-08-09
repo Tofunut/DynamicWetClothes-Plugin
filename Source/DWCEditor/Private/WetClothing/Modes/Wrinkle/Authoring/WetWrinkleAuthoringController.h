@@ -15,6 +15,7 @@ struct FWetWrinklePatchCommitResult
 {
     bool bSucceeded = false;
     FGuid PatchGuid;
+    FWetWrinklePatchPlacement Placement;
     FString FailureReason;
 };
 

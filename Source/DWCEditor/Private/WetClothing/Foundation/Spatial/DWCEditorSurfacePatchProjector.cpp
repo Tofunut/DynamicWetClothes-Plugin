@@ -2,7 +2,6 @@
 #include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjector.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
-#include "WetClothing/Foundation/Spatial/DWCEditorIslandLocalGeodesicChartBuilder.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
 
 namespace DWCEditorSurfacePatchProjectorPrivate
@@ -156,15 +155,14 @@ namespace DWCEditorSurfacePatchProjectorPrivate
         return !(bHasNegative && bHasPositive);
     }
 
-    bool IntersectsUnitFootprint(
-        const FVector2f PhysicalCoordinates[3],
-        const FVector2f& EffectiveExtent)
+    bool IntersectsCircularFootprint(
+        const FVector2f Coordinates[3],
+        const float Radius)
     {
-        FVector2f Coordinates[3];
+        const float RadiusSquared = Radius * Radius;
         for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
         {
-            Coordinates[CornerIndex] = PhysicalCoordinates[CornerIndex] / EffectiveExtent;
-            if (Coordinates[CornerIndex].SizeSquared() <= 1.0f + ProjectionTolerance)
+            if (Coordinates[CornerIndex].SizeSquared() <= RadiusSquared + ProjectionTolerance)
             {
                 return true;
             }
@@ -182,12 +180,85 @@ namespace DWCEditorSurfacePatchProjectorPrivate
             if (PointSegmentDistanceSquared(
                     FVector2f::ZeroVector,
                     Coordinates[EdgeIndex],
-                    Coordinates[(EdgeIndex + 1) % 3]) <= 1.0f + ProjectionTolerance)
+                    Coordinates[(EdgeIndex + 1) % 3]) <= RadiusSquared + ProjectionTolerance)
             {
                 return true;
             }
         }
         return false;
+    }
+
+    bool IntersectsUnitFootprint(
+        const FVector2f PhysicalCoordinates[3],
+        const FVector2f& EffectiveExtent)
+    {
+        const FVector2f Coordinates[3] = {
+            PhysicalCoordinates[0] / EffectiveExtent,
+            PhysicalCoordinates[1] / EffectiveExtent,
+            PhysicalCoordinates[2] / EffectiveExtent
+        };
+        return IntersectsCircularFootprint(Coordinates, 1.0f);
+    }
+
+    bool IntersectsSymmetricDepthInterval(
+        const float SignedDepths[3],
+        const float Limit)
+    {
+        const float MinDepth = FMath::Min3(SignedDepths[0], SignedDepths[1], SignedDepths[2]);
+        const float MaxDepth = FMath::Max3(SignedDepths[0], SignedDepths[1], SignedDepths[2]);
+        return MinDepth <= Limit + ProjectionTolerance &&
+            MaxDepth >= -Limit - ProjectionTolerance;
+    }
+
+    bool BuildProjectedPatchAxes(
+        const FVector3f& PatchU,
+        const FVector3f& PatchV,
+        const FVector3f& SurfaceNormal,
+        const FVector3f& TargetTangent,
+        const FVector3f& TargetBitangent,
+        FVector2f& OutAxisU,
+        FVector2f& OutAxisV)
+    {
+        const FVector3f Normal = SurfaceNormal.GetSafeNormal();
+        if (Normal.IsNearlyZero())
+        {
+            return false;
+        }
+
+        FVector3f SurfaceU = PatchU - Normal * FVector3f::DotProduct(PatchU, Normal);
+        FVector3f SurfaceVHint = PatchV - Normal * FVector3f::DotProduct(PatchV, Normal);
+        if (!SurfaceU.Normalize())
+        {
+            if (!SurfaceVHint.Normalize())
+            {
+                return false;
+            }
+            SurfaceU = FVector3f::CrossProduct(SurfaceVHint, Normal).GetSafeNormal();
+        }
+        FVector3f SurfaceV = SurfaceVHint -
+            SurfaceU * FVector3f::DotProduct(SurfaceVHint, SurfaceU);
+        if (!SurfaceV.Normalize())
+        {
+            SurfaceV = FVector3f::CrossProduct(Normal, SurfaceU).GetSafeNormal();
+        }
+        if (SurfaceV.IsNearlyZero())
+        {
+            return false;
+        }
+
+        const FVector3f Tangent = TargetTangent.GetSafeNormal();
+        const FVector3f Bitangent = TargetBitangent.GetSafeNormal();
+        if (Tangent.IsNearlyZero() || Bitangent.IsNearlyZero())
+        {
+            return false;
+        }
+        OutAxisU = FVector2f(
+            FVector3f::DotProduct(SurfaceU, Tangent),
+            FVector3f::DotProduct(SurfaceU, Bitangent));
+        OutAxisV = FVector2f(
+            FVector3f::DotProduct(SurfaceV, Tangent),
+            FVector3f::DotProduct(SurfaceV, Bitangent));
+        return !OutAxisU.IsNearlyZero() && !OutAxisV.IsNearlyZero();
     }
 
     bool FindSharedCorners(
@@ -608,81 +679,6 @@ namespace DWCEditorSurfacePatchProjectorPrivate
             (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
     }
 
-    void BuildIslandChartShadowDiagnostics(
-        const FDWCEditorSurfacePatchProjectionRequest& Request,
-        const FVector2f& EffectiveExtent,
-        FDWCEditorSurfacePatchProjectionResult& Result,
-        const FDWCEditorCancellationToken* CancellationToken)
-    {
-        FDWCEditorSurfacePatchProjectionDiagnostics& Diagnostics = Result.Diagnostics;
-        if (!Diagnostics.bDetailed || Request.bUseSurfaceDecalProjection ||
-            !Request.SpatialHandle.IsValid())
-        {
-            return;
-        }
-
-        FDWCEditorIslandLocalChartRequest ChartRequest;
-        ChartRequest.SpatialHandle = Request.SpatialHandle;
-        ChartRequest.MaterialSlotIndex = Request.MaterialSlotIndex;
-        ChartRequest.AnchorTriangleID = Request.AnchorTriangleID;
-        ChartRequest.AnchorBarycentric = Request.AnchorBarycentric;
-        ChartRequest.SurfaceFrameU = Request.SurfaceFrameU;
-        ChartRequest.SurfaceFrameV = Request.SurfaceFrameV;
-        ChartRequest.GeodesicRadiusLocal = EffectiveExtent.Size();
-        ChartRequest.MaxVisitedTriangles = Request.MaxVisitedTriangles;
-        ChartRequest.MaxWorkingSetBytes = Request.MaxWorkingSetBytes;
-        ChartRequest.MaxResultBytes = Request.MaxResultBytes;
-
-        const uint64 LookupKey = MakeSurfacePatchTriangleLookupKey(
-            Request.MaterialSlotIndex, Request.AnchorTriangleID);
-        if (const int32* AnchorIndex = Request.SpatialHandle->TriangleLookup.Find(LookupKey))
-        {
-            if (Request.SpatialHandle->Triangles.IsValidIndex(*AnchorIndex))
-            {
-                const FDWCEditorSpatialTriangle& Anchor =
-                    Request.SpatialHandle->Triangles[*AnchorIndex];
-                ChartRequest.NeighborhoodMarginLocal = FMath::Max3(
-                    FVector3f::Distance(Anchor.LocalPositions[0], Anchor.LocalPositions[1]),
-                    FVector3f::Distance(Anchor.LocalPositions[1], Anchor.LocalPositions[2]),
-                    FVector3f::Distance(Anchor.LocalPositions[2], Anchor.LocalPositions[0]));
-            }
-        }
-
-        Diagnostics.bIslandChartBuildAttempted = true;
-        const FDWCEditorIslandLocalChartResult ChartResult =
-            FDWCEditorIslandLocalGeodesicChartBuilder::Build(ChartRequest, CancellationToken);
-        Diagnostics.IslandChartStatus = static_cast<uint8>(ChartResult.Status);
-        Diagnostics.bIslandChartBuildSucceeded = ChartResult.IsSuccess();
-        if (!ChartResult.IsSuccess())
-        {
-            return;
-        }
-        const FDWCEditorIslandLocalGeodesicChart& Chart = *ChartResult.Chart;
-        Diagnostics.IslandChartVertexCount = Chart.Vertices.Num();
-        Diagnostics.IslandChartTriangleCount = Chart.Triangles.Num();
-        Diagnostics.IslandChartLoopMismatchCount =
-            Chart.Diagnostics.DiscontinuousLoopClosureCount;
-        Diagnostics.IslandChartMaxLoopResidual = Chart.Diagnostics.MaxLoopClosureResidual;
-        Diagnostics.IslandChartBuildMilliseconds = Chart.Diagnostics.TotalMilliseconds;
-        Diagnostics.IslandChartPeakWorkingSetBytes = Chart.Diagnostics.PeakWorkingSetBytes;
-        Diagnostics.IslandChartResultBytes = Chart.Diagnostics.ResultBytes;
-    }
-
-    float SmoothProjectionWeight(const float Value, const float Limit, const float Softness)
-    {
-        if (Value >= Limit || Limit <= UE_SMALL_NUMBER)
-        {
-            return 0.0f;
-        }
-        const float FadeStart = Limit * (1.0f - FMath::Clamp(Softness, 0.0f, 1.0f));
-        if (Value <= FadeStart || FMath::IsNearlyEqual(FadeStart, Limit))
-        {
-            return 1.0f;
-        }
-        const float T = FMath::Clamp((Value - FadeStart) / (Limit - FadeStart), 0.0f, 1.0f);
-        return 1.0f - T * T * (3.0f - 2.0f * T);
-    }
-
     FDWCEditorSurfacePatchProjectionResult ProjectSurfaceDecal(
         const FDWCEditorSurfacePatchProjectionRequest& Request,
         const FDWCEditorCancellationToken* CancellationToken)
@@ -720,6 +716,16 @@ namespace DWCEditorSurfacePatchProjectorPrivate
         }
 
         const FDWCEditorSpatialTriangle& AnchorTriangle = Spatial->Triangles[*AnchorIndex];
+        const bool bAnchorIslandOnly =
+            Request.BoundaryPolicy ==
+                EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly;
+        const int32 AnchorUVIslandID = AnchorTriangle.UVIslandID;
+        if (bAnchorIslandOnly && AnchorUVIslandID == INDEX_NONE)
+        {
+            SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidRequest,
+                TEXT("The anchor-island decal request has no valid anchor UV island."));
+            return Result;
+        }
         const FVector3f AnchorPosition =
             AnchorTriangle.LocalPositions[0] * AnchorBarycentric.X +
             AnchorTriangle.LocalPositions[1] * AnchorBarycentric.Y +
@@ -742,13 +748,34 @@ namespace DWCEditorSurfacePatchProjectorPrivate
         const float SinRotation = FMath::Sin(Request.RotationRadians);
         const FVector3f PatchU = FrameU * CosRotation + FrameV * SinRotation;
         const FVector3f PatchV = FrameV * CosRotation - FrameU * SinRotation;
-        const float MaxAngleRadians = FMath::DegreesToRadians(Request.MaxSurfaceAngleDegrees);
+        struct FSharedProjectorVertexSample
+        {
+            FVector3f LocalPosition = FVector3f::ZeroVector;
+            FVector2f PatchCoordinate = FVector2f::ZeroVector;
+            float SignedDepth = 0.0f;
+        };
 
         TArray<int32> Frontier;
         Frontier.Add(*AnchorIndex);
         TSet<int32> Visited;
         Visited.Reserve(256);
         TSet<int32> AffectedIslands;
+        TMap<int64, FSharedProjectorVertexSample> SharedProjectorVertices;
+        SharedProjectorVertices.Reserve(256);
+        const auto UpdateWorkingSet = [&]()
+        {
+            Result.PeakWorkingSetBytes = FMath::Max<uint64>(
+                Result.PeakWorkingSetBytes,
+                Visited.GetAllocatedSize() + Frontier.GetAllocatedSize() +
+                    AffectedIslands.GetAllocatedSize() + SharedProjectorVertices.GetAllocatedSize());
+            if (Result.PeakWorkingSetBytes > Request.MaxWorkingSetBytes)
+            {
+                SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::TraversalBudgetExceeded,
+                    TEXT("The surface decal traversal exceeded its memory budget."));
+                return false;
+            }
+            return true;
+        };
         const int32 VisitLimit = Request.MaxVisitedTriangles > 0
             ? FMath::Min(Request.MaxVisitedTriangles, Spatial->Triangles.Num())
             : Spatial->Triangles.Num();
@@ -775,46 +802,88 @@ namespace DWCEditorSurfacePatchProjectorPrivate
             Visited.Add(TriangleIndex);
             ++Result.VisitedTriangleCount;
             const FDWCEditorSpatialTriangle& Triangle = Spatial->Triangles[TriangleIndex];
-            if (Triangle.MaterialSlotIndex != Request.MaterialSlotIndex)
+            if (Triangle.MaterialSlotIndex != Request.MaterialSlotIndex ||
+                (bAnchorIslandOnly && Triangle.UVIslandID != AnchorUVIslandID))
             {
                 continue;
             }
 
             FVector2f PatchCoordinates[3];
-            float Depths[3];
-            float Influences[3];
-            bool bWithinTraversalVolume = false;
+            float SignedDepths[3];
+            bool bHasCornerInsideFootprint = false;
+            bool bHasCornerInsideDepth = false;
             for (int32 Corner = 0; Corner < 3; ++Corner)
             {
                 const FVector3f Delta = Triangle.LocalPositions[Corner] - AnchorPosition;
-                PatchCoordinates[Corner] = FVector2f(
+                const FVector2f ComputedCoordinate(
                     FVector3f::DotProduct(Delta, PatchU) / EffectiveExtent.X,
                     FVector3f::DotProduct(Delta, PatchV) / EffectiveExtent.Y);
-                Depths[Corner] = FMath::Abs(FVector3f::DotProduct(Delta, AnchorNormal));
-                const float NormalDot = FMath::Clamp(
-                    FVector3f::DotProduct(Triangle.LocalNormals[Corner].GetSafeNormal(), AnchorNormal),
-                    -1.0f,
-                    1.0f);
-                const float Angle = FMath::Acos(NormalDot);
-                Influences[Corner] =
-                    SmoothProjectionWeight(
-                        Depths[Corner], Request.ProjectionDepthLocal, Request.ProjectionDepthSoftness) *
-                    SmoothProjectionWeight(
-                        Angle, MaxAngleRadians, Request.ProjectionAngleSoftness);
-                bWithinTraversalVolume = bWithinTraversalVolume ||
-                    (PatchCoordinates[Corner].SizeSquared() <= 1.21f &&
-                     Depths[Corner] <= Request.ProjectionDepthLocal * 1.1f);
+                const float ComputedSignedDepth =
+                    FVector3f::DotProduct(Delta, AnchorNormal);
+                const int64 TopologyVertexID = Triangle.TopologyVertexIDs[Corner];
+                if (TopologyVertexID != INDEX_NONE)
+                {
+                    if (const FSharedProjectorVertexSample* SharedSample =
+                            SharedProjectorVertices.Find(TopologyVertexID))
+                    {
+                        PatchCoordinates[Corner] = SharedSample->PatchCoordinate;
+                        SignedDepths[Corner] = SharedSample->SignedDepth;
+                        if (Result.Diagnostics.bDetailed)
+                        {
+                            const float PositionError = FVector3f::Distance(
+                                Triangle.LocalPositions[Corner], SharedSample->LocalPosition);
+                            Result.Diagnostics.MaxSharedProjectorVertexError = FMath::Max(
+                                Result.Diagnostics.MaxSharedProjectorVertexError,
+                                PositionError);
+                            if (PositionError > ProjectionTolerance)
+                            {
+                                ++Result.Diagnostics.SharedProjectorVertexMismatchCount;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        FSharedProjectorVertexSample& NewSharedSample =
+                            SharedProjectorVertices.Add(TopologyVertexID);
+                        NewSharedSample.LocalPosition = Triangle.LocalPositions[Corner];
+                        NewSharedSample.PatchCoordinate = ComputedCoordinate;
+                        NewSharedSample.SignedDepth = ComputedSignedDepth;
+                        PatchCoordinates[Corner] = ComputedCoordinate;
+                        SignedDepths[Corner] = ComputedSignedDepth;
+                    }
+                }
+                else
+                {
+                    PatchCoordinates[Corner] = ComputedCoordinate;
+                    SignedDepths[Corner] = ComputedSignedDepth;
+                }
+                bHasCornerInsideFootprint = bHasCornerInsideFootprint ||
+                    PatchCoordinates[Corner].SizeSquared() <= 1.0f + ProjectionTolerance;
+                bHasCornerInsideDepth = bHasCornerInsideDepth ||
+                    FMath::Abs(SignedDepths[Corner]) <=
+                        Request.ProjectionDepthLocal + ProjectionTolerance;
             }
 
-            const FVector2f PhysicalCoordinates[3] = {
-                PatchCoordinates[0] * EffectiveExtent,
-                PatchCoordinates[1] * EffectiveExtent,
-                PatchCoordinates[2] * EffectiveExtent
-            };
-            const bool bIntersectsFootprint = IntersectsUnitFootprint(PhysicalCoordinates, EffectiveExtent);
-            const bool bHasInfluence = Influences[0] > UE_SMALL_NUMBER ||
-                Influences[1] > UE_SMALL_NUMBER || Influences[2] > UE_SMALL_NUMBER;
-            if (bIntersectsFootprint && bHasInfluence)
+            const bool bIntersectsFootprint =
+                IntersectsCircularFootprint(PatchCoordinates, 1.0f);
+            const bool bIntersectsDepth = IntersectsSymmetricDepthInterval(
+                SignedDepths, Request.ProjectionDepthLocal);
+            const bool bIntersectsTraversalFootprint =
+                IntersectsCircularFootprint(PatchCoordinates, 1.1f);
+            const bool bIntersectsTraversalDepth = IntersectsSymmetricDepthInterval(
+                SignedDepths, Request.ProjectionDepthLocal * 1.1f);
+            if (Result.Diagnostics.bDetailed)
+            {
+                if (bIntersectsFootprint && !bHasCornerInsideFootprint)
+                {
+                    ++Result.Diagnostics.InteriorFootprintCandidateCount;
+                }
+                if (bIntersectsDepth && !bHasCornerInsideDepth)
+                {
+                    ++Result.Diagnostics.InteriorDepthCandidateCount;
+                }
+            }
+            if (bIntersectsFootprint && bIntersectsDepth)
             {
                 FDWCEditorSurfacePatchFragment& Fragment = Result.Fragments.AddDefaulted_GetRef();
                 Fragment.TriangleIndex = TriangleIndex;
@@ -824,16 +893,28 @@ namespace DWCEditorSurfacePatchProjectorPrivate
                 {
                     Fragment.TargetUVs[Corner] = Triangle.UVs[Corner];
                     Fragment.PatchCoordinates[Corner] = PatchCoordinates[Corner];
-                    Fragment.ProjectionInfluence[Corner] = Influences[Corner];
+                    Fragment.SignedProjectionDepth[Corner] = SignedDepths[Corner];
                     Fragment.TargetUVBounds += Triangle.UVs[Corner];
-                    const FVector3f Tangent = Triangle.LocalTangents[Corner].GetSafeNormal();
-                    const FVector3f Bitangent = Triangle.LocalBitangents[Corner].GetSafeNormal();
-                    Fragment.PatchAxisUInTargetTangent[Corner] = FVector2f(
-                        FVector3f::DotProduct(PatchU, Tangent),
-                        FVector3f::DotProduct(PatchU, Bitangent));
-                    Fragment.PatchAxisVInTargetTangent[Corner] = FVector2f(
-                        FVector3f::DotProduct(PatchV, Tangent),
-                        FVector3f::DotProduct(PatchV, Bitangent));
+                    const FVector3f SurfaceNormal =
+                        Triangle.LocalNormals[Corner].GetSafeNormal(
+                            UE_SMALL_NUMBER, Triangle.LocalNormal);
+                    Fragment.SurfaceNormalInProjectorSpace[Corner] = FVector3f(
+                        FVector3f::DotProduct(SurfaceNormal, PatchU),
+                        FVector3f::DotProduct(SurfaceNormal, PatchV),
+                        FVector3f::DotProduct(SurfaceNormal, AnchorNormal));
+                    if (!BuildProjectedPatchAxes(
+                            PatchU,
+                            PatchV,
+                            SurfaceNormal,
+                            Triangle.LocalTangents[Corner],
+                            Triangle.LocalBitangents[Corner],
+                            Fragment.PatchAxisUInTargetTangent[Corner],
+                            Fragment.PatchAxisVInTargetTangent[Corner]))
+                    {
+                        ++Result.Diagnostics.DegenerateTangentFrameCount;
+                        Fragment.PatchAxisUInTargetTangent[Corner] = FVector2f(1.0f, 0.0f);
+                        Fragment.PatchAxisVInTargetTangent[Corner] = FVector2f(0.0f, 1.0f);
+                    }
                 }
                 AffectedIslands.Add(Triangle.UVIslandID);
                 if (Result.GetAllocatedSizeBytes() > Request.MaxResultBytes)
@@ -844,7 +925,11 @@ namespace DWCEditorSurfacePatchProjectorPrivate
                 }
             }
 
-            if (!bWithinTraversalVolume && !bIntersectsFootprint)
+            if (!UpdateWorkingSet())
+            {
+                return Result;
+            }
+            if (!bIntersectsTraversalFootprint || !bIntersectsTraversalDepth)
             {
                 continue;
             }
@@ -852,10 +937,16 @@ namespace DWCEditorSurfacePatchProjectorPrivate
             {
                 const int32 Adjacent = Triangle.AdjacentTriangleIndices[Edge];
                 const EDWCEditorSpatialEdgeType EdgeType = Triangle.EdgeTypes[Edge];
-                if ((EdgeType == EDWCEditorSpatialEdgeType::Regular ||
-                     (Request.bAllowUVSeamTraversal &&
-                      EdgeType == EDWCEditorSpatialEdgeType::UVSeam)) &&
-                    Spatial->Triangles.IsValidIndex(Adjacent) && !Visited.Contains(Adjacent) &&
+                const bool bTraversableEdge =
+                    EdgeType == EDWCEditorSpatialEdgeType::Regular ||
+                    (Request.BoundaryPolicy ==
+                         EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams &&
+                     EdgeType == EDWCEditorSpatialEdgeType::UVSeam);
+                const bool bValidAdjacent = Spatial->Triangles.IsValidIndex(Adjacent);
+                const bool bAllowedAdjacentIsland = !bValidAdjacent || !bAnchorIslandOnly ||
+                    Spatial->Triangles[Adjacent].UVIslandID == AnchorUVIslandID;
+                if (bTraversableEdge && bValidAdjacent && bAllowedAdjacentIsland &&
+                    !Visited.Contains(Adjacent) &&
                     Spatial->Triangles[Adjacent].MaterialSlotIndex == Request.MaterialSlotIndex)
                 {
                     Frontier.Add(Adjacent);
@@ -865,13 +956,8 @@ namespace DWCEditorSurfacePatchProjectorPrivate
                     }
                 }
             }
-            Result.PeakWorkingSetBytes = FMath::Max<uint64>(
-                Result.PeakWorkingSetBytes,
-                Visited.GetAllocatedSize() + Frontier.GetAllocatedSize() + AffectedIslands.GetAllocatedSize());
-            if (Result.PeakWorkingSetBytes > Request.MaxWorkingSetBytes)
+            if (!UpdateWorkingSet())
             {
-                SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::TraversalBudgetExceeded,
-                    TEXT("The surface decal traversal exceeded its memory budget."));
                 return Result;
             }
         }
@@ -893,349 +979,7 @@ namespace DWCEditorSurfacePatchProjectorPrivate
     }
 }
 
-namespace DWCEditorSurfacePatchProjectorPrivate
-{
-FDWCEditorSurfacePatchProjectionResult ProjectLegacyTriangleUnfolding(
-    const FDWCEditorSurfacePatchProjectionRequest& Request,
-    const FDWCEditorCancellationToken* CancellationToken)
-{
-    using namespace DWCEditorSurfacePatchProjectorPrivate;
-
-    if (Request.bUseSurfaceDecalProjection)
-    {
-        return ProjectSurfaceDecal(Request, CancellationToken);
-    }
-
-    FDWCEditorSurfacePatchProjectionResult Result;
-    const double ProjectionStartSeconds = Request.bCollectDetailedDiagnostics
-        ? FPlatformTime::Seconds()
-        : 0.0;
-    Result.Diagnostics.bDetailed = Request.bCollectDetailedDiagnostics;
-    const FDWCEditorSpatialHandle& Spatial = Request.SpatialHandle;
-    if (!Spatial.IsValid())
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidSpatialHandle,
-            TEXT("The surface patch projection has no valid spatial payload."));
-        return Result;
-    }
-
-    FVector3f AnchorBarycentric;
-    const FVector2f EffectiveExtent(
-        Request.SurfaceHalfExtentLocal.X * FMath::Abs(Request.Scale.X),
-        Request.SurfaceHalfExtentLocal.Y * FMath::Abs(Request.Scale.Y));
-    if (Request.MaterialSlotIndex == INDEX_NONE || Request.AnchorTriangleID == INDEX_NONE ||
-        !FDWCEditorSpatialQueryService::NormalizeSurfaceAnchor(
-            Request.AnchorBarycentric, AnchorBarycentric) ||
-        !FMath::IsFinite(EffectiveExtent.X) || !FMath::IsFinite(EffectiveExtent.Y) ||
-        EffectiveExtent.X <= UE_SMALL_NUMBER || EffectiveExtent.Y <= UE_SMALL_NUMBER ||
-        !FMath::IsFinite(Request.RotationRadians))
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidRequest,
-            TEXT("The surface patch projection request has an invalid anchor or footprint."));
-        return Result;
-    }
-
-    const int32* AnchorTriangleIndex = Spatial->TriangleLookup.Find(
-        MakeSurfacePatchTriangleLookupKey(Request.MaterialSlotIndex, Request.AnchorTriangleID));
-    if (AnchorTriangleIndex == nullptr || !Spatial->Triangles.IsValidIndex(*AnchorTriangleIndex))
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::AnchorNotFound,
-            TEXT("The anchored triangle is not present in the selected material-slot topology."));
-        return Result;
-    }
-
-    const int32 TriangleCount = Spatial->Triangles.Num();
-    const int32 VisitLimit = Request.MaxVisitedTriangles > 0
-        ? FMath::Min(Request.MaxVisitedTriangles, TriangleCount)
-        : TriangleCount;
-    const uint64 InitialWorkingSetBytes = EstimateSparseWorkingSetBytes(1, 0, 1, 0);
-    Result.PeakWorkingSetBytes = InitialWorkingSetBytes;
-    if (VisitLimit <= 0 || InitialWorkingSetBytes > Request.MaxWorkingSetBytes)
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::TraversalBudgetExceeded,
-            TEXT("The surface patch projection working set exceeds its memory budget."));
-        return Result;
-    }
-
-    const FDWCEditorSpatialTriangle& AnchorTriangle = Spatial->Triangles[*AnchorTriangleIndex];
-    const FVector3f AnchorPosition =
-        AnchorTriangle.LocalPositions[0] * AnchorBarycentric.X +
-        AnchorTriangle.LocalPositions[1] * AnchorBarycentric.Y +
-        AnchorTriangle.LocalPositions[2] * AnchorBarycentric.Z;
-    const FVector3f SurfaceNormal = (
-        AnchorTriangle.LocalNormals[0] * AnchorBarycentric.X +
-        AnchorTriangle.LocalNormals[1] * AnchorBarycentric.Y +
-        AnchorTriangle.LocalNormals[2] * AnchorBarycentric.Z).GetSafeNormal(
-            UE_SMALL_NUMBER,
-            AnchorTriangle.LocalNormal);
-    FVector3f SurfaceU;
-    FVector3f SurfaceV;
-    if (!FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
-            SurfaceNormal,
-            Request.SurfaceFrameU,
-            Request.SurfaceFrameV,
-            SurfaceU,
-            SurfaceV))
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::DegenerateSurface,
-            TEXT("The anchor triangle cannot provide a stable surface frame."));
-        return Result;
-    }
-
-    const float CosRotation = FMath::Cos(Request.RotationRadians);
-    const float SinRotation = FMath::Sin(Request.RotationRadians);
-    const FVector3f PatchU = SurfaceU * CosRotation + SurfaceV * SinRotation;
-    const FVector3f PatchV = SurfaceV * CosRotation - SurfaceU * SinRotation;
-
-    // A patch normally touches a small neighborhood. Sparse state avoids allocating
-    // arrays proportional to the complete mesh for every interactive hover request.
-    TMap<int32, FTriangleProjectionState> States;
-    TSet<int32> Finalized;
-    const int32 InitialReserve = FMath::Max(
-        1,
-        FMath::Min3(
-            VisitLimit,
-            256,
-            static_cast<int32>(Request.MaxWorkingSetBytes /
-                FMath::Max<uint64>(InitialWorkingSetBytes, 1))));
-    States.Reserve(InitialReserve);
-    Finalized.Reserve(InitialReserve);
-    TArray<FFrontierEntry> Frontier;
-    Frontier.Reserve(InitialReserve);
-    TSet<int32> AffectedIslandSet;
-    AffectedIslandSet.Reserve(8);
-    double CandidatePathErrorSum = 0.0;
-
-    FTriangleProjectionState& AnchorState = States.Add(*AnchorTriangleIndex);
-    for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
-    {
-        const FVector3f Delta = AnchorTriangle.LocalPositions[CornerIndex] - AnchorPosition;
-        AnchorState.Coordinates[CornerIndex] = FVector2f(
-            FVector3f::DotProduct(Delta, PatchU),
-            FVector3f::DotProduct(Delta, PatchV));
-    }
-    if (FMath::Abs(Cross2D(
-            AnchorState.Coordinates[1] - AnchorState.Coordinates[0],
-            AnchorState.Coordinates[2] - AnchorState.Coordinates[0])) <= UE_SMALL_NUMBER)
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::DegenerateSurface,
-            TEXT("The anchor triangle collapses in the patch projection frame."));
-        return Result;
-    }
-    AnchorState.Cost = 0.0f;
-    AnchorState.bValid = true;
-    PushFrontier(Frontier, { *AnchorTriangleIndex, 0.0f }, *Spatial);
-
-    while (!Frontier.IsEmpty())
-    {
-        if (CancellationToken != nullptr && CancellationToken->IsCanceled())
-        {
-            SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::Canceled,
-                TEXT("The surface patch projection was canceled."));
-            return Result;
-        }
-
-        const FFrontierEntry Entry = PopFrontier(Frontier, *Spatial);
-        const FTriangleProjectionState* CurrentState = States.Find(Entry.TriangleIndex);
-        if (CurrentState == nullptr || Finalized.Contains(Entry.TriangleIndex) ||
-            Entry.Cost > CurrentState->Cost + ProjectionTolerance)
-        {
-            continue;
-        }
-        if (Result.VisitedTriangleCount >= VisitLimit)
-        {
-            SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::TraversalBudgetExceeded,
-                TEXT("The surface patch projection exceeded its triangle traversal budget."));
-            return Result;
-        }
-
-        Finalized.Add(Entry.TriangleIndex);
-        ++Result.VisitedTriangleCount;
-        const uint64 FinalizedWorkingSetBytes = EstimateSparseWorkingSetBytes(
-            States.Num(), Finalized.Num(), Frontier.Num(), AffectedIslandSet.Num());
-        Result.PeakWorkingSetBytes = FMath::Max(
-            Result.PeakWorkingSetBytes, FinalizedWorkingSetBytes);
-        if (FinalizedWorkingSetBytes > Request.MaxWorkingSetBytes)
-        {
-            SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::TraversalBudgetExceeded,
-                TEXT("The surface patch projection finalized-state set exceeds its memory budget."));
-            return Result;
-        }
-        const FDWCEditorSpatialTriangle& Triangle = Spatial->Triangles[Entry.TriangleIndex];
-        const FTriangleProjectionState State = *CurrentState;
-        if (Triangle.MaterialSlotIndex != Request.MaterialSlotIndex)
-        {
-            continue;
-        }
-
-        if (IntersectsUnitFootprint(State.Coordinates, EffectiveExtent))
-        {
-            const uint64 ProspectiveResultBytes =
-                static_cast<uint64>(Result.Fragments.Num() + 1) *
-                    sizeof(FDWCEditorSurfacePatchFragment) +
-                static_cast<uint64>(AffectedIslandSet.Num() + 1) * sizeof(int32);
-            if (ProspectiveResultBytes > Request.MaxResultBytes)
-            {
-                SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::ResultBudgetExceeded,
-                    TEXT("The projected surface fragment result exceeds its memory budget."));
-                return Result;
-            }
-
-            FDWCEditorSurfacePatchFragment& Fragment = Result.Fragments.AddDefaulted_GetRef();
-            Fragment.TriangleIndex = Entry.TriangleIndex;
-            Fragment.TriangleID = Triangle.TriangleID;
-            Fragment.UVIslandID = Triangle.UVIslandID;
-            for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
-            {
-                Fragment.TargetUVs[CornerIndex] = Triangle.UVs[CornerIndex];
-                Fragment.PatchCoordinates[CornerIndex] =
-                    State.Coordinates[CornerIndex] / EffectiveExtent;
-                Fragment.TargetUVBounds += Triangle.UVs[CornerIndex];
-            }
-            if (!BuildTangentTransforms(
-                    Triangle,
-                    State.Coordinates,
-                    Fragment.PatchAxisUInTargetTangent,
-                    Fragment.PatchAxisVInTargetTangent))
-            {
-                SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::DegenerateSurface,
-                    TEXT("A projected triangle cannot provide a stable tangent transform."));
-                return Result;
-            }
-            AffectedIslandSet.Add(Fragment.UVIslandID);
-            const uint64 ResultBytes = Result.GetAllocatedSizeBytes();
-            if (ResultBytes > Request.MaxResultBytes)
-            {
-                SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::ResultBudgetExceeded,
-                    TEXT("The allocated surface projection result exceeds its memory budget."));
-                return Result;
-            }
-        }
-
-        for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
-        {
-            const EDWCEditorSpatialEdgeType EdgeType = Triangle.EdgeTypes[EdgeIndex];
-            const int32 AdjacentTriangleIndex = Triangle.AdjacentTriangleIndices[EdgeIndex];
-            const bool bTraversableEdge = EdgeType == EDWCEditorSpatialEdgeType::Regular ||
-                (Request.bAllowUVSeamTraversal &&
-                 EdgeType == EDWCEditorSpatialEdgeType::UVSeam);
-            if (!bTraversableEdge ||
-                !Spatial->Triangles.IsValidIndex(AdjacentTriangleIndex) ||
-                Finalized.Contains(AdjacentTriangleIndex) ||
-                Spatial->Triangles[AdjacentTriangleIndex].MaterialSlotIndex != Request.MaterialSlotIndex)
-            {
-                continue;
-            }
-
-            const float EdgeDistance = FMath::Sqrt(PointSegmentDistanceSquared(
-                FVector2f::ZeroVector,
-                State.Coordinates[EdgeIndex] / EffectiveExtent,
-                State.Coordinates[(EdgeIndex + 1) % 3] / EffectiveExtent));
-            if (EdgeDistance > 1.0f + ProjectionTolerance)
-            {
-                continue;
-            }
-
-            FTriangleProjectionState CandidateState;
-            if (!UnfoldAdjacentTriangle(
-                    Triangle,
-                    State,
-                    EdgeIndex,
-                    Spatial->Triangles[AdjacentTriangleIndex],
-                    CandidateState))
-            {
-                if (Result.Diagnostics.bDetailed)
-                {
-                    ++Result.Diagnostics.FailedUnfoldEdgeCount;
-                }
-                continue;
-            }
-            CandidateState.Cost = FMath::Max(State.Cost, EdgeDistance);
-            FTriangleProjectionState* ExistingState = States.Find(AdjacentTriangleIndex);
-            if (Result.Diagnostics.bDetailed && ExistingState != nullptr)
-            {
-                float CandidatePathError = 0.0f;
-                for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
-                {
-                    CandidatePathError = FMath::Max(
-                        CandidatePathError,
-                        FVector2f::Distance(
-                            ExistingState->Coordinates[CornerIndex],
-                            CandidateState.Coordinates[CornerIndex]));
-                }
-                ++Result.Diagnostics.CandidatePathComparisonCount;
-                CandidatePathErrorSum += CandidatePathError;
-                Result.Diagnostics.MaxCandidatePathError = FMath::Max(
-                    Result.Diagnostics.MaxCandidatePathError,
-                    CandidatePathError);
-                if (CandidatePathError > 1.0e-3f)
-                {
-                    ++Result.Diagnostics.DiscontinuousCandidatePathCount;
-                }
-            }
-            if (ExistingState == nullptr ||
-                CandidateState.Cost < ExistingState->Cost - ProjectionTolerance)
-            {
-                const int32 ProspectiveStateCount = States.Num() +
-                    (ExistingState == nullptr ? 1 : 0);
-                const uint64 ProspectiveWorkingSetBytes = EstimateSparseWorkingSetBytes(
-                    ProspectiveStateCount,
-                    Finalized.Num(),
-                    Frontier.Num() + 1,
-                    AffectedIslandSet.Num());
-                Result.PeakWorkingSetBytes = FMath::Max(
-                    Result.PeakWorkingSetBytes,
-                    ProspectiveWorkingSetBytes);
-                if (ProspectiveWorkingSetBytes > Request.MaxWorkingSetBytes)
-                {
-                    SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::TraversalBudgetExceeded,
-                        TEXT("The surface patch projection sparse working set exceeds its memory budget."));
-                    return Result;
-                }
-                if (ExistingState == nullptr)
-                {
-                    States.Add(AdjacentTriangleIndex, CandidateState);
-                }
-                else
-                {
-                    *ExistingState = CandidateState;
-                }
-                PushFrontier(Frontier, { AdjacentTriangleIndex, CandidateState.Cost }, *Spatial);
-                if (EdgeType == EDWCEditorSpatialEdgeType::UVSeam)
-                {
-                    ++Result.TraversedSeamCount;
-                }
-            }
-        }
-    }
-
-    Result.AffectedUVIslandIDs.Reserve(AffectedIslandSet.Num());
-    for (const int32 IslandID : AffectedIslandSet)
-    {
-        Result.AffectedUVIslandIDs.Add(IslandID);
-    }
-    Result.AffectedUVIslandIDs.Sort();
-    Result.Status = EDWCEditorSurfacePatchProjectionStatus::Succeeded;
-    Result.Error.Reset();
-    if (Result.Diagnostics.bDetailed)
-    {
-        Result.Diagnostics.CandidateTriangleCount = States.Num();
-        if (Result.Diagnostics.CandidatePathComparisonCount > 0)
-        {
-            Result.Diagnostics.AverageCandidatePathError = static_cast<float>(
-                CandidatePathErrorSum / Result.Diagnostics.CandidatePathComparisonCount);
-        }
-        AnalyzeProjectionContinuity(Result, *Spatial);
-        Result.Diagnostics.ProjectionMilliseconds =
-            (FPlatformTime::Seconds() - ProjectionStartSeconds) * 1000.0;
-        BuildIslandChartShadowDiagnostics(
-            Request, EffectiveExtent, Result, CancellationToken);
-    }
-    return Result;
-}
-}
-
-bool FDWCEditorSurfacePatchProjector::ValidateProjectionModeContract(
+bool FDWCEditorSurfacePatchProjector::ValidateProjectionContract(
     const FDWCEditorSurfacePatchProjectionRequest& Request,
     FString* OutError)
 {
@@ -1243,251 +987,71 @@ bool FDWCEditorSurfacePatchProjector::ValidateProjectionModeContract(
     {
         OutError->Reset();
     }
-    if (Request.bUseSurfaceDecalProjection != Request.bAllowUVSeamTraversal)
+
+    const bool bKnownBoundaryPolicy =
+        Request.BoundaryPolicy ==
+            EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly ||
+        Request.BoundaryPolicy ==
+            EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
+    if (!bKnownBoundaryPolicy)
     {
         if (OutError != nullptr)
         {
-            *OutError = Request.bUseSurfaceDecalProjection
-                ? TEXT("Surface Decal projection must explicitly allow UV seam traversal.")
-                : TEXT("Non UV Seam projection cannot allow UV seam traversal.");
+            *OutError = TEXT("The surface patch boundary policy is invalid.");
         }
         return false;
     }
+
     return true;
 }
 
-bool FDWCEditorSurfacePatchProjector::BuildIslandLocalChartRequest(
-    const FDWCEditorSurfacePatchProjectionRequest& Request,
-    FDWCEditorIslandLocalChartRequest& OutChartRequest,
-    FString* OutError)
+FDWCEditorSurfacePatchProjectionMemoryEstimate
+FDWCEditorSurfacePatchProjector::EstimateAdmissionMemory(
+    const FDWCEditorSurfacePatchProjectionRequest& Request)
 {
-    using namespace DWCEditorSurfacePatchProjectorPrivate;
-    if (OutError != nullptr)
+    FDWCEditorSurfacePatchProjectionMemoryEstimate Estimate;
+    if (!ValidateProjectionContract(Request, nullptr) || !Request.SpatialHandle.IsValid())
     {
-        OutError->Reset();
-    }
-    OutChartRequest = FDWCEditorIslandLocalChartRequest();
-    if (!ValidateProjectionModeContract(Request, OutError) ||
-        Request.bUseSurfaceDecalProjection)
-    {
-        if (OutError != nullptr && OutError->IsEmpty())
-        {
-            *OutError = TEXT("Surface Decal projection does not use an island-local chart.");
-        }
-        return false;
-    }
-    if (!Request.SpatialHandle.IsValid())
-    {
-        if (OutError != nullptr)
-        {
-            *OutError = TEXT("The surface patch projection has no valid spatial payload.");
-        }
-        return false;
+        return Estimate;
     }
 
-    FVector3f AnchorBarycentric;
-    const FVector2f EffectiveExtent(
-        Request.SurfaceHalfExtentLocal.X * FMath::Abs(Request.Scale.X),
-        Request.SurfaceHalfExtentLocal.Y * FMath::Abs(Request.Scale.Y));
-    if (Request.MaterialSlotIndex == INDEX_NONE || Request.AnchorTriangleID == INDEX_NONE ||
-        !FDWCEditorSpatialQueryService::NormalizeSurfaceAnchor(
-            Request.AnchorBarycentric, AnchorBarycentric) ||
-        !FMath::IsFinite(EffectiveExtent.X) || !FMath::IsFinite(EffectiveExtent.Y) ||
-        EffectiveExtent.X <= UE_SMALL_NUMBER || EffectiveExtent.Y <= UE_SMALL_NUMBER)
+    const int32 SpatialTriangleCount = Request.SpatialHandle->Triangles.Num();
+    Estimate.TriangleUpperBound = Request.MaxVisitedTriangles > 0
+        ? FMath::Min(Request.MaxVisitedTriangles, SpatialTriangleCount)
+        : SpatialTriangleCount;
+    if (Estimate.TriangleUpperBound <= 0)
     {
-        if (OutError != nullptr)
-        {
-            *OutError = TEXT("The surface patch projection request has an invalid anchor or footprint.");
-        }
-        return false;
+        return Estimate;
     }
 
-    const uint64 LookupKey = MakeSurfacePatchTriangleLookupKey(
-        Request.MaterialSlotIndex, Request.AnchorTriangleID);
-    const int32* AnchorIndex = Request.SpatialHandle->TriangleLookup.Find(LookupKey);
-    if (AnchorIndex == nullptr || !Request.SpatialHandle->Triangles.IsValidIndex(*AnchorIndex))
+    const uint64 TriangleCount = static_cast<uint64>(Estimate.TriangleUpperBound);
+    const auto SaturatingMultiply = [](const uint64 A, const uint64 B)
     {
-        if (OutError != nullptr)
-        {
-            *OutError = TEXT("The anchored triangle is not present in the selected material-slot topology.");
-        }
-        return false;
-    }
-
-    const FDWCEditorSpatialTriangle& Anchor = Request.SpatialHandle->Triangles[*AnchorIndex];
-    OutChartRequest.SpatialHandle = Request.SpatialHandle;
-    OutChartRequest.MaterialSlotIndex = Request.MaterialSlotIndex;
-    OutChartRequest.AnchorTriangleID = Request.AnchorTriangleID;
-    OutChartRequest.AnchorBarycentric = AnchorBarycentric;
-    OutChartRequest.SurfaceFrameU = Request.SurfaceFrameU;
-    OutChartRequest.SurfaceFrameV = Request.SurfaceFrameV;
-    OutChartRequest.GeodesicRadiusLocal = EffectiveExtent.Size();
-    OutChartRequest.NeighborhoodMarginLocal = FMath::Max3(
-        FVector3f::Distance(Anchor.LocalPositions[0], Anchor.LocalPositions[1]),
-        FVector3f::Distance(Anchor.LocalPositions[1], Anchor.LocalPositions[2]),
-        FVector3f::Distance(Anchor.LocalPositions[2], Anchor.LocalPositions[0]));
-    OutChartRequest.MaxVisitedTriangles = Request.MaxVisitedTriangles;
-    OutChartRequest.MaxWorkingSetBytes = Request.MaxWorkingSetBytes;
-    OutChartRequest.MaxResultBytes = Request.MaxResultBytes;
-    return true;
-}
-
-FDWCEditorSurfacePatchProjectionResult FDWCEditorSurfacePatchProjector::ProjectFromIslandLocalChart(
-    const FDWCEditorSurfacePatchProjectionRequest& Request,
-    const FDWCEditorIslandLocalChartHandle& Chart,
-    const FDWCEditorCancellationToken* CancellationToken)
-{
-    using namespace DWCEditorSurfacePatchProjectorPrivate;
-    FDWCEditorSurfacePatchProjectionResult Result;
-    const double ProjectionStartSeconds = Request.bCollectDetailedDiagnostics
-        ? FPlatformTime::Seconds()
-        : 0.0;
-    Result.Diagnostics.bDetailed = Request.bCollectDetailedDiagnostics;
-    FString ModeError;
-    if (!ValidateProjectionModeContract(Request, &ModeError) ||
-        Request.bUseSurfaceDecalProjection)
+        return A != 0 && B > MAX_uint64 / A ? MAX_uint64 : A * B;
+    };
+    const auto AddClamped = [](const uint64 A, const uint64 B, const uint64 Limit)
     {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidRequest,
-            ModeError.IsEmpty()
-                ? TEXT("Surface Decal projection cannot consume an island-local chart.")
-                : *ModeError);
-        return Result;
-    }
-    if (!Request.SpatialHandle.IsValid() || !Chart.IsValid())
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidSpatialHandle,
-            TEXT("The Non UV Seam projection has no valid island-local chart."));
-        return Result;
-    }
-    if (Chart->MaterialSlotIndex != Request.MaterialSlotIndex ||
-        Chart->AnchorTriangleID != Request.AnchorTriangleID)
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidRequest,
-            TEXT("The island-local chart does not match the surface patch anchor."));
-        return Result;
-    }
+        const uint64 Sum = B > MAX_uint64 - A ? MAX_uint64 : A + B;
+        return FMath::Min(Sum, Limit);
+    };
 
-    const FVector2f EffectiveExtent(
-        Request.SurfaceHalfExtentLocal.X * FMath::Abs(Request.Scale.X),
-        Request.SurfaceHalfExtentLocal.Y * FMath::Abs(Request.Scale.Y));
-    if (!FMath::IsFinite(EffectiveExtent.X) || !FMath::IsFinite(EffectiveExtent.Y) ||
-        EffectiveExtent.X <= UE_SMALL_NUMBER || EffectiveExtent.Y <= UE_SMALL_NUMBER ||
-        !FMath::IsFinite(Request.RotationRadians))
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidRequest,
-            TEXT("The surface patch projection request has an invalid footprint or rotation."));
-        return Result;
-    }
+    const uint64 FragmentCapacityUpperBound = SaturatingMultiply(TriangleCount, 2ull);
+    const uint64 FragmentResultBytes = SaturatingMultiply(
+        FragmentCapacityUpperBound,
+        sizeof(FDWCEditorSurfacePatchFragment) + sizeof(int32));
+    Estimate.ResultBytes = AddClamped(
+        sizeof(FDWCEditorSurfacePatchProjectionGeometry),
+        FragmentResultBytes,
+        Request.MaxResultBytes);
 
-    const float CosRotation = FMath::Cos(Request.RotationRadians);
-    const float SinRotation = FMath::Sin(Request.RotationRadians);
-    TSet<int32> AffectedIslandSet;
-    AffectedIslandSet.Reserve(1);
-    Result.VisitedTriangleCount = Chart->Triangles.Num();
-    Result.PeakWorkingSetBytes = Chart->Diagnostics.PeakWorkingSetBytes;
-    Result.Fragments.Reserve(FMath::Min(Chart->Triangles.Num(), 256));
-
-    for (const FDWCEditorIslandLocalChartTriangle& ChartTriangle : Chart->Triangles)
-    {
-        if (CancellationToken != nullptr && CancellationToken->IsCanceled())
-        {
-            SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::Canceled,
-                TEXT("The surface patch projection was canceled."));
-            return Result;
-        }
-        if (!Request.SpatialHandle->Triangles.IsValidIndex(ChartTriangle.SpatialTriangleIndex))
-        {
-            continue;
-        }
-
-        FVector2f RotatedCoordinates[3];
-        for (int32 Corner = 0; Corner < 3; ++Corner)
-        {
-            if (!Chart->Vertices.IsValidIndex(ChartTriangle.ChartVertexIndices[Corner]))
-            {
-                SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::DegenerateSurface,
-                    TEXT("The island-local chart contains an invalid shared vertex reference."));
-                return Result;
-            }
-            const FVector2f Coordinate =
-                Chart->Vertices[ChartTriangle.ChartVertexIndices[Corner]].ChartCoordinate;
-            RotatedCoordinates[Corner] = FVector2f(
-                Coordinate.X * CosRotation + Coordinate.Y * SinRotation,
-                Coordinate.Y * CosRotation - Coordinate.X * SinRotation);
-        }
-        if (!IntersectsUnitFootprint(RotatedCoordinates, EffectiveExtent))
-        {
-            continue;
-        }
-
-        const uint64 ProspectiveResultBytes =
-            static_cast<uint64>(Result.Fragments.Num() + 1) *
-                sizeof(FDWCEditorSurfacePatchFragment) + sizeof(int32);
-        if (ProspectiveResultBytes > Request.MaxResultBytes)
-        {
-            SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::ResultBudgetExceeded,
-                TEXT("The projected surface fragment result exceeds its memory budget."));
-            return Result;
-        }
-
-        const FDWCEditorSpatialTriangle& Triangle =
-            Request.SpatialHandle->Triangles[ChartTriangle.SpatialTriangleIndex];
-        FDWCEditorSurfacePatchFragment& Fragment = Result.Fragments.AddDefaulted_GetRef();
-        Fragment.TriangleIndex = ChartTriangle.SpatialTriangleIndex;
-        Fragment.TriangleID = ChartTriangle.TriangleID;
-        Fragment.UVIslandID = Chart->UVIslandID;
-        for (int32 Corner = 0; Corner < 3; ++Corner)
-        {
-            Fragment.TargetUVs[Corner] = ChartTriangle.TargetUVs[Corner];
-            Fragment.PatchCoordinates[Corner] = RotatedCoordinates[Corner] / EffectiveExtent;
-            Fragment.TargetUVBounds += ChartTriangle.TargetUVs[Corner];
-        }
-        if (!BuildTangentTransforms(
-                Triangle,
-                RotatedCoordinates,
-                Fragment.PatchAxisUInTargetTangent,
-                Fragment.PatchAxisVInTargetTangent))
-        {
-            SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::DegenerateSurface,
-                TEXT("A shared-chart triangle cannot provide a stable tangent transform."));
-            return Result;
-        }
-        AffectedIslandSet.Add(Fragment.UVIslandID);
-    }
-
-    if (Result.Fragments.IsEmpty())
-    {
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidRequest,
-            TEXT("The island-local chart did not intersect the patch footprint."));
-        return Result;
-    }
-    Result.AffectedUVIslandIDs = AffectedIslandSet.Array();
-    Result.AffectedUVIslandIDs.Sort();
-    Result.bTouchesUVSeam = Chart->Diagnostics.UVSeamEdgeCount > 0;
-    Result.Status = EDWCEditorSurfacePatchProjectionStatus::Succeeded;
-    if (Result.Diagnostics.bDetailed)
-    {
-        Result.Diagnostics.CandidateTriangleCount = Chart->Triangles.Num();
-        Result.Diagnostics.bIslandChartBuildAttempted = true;
-        Result.Diagnostics.bIslandChartBuildSucceeded = true;
-        Result.Diagnostics.IslandChartStatus =
-            static_cast<uint8>(EDWCEditorIslandLocalChartStatus::Succeeded);
-        Result.Diagnostics.IslandChartVertexCount = Chart->Vertices.Num();
-        Result.Diagnostics.IslandChartTriangleCount = Chart->Triangles.Num();
-        Result.Diagnostics.IslandChartLoopMismatchCount =
-            Chart->Diagnostics.DiscontinuousLoopClosureCount;
-        Result.Diagnostics.IslandChartMaxLoopResidual =
-            Chart->Diagnostics.MaxLoopClosureResidual;
-        Result.Diagnostics.IslandChartBuildMilliseconds =
-            Chart->Diagnostics.TotalMilliseconds;
-        Result.Diagnostics.IslandChartPeakWorkingSetBytes =
-            Chart->Diagnostics.PeakWorkingSetBytes;
-        Result.Diagnostics.IslandChartResultBytes = Chart->Diagnostics.ResultBytes;
-        AnalyzeProjectionContinuity(Result, *Request.SpatialHandle);
-        Result.Diagnostics.ProjectionMilliseconds =
-            (FPlatformTime::Seconds() - ProjectionStartSeconds) * 1000.0;
-    }
-    return Result;
+    // Visited/frontier/island containers and the shared physical-vertex
+    // projector samples coexist during decal traversal.
+    constexpr uint64 DecalTraversalBytesPerTriangle = 320ull;
+    Estimate.WorkingSetBytes = AddClamped(
+        4096ull,
+        SaturatingMultiply(TriangleCount, DecalTraversalBytesPerTriangle),
+        Request.MaxWorkingSetBytes);
+    return Estimate;
 }
 
 FDWCEditorSurfacePatchProjectionResult FDWCEditorSurfacePatchProjector::Project(
@@ -1495,56 +1059,15 @@ FDWCEditorSurfacePatchProjectionResult FDWCEditorSurfacePatchProjector::Project(
     const FDWCEditorCancellationToken* CancellationToken)
 {
     using namespace DWCEditorSurfacePatchProjectorPrivate;
-    FString ModeError;
-    if (!ValidateProjectionModeContract(Request, &ModeError))
+    FString ContractError;
+    if (!ValidateProjectionContract(Request, &ContractError))
     {
         FDWCEditorSurfacePatchProjectionResult Result;
-        Result.Diagnostics.bDetailed = Request.bCollectDetailedDiagnostics;
-        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidRequest, *ModeError);
+        SetFailure(Result, EDWCEditorSurfacePatchProjectionStatus::InvalidRequest,
+            *ContractError);
         return Result;
     }
-    if (Request.bUseSurfaceDecalProjection)
-    {
-        return ProjectSurfaceDecal(Request, CancellationToken);
-    }
-
-    FDWCEditorIslandLocalChartRequest ChartRequest;
-    FString RequestError;
-    if (!BuildIslandLocalChartRequest(Request, ChartRequest, &RequestError))
-    {
-        FDWCEditorSurfacePatchProjectionResult Result;
-        Result.Diagnostics.bDetailed = Request.bCollectDetailedDiagnostics;
-        SetFailure(Result,
-            Request.SpatialHandle.IsValid()
-                ? EDWCEditorSurfacePatchProjectionStatus::InvalidRequest
-                : EDWCEditorSurfacePatchProjectionStatus::InvalidSpatialHandle,
-            *RequestError);
-        return Result;
-    }
-    const FDWCEditorIslandLocalChartResult ChartResult =
-        FDWCEditorIslandLocalGeodesicChartBuilder::Build(ChartRequest, CancellationToken);
-    if (!ChartResult.IsSuccess())
-    {
-        FDWCEditorSurfacePatchProjectionResult Result;
-        Result.Diagnostics.bDetailed = Request.bCollectDetailedDiagnostics;
-        Result.Diagnostics.bIslandChartBuildAttempted = true;
-        Result.Diagnostics.bIslandChartBuildSucceeded = false;
-        Result.Diagnostics.IslandChartStatus = static_cast<uint8>(ChartResult.Status);
-        const EDWCEditorSurfacePatchProjectionStatus Status =
-            ChartResult.Status == EDWCEditorIslandLocalChartStatus::Canceled
-                ? EDWCEditorSurfacePatchProjectionStatus::Canceled
-                : (ChartResult.Status == EDWCEditorIslandLocalChartStatus::TraversalBudgetExceeded
-                    ? EDWCEditorSurfacePatchProjectionStatus::TraversalBudgetExceeded
-                    : (ChartResult.Status == EDWCEditorIslandLocalChartStatus::ResultBudgetExceeded
-                        ? EDWCEditorSurfacePatchProjectionStatus::ResultBudgetExceeded
-                        : EDWCEditorSurfacePatchProjectionStatus::DegenerateSurface));
-        SetFailure(Result, Status,
-            ChartResult.Error.IsEmpty()
-                ? TEXT("The island-local chart build failed.")
-                : *ChartResult.Error);
-        return Result;
-    }
-    return ProjectFromIslandLocalChart(Request, ChartResult.Chart, CancellationToken);
+    return ProjectSurfaceDecal(Request, CancellationToken);
 }
 
 void FDWCEditorSurfacePatchProjector::AnalyzeContinuityForDiagnostics(

@@ -116,14 +116,14 @@ class FDWCEditorWorkerJobScheduler final
     void SupersedeLatestJobs(const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Replacement);
     void CancelJobsByKey(const FDWCEditorWorkerJobKey& Key);
     void FinalizeNonRunningJob(
-        const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
+        TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job,
         EDWCEditorWorkerJobCompletion Completion,
         const FString& Error);
     static void FinalizeDetachedJob(
-        const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
+        TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job,
         const FString& Error);
     static void NotifyFinished(
-        const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
+        TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job,
         EDWCEditorWorkerJobCompletion Completion,
         const FString& Error);
     static bool TransitionJob(

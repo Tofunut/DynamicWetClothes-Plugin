@@ -768,6 +768,205 @@ bool FDWCEditorWorkerPhaseContinuationAdmissionTest::RunTest(const FString& Para
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorWorkerTicketCancellationLifetimeTest,
+    "DWC.Editor.Authoring.Worker.TicketCancellationLifetime",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorWorkerTicketCancellationLifetimeTest::RunTest(const FString& Parameters)
+{
+    TSharedRef<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler =
+        MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(1, 256, 256);
+    FEvent* BlockerStarted = FPlatformProcess::GetSynchEventFromPool(true);
+    FEvent* ReleaseBlocker = FPlatformProcess::GetSynchEventFromPool(true);
+
+    FDWCEditorWorkerJobDescriptor BlockerDescriptor;
+    BlockerDescriptor.Key.MaterialSlotIndex = 40;
+    BlockerDescriptor.MemoryEstimate.SnapshotBytes = 128;
+    SubmitPreparedWork(
+        Scheduler,
+        BlockerDescriptor,
+        [BlockerStarted, ReleaseBlocker](
+            const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+        {
+            BlockerStarted->Trigger();
+            ReleaseBlocker->Wait();
+            return MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
+        },
+        [](const FDWCEditorWorkerJobTicket&,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>) {});
+    TestTrue(TEXT("The cancellation blocker starts"), BlockerStarted->Wait(5000));
+
+    int32 ReadyFinishedCount = 0;
+    EDWCEditorWorkerJobCompletion ReadyCompletion = EDWCEditorWorkerJobCompletion::Applied;
+    FDWCEditorWorkerJobDescriptor ReadyDescriptor;
+    ReadyDescriptor.Key.MaterialSlotIndex = 41;
+    ReadyDescriptor.MemoryEstimate.SnapshotBytes = 64;
+    const FDWCEditorWorkerJobTicket ReadyTicket = SubmitPreparedWork(
+        Scheduler,
+        ReadyDescriptor,
+        [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+        {
+            return MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
+        },
+        [](const FDWCEditorWorkerJobTicket&,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>) {},
+        nullptr,
+        [&ReadyFinishedCount, &ReadyCompletion](
+            const FDWCEditorWorkerJobTicket&,
+            const EDWCEditorWorkerJobCompletion Completion,
+            const FString&)
+        {
+            ++ReadyFinishedCount;
+            ReadyCompletion = Completion;
+        });
+
+    int32 PendingFinishedCount = 0;
+    bool bReentrantReadyCancelSucceeded = false;
+    EDWCEditorWorkerJobCompletion PendingCompletion = EDWCEditorWorkerJobCompletion::Applied;
+    FDWCEditorWorkerJobDescriptor PendingDescriptor;
+    PendingDescriptor.Key.MaterialSlotIndex = 42;
+    PendingDescriptor.MemoryEstimate.SnapshotBytes = 128;
+    const FDWCEditorWorkerJobTicket PendingTicket = SubmitPreparedWork(
+        Scheduler,
+        PendingDescriptor,
+        [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+        {
+            return MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
+        },
+        [](const FDWCEditorWorkerJobTicket&,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>) {},
+        nullptr,
+        [&Scheduler, ReadyTicket, &bReentrantReadyCancelSucceeded,
+            &PendingFinishedCount, &PendingCompletion](
+            const FDWCEditorWorkerJobTicket&,
+            const EDWCEditorWorkerJobCompletion Completion,
+            const FString&)
+        {
+            ++PendingFinishedCount;
+            PendingCompletion = Completion;
+            bReentrantReadyCancelSucceeded = Scheduler->CancelTicket(ReadyTicket);
+        });
+
+    TestTrue(TEXT("The ready ticket is accepted"), ReadyTicket.IsValid());
+    TestTrue(TEXT("The pending-admission ticket is accepted"), PendingTicket.IsValid());
+    TestEqual(
+        TEXT("One request waits for admission"),
+        Scheduler->GetDiagnostics().PendingAdmissionCount,
+        1);
+    TestTrue(
+        TEXT("CancelTicket finalizes a pending request without invalidating its owner"),
+        Scheduler->CancelTicket(PendingTicket));
+    TestEqual(TEXT("The pending callback runs exactly once"), PendingFinishedCount, 1);
+    TestTrue(TEXT("A completion callback can safely cancel another ticket"),
+        bReentrantReadyCancelSucceeded);
+    TestEqual(TEXT("The ready callback runs exactly once during reentrant cancellation"), ReadyFinishedCount, 1);
+    TestEqual(TEXT("The pending request reports cancellation"), PendingCompletion,
+        EDWCEditorWorkerJobCompletion::Canceled);
+    TestEqual(TEXT("The ready request reports cancellation"), ReadyCompletion,
+        EDWCEditorWorkerJobCompletion::Canceled);
+    TestFalse(TEXT("A completed ticket cannot be canceled twice"), Scheduler->CancelTicket(PendingTicket));
+    TestFalse(TEXT("A reentrantly completed ticket cannot be canceled twice"), Scheduler->CancelTicket(ReadyTicket));
+
+    ReleaseBlocker->Trigger();
+    TestTrue(
+        TEXT("The blocker retires after ticket cancellation"),
+        PumpWorkerCompletionsUntil([&Scheduler]() { return Scheduler->GetActiveJobCount() == 0; }));
+    Scheduler->Shutdown();
+    FPlatformProcess::ReturnSynchEventToPool(ReleaseBlocker);
+    FPlatformProcess::ReturnSynchEventToPool(BlockerStarted);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorWorkerPendingPhaseTicketCancellationTest,
+    "DWC.Editor.Authoring.Worker.PendingPhaseTicketCancellation",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorWorkerPendingPhaseTicketCancellationTest::RunTest(const FString& Parameters)
+{
+    TSharedRef<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler =
+        MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(2, 192, 192);
+    FEvent* BlockerStarted = FPlatformProcess::GetSynchEventFromPool(true);
+    FEvent* ReleaseBlocker = FPlatformProcess::GetSynchEventFromPool(true);
+
+    FDWCEditorWorkerJobDescriptor BlockerDescriptor;
+    BlockerDescriptor.Key.MaterialSlotIndex = 50;
+    BlockerDescriptor.MemoryEstimate.SnapshotBytes = 128;
+    SubmitPreparedWork(
+        Scheduler,
+        BlockerDescriptor,
+        [BlockerStarted, ReleaseBlocker](
+            const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+        {
+            BlockerStarted->Trigger();
+            ReleaseBlocker->Wait();
+            return MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
+        },
+        [](const FDWCEditorWorkerJobTicket&,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>) {});
+    TestTrue(TEXT("The phase cancellation blocker starts"), BlockerStarted->Wait(5000));
+
+    int32 FinishedCount = 0;
+    EDWCEditorWorkerJobCompletion Completion = EDWCEditorWorkerJobCompletion::Applied;
+    FDWCEditorWorkerJobDescriptor PhaseDescriptor;
+    PhaseDescriptor.Key.Kind = EDWCEditorWorkerJobKind::WrinkleHoverPreview;
+    PhaseDescriptor.Key.MaterialSlotIndex = 51;
+    PhaseDescriptor.MemoryEstimate.SnapshotBytes = 64;
+    const FDWCEditorWorkerJobTicket PhaseTicket = SubmitPreparedWork(
+        Scheduler,
+        PhaseDescriptor,
+        [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+        {
+            TSharedPtr<FDWCEditorWorkerPhaseContinuationResult, ESPMode::ThreadSafe> Continuation =
+                MakeShared<FDWCEditorWorkerPhaseContinuationResult, ESPMode::ThreadSafe>();
+            Continuation->NextPhaseName = TEXT("Pending raster");
+            Continuation->RetainedMemoryEstimate.SnapshotBytes = 16;
+            Continuation->NextPhaseMemoryEstimate.SnapshotBytes = 16;
+            Continuation->NextPhaseMemoryEstimate.WorkingBytes = 64;
+            Continuation->NextWork = [](
+                const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+            {
+                return MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
+            };
+            return Continuation;
+        },
+        [](const FDWCEditorWorkerJobTicket&,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>) {},
+        nullptr,
+        [&FinishedCount, &Completion](
+            const FDWCEditorWorkerJobTicket&,
+            const EDWCEditorWorkerJobCompletion InCompletion,
+            const FString&)
+        {
+            ++FinishedCount;
+            Completion = InCompletion;
+        });
+
+    TestTrue(TEXT("The phase ticket is accepted"), PhaseTicket.IsValid());
+    TestTrue(
+        TEXT("The request reaches pending phase admission"),
+        PumpWorkerCompletionsUntil([&Scheduler]()
+        {
+            return Scheduler->GetDiagnostics().PendingPhaseAdmissionCount == 1;
+        }));
+    TestTrue(TEXT("CancelTicket safely finalizes retained phase state"),
+        Scheduler->CancelTicket(PhaseTicket));
+    TestEqual(TEXT("Pending phase completion is reported once"), FinishedCount, 1);
+    TestEqual(TEXT("Pending phase completion is canceled"), Completion,
+        EDWCEditorWorkerJobCompletion::Canceled);
+    TestEqual(TEXT("Only the blocker lease remains"), Scheduler->GetReservedBytes(), 128ull);
+
+    ReleaseBlocker->Trigger();
+    TestTrue(
+        TEXT("The phase blocker retires"),
+        PumpWorkerCompletionsUntil([&Scheduler]() { return Scheduler->GetActiveJobCount() == 0; }));
+    Scheduler->Shutdown();
+    FPlatformProcess::ReturnSynchEventToPool(ReleaseBlocker);
+    FPlatformProcess::ReturnSynchEventToPool(BlockerStarted);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorWorkerPendingPhaseLatestWinsTest,
     "DWC.Editor.Authoring.Worker.PendingPhaseLatestWins",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

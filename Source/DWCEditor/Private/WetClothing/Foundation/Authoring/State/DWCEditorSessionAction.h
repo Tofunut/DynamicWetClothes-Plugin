@@ -26,6 +26,13 @@ struct FDWCSetWrinkleBrushAction
     EDWCEditorSessionEffect Effects = EDWCEditorSessionEffect::UpdatePreviewParameters;
 };
 
+struct FDWCSetWrinkleEditContextAction
+{
+    int32 MaterialSlotIndex = INDEX_NONE;
+    int32 UVChannelIndex = INDEX_NONE;
+    bool bClearElementSelection = false;
+};
+
 struct FDWCSelectWrinkleElementAction
 {
     FGuid ElementGuid;

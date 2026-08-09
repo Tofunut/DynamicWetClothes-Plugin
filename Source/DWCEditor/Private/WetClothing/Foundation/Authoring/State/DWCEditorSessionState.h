@@ -5,6 +5,7 @@
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringTypes.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionTypes.h"
 #include "WetClothing/WCAEditor/WCAEditorMode.h"
 
 class UTexture2D;
@@ -79,11 +80,7 @@ struct FWetWrinkleBrushSettings
     int32 UVChannelIndex = INDEX_NONE;
     int32 MaterialSlotIndex = INDEX_NONE;
     TObjectPtr<UTexture2D> WrinkleNormalTexture = nullptr;
-    EWetWrinklePatchProjectionMode PatchProjectionMode = EWetWrinklePatchProjectionMode::NonUVSeam;
-    float PatchProjectionDepthLocal = 3.0f;
-    float PatchMaxSurfaceAngleDegrees = 70.0f;
-    float PatchProjectionDepthSoftness = 0.2f;
-    float PatchProjectionAngleSoftness = 0.1f;
+    FDWCEditorSurfacePatchProjectionSettings PatchProjection;
     // Full physical patch diameter in local mesh units (centimeters for the
     // standard Unreal asset scale). BrushRadiusUV remains ridge/UV UI state.
     float PatchDiameterLocal = 8.0f;
@@ -102,6 +99,8 @@ struct FWetWrinkleBrushSettings
     EWetProceduralRidgeEditMode RidgeEditMode = EWetProceduralRidgeEditMode::Draw;
     bool bRidgeJunctionModeEnabled = true;
     bool bShowPreview = true;
+
+    bool IsEquivalent(const FWetWrinkleBrushSettings& Other) const;
 };
 
 struct FDWCTransparencyPaintSettings

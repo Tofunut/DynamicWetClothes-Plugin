@@ -3,7 +3,6 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
-#include "WetClothing/Foundation/Spatial/DWCEditorIslandLocalGeodesicChartTypes.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionTypes.h"
 
 class FDWCEditorCancellationToken;
@@ -20,21 +19,21 @@ enum class EDWCEditorSurfacePatchCachePolicy : uint8
 struct FDWCEditorSurfacePatchProjectionCacheDiagnostics
 {
     uint64 UsedBytes = 0;
-    uint64 GeometryUsedBytes = 0;
-    uint64 ChartUsedBytes = 0;
+    uint64 ActiveBytes = 0;
+    uint64 RetiredPinnedBytes = 0;
+    uint64 HighWaterBytes = 0;
     uint64 BudgetBytes = 0;
     uint64 HitCount = 0;
     uint64 MissCount = 0;
     uint64 EvictionCount = 0;
     uint64 AdmissionRejectCount = 0;
     uint64 EphemeralBuildCount = 0;
-    uint64 ChartHitCount = 0;
-    uint64 ChartMissCount = 0;
     uint64 ReadOnlyHitCount = 0;
     uint64 ReadOnlyMissCount = 0;
-    uint64 GeometryEvictionCount = 0;
-    uint64 ChartEvictionCount = 0;
-    int32 ChartEntryCount = 0;
+    uint64 RetireCount = 0;
+    uint64 RetiredSweepCount = 0;
+    int32 PinnedEntryCount = 0;
+    int32 RetiredEntryCount = 0;
     int32 EntryCount = 0;
 };
 
@@ -49,11 +48,12 @@ class FDWCEditorSurfacePatchProjectionCacheService final
         TSharedRef<FDWCEditorResourceGovernor> InResourceGovernor,
         const FGuid& InSessionEpoch,
         uint64 InBudgetBytes = DefaultBudgetBytes);
+    ~FDWCEditorSurfacePatchProjectionCacheService();
 
     bool Resolve(
         const FDWCEditorSurfacePatchProjectionRequest& Request,
         EDWCEditorSurfacePatchCachePolicy Policy,
-        FDWCEditorSurfacePatchProjectionHandle& OutGeometry,
+        FDWCEditorSurfacePatchProjectionLease& OutLease,
         FString* OutError = nullptr,
         const FDWCEditorCancellationToken* CancellationToken = nullptr);
 
@@ -69,11 +69,99 @@ class FDWCEditorSurfacePatchProjectionCacheService final
         const FDWCEditorSurfacePatchProjectionGeometry& Geometry);
 
   private:
-    enum class ECacheEntryClass : uint8
+    struct FResidencyAccountingSnapshot
     {
-        Any,
-        Geometry,
-        Chart
+        uint64 UsedBytes = 0;
+        uint64 HighWaterBytes = 0;
+    };
+
+    struct FResidencyAccountingState
+    {
+        void Add(uint64 Bytes)
+        {
+            FScopeLock Lock(&Mutex);
+            UsedBytes += Bytes;
+            HighWaterBytes = FMath::Max(HighWaterBytes, UsedBytes);
+        }
+
+        void Release(uint64 Bytes)
+        {
+            FScopeLock Lock(&Mutex);
+            UsedBytes = Bytes >= UsedBytes ? 0ull : UsedBytes - Bytes;
+        }
+
+        FResidencyAccountingSnapshot Snapshot() const
+        {
+            FScopeLock Lock(&Mutex);
+            FResidencyAccountingSnapshot Result;
+            Result.UsedBytes = UsedBytes;
+            Result.HighWaterBytes = HighWaterBytes;
+            return Result;
+        }
+
+      private:
+        mutable FCriticalSection Mutex;
+        uint64 UsedBytes = 0;
+        uint64 HighWaterBytes = 0;
+    };
+
+    struct FProjectionResidency final : IDWCEditorSurfacePatchProjectionResidency
+    {
+        FProjectionResidency(
+            TSharedRef<FResidencyAccountingState, ESPMode::ThreadSafe> InAccounting,
+            FDWCEditorMemoryLease&& InMemoryLease,
+            uint64 InResidentBytes)
+            : Accounting(MoveTemp(InAccounting))
+            , MemoryLease(MoveTemp(InMemoryLease))
+            , ResidentBytes(InResidentBytes)
+        {
+            Accounting->Add(ResidentBytes);
+        }
+
+        virtual ~FProjectionResidency() override
+        {
+            Accounting->Release(ResidentBytes);
+        }
+
+        virtual uint64 GetResidentBytes() const override { return ResidentBytes; }
+
+        TSharedRef<FResidencyAccountingState, ESPMode::ThreadSafe> Accounting;
+        FDWCEditorMemoryLease MemoryLease;
+        uint64 ResidentBytes = 0;
+    };
+
+    struct FFloat2Bits
+    {
+        uint32 X = 0;
+        uint32 Y = 0;
+
+        bool operator==(const FFloat2Bits& Other) const
+        {
+            return X == Other.X && Y == Other.Y;
+        }
+
+        friend uint32 GetTypeHash(const FFloat2Bits& Value)
+        {
+            return HashCombine(::GetTypeHash(Value.X), ::GetTypeHash(Value.Y));
+        }
+    };
+
+    struct FFloat3Bits
+    {
+        uint32 X = 0;
+        uint32 Y = 0;
+        uint32 Z = 0;
+
+        bool operator==(const FFloat3Bits& Other) const
+        {
+            return X == Other.X && Y == Other.Y && Z == Other.Z;
+        }
+
+        friend uint32 GetTypeHash(const FFloat3Bits& Value)
+        {
+            uint32 Hash = HashCombine(::GetTypeHash(Value.X), ::GetTypeHash(Value.Y));
+            return HashCombine(Hash, ::GetTypeHash(Value.Z));
+        }
     };
 
     struct FKey
@@ -81,7 +169,17 @@ class FDWCEditorSurfacePatchProjectionCacheService final
         const FDWCEditorSpatialData* SpatialIdentity = nullptr;
         int32 MaterialSlotIndex = INDEX_NONE;
         int32 AnchorTriangleID = INDEX_NONE;
-        uint32 Values[23] = {};
+        FFloat3Bits AnchorBarycentric;
+        FFloat2Bits SurfaceHalfExtentLocal;
+        FFloat3Bits SurfaceFrameU;
+        FFloat3Bits SurfaceFrameV;
+        uint32 RotationRadians = 0;
+        FFloat2Bits Scale;
+        int32 UVChannelIndex = INDEX_NONE;
+        int32 LODIndex = INDEX_NONE;
+        uint32 ProjectionDepthLocal = 0;
+        EDWCEditorSurfacePatchBoundaryPolicy BoundaryPolicy =
+            EDWCEditorSurfacePatchBoundaryPolicy::Invalid;
         uint32 AlgorithmVersion = 0;
 
         bool operator==(const FKey& Other) const
@@ -89,8 +187,17 @@ class FDWCEditorSurfacePatchProjectionCacheService final
             return SpatialIdentity == Other.SpatialIdentity &&
                 MaterialSlotIndex == Other.MaterialSlotIndex &&
                 AnchorTriangleID == Other.AnchorTriangleID &&
-                AlgorithmVersion == Other.AlgorithmVersion &&
-                FMemory::Memcmp(Values, Other.Values, sizeof(Values)) == 0;
+                AnchorBarycentric == Other.AnchorBarycentric &&
+                SurfaceHalfExtentLocal == Other.SurfaceHalfExtentLocal &&
+                SurfaceFrameU == Other.SurfaceFrameU &&
+                SurfaceFrameV == Other.SurfaceFrameV &&
+                RotationRadians == Other.RotationRadians &&
+                Scale == Other.Scale &&
+                UVChannelIndex == Other.UVChannelIndex &&
+                LODIndex == Other.LODIndex &&
+                ProjectionDepthLocal == Other.ProjectionDepthLocal &&
+                BoundaryPolicy == Other.BoundaryPolicy &&
+                AlgorithmVersion == Other.AlgorithmVersion;
         }
 
         friend uint32 GetTypeHash(const FKey& Key)
@@ -98,92 +205,52 @@ class FDWCEditorSurfacePatchProjectionCacheService final
             uint32 Hash = PointerHash(Key.SpatialIdentity);
             Hash = HashCombine(Hash, ::GetTypeHash(Key.MaterialSlotIndex));
             Hash = HashCombine(Hash, ::GetTypeHash(Key.AnchorTriangleID));
+            Hash = HashCombine(Hash, GetTypeHash(Key.AnchorBarycentric));
+            Hash = HashCombine(Hash, GetTypeHash(Key.SurfaceHalfExtentLocal));
+            Hash = HashCombine(Hash, GetTypeHash(Key.SurfaceFrameU));
+            Hash = HashCombine(Hash, GetTypeHash(Key.SurfaceFrameV));
+            Hash = HashCombine(Hash, ::GetTypeHash(Key.RotationRadians));
+            Hash = HashCombine(Hash, GetTypeHash(Key.Scale));
+            Hash = HashCombine(Hash, ::GetTypeHash(Key.UVChannelIndex));
+            Hash = HashCombine(Hash, ::GetTypeHash(Key.LODIndex));
+            Hash = HashCombine(Hash, ::GetTypeHash(Key.ProjectionDepthLocal));
+            Hash = HashCombine(Hash, ::GetTypeHash(static_cast<uint8>(Key.BoundaryPolicy)));
             Hash = HashCombine(Hash, ::GetTypeHash(Key.AlgorithmVersion));
-            for (const uint32 Value : Key.Values)
-            {
-                Hash = HashCombine(Hash, ::GetTypeHash(Value));
-            }
             return Hash;
         }
     };
 
     struct FEntry
     {
-        FDWCEditorSurfacePatchProjectionHandle Geometry;
-        FDWCEditorMemoryLease MemoryLease;
-        uint64 ResidentBytes = 0;
-        uint64 LastUsedSerial = 0;
-    };
-
-    struct FChartKey
-    {
-        const FDWCEditorSpatialData* SpatialIdentity = nullptr;
-        int32 MaterialSlotIndex = INDEX_NONE;
-        int32 AnchorTriangleID = INDEX_NONE;
-        uint32 Values[13] = {};
-        uint32 AlgorithmVersion = 0;
-
-        bool operator==(const FChartKey& Other) const
-        {
-            return SpatialIdentity == Other.SpatialIdentity &&
-                MaterialSlotIndex == Other.MaterialSlotIndex &&
-                AnchorTriangleID == Other.AnchorTriangleID &&
-                AlgorithmVersion == Other.AlgorithmVersion &&
-                FMemory::Memcmp(Values, Other.Values, sizeof(Values)) == 0;
-        }
-
-        friend uint32 GetTypeHash(const FChartKey& Key)
-        {
-            uint32 Hash = PointerHash(Key.SpatialIdentity);
-            Hash = HashCombine(Hash, ::GetTypeHash(Key.MaterialSlotIndex));
-            Hash = HashCombine(Hash, ::GetTypeHash(Key.AnchorTriangleID));
-            Hash = HashCombine(Hash, ::GetTypeHash(Key.AlgorithmVersion));
-            for (const uint32 Value : Key.Values)
-            {
-                Hash = HashCombine(Hash, ::GetTypeHash(Value));
-            }
-            return Hash;
-        }
-    };
-
-    struct FChartEntry
-    {
-        FDWCEditorIslandLocalChartHandle Chart;
-        FDWCEditorMemoryLease MemoryLease;
-        uint64 ResidentBytes = 0;
+        FDWCEditorSurfacePatchProjectionLease Lease;
+        FDWCEditorSpatialHandle SpatialLease;
         uint64 LastUsedSerial = 0;
     };
 
     static FKey MakeKey(const FDWCEditorSurfacePatchProjectionRequest& Request);
-    static FChartKey MakeChartKey(const FDWCEditorIslandLocalChartRequest& Request);
-    bool ResolveChart(
-        FDWCEditorIslandLocalChartRequest Request,
-        EDWCEditorSurfacePatchCachePolicy Policy,
-        FDWCEditorIslandLocalChartHandle& OutChart,
-        FString* OutError,
-        const FDWCEditorCancellationToken* CancellationToken);
-    bool EvictOldestUnleased_Locked(ECacheEntryClass PreferredClass = ECacheEntryClass::Any);
-    ECacheEntryClass ResolvePressureClass_Locked() const;
+    bool EvictOldestUnleased_Locked();
+    void RetireActiveEntries_Locked();
+    void SweepRetired_Locked() const;
+    uint64 GetActiveBytes_Locked() const;
 
     mutable FCriticalSection Mutex;
     TMap<FKey, TSharedPtr<FEntry, ESPMode::ThreadSafe>> Entries;
-    TMap<FChartKey, TSharedPtr<FChartEntry, ESPMode::ThreadSafe>> ChartEntries;
+    mutable TArray<TWeakPtr<const IDWCEditorSurfacePatchProjectionResidency, ESPMode::ThreadSafe>>
+        RetiredResidencies;
+    TSharedRef<FResidencyAccountingState, ESPMode::ThreadSafe> AccountingState =
+        MakeShared<FResidencyAccountingState, ESPMode::ThreadSafe>();
     TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
     FDWCEditorAsyncOperationIdentity MemoryOwner;
     uint64 BudgetBytes = DefaultBudgetBytes;
-    uint64 UsedBytes = 0;
-    uint64 GeometryUsedBytes = 0;
-    uint64 ChartUsedBytes = 0;
+    uint64 CacheGeneration = 1;
     uint64 UseSerial = 0;
     uint64 HitCount = 0;
     uint64 MissCount = 0;
     uint64 EvictionCount = 0;
     uint64 AdmissionRejectCount = 0;
     uint64 EphemeralBuildCount = 0;
-    uint64 ChartHitCount = 0;
-    uint64 ChartMissCount = 0;
     uint64 ReadOnlyHitCount = 0;
     uint64 ReadOnlyMissCount = 0;
-    uint64 GeometryEvictionCount = 0;
-    uint64 ChartEvictionCount = 0;
+    uint64 RetireCount = 0;
+    mutable uint64 RetiredSweepCount = 0;
 };

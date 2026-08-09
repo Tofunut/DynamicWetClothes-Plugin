@@ -26,6 +26,37 @@ namespace
         return T * T * (3.0f - 2.0f * T);
     }
 
+    float RasterProjectionWeight(const float Value, const float Limit, const float Softness)
+    {
+        if (Value >= Limit || Limit <= UE_SMALL_NUMBER)
+        {
+            return 0.0f;
+        }
+        const float FadeStart = Limit * (1.0f - FMath::Clamp(Softness, 0.0f, 1.0f));
+        if (Value <= FadeStart || FMath::IsNearlyEqual(FadeStart, Limit))
+        {
+            return 1.0f;
+        }
+        return 1.0f - RasterSmoothStep(FadeStart, Limit, Value);
+    }
+
+    float RasterProjectionNormalWeight(
+        const float NormalDot,
+        const float RejectedNormalDot,
+        const float FullInfluenceNormalDot)
+    {
+        if (NormalDot <= RejectedNormalDot)
+        {
+            return 0.0f;
+        }
+        if (NormalDot >= FullInfluenceNormalDot ||
+            FMath::IsNearlyEqual(RejectedNormalDot, FullInfluenceNormalDot))
+        {
+            return 1.0f;
+        }
+        return RasterSmoothStep(RejectedNormalDot, FullInfluenceNormalDot, NormalDot);
+    }
+
     void RasterIncludePixel(FIntRect& Rect, bool& bHasRect, const int32 X, const int32 Y)
     {
         if (!bHasRect)
@@ -222,6 +253,10 @@ namespace
         FDWCEditorRasterResult Result;
         bool bHasDirtyRect = false;
         const float EdgeFadeStart = FMath::Clamp(1.0f - Command.Falloff, 0.0f, 0.98f);
+        const float RejectedNormalDot = FMath::Cos(Command.MaxSurfaceAngleRadians);
+        const float FullInfluenceNormalDot = FMath::Cos(
+            Command.MaxSurfaceAngleRadians *
+            (1.0f - FMath::Clamp(Command.ProjectionAngleSoftness, 0.0f, 1.0f)));
 
         struct FPreparedFragment
         {
@@ -229,7 +264,8 @@ namespace
             FVector2f Patch[3];
             FVector2f PatchAxisU[3];
             FVector2f PatchAxisV[3];
-            float ProjectionInfluence[3];
+            float SignedProjectionDepth[3];
+            FVector3f SurfaceNormalInProjectorSpace[3];
             float Area = 0.0f;
             int32 MinX = 0;
             int32 MaxX = -1;
@@ -261,7 +297,10 @@ namespace
                 Prepared.Patch[Corner] = Fragment.PatchCoordinates[Corner];
                 Prepared.PatchAxisU[Corner] = Fragment.PatchAxisUInTargetTangent[Corner];
                 Prepared.PatchAxisV[Corner] = Fragment.PatchAxisVInTargetTangent[Corner];
-                Prepared.ProjectionInfluence[Corner] = Fragment.ProjectionInfluence[Corner];
+                Prepared.SignedProjectionDepth[Corner] =
+                    Fragment.SignedProjectionDepth[Corner];
+                Prepared.SurfaceNormalInProjectorSpace[Corner] =
+                    Fragment.SurfaceNormalInProjectorSpace[Corner];
             }
             Prepared.Area = RasterEdge(
                 Prepared.Target[0], Prepared.Target[1], Prepared.Target[2]);
@@ -275,7 +314,9 @@ namespace
                 Swap(Prepared.Patch[1], Prepared.Patch[2]);
                 Swap(Prepared.PatchAxisU[1], Prepared.PatchAxisU[2]);
                 Swap(Prepared.PatchAxisV[1], Prepared.PatchAxisV[2]);
-                Swap(Prepared.ProjectionInfluence[1], Prepared.ProjectionInfluence[2]);
+                Swap(Prepared.SignedProjectionDepth[1], Prepared.SignedProjectionDepth[2]);
+                Swap(Prepared.SurfaceNormalInProjectorSpace[1],
+                    Prepared.SurfaceNormalInProjectorSpace[2]);
                 Prepared.Area = -Prepared.Area;
             }
 
@@ -335,12 +376,29 @@ namespace
             {
                 return false;
             }
-            const float ProjectionFade = FMath::Clamp(
-                Fragment.ProjectionInfluence[0] * Barycentric[0] +
-                Fragment.ProjectionInfluence[1] * Barycentric[1] +
-                Fragment.ProjectionInfluence[2] * Barycentric[2],
-                0.0f,
-                1.0f);
+            float ProjectionFade = 1.0f;
+            if (Command.bUseSurfaceProjectionFilter)
+            {
+                const float SignedDepth =
+                    Fragment.SignedProjectionDepth[0] * Barycentric[0] +
+                    Fragment.SignedProjectionDepth[1] * Barycentric[1] +
+                    Fragment.SignedProjectionDepth[2] * Barycentric[2];
+                const FVector3f ProjectorNormal = (
+                    Fragment.SurfaceNormalInProjectorSpace[0] * Barycentric[0] +
+                    Fragment.SurfaceNormalInProjectorSpace[1] * Barycentric[1] +
+                    Fragment.SurfaceNormalInProjectorSpace[2] * Barycentric[2]).GetSafeNormal(
+                        UE_SMALL_NUMBER,
+                        FVector3f(0.0f, 0.0f, 1.0f));
+                ProjectionFade =
+                    RasterProjectionWeight(
+                        FMath::Abs(SignedDepth),
+                        Command.ProjectionDepthLocal,
+                        Command.ProjectionDepthSoftness) *
+                    RasterProjectionNormalWeight(
+                        FMath::Clamp(ProjectorNormal.Z, -1.0f, 1.0f),
+                        RejectedNormalDot,
+                        FullInfluenceNormalDot);
+            }
             const float EdgeFade =
                 (1.0f - RasterSmoothStep(EdgeFadeStart, 1.0f, Distance)) * ProjectionFade;
             if (EdgeFade <= UE_SMALL_NUMBER)

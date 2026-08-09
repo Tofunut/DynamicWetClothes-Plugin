@@ -74,6 +74,9 @@ bool FWetWrinkleAuthoringControllerCommitTest::RunTest(const FString& Parameters
     const FWetWrinklePatchCommitResult CommitResult =
         Controller->CommitPresentedPatch(PresentedDescriptor);
     TestTrue(TEXT("The presented Patch commits successfully"), CommitResult.bSucceeded);
+    TestTrue(TEXT("The commit result returns the exact authored placement"),
+        CommitResult.Placement.PatchGuid == CommitResult.PatchGuid &&
+        CommitResult.Placement.PatchGuid.IsValid());
 
     TestEqual(
         TEXT("A Patch click commits one authored patch"),
@@ -84,6 +87,11 @@ bool FWetWrinkleAuthoringControllerCommitTest::RunTest(const FString& Parameters
         Store->GetState().Wrinkle.SelectedElementGuid ==
             Asset->Authored.WrinkleData.EditablePatches[0].PatchGuid);
     const FWetWrinklePatchPlacement& Patch = Asset->Authored.WrinkleData.EditablePatches[0];
+    TestTrue(TEXT("The returned placement matches the placement stored in the WCA"),
+        CommitResult.Placement.PatchGuid == Patch.PatchGuid &&
+        CommitResult.Placement.AnchorTriangleID == Patch.AnchorTriangleID &&
+        CommitResult.Placement.SurfaceHalfExtentLocal.Equals(
+            Patch.SurfaceHalfExtentLocal, UE_KINDA_SMALL_NUMBER));
     TestTrue(TEXT("A new Patch stores a canonical surface anchor"), Patch.bHasSurfaceAnchor);
     TestEqual(TEXT("The Patch anchor preserves the hit triangle"), Patch.AnchorTriangleID, 7);
     TestTrue(TEXT("A new Patch stores a Data UV-independent surface frame"), Patch.HasValidSurfaceFrame());
@@ -125,7 +133,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FWetWrinklePresentedPatchDescriptorParityTest::RunTest(const FString&)
 {
     UTexture2D* NormalTexture = NewObject<UTexture2D>(GetTransientPackage());
-    UTexture2D* SourceTexture = NewObject<UTexture2D>(GetTransientPackage());
     FWetWrinkleBrushSettings Brush;
     Brush.MaterialSlotIndex = 4;
     Brush.UVChannelIndex = 2;
@@ -159,8 +166,7 @@ bool FWetWrinklePresentedPatchDescriptorParityTest::RunTest(const FString&)
     FWetWrinklePatchPlacement Committed;
     TestTrue(
         TEXT("The presented descriptor converts directly into authored data"),
-        FDWCEditorWrinklePatchDescriptorBuilder::BuildPlacement(
-            Presented, SourceTexture, Committed));
+        FDWCEditorWrinklePatchDescriptorBuilder::BuildPlacement(Presented, Committed));
     TestEqual(TEXT("Commit keeps the presented triangle"), Committed.AnchorTriangleID, 19);
     TestTrue(
         TEXT("Commit keeps the presented anchor instead of the newer mouse hit"),
@@ -215,6 +221,166 @@ bool FWetWrinklePresentedPatchDescriptorParityTest::RunTest(const FString&)
     TestTrue(TEXT("Projector requests keep the same rotation and scale"),
         FMath::IsNearlyEqual(AuthoredRequest.RotationRadians, HoverRequest.RotationRadians) &&
             AuthoredRequest.Scale.Equals(HoverRequest.Scale, UE_KINDA_SMALL_NUMBER));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FWetWrinkleProjectionModeCanonicalizationTest,
+    "DWC.Editor.Wrinkle.Authoring.ProjectionModeCanonicalization",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FWetWrinkleProjectionModeCanonicalizationTest::RunTest(const FString&)
+{
+    UTexture2D* NormalTexture = NewObject<UTexture2D>(GetTransientPackage());
+    FWetWrinkleBrushSettings Brush;
+    Brush.MaterialSlotIndex = 2;
+    Brush.UVChannelIndex = 1;
+    Brush.WrinkleNormalTexture = NormalTexture;
+    Brush.PatchDiameterLocal = 10.0f;
+    Brush.Strength = 1.0f;
+    Brush.PatchProjection.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly;
+
+    FWetWrinkleSurfaceHit Hit;
+    Hit.bHit = true;
+    Hit.MaterialSlotIndex = 2;
+    Hit.UVChannelIndex = 1;
+    Hit.TriangleID = 12;
+    Hit.Barycentric = FVector(0.2, 0.3, 0.5);
+    Hit.UV = FVector2D(0.4, 0.6);
+    Hit.LocalNormal = FVector::UpVector;
+    Hit.LocalSurfaceFrameU = FVector::ForwardVector;
+    Hit.LocalSurfaceFrameV = FVector::RightVector;
+
+    FDWCEditorWrinklePatchDescriptor NonUvDescriptor;
+    TestTrue(
+        TEXT("A Non UV Seam descriptor builds from a valid surface hit"),
+        FDWCEditorWrinklePatchDescriptorBuilder::BuildFromHit(
+            Hit, Brush, 1, NonUvDescriptor));
+
+    FDWCEditorWrinklePatchDescriptor DifferentDecalSettings = NonUvDescriptor;
+    DifferentDecalSettings.ProjectionSettings.ProjectionDepthLocal = -1.0f;
+    DifferentDecalSettings.ProjectionSettings.MaxSurfaceAngleDegrees = 120.0f;
+    DifferentDecalSettings.ProjectionSettings.ProjectionDepthSoftness = -0.5f;
+    DifferentDecalSettings.ProjectionSettings.ProjectionAngleSoftness = 2.0f;
+    TestFalse(
+        TEXT("Non UV Seam rejects invalid shared decal projection settings"),
+        DifferentDecalSettings.IsValid());
+
+    FDWCEditorWrinklePatchDescriptor ChangedNonUvSettings = NonUvDescriptor;
+    ChangedNonUvSettings.ProjectionSettings.ProjectionDepthLocal *= 2.0f;
+    TestNotEqual(
+        TEXT("Non UV Seam stable hashes include shared decal projection settings"),
+        ChangedNonUvSettings.GetStableHash(),
+        NonUvDescriptor.GetStableHash());
+
+    TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> SpatialData =
+        MakeShared<FDWCEditorSpatialData, ESPMode::ThreadSafe>();
+    SpatialData->MaterialSlotIndex = NonUvDescriptor.MaterialSlotIndex;
+    SpatialData->UVChannelIndex = NonUvDescriptor.UVChannelIndex;
+    FDWCEditorSurfacePatchProjectionRequest NonUvRequest;
+    TestTrue(
+        TEXT("The Non UV Seam descriptor builds a projection request"),
+        FDWCEditorWrinklePatchDescriptorBuilder::BuildProjectionRequest(
+            NonUvDescriptor, SpatialData, NonUvRequest));
+    TestEqual(
+        TEXT("Non UV Seam resolves to the anchor-island boundary policy"),
+        NonUvRequest.BoundaryPolicy,
+        EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly);
+
+    FDWCEditorWrinklePatchDescriptor DecalDescriptor = NonUvDescriptor;
+    DecalDescriptor.ProjectionSettings.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
+    TestTrue(TEXT("A UV Seam descriptor with valid decal settings remains valid"),
+        DecalDescriptor.IsValid());
+    TestNotEqual(
+        TEXT("Changing projection mode changes the descriptor stable hash"),
+        DecalDescriptor.GetStableHash(),
+        NonUvDescriptor.GetStableHash());
+
+    FDWCEditorWrinklePatchDescriptor ChangedDecalSettings = DecalDescriptor;
+    ChangedDecalSettings.ProjectionSettings.ProjectionDepthLocal *= 2.0f;
+    TestNotEqual(
+        TEXT("UV Seam stable hashes include decal projection settings"),
+        ChangedDecalSettings.GetStableHash(),
+        DecalDescriptor.GetStableHash());
+
+    DifferentDecalSettings.ProjectionSettings.BoundaryPolicy =
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams;
+    TestFalse(
+        TEXT("UV Seam rejects invalid decal projection settings"),
+        DifferentDecalSettings.IsValid());
+
+    FWetWrinklePatchPlacement Placement;
+    TestTrue(
+        TEXT("A UV Seam descriptor converts to authored placement data"),
+        FDWCEditorWrinklePatchDescriptorBuilder::BuildPlacement(
+            DecalDescriptor, Placement));
+    FDWCEditorWrinklePatchDescriptor RoundTrip;
+    TestTrue(
+        TEXT("The authored UV Seam placement rebuilds a descriptor"),
+        FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
+            Placement, DecalDescriptor.UVChannelIndex, RoundTrip));
+    TestEqual(
+        TEXT("The projection mode survives the descriptor-placement round trip"),
+        RoundTrip.ProjectionSettings.BoundaryPolicy,
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams);
+    TestEqual(
+        TEXT("The round-trip descriptor preserves its stable projection contract"),
+        RoundTrip.GetStableHash(),
+        DecalDescriptor.GetStableHash());
+
+    FDWCEditorSurfacePatchProjectionRequest DecalRequest;
+    TestTrue(
+        TEXT("The UV Seam descriptor builds a projection request"),
+        FDWCEditorWrinklePatchDescriptorBuilder::BuildProjectionRequest(
+            RoundTrip, SpatialData, DecalRequest));
+    TestEqual(
+        TEXT("UV Seam resolves to the cross-seam boundary policy"),
+        DecalRequest.BoundaryPolicy,
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams);
+
+    FDWCEditorNormalSourceSnapshot NormalSource;
+    NormalSource.Texture.Width = 1;
+    NormalSource.Texture.Height = 1;
+    NormalSource.Texture.BytesPerPixel = 4;
+    NormalSource.Texture.Format = TSF_BGRA8;
+    NormalSource.Texture.RawData = MakeShared<TArray64<uint8>>();
+    NormalSource.Texture.RawData->Append({255, 128, 128, 255});
+    FDWCEditorScalarSourceSnapshot CoverageSource;
+    CoverageSource.Size = FIntPoint(1, 1);
+    TSharedRef<TArray<float>, ESPMode::ThreadSafe> CoverageValues =
+        MakeShared<TArray<float>, ESPMode::ThreadSafe>();
+    CoverageValues->Add(1.0f);
+    CoverageSource.Values = CoverageValues;
+
+    FDWCEditorSurfaceNormalPatchInput NonUvRasterInput;
+    TestTrue(
+        TEXT("Cached bake sources build the canonical Non UV Seam command input"),
+        FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInputFromSources(
+            NonUvDescriptor,
+            SpatialData,
+            NormalSource,
+            CoverageSource,
+            NonUvRasterInput));
+    TestEqual(
+        TEXT("The canonical Non UV Seam command input keeps the anchor-island policy"),
+        NonUvRasterInput.Projection.BoundaryPolicy,
+        EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly);
+
+    FDWCEditorSurfaceNormalPatchInput DecalRasterInput;
+    TestTrue(
+        TEXT("Cached bake sources build the canonical UV Seam command input"),
+        FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInputFromSources(
+            DecalDescriptor,
+            SpatialData,
+            NormalSource,
+            CoverageSource,
+            DecalRasterInput));
+    TestEqual(
+        TEXT("The canonical UV Seam command input keeps the cross-seam policy"),
+        DecalRasterInput.Projection.BoundaryPolicy,
+        EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams);
     return true;
 }
 

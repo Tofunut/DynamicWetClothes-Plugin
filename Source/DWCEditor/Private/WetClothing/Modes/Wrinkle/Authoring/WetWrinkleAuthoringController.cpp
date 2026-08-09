@@ -9,7 +9,6 @@
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionAction.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionStore.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
-#include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleViewport.h"
 #include "WetClothing/Modes/Wrinkle/Authoring/WetWrinklePatchDescriptor.h"
 
@@ -261,10 +260,8 @@ FWetWrinklePatchCommitResult FWetWrinkleAuthoringController::CommitPresentedPatc
 
     FWetWrinklePatchPlacement NewPatch;
     FString DescriptorError;
-    UTexture* SourceTexture = FWetClothingMaterialTextureResolver::ResolveOrSaveTextureSelection(
-        CurrentAsset, Descriptor.MaterialSlotIndex);
     if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildPlacement(
-            Descriptor, SourceTexture, NewPatch, &DescriptorError))
+            Descriptor, NewPatch, &DescriptorError))
     {
         FMessageDialog::Open(
             EAppMsgType::Ok,
@@ -296,12 +293,9 @@ FWetWrinklePatchCommitResult FWetWrinkleAuthoringController::CommitPresentedPatc
     }
 
     SelectElement(EWetWrinkleElementType::Patch, NewPatch.PatchGuid);
-    if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = Viewport.Pin())
-    {
-        PinnedViewport->AppendAccumulatedPreviewStamp(NewPatch);
-    }
     Result.bSucceeded = true;
     Result.PatchGuid = NewPatch.PatchGuid;
+    Result.Placement = MoveTemp(NewPatch);
     return Result;
 }
 

@@ -9,6 +9,7 @@ class FDWCEditorSessionReducer
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCActivateEditorModeAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCReconcileAuthoringAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetWrinkleBrushAction& Action);
+    static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetWrinkleEditContextAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSelectWrinkleElementAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetWrinkleCrossPreviewAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSelectTransparencyLayerAction& Action);

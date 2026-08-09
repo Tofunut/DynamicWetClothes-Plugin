@@ -2,45 +2,41 @@
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionReducer.h"
 #include "WetClothing/Modes/Wrinkle/Authoring/WetWrinkleBrushConstants.h"
 
+bool FWetWrinkleBrushSettings::IsEquivalent(const FWetWrinkleBrushSettings& Other) const
+{
+    return ToolMode == Other.ToolMode &&
+        UVChannelIndex == Other.UVChannelIndex &&
+        MaterialSlotIndex == Other.MaterialSlotIndex &&
+        WrinkleNormalTexture == Other.WrinkleNormalTexture &&
+        PatchProjection.IsEquivalent(Other.PatchProjection) &&
+        FMath::IsNearlyEqual(PatchDiameterLocal, Other.PatchDiameterLocal) &&
+        FMath::IsNearlyEqual(BrushRadiusUV, Other.BrushRadiusUV) &&
+        FMath::IsNearlyEqual(Strength, Other.Strength) &&
+        FMath::IsNearlyEqual(Falloff, Other.Falloff) &&
+        FMath::IsNearlyEqual(RotationRadians, Other.RotationRadians) &&
+        FMath::IsNearlyEqual(PreviewWetness, Other.PreviewWetness) &&
+        RidgeShape == Other.RidgeShape &&
+        bFlipRidgeFoldSide == Other.bFlipRidgeFoldSide &&
+        FMath::IsNearlyEqual(RidgeStartTaper, Other.RidgeStartTaper) &&
+        FMath::IsNearlyEqual(RidgeEndTaper, Other.RidgeEndTaper) &&
+        FMath::IsNearlyEqual(RidgePointSpacingScale, Other.RidgePointSpacingScale) &&
+        FMath::IsNearlyEqual(RidgeFlareSettings.Length, Other.RidgeFlareSettings.Length) &&
+        FMath::IsNearlyEqual(RidgeFlareSettings.WidthScale, Other.RidgeFlareSettings.WidthScale) &&
+        FMath::IsNearlyEqual(RidgeFlareSettings.EndStrength, Other.RidgeFlareSettings.EndStrength) &&
+        FMath::IsNearlyEqual(RidgeFlareSettings.Softness, Other.RidgeFlareSettings.Softness) &&
+        RidgeNaturalVariation.bEnabled == Other.RidgeNaturalVariation.bEnabled &&
+        FMath::IsNearlyEqual(RidgeNaturalVariation.CenterlineAmount, Other.RidgeNaturalVariation.CenterlineAmount) &&
+        FMath::IsNearlyEqual(RidgeNaturalVariation.CenterlineFrequency, Other.RidgeNaturalVariation.CenterlineFrequency) &&
+        FMath::IsNearlyEqual(RidgeNaturalVariation.WidthVariation, Other.RidgeNaturalVariation.WidthVariation) &&
+        FMath::IsNearlyEqual(RidgeNaturalVariation.WidthFrequency, Other.RidgeNaturalVariation.WidthFrequency) &&
+        RidgeNaturalVariation.NoiseSeed == Other.RidgeNaturalVariation.NoiseSeed &&
+        RidgeEditMode == Other.RidgeEditMode &&
+        bRidgeJunctionModeEnabled == Other.bRidgeJunctionModeEnabled &&
+        bShowPreview == Other.bShowPreview;
+}
+
 namespace
 {
-    bool AreBrushesEquivalent(const FWetWrinkleBrushSettings& A, const FWetWrinkleBrushSettings& B)
-    {
-        return A.ToolMode == B.ToolMode &&
-            A.UVChannelIndex == B.UVChannelIndex &&
-            A.MaterialSlotIndex == B.MaterialSlotIndex &&
-            A.WrinkleNormalTexture == B.WrinkleNormalTexture &&
-            A.PatchProjectionMode == B.PatchProjectionMode &&
-            FMath::IsNearlyEqual(A.PatchProjectionDepthLocal, B.PatchProjectionDepthLocal) &&
-            FMath::IsNearlyEqual(A.PatchMaxSurfaceAngleDegrees, B.PatchMaxSurfaceAngleDegrees) &&
-            FMath::IsNearlyEqual(A.PatchProjectionDepthSoftness, B.PatchProjectionDepthSoftness) &&
-            FMath::IsNearlyEqual(A.PatchProjectionAngleSoftness, B.PatchProjectionAngleSoftness) &&
-            FMath::IsNearlyEqual(A.PatchDiameterLocal, B.PatchDiameterLocal) &&
-            FMath::IsNearlyEqual(A.BrushRadiusUV, B.BrushRadiusUV) &&
-            FMath::IsNearlyEqual(A.Strength, B.Strength) &&
-            FMath::IsNearlyEqual(A.Falloff, B.Falloff) &&
-            FMath::IsNearlyEqual(A.RotationRadians, B.RotationRadians) &&
-            FMath::IsNearlyEqual(A.PreviewWetness, B.PreviewWetness) &&
-            A.RidgeShape == B.RidgeShape &&
-            A.bFlipRidgeFoldSide == B.bFlipRidgeFoldSide &&
-            FMath::IsNearlyEqual(A.RidgeStartTaper, B.RidgeStartTaper) &&
-            FMath::IsNearlyEqual(A.RidgeEndTaper, B.RidgeEndTaper) &&
-            FMath::IsNearlyEqual(A.RidgePointSpacingScale, B.RidgePointSpacingScale) &&
-            FMath::IsNearlyEqual(A.RidgeFlareSettings.Length, B.RidgeFlareSettings.Length) &&
-            FMath::IsNearlyEqual(A.RidgeFlareSettings.WidthScale, B.RidgeFlareSettings.WidthScale) &&
-            FMath::IsNearlyEqual(A.RidgeFlareSettings.EndStrength, B.RidgeFlareSettings.EndStrength) &&
-            FMath::IsNearlyEqual(A.RidgeFlareSettings.Softness, B.RidgeFlareSettings.Softness) &&
-            A.RidgeNaturalVariation.bEnabled == B.RidgeNaturalVariation.bEnabled &&
-            FMath::IsNearlyEqual(A.RidgeNaturalVariation.CenterlineAmount, B.RidgeNaturalVariation.CenterlineAmount) &&
-            FMath::IsNearlyEqual(A.RidgeNaturalVariation.CenterlineFrequency, B.RidgeNaturalVariation.CenterlineFrequency) &&
-            FMath::IsNearlyEqual(A.RidgeNaturalVariation.WidthVariation, B.RidgeNaturalVariation.WidthVariation) &&
-            FMath::IsNearlyEqual(A.RidgeNaturalVariation.WidthFrequency, B.RidgeNaturalVariation.WidthFrequency) &&
-            A.RidgeNaturalVariation.NoiseSeed == B.RidgeNaturalVariation.NoiseSeed &&
-            A.RidgeEditMode == B.RidgeEditMode &&
-            A.bRidgeJunctionModeEnabled == B.bRidgeJunctionModeEnabled &&
-            A.bShowPreview == B.bShowPreview;
-    }
-
     bool ArePaintSettingsEquivalent(
         const FDWCTransparencyPaintSettings& A,
         const FDWCTransparencyPaintSettings& B)
@@ -67,10 +63,7 @@ namespace
             Brush.BrushRadiusUV,
             0.001f,
             WetWrinkleBrushConstants::MaxRadiusUV);
-        Brush.PatchProjectionDepthLocal = FMath::Clamp(Brush.PatchProjectionDepthLocal, 0.1f, 20.0f);
-        Brush.PatchMaxSurfaceAngleDegrees = FMath::Clamp(Brush.PatchMaxSurfaceAngleDegrees, 1.0f, 89.0f);
-        Brush.PatchProjectionDepthSoftness = FMath::Clamp(Brush.PatchProjectionDepthSoftness, 0.0f, 1.0f);
-        Brush.PatchProjectionAngleSoftness = FMath::Clamp(Brush.PatchProjectionAngleSoftness, 0.0f, 1.0f);
+        Brush.PatchProjection.Normalize();
         Brush.Strength = FMath::Clamp(Brush.Strength, 0.0f, 4.0f);
         Brush.Falloff = FMath::Clamp(Brush.Falloff, 0.0f, 1.0f);
         Brush.PreviewWetness = FMath::Clamp(Brush.PreviewWetness, 0.0f, 1.0f);
@@ -207,7 +200,7 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
         Action.BrushSizeCm, 0.1f, WetWrinkleBrushConstants::MaxSizeCm);
     const float SizeUV = FMath::Clamp(
         Action.BrushSizeUV, 0.001f, WetWrinkleBrushConstants::MaxRadiusUV);
-    if (AreBrushesEquivalent(State.Wrinkle.Brush, Brush) &&
+    if (State.Wrinkle.Brush.IsEquivalent(Brush) &&
         FMath::IsNearlyEqual(State.Wrinkle.BrushSizeCm, SizeCm) &&
         FMath::IsNearlyEqual(State.Wrinkle.BrushSizeUV, SizeUV))
     {
@@ -217,6 +210,49 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     State.Wrinkle.BrushSizeCm = SizeCm;
     State.Wrinkle.BrushSizeUV = SizeUV;
     return Action.Effects | EDWCEditorSessionEffect::SyncControls;
+}
+
+EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
+    FDWCEditorSessionState& State,
+    const FDWCSetWrinkleEditContextAction& Action)
+{
+    const int32 MaterialSlotIndex = Action.MaterialSlotIndex >= 0
+        ? Action.MaterialSlotIndex
+        : INDEX_NONE;
+    const int32 UVChannelIndex = Action.UVChannelIndex >= 0
+        ? Action.UVChannelIndex
+        : INDEX_NONE;
+    const bool bTopologyChanged =
+        State.Wrinkle.Brush.MaterialSlotIndex != MaterialSlotIndex ||
+        State.Wrinkle.Brush.UVChannelIndex != UVChannelIndex;
+    const bool bSelectionChanged = Action.bClearElementSelection &&
+        (State.Wrinkle.SelectedElementGuid.IsValid() ||
+         State.Wrinkle.SelectedRidgePointIndex != INDEX_NONE);
+
+    if (!bTopologyChanged && !bSelectionChanged)
+    {
+        return EDWCEditorSessionEffect::None;
+    }
+
+    EDWCEditorSessionEffect Effects = EDWCEditorSessionEffect::None;
+    if (bTopologyChanged)
+    {
+        State.Wrinkle.Brush.MaterialSlotIndex = MaterialSlotIndex;
+        State.Wrinkle.Brush.UVChannelIndex = UVChannelIndex;
+        Effects |= EDWCEditorSessionEffect::SyncControls |
+            EDWCEditorSessionEffect::RefreshElementList |
+            EDWCEditorSessionEffect::RebuildHitTopology |
+            EDWCEditorSessionEffect::RefreshUVView;
+    }
+    if (bSelectionChanged)
+    {
+        State.Wrinkle.SelectedElementGuid.Invalidate();
+        State.Wrinkle.SelectedElementType = EWetWrinkleElementType::Patch;
+        State.Wrinkle.SelectedRidgePointIndex = INDEX_NONE;
+        Effects |= EDWCEditorSessionEffect::SyncSelection |
+            EDWCEditorSessionEffect::RefreshDetails;
+    }
+    return Effects;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
@@ -233,7 +269,6 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     State.Wrinkle.SelectedElementType = Action.ElementType;
     State.Wrinkle.SelectedRidgePointIndex = Action.RidgePointIndex;
     return EDWCEditorSessionEffect::SyncSelection |
-        EDWCEditorSessionEffect::UpdatePreviewParameters |
         EDWCEditorSessionEffect::RefreshDetails;
 }
 

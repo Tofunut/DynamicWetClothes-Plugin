@@ -6,7 +6,8 @@
 /** Canonical versions shared by cache keys, baked signatures, and regression tests. */
 namespace DWCEditorSurfacePatchProjectionVersion
 {
-    inline constexpr uint32 SurfaceProjection = 7;
-    inline constexpr uint32 IslandLocalChart = 1;
-    inline constexpr uint32 ProjectedRaster = 2;
+    inline constexpr uint32 SurfaceProjection = 10;
+    inline constexpr uint32 ProjectedRaster = 3;
+    // Preserves the historical CoreMode token in baked build signatures.
+    inline constexpr int32 SurfaceDecalSignatureId = 1;
 }

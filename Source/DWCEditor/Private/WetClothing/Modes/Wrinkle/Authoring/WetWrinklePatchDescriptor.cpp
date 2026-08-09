@@ -6,6 +6,7 @@
 #include "HAL/IConsoleManager.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionState.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjector.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleHitData.h"
 
@@ -32,6 +33,36 @@ namespace
         Hash = HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Value.Y * Quantization)));
         return HashCombine(Hash, GetTypeHash(FMath::RoundToInt(Value.Z * Quantization)));
     }
+
+}
+
+FDWCEditorSurfacePatchProjectionSettings
+FDWCEditorWrinklePatchDescriptorBuilder::BuildProjectionSettings(
+    const EWetWrinklePatchProjectionMode AuthoredMode,
+    const float ProjectionDepthLocal,
+    const float MaxSurfaceAngleDegrees,
+    const float ProjectionDepthSoftness,
+    const float ProjectionAngleSoftness)
+{
+    FDWCEditorSurfacePatchProjectionSettings Settings;
+    Settings.BoundaryPolicy = AuthoredMode == EWetWrinklePatchProjectionMode::SurfaceDecal
+        ? EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams
+        : EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly;
+    Settings.ProjectionDepthLocal = ProjectionDepthLocal;
+    Settings.MaxSurfaceAngleDegrees = MaxSurfaceAngleDegrees;
+    Settings.ProjectionDepthSoftness = ProjectionDepthSoftness;
+    Settings.ProjectionAngleSoftness = ProjectionAngleSoftness;
+    Settings.Normalize();
+    return Settings;
+}
+
+EWetWrinklePatchProjectionMode
+FDWCEditorWrinklePatchDescriptorBuilder::ResolveAuthoredProjectionMode(
+    const EDWCEditorSurfacePatchBoundaryPolicy BoundaryPolicy)
+{
+    return BoundaryPolicy == EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams
+        ? EWetWrinklePatchProjectionMode::SurfaceDecal
+        : EWetWrinklePatchProjectionMode::NonUVSeam;
 }
 
 bool FDWCEditorWrinklePatchDescriptor::IsValid() const
@@ -47,10 +78,7 @@ bool FDWCEditorWrinklePatchDescriptor::IsValid() const
         FMath::IsFinite(SurfaceHalfExtentLocal.X) && FMath::IsFinite(SurfaceHalfExtentLocal.Y) &&
         SurfaceHalfExtentLocal.X > UE_SMALL_NUMBER && SurfaceHalfExtentLocal.Y > UE_SMALL_NUMBER &&
         FMath::IsFinite(DisplayRadiusUV) && DisplayRadiusUV >= 0.0f &&
-        FMath::IsFinite(ProjectionDepthLocal) && ProjectionDepthLocal > 0.0f &&
-        FMath::IsFinite(MaxSurfaceAngleDegrees) && MaxSurfaceAngleDegrees > 0.0f && MaxSurfaceAngleDegrees < 90.0f &&
-        FMath::IsFinite(ProjectionDepthSoftness) && ProjectionDepthSoftness >= 0.0f && ProjectionDepthSoftness <= 1.0f &&
-        FMath::IsFinite(ProjectionAngleSoftness) && ProjectionAngleSoftness >= 0.0f && ProjectionAngleSoftness <= 1.0f &&
+        ProjectionSettings.IsValid() &&
         FMath::IsFinite(RotationRadians) && FMath::IsFinite(Scale.X) && FMath::IsFinite(Scale.Y) &&
         FMath::Abs(Scale.X) > UE_SMALL_NUMBER && FMath::Abs(Scale.Y) > UE_SMALL_NUMBER &&
         FMath::IsFinite(Strength) && Strength > 0.0f && FMath::IsFinite(Falloff) &&
@@ -72,11 +100,11 @@ uint32 FDWCEditorWrinklePatchDescriptor::GetStableHash() const
     Hash = HashCombine(Hash, HashQuantizedVector(SurfaceFrameU));
     Hash = HashCombine(Hash, HashQuantizedVector(SurfaceFrameV));
     Hash = HashCombine(Hash, GetTypeHash(SurfaceHalfExtentLocal));
-    Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(ProjectionMode)));
-    Hash = HashCombine(Hash, GetTypeHash(ProjectionDepthLocal));
-    Hash = HashCombine(Hash, GetTypeHash(MaxSurfaceAngleDegrees));
-    Hash = HashCombine(Hash, GetTypeHash(ProjectionDepthSoftness));
-    Hash = HashCombine(Hash, GetTypeHash(ProjectionAngleSoftness));
+    Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(ProjectionSettings.BoundaryPolicy)));
+    Hash = HashCombine(Hash, GetTypeHash(ProjectionSettings.ProjectionDepthLocal));
+    Hash = HashCombine(Hash, GetTypeHash(ProjectionSettings.MaxSurfaceAngleDegrees));
+    Hash = HashCombine(Hash, GetTypeHash(ProjectionSettings.ProjectionDepthSoftness));
+    Hash = HashCombine(Hash, GetTypeHash(ProjectionSettings.ProjectionAngleSoftness));
     Hash = HashCombine(Hash, GetTypeHash(DisplayRadiusUV));
     Hash = HashCombine(Hash, GetTypeHash(RotationRadians));
     Hash = HashCombine(Hash, GetTypeHash(Scale));
@@ -120,11 +148,8 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildFromHit(
     OutDescriptor.SurfaceFrameV = FrameV;
     const float HalfExtent = Brush.PatchDiameterLocal * 0.5f;
     OutDescriptor.SurfaceHalfExtentLocal = FVector2f(HalfExtent, HalfExtent);
-    OutDescriptor.ProjectionMode = Brush.PatchProjectionMode;
-    OutDescriptor.ProjectionDepthLocal = Brush.PatchProjectionDepthLocal;
-    OutDescriptor.MaxSurfaceAngleDegrees = Brush.PatchMaxSurfaceAngleDegrees;
-    OutDescriptor.ProjectionDepthSoftness = Brush.PatchProjectionDepthSoftness;
-    OutDescriptor.ProjectionAngleSoftness = Brush.PatchProjectionAngleSoftness;
+    OutDescriptor.ProjectionSettings = Brush.PatchProjection;
+    OutDescriptor.ProjectionSettings.Normalize();
     OutDescriptor.AnchorUV = FVector2f(Hit.UV);
     OutDescriptor.DisplayRadiusUV = Brush.BrushRadiusUV;
     OutDescriptor.RotationRadians = Brush.RotationRadians;
@@ -155,11 +180,12 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
     OutDescriptor.SurfaceFrameU = Placement.SurfaceFrameU;
     OutDescriptor.SurfaceFrameV = Placement.SurfaceFrameV;
     OutDescriptor.SurfaceHalfExtentLocal = Placement.SurfaceHalfExtentLocal;
-    OutDescriptor.ProjectionMode = Placement.ProjectionMode;
-    OutDescriptor.ProjectionDepthLocal = Placement.ProjectionDepthLocal;
-    OutDescriptor.MaxSurfaceAngleDegrees = Placement.MaxSurfaceAngleDegrees;
-    OutDescriptor.ProjectionDepthSoftness = Placement.ProjectionDepthSoftness;
-    OutDescriptor.ProjectionAngleSoftness = Placement.ProjectionAngleSoftness;
+    OutDescriptor.ProjectionSettings = BuildProjectionSettings(
+        Placement.ProjectionMode,
+        Placement.ProjectionDepthLocal,
+        Placement.MaxSurfaceAngleDegrees,
+        Placement.ProjectionDepthSoftness,
+        Placement.ProjectionAngleSoftness);
     OutDescriptor.AnchorUV = FVector2f(Placement.PositionUV);
     OutDescriptor.DisplayRadiusUV = Placement.BrushRadiusUV;
     OutDescriptor.RotationRadians = Placement.RotationRadians;
@@ -184,15 +210,15 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInput(
 {
     OutInput = {};
     UTexture2D* NormalTexture = Descriptor.NormalTexture.Get();
-    if (!BuildProjectionRequest(Descriptor, SpatialHandle, OutInput.Projection, OutError) ||
-        NormalTexture == nullptr)
+    if (NormalTexture == nullptr)
     {
-        SetDescriptorError(OutError, TEXT("The patch descriptor does not match the active spatial payload."));
+        SetDescriptorError(OutError, TEXT("The patch descriptor has no normal texture."));
         return false;
     }
+    FDWCEditorNormalSourceSnapshot NormalSource;
     FString ReadError;
     if (!FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
-            NormalTexture, OutInput.NormalSource.Texture, ReadError))
+            NormalTexture, NormalSource.Texture, ReadError))
     {
         if (OutError != nullptr)
         {
@@ -200,10 +226,44 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInput(
         }
         return false;
     }
-    OutInput.NormalSource.bFlipGreenChannel = NormalTexture->bFlipGreenChannel;
+    NormalSource.bFlipGreenChannel = NormalTexture->bFlipGreenChannel;
+    return BuildRasterInputFromSources(
+        Descriptor,
+        SpatialHandle,
+        NormalSource,
+        FDWCEditorScalarSourceSnapshot(),
+        OutInput,
+        OutError);
+}
+
+bool FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInputFromSources(
+    const FDWCEditorWrinklePatchDescriptor& Descriptor,
+    const FDWCEditorSpatialHandle& SpatialHandle,
+    const FDWCEditorNormalSourceSnapshot& NormalSource,
+    const FDWCEditorScalarSourceSnapshot& CoverageSource,
+    FDWCEditorSurfaceNormalPatchInput& OutInput,
+    FString* OutError)
+{
+    OutInput = {};
+    if (!NormalSource.IsValid())
+    {
+        SetDescriptorError(OutError, TEXT("The patch command input has no readable normal source."));
+        return false;
+    }
+    if (!BuildProjectionRequest(Descriptor, SpatialHandle, OutInput.Projection, OutError))
+    {
+        return false;
+    }
+    OutInput.NormalSource = NormalSource;
+    OutInput.CoverageSource = CoverageSource;
     OutInput.Strength = Descriptor.Strength;
     OutInput.Falloff = Descriptor.Falloff;
-    return OutInput.IsValid();
+    if (!OutInput.IsValid())
+    {
+        SetDescriptorError(OutError, TEXT("The canonical surface patch command input is invalid."));
+        return false;
+    }
+    return true;
 }
 
 bool FDWCEditorWrinklePatchDescriptorBuilder::BuildProjectionRequest(
@@ -229,22 +289,14 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildProjectionRequest(
     OutRequest.SurfaceHalfExtentLocal = Descriptor.SurfaceHalfExtentLocal;
     OutRequest.RotationRadians = Descriptor.RotationRadians;
     OutRequest.Scale = Descriptor.Scale;
-    OutRequest.ProjectionDepthLocal = Descriptor.ProjectionDepthLocal;
-    OutRequest.MaxSurfaceAngleDegrees = Descriptor.MaxSurfaceAngleDegrees;
-    OutRequest.ProjectionDepthSoftness = Descriptor.ProjectionDepthSoftness;
-    OutRequest.ProjectionAngleSoftness = Descriptor.ProjectionAngleSoftness;
-    OutRequest.bUseSurfaceDecalProjection =
-        Descriptor.ProjectionMode == EWetWrinklePatchProjectionMode::SurfaceDecal;
-    OutRequest.bAllowUVSeamTraversal =
-        Descriptor.ProjectionMode == EWetWrinklePatchProjectionMode::SurfaceDecal;
+    OutRequest.ApplySettings(Descriptor.ProjectionSettings);
     OutRequest.bCollectDetailedDiagnostics =
         CVarDWCWrinkleProjectionDiagnostics.GetValueOnAnyThread() > 0;
-    return true;
+    return FDWCEditorSurfacePatchProjector::ValidateProjectionContract(OutRequest, OutError);
 }
 
 bool FDWCEditorWrinklePatchDescriptorBuilder::BuildPlacement(
     const FDWCEditorWrinklePatchDescriptor& Descriptor,
-    UTexture* SourceTexture,
     FWetWrinklePatchPlacement& OutPlacement,
     FString* OutError)
 {
@@ -257,15 +309,15 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildPlacement(
     }
     OutPlacement.PatchGuid = FGuid::NewGuid();
     OutPlacement.MaterialSlotIndex = Descriptor.MaterialSlotIndex;
-    OutPlacement.ProjectionMode = Descriptor.ProjectionMode;
-    OutPlacement.ProjectionDepthLocal = Descriptor.ProjectionDepthLocal;
-    OutPlacement.MaxSurfaceAngleDegrees = Descriptor.MaxSurfaceAngleDegrees;
-    OutPlacement.ProjectionDepthSoftness = Descriptor.ProjectionDepthSoftness;
-    OutPlacement.ProjectionAngleSoftness = Descriptor.ProjectionAngleSoftness;
+    OutPlacement.ProjectionMode = ResolveAuthoredProjectionMode(
+        Descriptor.ProjectionSettings.BoundaryPolicy);
+    OutPlacement.ProjectionDepthLocal = Descriptor.ProjectionSettings.ProjectionDepthLocal;
+    OutPlacement.MaxSurfaceAngleDegrees = Descriptor.ProjectionSettings.MaxSurfaceAngleDegrees;
+    OutPlacement.ProjectionDepthSoftness = Descriptor.ProjectionSettings.ProjectionDepthSoftness;
+    OutPlacement.ProjectionAngleSoftness = Descriptor.ProjectionSettings.ProjectionAngleSoftness;
     OutPlacement.bHasSurfaceAnchor = true;
     OutPlacement.AnchorTriangleID = Descriptor.AnchorTriangleID;
     OutPlacement.AnchorBarycentric = Descriptor.AnchorBarycentric;
-    OutPlacement.SourceTexture = SourceTexture;
     OutPlacement.PositionUV = FVector2D(Descriptor.AnchorUV);
     OutPlacement.BrushRadiusUV = Descriptor.DisplayRadiusUV;
     OutPlacement.bHasSurfaceFrame = true;
@@ -279,12 +331,5 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildPlacement(
     OutPlacement.Falloff = Descriptor.Falloff;
     OutPlacement.WrinkleNormalTexture = NormalTexture;
     OutPlacement.bEnabled = true;
-#if WITH_EDITORONLY_DATA
-    OutPlacement.bHasEditorSurface = true;
-    OutPlacement.EditorSurfaceLocalTangent = FVector(Descriptor.SurfaceFrameU);
-    OutPlacement.EditorSurfaceLocalBitangent = FVector(Descriptor.SurfaceFrameV);
-    OutPlacement.EditorSurfaceLocalNormal = FVector(FVector3f::CrossProduct(
-        Descriptor.SurfaceFrameU, Descriptor.SurfaceFrameV).GetSafeNormal());
-#endif
     return true;
 }

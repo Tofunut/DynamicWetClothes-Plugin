@@ -141,7 +141,7 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(
     }
 
     FWetWrinkleNormalMapBakeSettings Settings;
-    Settings.Resolution = WetClothingAsset->Authored.WrinkleData.BakeSettings.DefaultResolution;
+    Settings.Resolution = WetClothingAsset->GetWrinkleMapResolution();
     Settings.PaddingPixels = WetClothingAsset->Authored.WrinkleData.BakeSettings.PaddingPixels;
     Settings.bIncludeDisabledPatches = WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches;
 

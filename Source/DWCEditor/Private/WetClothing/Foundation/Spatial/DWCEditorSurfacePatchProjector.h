@@ -2,7 +2,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "WetClothing/Foundation/Spatial/DWCEditorIslandLocalGeodesicChartTypes.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionTypes.h"
 
 class FDWCEditorCancellationToken;
@@ -11,25 +10,20 @@ class FDWCEditorCancellationToken;
 class FDWCEditorSurfacePatchProjector final
 {
   public:
+    /** Validates the algorithm and topology-boundary combination before admission. */
+    static bool ValidateProjectionContract(
+        const FDWCEditorSurfacePatchProjectionRequest& Request,
+        FString* OutError = nullptr);
+
+    /**
+     * Computes a topology-bounded admission estimate without allocating projection output.
+     * MaxWorkingSetBytes and MaxResultBytes remain hard safety limits, not reservation sizes.
+     */
+    static FDWCEditorSurfacePatchProjectionMemoryEstimate EstimateAdmissionMemory(
+        const FDWCEditorSurfacePatchProjectionRequest& Request);
+
     static FDWCEditorSurfacePatchProjectionResult Project(
         const FDWCEditorSurfacePatchProjectionRequest& Request,
-        const FDWCEditorCancellationToken* CancellationToken = nullptr);
-
-    /** Rejects contradictory projection-mode flags before any chart or decal work begins. */
-    static bool ValidateProjectionModeContract(
-        const FDWCEditorSurfacePatchProjectionRequest& Request,
-        FString* OutError = nullptr);
-
-    /** Builds the rotation-independent chart request used by Non UV Seam projection. */
-    static bool BuildIslandLocalChartRequest(
-        const FDWCEditorSurfacePatchProjectionRequest& Request,
-        FDWCEditorIslandLocalChartRequest& OutChartRequest,
-        FString* OutError = nullptr);
-
-    /** Converts an immutable shared-vertex chart into the final rotated patch fragments. */
-    static FDWCEditorSurfacePatchProjectionResult ProjectFromIslandLocalChart(
-        const FDWCEditorSurfacePatchProjectionRequest& Request,
-        const FDWCEditorIslandLocalChartHandle& Chart,
         const FDWCEditorCancellationToken* CancellationToken = nullptr);
 
     /** Re-runs fragment continuity validation without projecting again. Intended for diagnostics/tests. */

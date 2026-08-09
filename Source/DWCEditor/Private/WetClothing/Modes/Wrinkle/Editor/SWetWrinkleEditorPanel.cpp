@@ -1372,89 +1372,77 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                    .Padding(0.0f, 0.0f, 0.0f, 6.0f)
                        [SNew(STextBlock)
                             .Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
-                            .Text(LOCTEXT("PatchProjectionModeLabel", "Projection Mode"))]
+                            .Text(LOCTEXT("PatchProjectionModeLabel", "Projection"))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                       [SNew(SHorizontalBox)
-                        .Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
-
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                              .Padding(0.0f, 0.0f, 18.0f, 0.0f)
-                                  [SNew(SCheckBox)
-                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetPatchProjectionModeCheckState,
-                                           EWetWrinklePatchProjectionMode::NonUVSeam)
-                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandlePatchProjectionModeChanged,
-                                           EWetWrinklePatchProjectionMode::NonUVSeam)
-                                           [SNew(STextBlock).Text(LOCTEXT("NonUVSeamProjectionMode", "Non UV Seam"))]]
-
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                                  [SNew(SCheckBox)
-                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetPatchProjectionModeCheckState,
-                                           EWetWrinklePatchProjectionMode::SurfaceDecal)
-                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandlePatchProjectionModeChanged,
-                                           EWetWrinklePatchProjectionMode::SurfaceDecal)
-                                           [SNew(STextBlock).Text(LOCTEXT("SurfaceDecalProjectionMode", "UV Seam"))]]]
+                       [SNew(SCheckBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
+                            .IsChecked(this, &SWetWrinkleEditorPanel::GetCrossUVSeamsCheckState)
+                            .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleCrossUVSeamsChanged)
+                            .ToolTipText(LOCTEXT(
+                                "CrossUVSeamsProjectionTip",
+                                "When enabled, the surface decal may continue across UV seams. When disabled, it is restricted to the UV island under the cursor."))
+                                [SNew(STextBlock).Text(LOCTEXT("CrossUVSeamsProjection", "Cross UV Seams"))]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 4.0f)
                        [SNew(STextBlock)
-                            .Visibility(this, &SWetWrinkleEditorPanel::GetSurfaceDecalSettingsVisibility)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetPatchProjectionSettingsVisibility)
                             .Text(LOCTEXT("ProjectionDepthLabel", "Projection Depth (cm)"))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 8.0f)
                        [SNew(SSpinBox<float>)
-                            .Visibility(this, &SWetWrinkleEditorPanel::GetSurfaceDecalSettingsVisibility)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetPatchProjectionSettingsVisibility)
                             .MinValue(0.1f).MaxValue(20.0f)
-                            .Value_Lambda([this]() { return BrushSettings.PatchProjectionDepthLocal; })
+                            .Value_Lambda([this]() { return BrushSettings.PatchProjection.ProjectionDepthLocal; })
                             .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleProjectionDepthChanged)]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 4.0f)
                        [SNew(STextBlock)
-                            .Visibility(this, &SWetWrinkleEditorPanel::GetSurfaceDecalSettingsVisibility)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetPatchProjectionSettingsVisibility)
                             .Text(LOCTEXT("ProjectionAngleLabel", "Max Surface Angle (deg)"))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 8.0f)
                        [SNew(SSpinBox<float>)
-                            .Visibility(this, &SWetWrinkleEditorPanel::GetSurfaceDecalSettingsVisibility)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetPatchProjectionSettingsVisibility)
                             .MinValue(1.0f).MaxValue(89.0f)
-                            .Value_Lambda([this]() { return BrushSettings.PatchMaxSurfaceAngleDegrees; })
+                            .Value_Lambda([this]() { return BrushSettings.PatchProjection.MaxSurfaceAngleDegrees; })
                             .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleProjectionAngleChanged)]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                       [SNew(STextBlock)
-                            .Visibility(this, &SWetWrinkleEditorPanel::GetSurfaceDecalSettingsVisibility)
-                            .Text(LOCTEXT("ProjectionSoftnessLabel", "Depth / Angle Softness"))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 10.0f)
                        [SNew(SHorizontalBox)
-                        .Visibility(this, &SWetWrinkleEditorPanel::GetSurfaceDecalSettingsVisibility)
+                        .Visibility(this, &SWetWrinkleEditorPanel::GetPatchProjectionSettingsVisibility)
                         + SHorizontalBox::Slot().FillWidth(1.0f)
-                              [SNew(SSpinBox<float>)
-                                   .MinValue(0.0f).MaxValue(1.0f).Delta(0.05f)
-                                   .ToolTipText(LOCTEXT("ProjectionDepthSoftnessTip", "Soft fade near the projection depth limit."))
-                                   .Value_Lambda([this]() { return BrushSettings.PatchProjectionDepthSoftness; })
-                                   .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleProjectionDepthSoftnessChanged)]
+                              [SNew(SVerticalBox)
+                               + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                     [SNew(STextBlock).Text(LOCTEXT("ProjectionDepthSoftnessLabel", "Depth Softness"))]
+                               + SVerticalBox::Slot().AutoHeight()
+                                     [SNew(SSpinBox<float>)
+                                          .MinValue(0.0f).MaxValue(1.0f).Delta(0.05f)
+                                          .ToolTipText(LOCTEXT("ProjectionDepthSoftnessTip", "Soft fade near the projection depth limit."))
+                                          .Value_Lambda([this]() { return BrushSettings.PatchProjection.ProjectionDepthSoftness; })
+                                          .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleProjectionDepthSoftnessChanged)]]
                         + SHorizontalBox::Slot().FillWidth(1.0f).Padding(4.0f, 0.0f, 0.0f, 0.0f)
-                              [SNew(SSpinBox<float>)
-                                   .MinValue(0.0f).MaxValue(1.0f).Delta(0.05f)
-                                   .ToolTipText(LOCTEXT("ProjectionAngleSoftnessTip", "Soft fade near the surface angle limit."))
-                                   .Value_Lambda([this]() { return BrushSettings.PatchProjectionAngleSoftness; })
-                                   .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleProjectionAngleSoftnessChanged)]]
+                              [SNew(SVerticalBox)
+                               + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                     [SNew(STextBlock).Text(LOCTEXT("ProjectionAngleSoftnessLabel", "Angle Softness"))]
+                               + SVerticalBox::Slot().AutoHeight()
+                                     [SNew(SSpinBox<float>)
+                                          .MinValue(0.0f).MaxValue(1.0f).Delta(0.05f)
+                                          .ToolTipText(LOCTEXT("ProjectionAngleSoftnessTip", "Soft fade near the surface angle limit."))
+                                          .Value_Lambda([this]() { return BrushSettings.PatchProjection.ProjectionAngleSoftness; })
+                                          .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleProjectionAngleSoftnessChanged)]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -3314,7 +3302,7 @@ FReply SWetWrinkleEditorPanel::HandleAutoGenerateClicked()
             .WetClothingAsset(Asset)
             .MaterialSlotIndex(MaterialSlotIndex)
             .UVChannelIndex(UVChannelIndex)
-            .Resolution(Asset->Authored.WrinkleData.BakeSettings.DefaultResolution)
+            .Resolution(Asset->GetWrinkleMapResolution())
             .BaseNormalOptions(BrushPresetOptions));
 
     FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
@@ -3488,55 +3476,60 @@ EVisibility SWetWrinkleEditorPanel::GetPatchToolVisibility() const
     return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch ? EVisibility::Visible : EVisibility::Collapsed;
 }
 
-EVisibility SWetWrinkleEditorPanel::GetSurfaceDecalSettingsVisibility() const
+EVisibility SWetWrinkleEditorPanel::GetPatchProjectionSettingsVisibility() const
 {
-    return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch &&
-            BrushSettings.PatchProjectionMode == EWetWrinklePatchProjectionMode::SurfaceDecal
+    return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch
         ? EVisibility::Visible
         : EVisibility::Collapsed;
 }
 
-ECheckBoxState SWetWrinkleEditorPanel::GetPatchProjectionModeCheckState(
-    const EWetWrinklePatchProjectionMode Mode) const
+ECheckBoxState SWetWrinkleEditorPanel::GetCrossUVSeamsCheckState() const
 {
-    return BrushSettings.PatchProjectionMode == Mode
+    return BrushSettings.PatchProjection.BoundaryPolicy ==
+            EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams
         ? ECheckBoxState::Checked
         : ECheckBoxState::Unchecked;
 }
 
-void SWetWrinkleEditorPanel::HandlePatchProjectionModeChanged(
-    const ECheckBoxState NewState,
-    const EWetWrinklePatchProjectionMode Mode)
+void SWetWrinkleEditorPanel::HandleCrossUVSeamsChanged(const ECheckBoxState NewState)
 {
-    if (NewState != ECheckBoxState::Checked || BrushSettings.PatchProjectionMode == Mode)
+    const EDWCEditorSurfacePatchBoundaryPolicy NewPolicy =
+        NewState == ECheckBoxState::Checked
+            ? EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams
+            : EDWCEditorSurfacePatchBoundaryPolicy::AnchorUVIslandOnly;
+    if (BrushSettings.PatchProjection.BoundaryPolicy == NewPolicy)
     {
         return;
     }
-    BrushSettings.PatchProjectionMode = Mode;
+    BrushSettings.PatchProjection.BoundaryPolicy = NewPolicy;
     DispatchWrinkleBrushState(EDWCEditorSessionEffect::UpdatePreviewParameters);
 }
 
 void SWetWrinkleEditorPanel::HandleProjectionDepthChanged(const float NewValue)
 {
-    BrushSettings.PatchProjectionDepthLocal = FMath::Clamp(NewValue, 0.1f, 20.0f);
+    BrushSettings.PatchProjection.ProjectionDepthLocal = NewValue;
+    BrushSettings.PatchProjection.Normalize();
     DispatchWrinkleBrushState(EDWCEditorSessionEffect::UpdatePreviewParameters);
 }
 
 void SWetWrinkleEditorPanel::HandleProjectionAngleChanged(const float NewValue)
 {
-    BrushSettings.PatchMaxSurfaceAngleDegrees = FMath::Clamp(NewValue, 1.0f, 89.0f);
+    BrushSettings.PatchProjection.MaxSurfaceAngleDegrees = NewValue;
+    BrushSettings.PatchProjection.Normalize();
     DispatchWrinkleBrushState(EDWCEditorSessionEffect::UpdatePreviewParameters);
 }
 
 void SWetWrinkleEditorPanel::HandleProjectionDepthSoftnessChanged(const float NewValue)
 {
-    BrushSettings.PatchProjectionDepthSoftness = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    BrushSettings.PatchProjection.ProjectionDepthSoftness = NewValue;
+    BrushSettings.PatchProjection.Normalize();
     DispatchWrinkleBrushState(EDWCEditorSessionEffect::UpdatePreviewParameters);
 }
 
 void SWetWrinkleEditorPanel::HandleProjectionAngleSoftnessChanged(const float NewValue)
 {
-    BrushSettings.PatchProjectionAngleSoftness = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    BrushSettings.PatchProjection.ProjectionAngleSoftness = NewValue;
+    BrushSettings.PatchProjection.Normalize();
     DispatchWrinkleBrushState(EDWCEditorSessionEffect::UpdatePreviewParameters);
 }
 
@@ -3635,17 +3628,50 @@ void SWetWrinkleEditorPanel::ApplyMaterialSlotSelection(
     EnsureWrinkleUVChannelForMaterialSlot(MaterialSlotIndex, bShowFailureDialog);
     RefreshDWCDataUVChannel();
 
+    bool bClearElementSelection = false;
+    if (SelectedStrokeGuid.IsValid())
+    {
+        if (SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+        {
+            const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid);
+            bClearElementSelection = Stroke == nullptr ||
+                !IsProceduralRidgeStrokeVisibleForCurrentMaterialSlot(*Stroke);
+        }
+        else
+        {
+            const FWetWrinklePatchPlacement* Patch = FindPatch(SelectedStrokeGuid);
+            bClearElementSelection = Patch == nullptr ||
+                !IsPatchVisibleForCurrentMaterialSlot(*Patch);
+        }
+    }
+
     if (MaterialSlotListView.IsValid())
     {
         MaterialSlotListView->SetSelection(FindMaterialSlotItem(MaterialSlotIndex), ESelectInfo::Direct);
     }
 
-    RefreshStrokeList();
+    if (SessionStore.IsValid())
+    {
+        FDWCSetWrinkleEditContextAction Action;
+        Action.MaterialSlotIndex = BrushSettings.MaterialSlotIndex;
+        Action.UVChannelIndex = BrushSettings.UVChannelIndex;
+        Action.bClearElementSelection = bClearElementSelection;
+        SessionStore->Dispatch(Action);
+    }
+    else
+    {
+        if (bClearElementSelection)
+        {
+            SelectedStrokeGuid.Invalidate();
+            SelectedElementType = EWetWrinkleElementType::Patch;
+            SelectedProceduralRidgePointIndex = INDEX_NONE;
+        }
+        RefreshStrokeList();
+        PushStrokeSelectionToViewport();
+        PushBrushTopologyToViewport();
+        RefreshWrinkleUVView();
+    }
     RefreshRuntimeNormalUI(false, false);
-    PushStrokeSelectionToViewport();
-    PushBrushTopologyToViewport();
-    RefreshWrinkleUVView();
-    DispatchWrinkleBrushState(EDWCEditorSessionEffect::None);
 }
 
 TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildCustomWrinkleMapToggle(const int32 MaterialSlotIndex)

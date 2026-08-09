@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfaceOrientationTypes.h"
 
 enum class EDWCEditorSpatialEdgeType : uint8
 {
@@ -92,6 +93,7 @@ struct FDWCEditorSpatialData final : IDWCEditorCacheValue
     TArray<int32> BVHTriangleIndices;
     TArray<FDWCEditorSpatialBVHNode> BVHNodes;
     TArray<TArray<int32>> UVTriangleGrid;
+    FDWCEditorSurfaceOrientationField SurfaceOrientationField;
 
     static FName StaticCacheTypeName();
     virtual FName GetCacheTypeName() const override { return StaticCacheTypeName(); }
@@ -109,6 +111,8 @@ struct FDWCEditorSurfaceHit
     FVector WorldNormal = FVector::UpVector;
     FVector WorldTangent = FVector::ForwardVector;
     FVector WorldBitangent = FVector::RightVector;
+    FVector WorldSurfaceFrameU = FVector::ForwardVector;
+    FVector WorldSurfaceFrameV = FVector::RightVector;
     FVector LocalPosition = FVector::ZeroVector;
     FVector LocalNormal = FVector::UpVector;
     FVector LocalTangent = FVector::ForwardVector;
@@ -143,6 +147,8 @@ struct FDWCEditorProjectedSurface
     FVector WorldNormal = FVector::UpVector;
     FVector WorldTangent = FVector::ForwardVector;
     FVector WorldBitangent = FVector::RightVector;
+    FVector WorldSurfaceFrameU = FVector::ForwardVector;
+    FVector WorldSurfaceFrameV = FVector::RightVector;
 };
 
 struct FDWCEditorTriangleEdgeTopology

@@ -275,10 +275,16 @@ namespace
         }
 
         constexpr double UVToleranceSq = 1.0e-8;
+        constexpr double FrameDirectionTolerance = 0.99999;
+        const FVector FrameUA = A.LocalSurfaceFrameU.GetSafeNormal();
+        const FVector FrameUB = B.LocalSurfaceFrameU.GetSafeNormal();
         return A.MaterialSlotIndex == B.MaterialSlotIndex &&
                A.UVChannelIndex == B.UVChannelIndex &&
                A.TriangleID == B.TriangleID &&
-               (A.UV - B.UV).SizeSquared() <= UVToleranceSq;
+               (A.UV - B.UV).SizeSquared() <= UVToleranceSq &&
+               !FrameUA.IsNearlyZero() &&
+               !FrameUB.IsNearlyZero() &&
+               FVector::DotProduct(FrameUA, FrameUB) >= FrameDirectionTolerance;
     }
 
     FColor EncodeWetWrinkleNormal(const FVector& Normal)
@@ -1092,10 +1098,12 @@ bool SWetWrinkleViewport::TryBuildSurfaceHitAtUVNearWorldPosition(
     OutHit.WorldNormal = Surface->WorldNormal;
     OutHit.WorldTangent = Surface->WorldTangent;
     OutHit.WorldBitangent = Surface->WorldBitangent;
+    OutHit.WorldSurfaceFrameU = Surface->WorldSurfaceFrameU;
+    OutHit.WorldSurfaceFrameV = Surface->WorldSurfaceFrameV;
     OutHit.LocalPosition = ComponentTransform.InverseTransformPosition(Surface->WorldPosition);
     OutHit.LocalNormal = ComponentTransform.InverseTransformVectorNoScale(Surface->WorldNormal).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-    OutHit.LocalTangent = ComponentTransform.InverseTransformVectorNoScale(Surface->WorldTangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
-    OutHit.LocalBitangent = ComponentTransform.InverseTransformVectorNoScale(Surface->WorldBitangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+    OutHit.LocalTangent = Surface->LocalTangent;
+    OutHit.LocalBitangent = Surface->LocalBitangent;
     OutHit.LocalSurfaceAxisU = Surface->LocalSurfaceAxisU;
     OutHit.LocalSurfaceAxisV = Surface->LocalSurfaceAxisV;
     OutHit.LocalSurfaceFrameU = Surface->LocalSurfaceFrameU;
@@ -1140,6 +1148,8 @@ bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& 
     OutHit.WorldNormal = SharedHit.WorldNormal;
     OutHit.WorldTangent = SharedHit.WorldTangent;
     OutHit.WorldBitangent = SharedHit.WorldBitangent;
+    OutHit.WorldSurfaceFrameU = SharedHit.WorldSurfaceFrameU;
+    OutHit.WorldSurfaceFrameV = SharedHit.WorldSurfaceFrameV;
     OutHit.LocalPosition = SharedHit.LocalPosition;
     OutHit.LocalNormal = SharedHit.LocalNormal;
     OutHit.LocalTangent = SharedHit.LocalTangent;
@@ -4065,36 +4075,12 @@ void SWetWrinkleViewport::RebuildHitTriangles()
 
 void SWetWrinkleViewport::HandleSurfaceHitFromClient(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
-    FWetWrinkleSurfaceHit StableHit = SurfaceHit;
-    if (StableHit.bHit && CurrentSurfaceHit.bHit &&
-        StableHit.MaterialSlotIndex == CurrentSurfaceHit.MaterialSlotIndex)
-    {
-        FVector3f StableU;
-        FVector3f StableV;
-        if (FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
-                FVector3f(StableHit.LocalNormal),
-                FVector3f(CurrentSurfaceHit.LocalSurfaceFrameU),
-                FVector3f(CurrentSurfaceHit.LocalSurfaceFrameV),
-                StableU,
-                StableV))
-        {
-            StableHit.LocalSurfaceFrameU = FVector(StableU);
-            StableHit.LocalSurfaceFrameV = FVector(StableV);
-            if (PreviewMeshComponent != nullptr)
-            {
-                const FTransform ComponentTransform = PreviewMeshComponent->GetComponentTransform();
-                StableHit.WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(StableU)).GetSafeNormal();
-                StableHit.WorldBitangent = ComponentTransform.TransformVectorNoScale(FVector(StableV)).GetSafeNormal();
-            }
-        }
-    }
-
-    if (AreWetWrinkleSurfaceHitsEquivalentForPreview(CurrentSurfaceHit, StableHit))
+    if (AreWetWrinkleSurfaceHitsEquivalentForPreview(CurrentSurfaceHit, SurfaceHit))
     {
         return;
     }
 
-    CurrentSurfaceHit = StableHit;
+    CurrentSurfaceHit = SurfaceHit;
     RefreshViewportHint();
     if (const TSharedPtr<FWetWrinkleAuthoringController> Controller = AuthoringController.Pin())
     {
@@ -4150,7 +4136,7 @@ void SWetWrinkleViewport::DrawBrushCursor(FPrimitiveDrawInterface* PDI) const
         SurfaceNormal = FVector::UpVector;
     }
 
-    FVector SurfaceTangent = CurrentSurfaceHit.WorldTangent.GetSafeNormal();
+    FVector SurfaceTangent = CurrentSurfaceHit.WorldSurfaceFrameU.GetSafeNormal();
     SurfaceTangent = (SurfaceTangent - SurfaceNormal * FVector::DotProduct(SurfaceTangent, SurfaceNormal)).GetSafeNormal();
     if (SurfaceTangent.IsNearlyZero())
     {
@@ -4373,13 +4359,13 @@ bool SWetWrinkleViewport::TryBuildSurfaceHitFromProceduralStrokePoint(
     OutHit.WorldNormal = Surface.WorldNormal;
     OutHit.WorldTangent = Surface.WorldTangent;
     OutHit.WorldBitangent = Surface.WorldBitangent;
+    OutHit.WorldSurfaceFrameU = Surface.WorldSurfaceFrameU;
+    OutHit.WorldSurfaceFrameV = Surface.WorldSurfaceFrameV;
     OutHit.LocalPosition = ComponentTransform.InverseTransformPosition(Surface.WorldPosition);
     OutHit.LocalNormal = ComponentTransform.InverseTransformVectorNoScale(Surface.WorldNormal)
         .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-    OutHit.LocalTangent = ComponentTransform.InverseTransformVectorNoScale(Surface.WorldTangent)
-        .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
-    OutHit.LocalBitangent = ComponentTransform.InverseTransformVectorNoScale(Surface.WorldBitangent)
-        .GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+    OutHit.LocalTangent = Surface.LocalTangent;
+    OutHit.LocalBitangent = Surface.LocalBitangent;
     OutHit.LocalSurfaceAxisU = Surface.LocalSurfaceAxisU;
     OutHit.LocalSurfaceAxisV = Surface.LocalSurfaceAxisV;
     OutHit.LocalSurfaceFrameU = Surface.LocalSurfaceFrameU;

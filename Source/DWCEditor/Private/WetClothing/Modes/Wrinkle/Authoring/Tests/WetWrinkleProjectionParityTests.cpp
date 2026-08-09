@@ -9,6 +9,8 @@
 #include "WetClothing/Foundation/Raster/DWCEditorRasterPostProcess.h"
 #include "WetClothing/Foundation/Raster/DWCEditorSurfacePatchRasterBuilder.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfaceOrientationFieldBuilder.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfaceOrientationResolver.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionCacheService.h"
 #include "WetClothing/Modes/Wrinkle/Authoring/WetWrinklePatchDescriptor.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleHitData.h"
@@ -37,6 +39,7 @@ namespace WetWrinkleProjectionParityTestsPrivate
         Triangle.LocalSurfaceAxisV = Triangle.LocalBitangent;
         for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
         {
+            Triangle.LocalNormals[CornerIndex] = Triangle.LocalNormal;
             Triangle.LocalTangents[CornerIndex] = Triangle.LocalTangent;
             Triangle.LocalBitangents[CornerIndex] = Triangle.LocalBitangent;
             Triangle.LocalBounds += Triangle.LocalPositions[CornerIndex];
@@ -208,6 +211,23 @@ namespace WetWrinkleProjectionParityTestsPrivate
     {
         const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> SpatialData =
             BuildSeamedSurface();
+        FDWCEditorSurfaceOrientationPolicy OrientationPolicy;
+        OrientationPolicy.Normalize();
+        FString OrientationWarning;
+        if (!Test.TestTrue(
+                TEXT("The synthetic seam surface builds its canonical orientation field"),
+                FDWCEditorSurfaceOrientationFieldBuilder::Build(
+                    SpatialData->Triangles,
+                    OrientationPolicy,
+                    SpatialData->SurfaceOrientationField,
+                    &OrientationWarning)))
+        {
+            if (!OrientationWarning.IsEmpty())
+            {
+                Test.AddError(OrientationWarning);
+            }
+            return false;
+        }
         UTexture2D* NormalTexture = MakeNormalTexture();
 
         FWetWrinkleBrushSettings Brush;
@@ -234,8 +254,26 @@ namespace WetWrinkleProjectionParityTestsPrivate
         Hit.Barycentric = FVector(0.1, 0.45, 0.45);
         Hit.UV = FVector2D(0.44, 0.55);
         Hit.LocalNormal = FVector::UpVector;
-        Hit.LocalSurfaceFrameU = FVector::ForwardVector;
-        Hit.LocalSurfaceFrameV = FVector::RightVector;
+        const uint64 AnchorLookupKey = MakeTriangleLookupKey(
+            MaterialSlotIndex,
+            Hit.TriangleID);
+        const int32* AnchorTriangleIndex = SpatialData->TriangleLookup.Find(AnchorLookupKey);
+        FDWCEditorResolvedSurfaceOrientation ResolvedOrientation;
+        if (!Test.TestTrue(
+                TEXT("The hover anchor resolves its cached canonical orientation"),
+                AnchorTriangleIndex != nullptr &&
+                    FDWCEditorSurfaceOrientationResolver::Resolve(
+                        *SpatialData,
+                        *AnchorTriangleIndex,
+                        FVector3f(Hit.Barycentric),
+                        FVector3f(Hit.LocalNormal),
+                        OrientationPolicy,
+                        ResolvedOrientation)))
+        {
+            return false;
+        }
+        Hit.LocalSurfaceFrameU = FVector(ResolvedOrientation.FrameU);
+        Hit.LocalSurfaceFrameV = FVector(ResolvedOrientation.FrameV);
 
         FDWCEditorWrinklePatchDescriptor HoverDescriptor;
         FString Error;
@@ -283,6 +321,12 @@ namespace WetWrinkleProjectionParityTestsPrivate
             TEXT("The committed physical footprint is identical to the presented footprint"),
             BakeDescriptor.SurfaceHalfExtentLocal.Equals(
                 HoverDescriptor.SurfaceHalfExtentLocal, UE_KINDA_SMALL_NUMBER));
+        Test.TestTrue(
+            TEXT("The canonical orientation survives hover, commit, and authored rebuild"),
+            BakeDescriptor.SurfaceFrameU.Equals(
+                ResolvedOrientation.FrameU, UE_KINDA_SMALL_NUMBER) &&
+            BakeDescriptor.SurfaceFrameV.Equals(
+                ResolvedOrientation.FrameV, UE_KINDA_SMALL_NUMBER));
 
         const FDWCEditorNormalSourceSnapshot NormalSource = MakeNormalSource();
         const FDWCEditorScalarSourceSnapshot CoverageSource = MakeCoverageSource();

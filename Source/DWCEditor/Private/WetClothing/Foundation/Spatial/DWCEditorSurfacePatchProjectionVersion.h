@@ -11,3 +11,10 @@ namespace DWCEditorSurfacePatchProjectionVersion
     // Preserves the historical CoreMode token in baked build signatures.
     inline constexpr int32 SurfaceDecalSignatureId = 1;
 }
+
+namespace DWCEditorSurfaceOrientationVersion
+{
+    inline constexpr uint32 Policy = 1;
+    inline constexpr uint32 FieldLayout = 1;
+    inline constexpr uint32 Resolver = 1;
+}

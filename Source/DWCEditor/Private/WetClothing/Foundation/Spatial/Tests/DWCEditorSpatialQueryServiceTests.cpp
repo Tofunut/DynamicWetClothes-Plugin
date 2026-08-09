@@ -6,6 +6,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfaceOrientationPolicy.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionVersion.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorSpatialQueryTest,
@@ -38,9 +40,28 @@ bool FDWCEditorSpatialQueryTest::RunTest(const FString& Parameters)
     {
         Triangle.LocalBounds += Triangle.LocalPositions[CornerIndex];
         Triangle.UVBounds += Triangle.UVs[CornerIndex];
+        Triangle.LocalNormals[CornerIndex] = Triangle.LocalNormal;
+        Triangle.LocalTangents[CornerIndex] = FVector3f(0.0f, 1.0f, 0.0f);
+        Triangle.LocalBitangents[CornerIndex] = FVector3f(-1.0f, 0.0f, 0.0f);
     }
     const uint64 LookupKey = (static_cast<uint64>(4) << 32) | static_cast<uint32>(9);
     Data->TriangleLookup.Add(LookupKey, 0);
+    FDWCEditorSurfaceOrientationPolicy OrientationPolicy;
+    OrientationPolicy.Normalize();
+    Data->SurfaceOrientationField.BuildStatus =
+        EDWCEditorSurfaceOrientationFieldBuildStatus::Ready;
+    Data->SurfaceOrientationField.PolicySignature = OrientationPolicy.BuildSignature();
+    Data->SurfaceOrientationField.FieldLayoutVersion =
+        DWCEditorSurfaceOrientationVersion::FieldLayout;
+    Data->SurfaceOrientationField.EntryIndexByTriangle.Init(INDEX_NONE, 1);
+    FDWCEditorSurfaceOrientationFieldEntry& OrientationEntry =
+        Data->SurfaceOrientationField.Entries.AddDefaulted_GetRef();
+    OrientationEntry.TriangleIndex = 0;
+    for (FPackedNormal& CornerFallback : OrientationEntry.CornerFallbackV)
+    {
+        CornerFallback = FPackedNormal(FVector3f(1.0f, 0.0f, 0.0f));
+    }
+    Data->SurfaceOrientationField.EntryIndexByTriangle[0] = 0;
 
     FDWCEditorSpatialHandle Handle = Data;
     USkeletalMeshComponent* Component = NewObject<USkeletalMeshComponent>();
@@ -56,10 +77,42 @@ bool FDWCEditorSpatialQueryTest::RunTest(const FString& Parameters)
             Hit));
     TestEqual(TEXT("Ray hit preserves triangle ID"), Hit.TriangleID, 9);
     TestEqual(TEXT("Ray hit preserves Data UV channel"), Hit.UVChannelIndex, 2);
+    TestTrue(
+        TEXT("Ray hit preserves the render tangent independently"),
+        FVector::DotProduct(Hit.LocalTangent, FVector::RightVector) > 0.999);
+    TestTrue(
+        TEXT("Ray hit resolves the topology-backed authoring frame"),
+        FVector::DotProduct(Hit.LocalSurfaceFrameV, FVector::ForwardVector) > 0.999);
+
+    FDWCEditorSurfaceHit ObliqueHit;
+    const FVector TargetPoint(0.25, 0.25, 0.0);
+    const FVector ObliqueOrigin(2.0, -1.0, 5.0);
+    TestTrue(
+        TEXT("An oblique ray reaches the same physical point"),
+        Service.TraceSurface(
+            Handle,
+            Component,
+            ObliqueOrigin,
+            (TargetPoint - ObliqueOrigin).GetSafeNormal(),
+            ObliqueHit));
+    TestEqual(
+        TEXT("Ray approach direction does not change the selected triangle"),
+        ObliqueHit.TriangleID,
+        Hit.TriangleID);
+    TestTrue(
+        TEXT("Ray approach direction does not change the local authoring frame"),
+        FVector::DotProduct(ObliqueHit.LocalSurfaceFrameU, Hit.LocalSurfaceFrameU) > 0.9999 &&
+            FVector::DotProduct(ObliqueHit.LocalSurfaceFrameV, Hit.LocalSurfaceFrameV) > 0.9999);
 
     TArray<FDWCEditorProjectedSurface> Surfaces;
     Service.FindSurfacesAtUV(Handle, Component, FVector2D(0.25, 0.25), Surfaces);
     TestEqual(TEXT("UV projection finds one surface"), Surfaces.Num(), 1);
+    TestTrue(
+        TEXT("Ray and UV projection share the same authoring frame"),
+        Surfaces.Num() == 1 &&
+            FVector::DotProduct(
+                Hit.LocalSurfaceFrameU,
+                Surfaces[0].LocalSurfaceFrameU) > 0.999);
 
     FDWCEditorProjectedSurface Anchor;
     TestTrue(
@@ -72,6 +125,9 @@ bool FDWCEditorSpatialQueryTest::RunTest(const FString& Parameters)
             FVector3f(0.5f, 0.25f, 0.25f),
             Anchor));
     TestEqual(TEXT("Anchor preserves island ID"), Anchor.UVIslandID, 3);
+    TestTrue(
+        TEXT("Stored anchors resolve the same authoring frame as hover"),
+        FVector::DotProduct(Hit.LocalSurfaceFrameU, Anchor.LocalSurfaceFrameU) > 0.999);
     return true;
 }
 

@@ -17,6 +17,8 @@ struct FWetWrinkleSurfaceHit
     FVector WorldNormal = FVector::UpVector;
     FVector WorldTangent = FVector::ForwardVector;
     FVector WorldBitangent = FVector::RightVector;
+    FVector WorldSurfaceFrameU = FVector::ForwardVector;
+    FVector WorldSurfaceFrameV = FVector::RightVector;
     FVector LocalPosition = FVector::ZeroVector;
     FVector LocalNormal = FVector::UpVector;
     FVector LocalTangent = FVector::ForwardVector;

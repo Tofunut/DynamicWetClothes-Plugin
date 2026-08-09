@@ -961,6 +961,17 @@ bool FDWCEditorSurfacePatchProjectionCanonicalCacheKeyTest::RunTest(const FStrin
     TestTrue(TEXT("Boundary policy owns a distinct geometry key"),
         BaseGeometry.Get() != BoundaryGeometry.Get());
 
+    FDWCEditorSurfacePatchProjectionRequest OrientationRequest = BaseRequest;
+    OrientationRequest.SurfaceFrameU = BaseRequest.SurfaceFrameV;
+    OrientationRequest.SurfaceFrameV = -BaseRequest.SurfaceFrameU;
+    FDWCEditorSurfacePatchProjectionLease OrientationGeometry;
+    TestTrue(TEXT("A different canonical orientation resolves"), Cache.Resolve(
+        OrientationRequest,
+        EDWCEditorSurfacePatchCachePolicy::Persistent,
+        OrientationGeometry));
+    TestTrue(TEXT("Canonical orientation owns a distinct geometry key"),
+        BaseGeometry.Get() != OrientationGeometry.Get());
+
     FDWCEditorSurfacePatchProjectionRequest DetailedRequest = BaseRequest;
     DetailedRequest.bCollectDetailedDiagnostics = true;
     FDWCEditorSurfacePatchProjectionLease DetailedGeometry;

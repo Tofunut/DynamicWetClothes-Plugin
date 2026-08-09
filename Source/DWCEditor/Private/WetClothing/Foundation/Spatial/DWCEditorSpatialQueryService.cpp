@@ -10,7 +10,12 @@
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfaceOrientationFieldBuilder.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfaceOrientationResolver.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionVersion.h"
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVPreviewTriangleReader.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogDWCEditorSpatialQuery, Log, All);
 
 namespace
 {
@@ -235,25 +240,30 @@ namespace
         return Value - FMath::FloorToFloat(Value);
     }
 
-    void FillProjectedSurface(
-        const FDWCEditorSpatialTriangle& Triangle,
-        const FVector3f& Barycentric,
-        const FTransform& ComponentTransform,
-        FDWCEditorProjectedSurface& OutSurface)
+    struct FDWCEditorResolvedSpatialFrames
     {
-        const FVector3f LocalPosition =
-            Triangle.LocalPositions[0] * Barycentric.X +
-            Triangle.LocalPositions[1] * Barycentric.Y +
-            Triangle.LocalPositions[2] * Barycentric.Z;
-        OutSurface.MaterialSlotIndex = Triangle.MaterialSlotIndex;
-        OutSurface.TriangleID = Triangle.TriangleID;
-        OutSurface.UVIslandID = Triangle.UVIslandID;
-        OutSurface.Barycentric = FVector(Barycentric);
-        OutSurface.UV = FVector2D(
-            Triangle.UVs[0] * Barycentric.X +
-            Triangle.UVs[1] * Barycentric.Y +
-            Triangle.UVs[2] * Barycentric.Z);
-        const FVector3f SmoothNormal = (
+        FVector3f LocalNormal = FVector3f::ZeroVector;
+        FVector3f RenderFrameU = FVector3f::ZeroVector;
+        FVector3f RenderFrameV = FVector3f::ZeroVector;
+        FVector3f AuthoringFrameU = FVector3f::ZeroVector;
+        FVector3f AuthoringFrameV = FVector3f::ZeroVector;
+    };
+
+    bool ResolveSpatialSurfaceFrames(
+        const FDWCEditorSpatialData& SpatialData,
+        const int32 TriangleIndex,
+        const FVector3f& Barycentric,
+        const FDWCEditorSurfaceOrientationPolicy& OrientationPolicy,
+        FDWCEditorResolvedSpatialFrames& OutFrames)
+    {
+        if (!SpatialData.Triangles.IsValidIndex(TriangleIndex))
+        {
+            OutFrames = {};
+            return false;
+        }
+
+        const FDWCEditorSpatialTriangle& Triangle = SpatialData.Triangles[TriangleIndex];
+        OutFrames.LocalNormal = (
             Triangle.LocalNormals[0] * Barycentric.X +
             Triangle.LocalNormals[1] * Barycentric.Y +
             Triangle.LocalNormals[2] * Barycentric.Z).GetSafeNormal(
@@ -267,31 +277,90 @@ namespace
             Triangle.LocalBitangents[0] * Barycentric.X +
             Triangle.LocalBitangents[1] * Barycentric.Y +
             Triangle.LocalBitangents[2] * Barycentric.Z;
-        FVector3f SurfaceFrameU;
-        FVector3f SurfaceFrameV;
         FDWCEditorSpatialQueryService::BuildStableSurfaceFrame(
-            SmoothNormal,
+            OutFrames.LocalNormal,
             InterpolatedTangent,
             InterpolatedBitangent,
-            SurfaceFrameU,
-            SurfaceFrameV);
+            OutFrames.RenderFrameU,
+            OutFrames.RenderFrameV);
+
+        FDWCEditorResolvedSurfaceOrientation AuthoringOrientation;
+        if (FDWCEditorSurfaceOrientationResolver::Resolve(
+                SpatialData,
+                TriangleIndex,
+                Barycentric,
+                OutFrames.LocalNormal,
+                OrientationPolicy,
+                AuthoringOrientation))
+        {
+            OutFrames.AuthoringFrameU = AuthoringOrientation.FrameU;
+            OutFrames.AuthoringFrameV = AuthoringOrientation.FrameV;
+        }
+        else
+        {
+            OutFrames.AuthoringFrameU = OutFrames.RenderFrameU;
+            OutFrames.AuthoringFrameV = OutFrames.RenderFrameV;
+        }
+        return true;
+    }
+
+    void FillProjectedSurface(
+        const FDWCEditorSpatialData& SpatialData,
+        const int32 TriangleIndex,
+        const FVector3f& Barycentric,
+        const FTransform& ComponentTransform,
+        const FDWCEditorSurfaceOrientationPolicy& OrientationPolicy,
+        FDWCEditorProjectedSurface& OutSurface)
+    {
+        FDWCEditorResolvedSpatialFrames Frames;
+        if (!ResolveSpatialSurfaceFrames(
+                SpatialData,
+                TriangleIndex,
+                Barycentric,
+                OrientationPolicy,
+                Frames))
+        {
+            OutSurface = {};
+            return;
+        }
+        const FDWCEditorSpatialTriangle& Triangle = SpatialData.Triangles[TriangleIndex];
+        const FVector3f LocalPosition =
+            Triangle.LocalPositions[0] * Barycentric.X +
+            Triangle.LocalPositions[1] * Barycentric.Y +
+            Triangle.LocalPositions[2] * Barycentric.Z;
+        OutSurface.MaterialSlotIndex = Triangle.MaterialSlotIndex;
+        OutSurface.TriangleID = Triangle.TriangleID;
+        OutSurface.UVIslandID = Triangle.UVIslandID;
+        OutSurface.Barycentric = FVector(Barycentric);
+        OutSurface.UV = FVector2D(
+            Triangle.UVs[0] * Barycentric.X +
+            Triangle.UVs[1] * Barycentric.Y +
+            Triangle.UVs[2] * Barycentric.Z);
 
         OutSurface.LocalPosition = FVector(LocalPosition);
-        OutSurface.LocalNormal = FVector(SmoothNormal);
-        OutSurface.LocalTangent = FVector(SurfaceFrameU);
-        OutSurface.LocalBitangent = FVector(SurfaceFrameV);
+        OutSurface.LocalNormal = FVector(Frames.LocalNormal);
+        OutSurface.LocalTangent = FVector(Frames.RenderFrameU);
+        OutSurface.LocalBitangent = FVector(Frames.RenderFrameV);
         OutSurface.LocalSurfaceAxisU = FVector(Triangle.LocalSurfaceAxisU);
         OutSurface.LocalSurfaceAxisV = FVector(Triangle.LocalSurfaceAxisV);
-        OutSurface.LocalSurfaceFrameU = FVector(SurfaceFrameU);
-        OutSurface.LocalSurfaceFrameV = FVector(SurfaceFrameV);
+        OutSurface.LocalSurfaceFrameU = FVector(Frames.AuthoringFrameU);
+        OutSurface.LocalSurfaceFrameV = FVector(Frames.AuthoringFrameV);
         OutSurface.SurfaceUnitsPerUV = Triangle.SurfaceUnitsPerUV;
         OutSurface.WorldPosition = ComponentTransform.TransformPosition(FVector(LocalPosition));
-        OutSurface.WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(SmoothNormal))
+        OutSurface.WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(Frames.LocalNormal))
             .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-        OutSurface.WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(SurfaceFrameU))
+        OutSurface.WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(Frames.RenderFrameU))
             .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
-        OutSurface.WorldBitangent = ComponentTransform.TransformVectorNoScale(FVector(SurfaceFrameV))
+        OutSurface.WorldBitangent = ComponentTransform.TransformVectorNoScale(FVector(Frames.RenderFrameV))
             .GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+        OutSurface.WorldSurfaceFrameU = ComponentTransform.TransformVectorNoScale(
+            FVector(Frames.AuthoringFrameU)).GetSafeNormal(
+                UE_SMALL_NUMBER,
+                FVector::ForwardVector);
+        OutSurface.WorldSurfaceFrameV = ComponentTransform.TransformVectorNoScale(
+            FVector(Frames.AuthoringFrameV)).GetSafeNormal(
+                UE_SMALL_NUMBER,
+                FVector::RightVector);
     }
 }
 
@@ -307,7 +376,8 @@ uint64 FDWCEditorSpatialData::GetAllocatedSizeBytes() const
         static_cast<uint64>(TriangleLookup.GetAllocatedSize()) +
         static_cast<uint64>(BVHTriangleIndices.GetAllocatedSize()) +
         static_cast<uint64>(BVHNodes.GetAllocatedSize()) +
-        static_cast<uint64>(UVTriangleGrid.GetAllocatedSize());
+        static_cast<uint64>(UVTriangleGrid.GetAllocatedSize()) +
+        SurfaceOrientationField.GetAllocatedSizeBytes();
     for (const TArray<int32>& Cell : UVTriangleGrid)
     {
         Bytes += static_cast<uint64>(Cell.GetAllocatedSize());
@@ -316,9 +386,12 @@ uint64 FDWCEditorSpatialData::GetAllocatedSizeBytes() const
 }
 
 FDWCEditorSpatialQueryService::FDWCEditorSpatialQueryService(
-    TSharedRef<FDWCEditorCacheStore> InCacheStore)
-    : CacheStore(MoveTemp(InCacheStore))
+    TSharedRef<FDWCEditorCacheStore> InCacheStore,
+    FDWCEditorSurfaceOrientationPolicy InOrientationPolicy)
+    : CacheStore(MoveTemp(InCacheStore)),
+      OrientationPolicy(MoveTemp(InOrientationPolicy))
 {
+    OrientationPolicy.Normalize();
 }
 
 FDWCEditorSpatialHandle FDWCEditorSpatialQueryService::Acquire(
@@ -413,8 +486,13 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
         RayOrigin + Direction * 1000000.0f));
     float BestSegmentT = TNumericLimits<float>::Max();
 
-    auto TestTriangle = [&](const FDWCEditorSpatialTriangle& Triangle)
+    auto TestTriangle = [&](const int32 TriangleIndex)
     {
+        if (!Handle->Triangles.IsValidIndex(TriangleIndex))
+        {
+            return;
+        }
+        const FDWCEditorSpatialTriangle& Triangle = Handle->Triangles[TriangleIndex];
         if (Triangle.LocalBounds.IsValid &&
             !DoesSegmentIntersectBox(Triangle.LocalBounds.ExpandBy(0.1f), LocalRayOrigin, LocalRayEnd))
         {
@@ -440,31 +518,19 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
             Triangle.LocalPositions[0] * Barycentric.X +
             Triangle.LocalPositions[1] * Barycentric.Y +
             Triangle.LocalPositions[2] * Barycentric.Z;
-        const FVector3f SmoothNormal = (
-            Triangle.LocalNormals[0] * Barycentric.X +
-            Triangle.LocalNormals[1] * Barycentric.Y +
-            Triangle.LocalNormals[2] * Barycentric.Z).GetSafeNormal(
-                UE_SMALL_NUMBER,
-                Triangle.LocalNormal);
-        const FVector3f InterpolatedTangent =
-            Triangle.LocalTangents[0] * Barycentric.X +
-            Triangle.LocalTangents[1] * Barycentric.Y +
-            Triangle.LocalTangents[2] * Barycentric.Z;
-        const FVector3f InterpolatedBitangent =
-            Triangle.LocalBitangents[0] * Barycentric.X +
-            Triangle.LocalBitangents[1] * Barycentric.Y +
-            Triangle.LocalBitangents[2] * Barycentric.Z;
-        FVector3f SurfaceFrameU;
-        FVector3f SurfaceFrameV;
-        BuildStableSurfaceFrame(
-            SmoothNormal,
-            InterpolatedTangent,
-            InterpolatedBitangent,
-            SurfaceFrameU,
-            SurfaceFrameV);
+        FDWCEditorResolvedSpatialFrames Frames;
+        if (!ResolveSpatialSurfaceFrames(
+                *Handle,
+                TriangleIndex,
+                Barycentric,
+                OrientationPolicy,
+                Frames))
+        {
+            return;
+        }
 
         const FVector WorldPosition = ComponentTransform.TransformPosition(FVector(LocalPosition));
-        FVector WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(SmoothNormal)).GetSafeNormal();
+        FVector WorldNormal = ComponentTransform.TransformVectorNoScale(FVector(Frames.LocalNormal)).GetSafeNormal();
         if (WorldNormal.IsNearlyZero())
         {
             WorldNormal = FVector::UpVector;
@@ -473,7 +539,7 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
         {
             WorldNormal *= -1.0f;
         }
-        FVector WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(SurfaceFrameU)).GetSafeNormal();
+        FVector WorldTangent = ComponentTransform.TransformVectorNoScale(FVector(Frames.RenderFrameU)).GetSafeNormal();
         WorldTangent = (WorldTangent - WorldNormal * FVector::DotProduct(WorldTangent, WorldNormal)).GetSafeNormal();
         if (WorldTangent.IsNearlyZero())
         {
@@ -484,6 +550,14 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
         {
             WorldBitangent = AnyPerpendicular(WorldNormal);
         }
+        const FVector WorldSurfaceFrameU = ComponentTransform.TransformVectorNoScale(
+            FVector(Frames.AuthoringFrameU)).GetSafeNormal(
+                UE_SMALL_NUMBER,
+                FVector::ForwardVector);
+        const FVector WorldSurfaceFrameV = ComponentTransform.TransformVectorNoScale(
+            FVector(Frames.AuthoringFrameV)).GetSafeNormal(
+                UE_SMALL_NUMBER,
+                FVector::RightVector);
 
         BestSegmentT = SegmentT;
         OutHit.bHit = true;
@@ -495,14 +569,16 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
         OutHit.WorldNormal = WorldNormal;
         OutHit.WorldTangent = WorldTangent;
         OutHit.WorldBitangent = WorldBitangent;
+        OutHit.WorldSurfaceFrameU = WorldSurfaceFrameU;
+        OutHit.WorldSurfaceFrameV = WorldSurfaceFrameV;
         OutHit.LocalPosition = FVector(LocalPosition);
-        OutHit.LocalNormal = FVector(SmoothNormal);
-        OutHit.LocalTangent = FVector(SurfaceFrameU);
-        OutHit.LocalBitangent = FVector(SurfaceFrameV);
+        OutHit.LocalNormal = FVector(Frames.LocalNormal);
+        OutHit.LocalTangent = FVector(Frames.RenderFrameU);
+        OutHit.LocalBitangent = FVector(Frames.RenderFrameV);
         OutHit.LocalSurfaceAxisU = FVector(Triangle.LocalSurfaceAxisU);
         OutHit.LocalSurfaceAxisV = FVector(Triangle.LocalSurfaceAxisV);
-        OutHit.LocalSurfaceFrameU = FVector(SurfaceFrameU);
-        OutHit.LocalSurfaceFrameV = FVector(SurfaceFrameV);
+        OutHit.LocalSurfaceFrameU = FVector(Frames.AuthoringFrameU);
+        OutHit.LocalSurfaceFrameV = FVector(Frames.AuthoringFrameV);
         OutHit.SurfaceUnitsPerUV = Triangle.SurfaceUnitsPerUV;
         OutHit.UV = FVector2D(
             Triangle.UVs[0] * Barycentric.X +
@@ -538,7 +614,7 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
                 if (Handle->BVHTriangleIndices.IsValidIndex(OrderedIndex) &&
                     Handle->Triangles.IsValidIndex(Handle->BVHTriangleIndices[OrderedIndex]))
                 {
-                    TestTriangle(Handle->Triangles[Handle->BVHTriangleIndices[OrderedIndex]]);
+                    TestTriangle(Handle->BVHTriangleIndices[OrderedIndex]);
                 }
             }
         }
@@ -551,9 +627,9 @@ bool FDWCEditorSpatialQueryService::TraceSurface(
 
     if (Handle->BVHNodes.IsEmpty())
     {
-        for (const FDWCEditorSpatialTriangle& Triangle : Handle->Triangles)
+        for (int32 TriangleIndex = 0; TriangleIndex < Handle->Triangles.Num(); ++TriangleIndex)
         {
-            TestTriangle(Triangle);
+            TestTriangle(TriangleIndex);
         }
     }
     return OutHit.bHit;
@@ -589,8 +665,13 @@ void FDWCEditorSpatialQueryService::FindSurfacesAtUV(
     const FVector2f QueryUV2f(QueryUV);
     const FTransform ComponentTransform = MeshComponent->GetComponentTransform();
 
-    auto TestTriangle = [&](const FDWCEditorSpatialTriangle& Triangle)
+    auto TestTriangle = [&](const int32 TriangleIndex)
     {
+        if (!Handle->Triangles.IsValidIndex(TriangleIndex))
+        {
+            return;
+        }
+        const FDWCEditorSpatialTriangle& Triangle = Handle->Triangles[TriangleIndex];
         if (Handle->MaterialSlotIndex != INDEX_NONE &&
             Triangle.MaterialSlotIndex != Handle->MaterialSlotIndex)
         {
@@ -614,7 +695,13 @@ void FDWCEditorSpatialQueryService::FindSurfacesAtUV(
         }
 
         FDWCEditorProjectedSurface& Surface = OutSurfaces.AddDefaulted_GetRef();
-        FillProjectedSurface(Triangle, Barycentric, ComponentTransform, Surface);
+        FillProjectedSurface(
+            *Handle,
+            TriangleIndex,
+            Barycentric,
+            ComponentTransform,
+            OrientationPolicy,
+            Surface);
     };
 
     if (Candidates != nullptr)
@@ -623,15 +710,15 @@ void FDWCEditorSpatialQueryService::FindSurfacesAtUV(
         {
             if (Handle->Triangles.IsValidIndex(TriangleIndex))
             {
-                TestTriangle(Handle->Triangles[TriangleIndex]);
+                TestTriangle(TriangleIndex);
             }
         }
     }
     else
     {
-        for (const FDWCEditorSpatialTriangle& Triangle : Handle->Triangles)
+        for (int32 TriangleIndex = 0; TriangleIndex < Handle->Triangles.Num(); ++TriangleIndex)
         {
-            TestTriangle(Triangle);
+            TestTriangle(TriangleIndex);
         }
     }
 }
@@ -663,9 +750,11 @@ bool FDWCEditorSpatialQueryService::ResolveTriangleAnchor(
     }
 
     FillProjectedSurface(
-        Handle->Triangles[*TriangleIndex],
+        *Handle,
+        *TriangleIndex,
         NormalizedBarycentric,
         MeshComponent->GetComponentTransform(),
+        OrientationPolicy,
         OutSurface);
     return true;
 }
@@ -805,7 +894,7 @@ TOptional<FDWCEditorCacheKey> FDWCEditorSpatialQueryService::MakeCacheKey(
     const USkeletalMesh* Mesh,
     const int32 LODIndex,
     const int32 UVChannelIndex,
-    const int32 MaterialSlotIndex)
+    const int32 MaterialSlotIndex) const
 {
     if (Mesh == nullptr || UVChannelIndex == INDEX_NONE || MaterialSlotIndex == INDEX_NONE)
     {
@@ -847,6 +936,11 @@ TOptional<FDWCEditorCacheKey> FDWCEditorSpatialQueryService::MakeCacheKey(
             Key.Signature = WetClothingAsset->GetSourceMeshSignature();
         }
     }
+    Key.Signature += FString::Printf(
+        TEXT("|SurfaceOrientation=P%u-F%u-R%u"),
+        OrientationPolicy.BuildSignature(),
+        DWCEditorSurfaceOrientationVersion::FieldLayout,
+        DWCEditorSurfaceOrientationVersion::Resolver);
     return Key;
 }
 
@@ -857,7 +951,7 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
     const int32 UVChannelIndex,
     const int32 MaterialSlotIndex,
     FDWCEditorSpatialData& OutData,
-    FString* OutError)
+    FString* OutError) const
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorSpatialQueryService_BuildSpatialData);
 
@@ -1017,6 +1111,30 @@ bool FDWCEditorSpatialQueryService::BuildSpatialData(
     }
 
     BuildTriangleTopology(OutData);
+
+    FString OrientationWarning;
+    if (!FDWCEditorSurfaceOrientationFieldBuilder::Build(
+            OutData.Triangles,
+            OrientationPolicy,
+            OutData.SurfaceOrientationField,
+            &OrientationWarning))
+    {
+        OutData.SurfaceOrientationField.Reset();
+        OutData.SurfaceOrientationField.BuildStatus =
+            EDWCEditorSurfaceOrientationFieldBuildStatus::Degraded;
+        OutData.SurfaceOrientationField.PolicySignature = OrientationPolicy.BuildSignature();
+        OutData.SurfaceOrientationField.FieldLayoutVersion =
+            DWCEditorSurfaceOrientationVersion::FieldLayout;
+    }
+    if (!OrientationWarning.IsEmpty())
+    {
+        UE_LOG(
+            LogDWCEditorSpatialQuery,
+            Warning,
+            TEXT("Surface orientation field for slot %d was degraded: %s"),
+            MaterialSlotIndex,
+            *OrientationWarning);
+    }
 
     OutData.TriangleLookup.Reserve(OutData.Triangles.Num());
     OutData.BVHTriangleIndices.Reserve(OutData.Triangles.Num());

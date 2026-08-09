@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryTypes.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSurfaceOrientationPolicy.h"
 
 class FDWCEditorCacheStore;
 class USkeletalMesh;
@@ -14,7 +15,9 @@ struct FDWCEditorPreviewMemoryBucket;
 class FDWCEditorSpatialQueryService final
 {
   public:
-    explicit FDWCEditorSpatialQueryService(TSharedRef<FDWCEditorCacheStore> InCacheStore);
+    explicit FDWCEditorSpatialQueryService(
+        TSharedRef<FDWCEditorCacheStore> InCacheStore,
+        FDWCEditorSurfaceOrientationPolicy InOrientationPolicy = {});
 
     FDWCEditorSpatialHandle Acquire(
         const UWetClothingAsset* WetClothingAsset,
@@ -87,20 +90,21 @@ class FDWCEditorSpatialQueryService final
     void ResetDiagnosticCounters();
 
   private:
-    static TOptional<FDWCEditorCacheKey> MakeCacheKey(
+    TOptional<FDWCEditorCacheKey> MakeCacheKey(
         const UWetClothingAsset* WetClothingAsset,
         const USkeletalMesh* Mesh,
         int32 LODIndex,
         int32 UVChannelIndex,
-        int32 MaterialSlotIndex);
-    static bool BuildSpatialData(
+        int32 MaterialSlotIndex) const;
+    bool BuildSpatialData(
         const UWetClothingAsset* WetClothingAsset,
         USkeletalMesh* Mesh,
         int32 LODIndex,
         int32 UVChannelIndex,
         int32 MaterialSlotIndex,
         FDWCEditorSpatialData& OutData,
-        FString* OutError);
+        FString* OutError) const;
 
     TSharedRef<FDWCEditorCacheStore> CacheStore;
+    FDWCEditorSurfaceOrientationPolicy OrientationPolicy;
 };

@@ -17,12 +17,14 @@ bool FDWCTransparencyRevealCommitSparseParityTest::RunTest(const FString&)
     constexpr int32 Size = FDWCTransparencyRevealColorTileStore::TileSize * 2;
     const FColor BaseColor(20, 40, 60, 255);
     const FColor EditedColor(180, 80, 30, 255);
+    constexpr uint8 AutoAlpha = 83;
     TSharedRef<FDWCTransparencySourcePayload> Source =
         MakeShared<FDWCTransparencySourcePayload>();
     Source->Resolution = FIntPoint(Size, Size);
     Source->MaterialSlotIndex = 4;
     Source->BuildSignature = TEXT("Stage3Source");
     Source->InnerColorBuffer.Init(BaseColor, Size * Size);
+    Source->AutoAlphaBuffer.Init(AutoAlpha, Size * Size);
 
     FDWCTransparencyRevealColorTileStore Store;
     Store.Initialize(Source->Resolution);
@@ -50,11 +52,14 @@ bool FDWCTransparencyRevealCommitSparseParityTest::RunTest(const FString&)
         return false;
     }
 
-    TestEqual(TEXT("Edited tile reaches the dense artifact"), Result->CorrectedRevealPixels[0], EditedColor);
+    TestEqual(
+        TEXT("Edited tile reaches the dense artifact while preserving automatic alpha"),
+        Result->CorrectedRevealPixels[0],
+        FColor(EditedColor.R, EditedColor.G, EditedColor.B, AutoAlpha));
     TestEqual(
         TEXT("Untouched tiles preserve the immutable Stage 2 source"),
         Result->CorrectedRevealPixels[Size - 1],
-        BaseColor);
+        FColor(BaseColor.R, BaseColor.G, BaseColor.B, AutoAlpha));
     TestEqual(TEXT("Source signature survives worker transfer"), Result->SourceSignature, Source->BuildSignature);
     TestTrue(TEXT("Result records the sparse path"), Result->bUsedSparseTiles);
     return true;
@@ -74,6 +79,11 @@ bool FDWCTransparencyRevealCommitFallbackParityTest::RunTest(const FString&)
     Source->MaterialSlotIndex = 7;
     Source->BuildSignature = TEXT("PendingStage3Source");
     Source->InnerColorBuffer.Init(FColor(25, 50, 75, 255), Size * Size);
+    Source->AutoAlphaBuffer.SetNumUninitialized(Size * Size);
+    for (int32 PixelIndex = 0; PixelIndex < Source->AutoAlphaBuffer.Num(); ++PixelIndex)
+    {
+        Source->AutoAlphaBuffer[PixelIndex] = static_cast<uint8>((PixelIndex * 19) & 0xff);
+    }
     Source->OuterCoverageBuffer.Init(255, Size * Size);
     Source->OuterIslandIDBuffer.Init(
         FDWCTransparencySourcePayload::EncodeOuterIslandID(0), Size * Size);
@@ -98,6 +108,10 @@ bool FDWCTransparencyRevealCommitFallbackParityTest::RunTest(const FString&)
         Source->MaterialSlotIndex,
         FLinearColor::White,
         Expected);
+    for (int32 PixelIndex = 0; PixelIndex < Expected.Num(); ++PixelIndex)
+    {
+        Expected[PixelIndex].A = Source->AutoAlphaBuffer[PixelIndex];
+    }
 
     FDWCTransparencyRevealCommitJobInput Input;
     Input.SourceResult = Source;

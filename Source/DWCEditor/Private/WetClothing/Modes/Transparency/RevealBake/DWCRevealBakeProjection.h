@@ -29,6 +29,9 @@ struct FDWCRevealBakeRayHit
     FVector   Position = FVector::ZeroVector;
     FVector   Normal = FVector::UpVector;
     FVector2D SourceUV = FVector2D::ZeroVector;
+    int32     OuterTriangleIndex = INDEX_NONE;
+    FVector   OuterBarycentric = FVector::ZeroVector;
+    FVector   SourceBarycentric = FVector::ZeroVector;
     float     Distance = 0.0f;
     float     Confidence = 0.0f;
 };

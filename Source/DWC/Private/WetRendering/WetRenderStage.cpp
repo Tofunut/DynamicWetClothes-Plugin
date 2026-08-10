@@ -374,6 +374,9 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
 
     if (DWCWetMaterialParameters::TransparencyMap().IsNone() &&
         DWCWetMaterialParameters::UseTransparencyMap().IsNone() &&
+        DWCWetMaterialParameters::RevealSurfaceMap().IsNone() &&
+        DWCWetMaterialParameters::UseRevealSurfaceMap().IsNone() &&
+        DWCWetMaterialParameters::RevealMetallicDarkeningStrength().IsNone() &&
         DWCWetMaterialParameters::TransparencyWetnessMin().IsNone() &&
         DWCWetMaterialParameters::TransparencyWetnessMax().IsNone() &&
         DWCWetMaterialParameters::TransparencyUVChannel().IsNone())
@@ -399,6 +402,18 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
             {
                 MID->SetScalarParameterValue(DWCWetMaterialParameters::UseTransparencyMap(), 0.0f);
             }
+            if (!DWCWetMaterialParameters::RevealSurfaceMap().IsNone())
+            {
+                MID->SetTextureParameterValue(DWCWetMaterialParameters::RevealSurfaceMap(), nullptr);
+            }
+            if (!DWCWetMaterialParameters::UseRevealSurfaceMap().IsNone())
+            {
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::UseRevealSurfaceMap(), 0.0f);
+            }
+            if (!DWCWetMaterialParameters::RevealMetallicDarkeningStrength().IsNone())
+            {
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::RevealMetallicDarkeningStrength(), 0.0f);
+            }
             if (!DWCWetMaterialParameters::TransparencyUVChannel().IsNone())
             {
                 MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyUVChannel(), 0.0f);
@@ -409,6 +424,12 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
 
     const float  SafeWetnessMin = FMath::Clamp(Receiver.TransparencyWetnessMin, 0.0f, 1.0f);
     const float  SafeWetnessMax = FMath::Max(SafeWetnessMin, FMath::Clamp(Receiver.TransparencyWetnessMax, 0.0f, 1.0f));
+    const float SafeRevealMetallicDarkening = Receiver.WetClothingAsset != nullptr
+        ? FMath::Clamp(
+            Receiver.WetClothingAsset->Authored.TransparencyData.RevealMetallicDarkeningStrength,
+            0.0f,
+            1.0f)
+        : 0.0f;
     TArray<bool> bTransparencyMapAssigned;
     bTransparencyMapAssigned.Init(false, Receiver.WetMaterialInstances->Num());
 
@@ -454,6 +475,28 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
             {
                 MID->SetScalarParameterValue(DWCWetMaterialParameters::UseTransparencyMap(), 1.0f);
             }
+            const bool bHasRevealSurface = BakedMap->RevealSurfaceMap != nullptr &&
+                BakedMap->bContainsRevealNormalRG &&
+                BakedMap->bContainsInnerMetallicB &&
+                BakedMap->bContainsRevealSurfaceCoverageAlpha;
+            if (!DWCWetMaterialParameters::RevealSurfaceMap().IsNone())
+            {
+                MID->SetTextureParameterValue(
+                    DWCWetMaterialParameters::RevealSurfaceMap(),
+                    bHasRevealSurface ? BakedMap->RevealSurfaceMap.Get() : nullptr);
+            }
+            if (!DWCWetMaterialParameters::UseRevealSurfaceMap().IsNone())
+            {
+                MID->SetScalarParameterValue(
+                    DWCWetMaterialParameters::UseRevealSurfaceMap(),
+                    bHasRevealSurface ? 1.0f : 0.0f);
+            }
+            if (!DWCWetMaterialParameters::RevealMetallicDarkeningStrength().IsNone())
+            {
+                MID->SetScalarParameterValue(
+                    DWCWetMaterialParameters::RevealMetallicDarkeningStrength(),
+                    bHasRevealSurface ? SafeRevealMetallicDarkening : 0.0f);
+            }
             if (!DWCWetMaterialParameters::TransparencyWetnessMin().IsNone())
             {
                 MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyWetnessMin(), SafeWetnessMin);
@@ -488,6 +531,18 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
         if (!DWCWetMaterialParameters::UseTransparencyMap().IsNone())
         {
             MID->SetScalarParameterValue(DWCWetMaterialParameters::UseTransparencyMap(), 0.0f);
+        }
+        if (!DWCWetMaterialParameters::RevealSurfaceMap().IsNone())
+        {
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::RevealSurfaceMap(), nullptr);
+        }
+        if (!DWCWetMaterialParameters::UseRevealSurfaceMap().IsNone())
+        {
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::UseRevealSurfaceMap(), 0.0f);
+        }
+        if (!DWCWetMaterialParameters::RevealMetallicDarkeningStrength().IsNone())
+        {
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::RevealMetallicDarkeningStrength(), 0.0f);
         }
         if (!DWCWetMaterialParameters::TransparencyWetnessMin().IsNone())
         {

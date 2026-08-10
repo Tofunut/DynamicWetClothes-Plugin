@@ -217,8 +217,17 @@ FDWCEditorPreviewLayer FDWCEditorPreviewOrchestrator::BuildSavedCrossLayer(
     {
         Layer.Kind = EDWCEditorPreviewLayerKind::SavedTransparency;
         UTexture2D* Texture = bShowSavedCrossLayer ? Saved.TransparencyMap.Get() : nullptr;
+        UTexture2D* RevealSurface = bShowSavedCrossLayer ? Saved.RevealSurfaceMap.Get() : nullptr;
         Layer.AddTexture(DWCWetMaterialParameters::TransparencyMap(), Texture);
         Layer.AddScalar(DWCWetMaterialParameters::UseTransparencyMap(), Texture != nullptr ? 1.0f : 0.0f);
+        Layer.AddTexture(DWCWetMaterialParameters::RevealSurfaceMap(), RevealSurface);
+        Layer.AddScalar(DWCWetMaterialParameters::UseRevealSurfaceMap(), RevealSurface != nullptr ? 1.0f : 0.0f);
+        const UWetClothingAsset* Asset = WetClothingAsset.Get();
+        Layer.AddScalar(
+            DWCWetMaterialParameters::RevealMetallicDarkeningStrength(),
+            RevealSurface != nullptr && Asset != nullptr
+                ? Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength
+                : 0.0f);
     }
     else
     {

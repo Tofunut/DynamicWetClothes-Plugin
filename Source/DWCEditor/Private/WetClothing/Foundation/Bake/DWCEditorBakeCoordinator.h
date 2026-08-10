@@ -11,6 +11,7 @@ class FDWCWrinkleSuppressionCoverageService;
 class UWetClothingAsset;
 struct FDWCTransparencySourcePayload;
 struct FDWCTransparencyAlphaWorkingSnapshot;
+struct FDWCTransparencyFinalSettingsSnapshot;
 
 enum class EDWCEditorTransparencyBakeKind : uint8
 {
@@ -63,6 +64,7 @@ class FDWCEditorBakeCoordinator final
         FGuid LayerGuid,
         TSharedRef<const FDWCTransparencySourcePayload> SourcePayload,
         TSharedPtr<const FDWCTransparencyAlphaWorkingSnapshot> AlphaSnapshot,
+        TSharedRef<const FDWCTransparencyFinalSettingsSnapshot> FinalSettings,
         bool bSaveAfterCommit,
         FCompletion Completion,
         FString* OutError = nullptr);
@@ -97,7 +99,8 @@ class FDWCEditorBakeCoordinator final
         TSharedRef<const FDWCTransparencySourcePayload> SourcePayload,
         FString& OutError,
         bool bCountAsBatchJob = true,
-        TSharedPtr<const FDWCTransparencyAlphaWorkingSnapshot> AlphaSnapshot = nullptr);
+        TSharedPtr<const FDWCTransparencyAlphaWorkingSnapshot> AlphaSnapshot = nullptr,
+        TSharedPtr<const FDWCTransparencyFinalSettingsSnapshot> FinalSettingsOverride = nullptr);
     void HandleTransparencyJobFinished(
         const TSharedRef<FTransparencyBatch>& Batch,
         const struct FDWCEditorWorkerJobTicket& Ticket,

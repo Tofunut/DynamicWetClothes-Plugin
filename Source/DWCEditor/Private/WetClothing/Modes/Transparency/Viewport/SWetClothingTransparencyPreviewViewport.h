@@ -47,6 +47,11 @@ struct FDWCTransparencyPixelComposeContext;
 enum class EDWCTransparencyDirtyReplayTarget : uint8;
 using FDWCTransparencySurfaceHit = FDWCEditorSurfaceHit;
 
+DECLARE_DELEGATE_TwoParams(
+    FDWCTransparencyExternalSourceTransformCommitted,
+    const FGuid& /* SourceGuid */,
+    const FTransform& /* BakeTransform */);
+
 class SWetClothingTransparencyPreviewViewport
     : public SEditorViewport
     , public FGCObject
@@ -77,6 +82,11 @@ class SWetClothingTransparencyPreviewViewport
     void FocusOnPreviewMesh(bool bInstant = false);
     void SetPreviewMode(EWetClothingTransparencyPreviewMode NewMode);
     EWetClothingTransparencyPreviewMode GetPreviewMode() const { return PreviewMode; }
+    /** Rebuilds the visible Type 2/3 source layout when its component set changes. */
+    void InvalidateFullSourceLayout();
+    void SetExternalSourcePlacementSelection(const FGuid& SourceGuid);
+    void SetExternalSourceTransformCommittedDelegate(
+        FDWCTransparencyExternalSourceTransformCommitted InDelegate);
     void SetWetnessPreviewPercent(float InPercent);
     void ApplyTransparencyPreviewSettings(const FDWCTransparencyPreviewSettings& InSettings);
     void SetShowSavedWrinkle(bool bInShowSavedWrinkle);
@@ -109,6 +119,9 @@ class SWetClothingTransparencyPreviewViewport
     bool CanShowBrushCursor() const;
     void HandleSurfaceHitFromClient(const FDWCTransparencySurfaceHit& SurfaceHit);
     void SetVisualizationMode(EDWCTransparencyVisualizationMode InMode);
+    // The Stage 3 panel displays this same workspace texture; it does not
+    // allocate a second preview copy just for Slate.
+    UTexture2D* GetVisualizationPreviewTexture() const;
     void SetAutoBakePreviewResult(TSharedPtr<const FDWCTransparencySourcePayload> InResult);
     void ClearAutoBakePreviewResult();
     void SetTransparencyEditContext(
@@ -116,7 +129,8 @@ class SWetClothingTransparencyPreviewViewport
         int32 InMaterialSlotIndex,
         int32 InUVChannelIndex,
         EDWCTransparencyUVAddressMode InAddressMode,
-        EDWCTransparencyPaintTarget InPaintTarget);
+        EDWCTransparencyPaintTarget InPaintTarget,
+        bool bInSurfacePaintingEnabled);
     void ProcessInteractivePaintWork();
     void FlushPendingPreviewTextureUpdates();
     void TickPreviewMaterialCompilations();
@@ -138,6 +152,22 @@ class SWetClothingTransparencyPreviewViewport
     void ClearPreview();
     void BuildTargetMeshPreview();
     void BuildFullBlueprintPreview();
+    void BuildFullExternalMeshPreview();
+
+  public:
+    // Called exclusively by the viewport client while Type 3 placement is active.
+    bool IsExternalSourcePlacementActive() const;
+    FVector GetExternalSourceWidgetLocation() const;
+    bool ApplyExternalSourceWidgetDelta(
+        EAxisList::Type CurrentAxis,
+        const FVector& Drag,
+        const FRotator& Rot,
+        const FVector& Scale);
+    void BeginExternalSourceTransformInteraction();
+    void FinishExternalSourceTransformInteraction();
+    bool NudgeExternalSourcePlacement(const FKey& Key, bool bLargeStep, bool bRotate);
+
+  private:
     void ConfigurePreviewMeshComponent(USkeletalMeshComponent* MeshComponent);
     void InitializePreviewSession();
     void HandlePreviewSessionSlotsChanged();
@@ -192,6 +222,7 @@ class SWetClothingTransparencyPreviewViewport
     void FinalizeAuthoringPreviewUpdate();
     void InvalidatePreviewContent(bool bRequireFullRebuild = false);
     FWetClothingTransparencyLayerData* GetSelectedLayer();
+    const FWetClothingTransparencyLayerData* GetSelectedLayer() const;
     void InvalidatePreviewViewport();
     USkeletalMeshComponent* FindFocusMeshComponent() const;
     void CollectDiagnosticMemoryStats(TArray<FDWCEditorPreviewMemoryBucket>& OutBuckets) const;
@@ -229,6 +260,10 @@ class SWetClothingTransparencyPreviewViewport
     TObjectPtr<USkeletalMeshComponent> TargetMeshPreviewComponent = nullptr;
     TObjectPtr<AActor> PreviewActor = nullptr;
     TArray<TObjectPtr<USkeletalMeshComponent>> PreviewMeshComponents;
+    TMap<FGuid, TObjectPtr<USkeletalMeshComponent>> ExternalSourcePreviewComponents;
+    FGuid SelectedExternalSourceGuid;
+    bool bExternalSourceTransformInteractionActive = false;
+    FDWCTransparencyExternalSourceTransformCommitted ExternalSourceTransformCommitted;
     TUniquePtr<FDWCEditorPreviewSession> PreviewSession;
     TUniquePtr<FDWCEditorPreviewOrchestrator> PreviewOrchestrator;
     FDWCEditorTextureLease TransparencyPreviewHandle;
@@ -280,6 +315,7 @@ class SWetClothingTransparencyPreviewViewport
     bool bOuterEdgeFeatherPreviewDirty = false;
     bool bTransparencyPaintingEnabled = false;
     bool bRevealColorPaintingEnabled = false;
+    bool bSurfacePaintingEnabled = false;
     bool bShowSavedWrinkle = true;
     bool bPreviewSuspended = false;
     FGuid SelectedLayerGuid;

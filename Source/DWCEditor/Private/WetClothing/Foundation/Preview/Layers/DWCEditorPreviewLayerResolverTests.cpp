@@ -18,6 +18,7 @@ bool FDWCEditorPreviewStaleTransparencyLayerTest::RunTest(const FString& Paramet
     constexpr int32 MaterialSlotIndex = 4;
     UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
     UTexture2D* Texture = NewObject<UTexture2D>(GetTransientPackage());
+    UTexture2D* RevealSurfaceTexture = NewObject<UTexture2D>(GetTransientPackage());
 
     FWetClothingTransparencyLayerData& Layer =
         Asset->Authored.TransparencyData.TransparencyLayers.AddDefaulted_GetRef();
@@ -35,8 +36,19 @@ bool FDWCEditorPreviewStaleTransparencyLayerTest::RunTest(const FString& Paramet
     TestEqual(TEXT("A texture-only editor result is classified as stale"),
         Saved.TransparencyState, EDWCEditorSavedLayerState::Stale);
     TestEqual(TEXT("A stale editor result keeps its texture"), Saved.TransparencyMap.Get(), Texture);
+    TestNull(TEXT("A legacy transparency map does not bind an incomplete Reveal Surface payload"),
+        Saved.RevealSurfaceMap.Get());
     TestNull(TEXT("Runtime rejects the stale result"),
         Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex));
+
+    BakedMap.RevealSurfaceMap = RevealSurfaceTexture;
+    BakedMap.RevealSurfaceBuildSignature = TEXT("RevealSurfaceBuild");
+    BakedMap.bContainsRevealNormalRG = true;
+    BakedMap.bContainsInnerMetallicB = true;
+    BakedMap.bContainsRevealSurfaceCoverageAlpha = true;
+    Saved = FDWCEditorPreviewLayerResolver::Resolve(Asset, MaterialSlotIndex);
+    TestEqual(TEXT("A complete Reveal Surface payload remains visible with a stale transparency layer"),
+        Saved.RevealSurfaceMap.Get(), RevealSurfaceTexture);
 
     BakedMap.BakeGuid = FGuid::NewGuid();
     BakedMap.BuildSignature = TEXT("CurrentTransparencyBuild");
@@ -46,11 +58,21 @@ bool FDWCEditorPreviewStaleTransparencyLayerTest::RunTest(const FString& Paramet
     TestNotNull(TEXT("Runtime accepts the current result"),
         Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex));
 
+    Layer.SourceType = EDWCTransparencySourceType::SameMeshMaterialSlots;
+    TestNotNull(TEXT("A raycast layer accepts a complete Reveal Surface payload"),
+        Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex));
+    BakedMap.RevealSurfaceMap = nullptr;
+    TestNull(TEXT("A raycast layer rejects an incomplete Reveal Surface payload"),
+        Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex));
+    BakedMap.RevealSurfaceMap = RevealSurfaceTexture;
+
     Layer.MarkFinalBakeStale();
     Saved = FDWCEditorPreviewLayerResolver::Resolve(Asset, MaterialSlotIndex);
     TestEqual(TEXT("Invalidation changes the editor result to stale"),
         Saved.TransparencyState, EDWCEditorSavedLayerState::Stale);
     TestEqual(TEXT("Invalidation does not hide the editor texture"), Saved.TransparencyMap.Get(), Texture);
+    TestEqual(TEXT("Invalidation does not hide the complete Reveal Surface payload"),
+        Saved.RevealSurfaceMap.Get(), RevealSurfaceTexture);
     TestNull(TEXT("Runtime still rejects the invalidated result"),
         Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex));
 

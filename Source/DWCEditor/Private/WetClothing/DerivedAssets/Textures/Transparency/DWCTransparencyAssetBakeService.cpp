@@ -46,6 +46,7 @@ bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingA
         for (const FWetClothingBakedTransparencyMap& BakedMap : Layer.BakedMaps)
         {
             AddPackageForObject(BakedMap.TransparencyMap.Get(), PackagesToSave);
+            AddPackageForObject(BakedMap.RevealSurfaceMap.Get(), PackagesToSave);
         }
 #if WITH_EDITORONLY_DATA
         for (const FDWCTransparencyTempArtifactReference& Artifact :
@@ -61,9 +62,11 @@ bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingA
     for (const FDWCTransparencyMaterialColorCacheReference& Reference :
          WetClothingAsset->Authored.TransparencyData.MaterialColorCache)
     {
-        // Material-color intermediates follow the same lazy save policy as
-        // layer artifacts: save loaded packages without forcing stale caches in.
+        // Evaluated source-material properties follow the same lazy save policy
+        // as layer artifacts: save loaded packages without forcing stale caches in.
         AddPackageForObject(Reference.Texture.Get(), PackagesToSave);
+        AddPackageForObject(Reference.NormalTexture.Get(), PackagesToSave);
+        AddPackageForObject(Reference.MetallicTexture.Get(), PackagesToSave);
     }
 #endif
 

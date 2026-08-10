@@ -99,7 +99,7 @@ uint64 FDWCTransparencyAlphaWorkingSnapshot::GetAllocatedBytes() const
 bool FDWCTransparencyFinalWorkingSet::IsValid(FString* OutError) const
 {
     if (!Identity.IsValid() || !SourcePayload.IsValid() || SourceSignature.IsEmpty() ||
-        RevealSignature.IsEmpty() || AlphaAuthoringSignature.IsEmpty() ||
+        RevealSignature.IsEmpty() || RevealSurfaceSignature.IsEmpty() || AlphaAuthoringSignature.IsEmpty() ||
         SuppressionSettingsSignature.IsEmpty() || FinalSignature.IsEmpty())
     {
         return Fail(OutError, TEXT("The Stage 4 working set is missing identity, payload, or signatures."));
@@ -154,9 +154,13 @@ bool FDWCTransparencyFinalWorkingSetBuilder::Build(
     OutWorkingSet.Alpha = MoveTemp(AlphaSnapshot);
     OutWorkingSet.WrinkleDependency = MoveTemp(WrinkleDependency);
     OutWorkingSet.AuthoringRevision = AuthoringRevision;
+    OutWorkingSet.bRequiresRevealSurface = Layer.RequiresRevealSurface();
     OutWorkingSet.SourceSignature = OutWorkingSet.SourcePayload->BuildSignature;
     OutWorkingSet.RevealSignature = FDWCTransparencySignatureService::BuildRevealSignature(
         OutWorkingSet.SourceSignature, Layer);
+    OutWorkingSet.RevealSurfaceSignature =
+        FDWCTransparencySignatureService::BuildRevealSurfaceSignature(
+            OutWorkingSet.SourceSignature);
     OutWorkingSet.AlphaAuthoringSignature =
         FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(Layer);
     OutWorkingSet.SuppressionSettingsSignature =
@@ -185,10 +189,12 @@ FDWCTransparencyFinalCurrentness FDWCTransparencyFinalWorkingSetBuilder::Evaluat
     const FDWCTransparencyFinalWorkingSet& WorkingSet)
 {
     FDWCTransparencyFinalCurrentness Result;
-    if (BakedMap == nullptr || !BakedMap->IsRuntimeUsable())
+    if (BakedMap == nullptr || !BakedMap->IsRuntimeUsableForLayer(WorkingSet.bRequiresRevealSurface))
     {
         Result.Reason = EDWCTransparencyStaleReason::MissingArtifact;
-        Result.Detail = TEXT("The final Transparency Map has not been baked.");
+        Result.Detail = WorkingSet.bRequiresRevealSurface
+            ? TEXT("The final Transparency Map or its required Reveal Surface payload has not been baked.")
+            : TEXT("The final Transparency Map has not been baked.");
     }
     else if (BakedMap->MaterialSlotIndex != WorkingSet.Identity.MaterialSlotIndex ||
         BakedMap->Resolution != WorkingSet.Identity.Resolution.X)
@@ -207,6 +213,25 @@ FDWCTransparencyFinalCurrentness FDWCTransparencyFinalWorkingSetBuilder::Evaluat
     {
         Result.Reason = EDWCTransparencyStaleReason::OutputSettingsChanged;
         Result.Detail = TEXT("The final transparency output settings changed.");
+    }
+    else if (WorkingSet.bRequiresRevealSurface &&
+        BakedMap->RevealSurfaceBuildSignature != WorkingSet.RevealSurfaceSignature)
+    {
+        Result.Reason = EDWCTransparencyStaleReason::SourceInputsChanged;
+        Result.Detail = TEXT("The final Reveal Surface payload needs to be rebuilt from the current Stage 2 source.");
+    }
+    else if (WorkingSet.bRequiresRevealSurface && !BakedMap->HasCompleteRevealSurfacePayload())
+    {
+        Result.Reason = EDWCTransparencyStaleReason::MissingArtifact;
+        Result.Detail = TEXT("This raycast transparency layer requires a complete Reveal Surface runtime payload.");
+    }
+    else if (BakedMap->bContainsRevealNormalRG != BakedMap->bContainsInnerMetallicB ||
+        BakedMap->bContainsRevealNormalRG != BakedMap->bContainsRevealSurfaceCoverageAlpha ||
+        (BakedMap->bContainsRevealNormalRG && BakedMap->RevealSurfaceMap == nullptr) ||
+        (!BakedMap->bContainsRevealNormalRG && BakedMap->RevealSurfaceMap != nullptr))
+    {
+        Result.Reason = EDWCTransparencyStaleReason::MissingArtifact;
+        Result.Detail = TEXT("The final Reveal Surface metadata does not match its runtime texture.");
     }
     else if (BakedMap->BuildSignature != WorkingSet.FinalSignature)
     {

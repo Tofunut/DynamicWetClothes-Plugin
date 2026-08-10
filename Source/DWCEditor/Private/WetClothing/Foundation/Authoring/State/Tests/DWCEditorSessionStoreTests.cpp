@@ -97,6 +97,32 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         State.Transparency.PreviewSettings.WrinkleMaskSoftness,
         0.0f);
 
+    FDWCSetTransparencyPreviewAction RevealVisualizationAction;
+    RevealVisualizationAction.Stage = EDWCTransparencyEditorStage::RevealEditing;
+    RevealVisualizationAction.PreviewMode = State.Transparency.PreviewMode;
+    RevealVisualizationAction.VisualizationMode = EDWCTransparencyVisualizationMode::CorrectionDifference;
+    RevealVisualizationAction.WetnessPreviewPercent = State.Transparency.WetnessPreviewPercent;
+    RevealVisualizationAction.Settings = State.Transparency.PreviewSettings;
+    RevealVisualizationAction.bShowSavedWrinkle = State.Transparency.bShowSavedWrinkle;
+    FDWCEditorSessionReducer::Reduce(State, RevealVisualizationAction);
+    TestEqual(
+        TEXT("Stage 3 owns its correction visualization selection"),
+        State.Transparency.RevealVisualizationMode,
+        EDWCTransparencyVisualizationMode::CorrectionDifference);
+
+    FDWCSetTransparencyPreviewAction FinalVisualizationAction = RevealVisualizationAction;
+    FinalVisualizationAction.Stage = EDWCTransparencyEditorStage::FinalEditing;
+    FinalVisualizationAction.VisualizationMode = EDWCTransparencyVisualizationMode::AutoAlpha;
+    FDWCEditorSessionReducer::Reduce(State, FinalVisualizationAction);
+    TestEqual(
+        TEXT("Stage 4 owns its alpha visualization selection"),
+        State.Transparency.FinalVisualizationMode,
+        EDWCTransparencyVisualizationMode::AutoAlpha);
+    TestEqual(
+        TEXT("Stage 4 does not overwrite the Stage 3 visualization selection"),
+        State.Transparency.RevealVisualizationMode,
+        EDWCTransparencyVisualizationMode::CorrectionDifference);
+
     const FGuid LayerGuid = FGuid::NewGuid();
     FDWCEditorSessionReducer::Reduce(State, FDWCSelectTransparencyLayerAction{LayerGuid});
     FDWCReconcileAuthoringAction Reconcile;

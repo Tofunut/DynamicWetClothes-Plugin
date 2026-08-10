@@ -37,12 +37,17 @@ enum class EWetClothingTransparencyPreviewMode : uint8
 enum class EDWCTransparencyVisualizationMode : uint8
 {
     Final,
+    // Stage 3's live corrected Reveal Color working result.
     InnerColor,
     AutoAlpha,
     WrinkleSeparation,
     ValidHit,
     HitDistance,
-    SourcePriority
+    SourcePriority,
+    // Keep new values appended: preview materials consume the legacy values.
+    BaseRevealColor,
+    CorrectionDifference,
+    RaycastGaps
 };
 
 enum class EDWCTransparencyEditorStage : uint8
@@ -67,6 +72,10 @@ struct FDWCTransparencyEditContext
     int32 UVChannelIndex = INDEX_NONE;
     EDWCTransparencyUVAddressMode AddressMode = EDWCTransparencyUVAddressMode::Clamp;
     EDWCTransparencyPaintTarget PaintTarget = EDWCTransparencyPaintTarget::None;
+    // Derived from the active stage's working-map availability. This is not
+    // an author-facing toggle: input becomes available as soon as its source
+    // map is ready and is disabled again when that map is unavailable.
+    bool bSurfacePaintingEnabled = false;
 };
 
 struct FWetWrinkleBrushSettings
@@ -169,7 +178,7 @@ struct FDWCEditorTransparencySessionState
 {
     FDWCEditorTransparencySessionState()
     {
-        RevealPaint.bEnabled = false;
+        RevealPaint.bEnabled = true;
         RevealPaint.bRevealColorPaint = true;
         RevealPaint.Strength = 1.0f;
     }
@@ -188,6 +197,12 @@ struct FDWCEditorTransparencySessionState
     EWetClothingTransparencyPreviewMode PreviewMode =
         EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     EDWCTransparencyVisualizationMode VisualizationMode =
+        EDWCTransparencyVisualizationMode::Final;
+    // Stage-local selections prevent Stage 3 diagnostics from replacing the
+    // Stage 4 final-alpha view when the author moves between the stages.
+    EDWCTransparencyVisualizationMode RevealVisualizationMode =
+        EDWCTransparencyVisualizationMode::InnerColor;
+    EDWCTransparencyVisualizationMode FinalVisualizationMode =
         EDWCTransparencyVisualizationMode::Final;
     float WetnessPreviewPercent = 100.0f;
     FDWCTransparencyPreviewSettings PreviewSettings;

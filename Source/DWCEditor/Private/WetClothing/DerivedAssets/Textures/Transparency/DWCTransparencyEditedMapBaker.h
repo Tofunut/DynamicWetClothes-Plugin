@@ -9,11 +9,14 @@ class FDWCEditorCancellationToken;
 class FDWCWrinkleSuppressionCoverageService;
 struct FDWCTransparencySourcePayload;
 struct FDWCTransparencyAlphaWorkingSnapshot;
+struct FDWCTransparencyFinalSettingsSnapshot;
 struct FWetClothingTransparencyLayerData;
 
 struct FDWCTransparencyEditedMapBakeResult
 {
     TObjectPtr<UTexture2D> TransparencyMap = nullptr;
+    /** Optional linear runtime payload: RG outer-tangent normal, B metallic, A source coverage. */
+    TObjectPtr<UTexture2D> RevealSurfaceMap = nullptr;
     int32 AppliedStrokeCount = 0;
     int32 AppliedSampleCount = 0;
     int32 IgnoredNoHitOverridePixelCount = 0;
@@ -37,6 +40,13 @@ class FDWCTransparencyEditedMapBakeSnapshot
     bool IsValid() const;
     int32 GetMaterialSlotIndex() const;
     FGuid GetLayerGuid() const;
+    /** Bytes uniquely owned by this immutable bake snapshot. */
+    uint64 GetEstimatedPrivateBytes() const;
+    /** Bytes returned as final/rebuilt color and Reveal Surface payloads. */
+    uint64 GetEstimatedOutputBytes() const;
+    /** Peak scratch used by alpha feathering and dilation. */
+    uint64 GetEstimatedScratchBytes() const;
+    /** Total worker-private estimate retained for compatibility with existing callers. */
     uint64 GetEstimatedBytes() const;
 
   private:
@@ -50,10 +60,15 @@ struct FDWCTransparencyEditedMapComputedResult
     bool bCanceled = false;
     FString Error;
     TArray<FColor> FinalPixels;
+    TArray<FColor> FinalRevealSurfacePixels;
+    bool bContainsRevealSurface = false;
     int32 AppliedStrokeCount = 0;
     int32 AppliedSampleCount = 0;
     int32 IgnoredNoHitOverridePixelCount = 0;
     bool bAppliedWrinkleSuppression = false;
+    /** Created only when Stage 4 had to rebuild a missing/stale Stage 3 checkpoint. */
+    bool bRebuiltCorrectedRevealCheckpoint = false;
+    TArray<FColor> RebuiltCorrectedRevealPixels;
     FString WarningMessage;
     uint64 ResultBytes = 0;
 };
@@ -97,6 +112,17 @@ class FDWCTransparencyEditedMapBaker
         TSharedRef<const FDWCTransparencySourcePayload> SourcePayload,
         FDWCTransparencyAlphaWorkingSnapshot AlphaSnapshot,
         TSharedPtr<FDWCWrinkleSuppressionCoverageService> CoverageService,
+        FDWCTransparencyEditedMapBakeSnapshot& OutSnapshot,
+        FString& OutErrorMessage);
+
+    /** Uses an immutable Stage 4 settings snapshot captured at the bake request boundary. */
+    static bool BuildSnapshot(
+        const UWetClothingAsset& WetClothingAsset,
+        const FWetClothingTransparencyLayerData& Layer,
+        TSharedRef<const FDWCTransparencySourcePayload> SourcePayload,
+        FDWCTransparencyAlphaWorkingSnapshot AlphaSnapshot,
+        TSharedPtr<FDWCWrinkleSuppressionCoverageService> CoverageService,
+        const FDWCTransparencyFinalSettingsSnapshot& FinalSettings,
         FDWCTransparencyEditedMapBakeSnapshot& OutSnapshot,
         FString& OutErrorMessage);
 

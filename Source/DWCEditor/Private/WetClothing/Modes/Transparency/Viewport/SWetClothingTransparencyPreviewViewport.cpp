@@ -39,6 +39,7 @@
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyRevealColorIncrementalWorker.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyRevealCommitWorker.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyFinalWorkingSet.h"
+#include "WetClothing/Modes/Transparency/Temp/DWCTransparencyTempAssetStore.h"
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyDirtyTileReplayWorker.h"
 #include "WetRendering/WetMaterialParameters.h"
 
@@ -232,7 +233,124 @@ namespace
             {
                 return true;
             }
+            if ((EventArgs.Event == IE_Pressed || EventArgs.Event == IE_Repeat))
+            {
+                if (const TSharedPtr<SWetClothingTransparencyPreviewViewport> Pinned = ViewportWidget.Pin())
+                {
+                    if (Pinned->IsExternalSourcePlacementActive() && EventArgs.Event == IE_Pressed)
+                    {
+                        if (EventArgs.Key == EKeys::W)
+                        {
+                            ExternalSourceWidgetMode = UE::Widget::WM_Translate;
+                            Invalidate();
+                            return true;
+                        }
+                        if (EventArgs.Key == EKeys::E)
+                        {
+                            ExternalSourceWidgetMode = UE::Widget::WM_Rotate;
+                            Invalidate();
+                            return true;
+                        }
+                    }
+                    if (Pinned->NudgeExternalSourcePlacement(
+                            EventArgs.Key,
+                            Viewport != nullptr &&
+                                (Viewport->KeyState(EKeys::LeftShift) || Viewport->KeyState(EKeys::RightShift)),
+                            Viewport != nullptr &&
+                                (Viewport->KeyState(EKeys::LeftAlt) || Viewport->KeyState(EKeys::RightAlt))))
+                    {
+                        return true;
+                    }
+                }
+            }
             return FEditorViewportClient::InputKey(EventArgs);
+        }
+
+        virtual bool CanSetWidgetMode(const UE::Widget::EWidgetMode NewMode) const override
+        {
+            if (const TSharedPtr<SWetClothingTransparencyPreviewViewport> Pinned = ViewportWidget.Pin())
+            {
+                if (Pinned->IsExternalSourcePlacementActive())
+                {
+                    return NewMode == UE::Widget::WM_Translate || NewMode == UE::Widget::WM_Rotate;
+                }
+            }
+            return FEditorViewportClient::CanSetWidgetMode(NewMode);
+        }
+
+        virtual void SetWidgetMode(const UE::Widget::EWidgetMode NewMode) override
+        {
+            if (CanSetWidgetMode(NewMode))
+            {
+                ExternalSourceWidgetMode = NewMode;
+                return;
+            }
+            FEditorViewportClient::SetWidgetMode(NewMode);
+        }
+
+        virtual void TrackingStarted(
+            const FInputEventState& InInputState,
+            const bool bIsDraggingWidget,
+            const bool bNudge) override
+        {
+            FEditorViewportClient::TrackingStarted(InInputState, bIsDraggingWidget, bNudge);
+            if (bIsDraggingWidget)
+            {
+                if (const TSharedPtr<SWetClothingTransparencyPreviewViewport> Pinned = ViewportWidget.Pin())
+                {
+                    Pinned->BeginExternalSourceTransformInteraction();
+                }
+            }
+        }
+
+        virtual void TrackingStopped() override
+        {
+            FEditorViewportClient::TrackingStopped();
+            if (const TSharedPtr<SWetClothingTransparencyPreviewViewport> Pinned = ViewportWidget.Pin())
+            {
+                Pinned->FinishExternalSourceTransformInteraction();
+            }
+        }
+
+        virtual bool InputWidgetDelta(
+            FViewport* InViewport,
+            const EAxisList::Type CurrentAxis,
+            FVector& Drag,
+            FRotator& Rot,
+            FVector& Scale) override
+        {
+            if (const TSharedPtr<SWetClothingTransparencyPreviewViewport> Pinned = ViewportWidget.Pin())
+            {
+                if (Pinned->ApplyExternalSourceWidgetDelta(CurrentAxis, Drag, Rot, Scale))
+                {
+                    return true;
+                }
+            }
+            return FEditorViewportClient::InputWidgetDelta(InViewport, CurrentAxis, Drag, Rot, Scale);
+        }
+
+        virtual UE::Widget::EWidgetMode GetWidgetMode() const override
+        {
+            if (const TSharedPtr<SWetClothingTransparencyPreviewViewport> Pinned = ViewportWidget.Pin())
+            {
+                if (Pinned->IsExternalSourcePlacementActive())
+                {
+                    return ExternalSourceWidgetMode;
+                }
+            }
+            return UE::Widget::WM_None;
+        }
+
+        virtual FVector GetWidgetLocation() const override
+        {
+            if (const TSharedPtr<SWetClothingTransparencyPreviewViewport> Pinned = ViewportWidget.Pin())
+            {
+                if (Pinned->IsExternalSourcePlacementActive())
+                {
+                    return Pinned->GetExternalSourceWidgetLocation();
+                }
+            }
+            return FEditorViewportClient::GetWidgetLocation();
         }
 
         void FocusOnMesh(const USkeletalMeshComponent* MeshComponent, bool bInstant)
@@ -276,6 +394,7 @@ namespace
         FAdvancedPreviewScene* PreviewScene = nullptr;
         TWeakPtr<SWetClothingTransparencyPreviewViewport> ViewportWidget;
         FDWCEditorInteractiveToolsHost* InputToolsHost = nullptr;
+        UE::Widget::EWidgetMode ExternalSourceWidgetMode = UE::Widget::WM_Translate;
     };
 
     FVector AnyPerpendicular(const FVector& Normal)
@@ -353,6 +472,10 @@ void SWetClothingTransparencyPreviewViewport::AddReferencedObjects(FReferenceCol
     Collector.AddReferencedObject(TargetMeshPreviewComponent);
     Collector.AddReferencedObject(PreviewActor);
     Collector.AddReferencedObjects(PreviewMeshComponents);
+    for (TPair<FGuid, TObjectPtr<USkeletalMeshComponent>>& Pair : ExternalSourcePreviewComponents)
+    {
+        Collector.AddReferencedObject(Pair.Value);
+    }
     Collector.AddReferencedObject(BrushCursorComponent);
 }
 
@@ -361,6 +484,11 @@ UTexture2D* SWetClothingTransparencyPreviewViewport::GetTransparencyPreviewTextu
     return TransparencyPreviewHandle.IsValid()
         ? TransparencyPreviewHandle->GetTexture()
         : nullptr;
+}
+
+UTexture2D* SWetClothingTransparencyPreviewViewport::GetVisualizationPreviewTexture() const
+{
+    return GetTransparencyPreviewTexture();
 }
 
 UTexture2D* SWetClothingTransparencyPreviewViewport::GetWrinkleCoverageTexture() const
@@ -569,6 +697,177 @@ void SWetClothingTransparencyPreviewViewport::SetPreviewMode(const EWetClothingT
     RefreshPreview();
 }
 
+void SWetClothingTransparencyPreviewViewport::InvalidateFullSourceLayout()
+{
+    // Source component selection is structural scene state. Parameter refreshes
+    // intentionally do not rebuild FullBlueprint preview, so make that boundary
+    // explicit for Type 2/3 source add, remove, and target changes.
+    if (!bPreviewSuspended && PreviewMode == EWetClothingTransparencyPreviewMode::FullBlueprint)
+    {
+        RefreshPreview();
+    }
+}
+
+void SWetClothingTransparencyPreviewViewport::SetExternalSourcePlacementSelection(const FGuid& SourceGuid)
+{
+    SelectedExternalSourceGuid = SourceGuid;
+    if (ViewportClient.IsValid() && SourceGuid.IsValid())
+    {
+        ViewportClient->SetWidgetMode(UE::Widget::WM_Translate);
+    }
+    InvalidatePreviewViewport();
+}
+
+void SWetClothingTransparencyPreviewViewport::SetExternalSourceTransformCommittedDelegate(
+    FDWCTransparencyExternalSourceTransformCommitted InDelegate)
+{
+    ExternalSourceTransformCommitted = MoveTemp(InDelegate);
+}
+
+bool SWetClothingTransparencyPreviewViewport::IsExternalSourcePlacementActive() const
+{
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    return !bPreviewSuspended &&
+        PreviewMode == EWetClothingTransparencyPreviewMode::FullBlueprint &&
+        Layer != nullptr &&
+        Layer->SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh &&
+        !bSurfacePaintingEnabled &&
+        SelectedExternalSourceGuid.IsValid() &&
+        ExternalSourcePreviewComponents.Contains(SelectedExternalSourceGuid);
+}
+
+FVector SWetClothingTransparencyPreviewViewport::GetExternalSourceWidgetLocation() const
+{
+    if (const TObjectPtr<USkeletalMeshComponent>* Component =
+            ExternalSourcePreviewComponents.Find(SelectedExternalSourceGuid))
+    {
+        if (*Component != nullptr)
+        {
+            return (*Component)->GetComponentLocation();
+        }
+    }
+    return FVector::ZeroVector;
+}
+
+bool SWetClothingTransparencyPreviewViewport::ApplyExternalSourceWidgetDelta(
+    const EAxisList::Type,
+    const FVector& Drag,
+    const FRotator& Rot,
+    const FVector&)
+{
+    if (!IsExternalSourcePlacementActive())
+    {
+        return false;
+    }
+    TObjectPtr<USkeletalMeshComponent>* Component =
+        ExternalSourcePreviewComponents.Find(SelectedExternalSourceGuid);
+    if (Component == nullptr || *Component == nullptr)
+    {
+        return false;
+    }
+
+    FTransform Transform = (*Component)->GetComponentTransform();
+    Transform.AddToTranslation(Drag);
+    if (!Rot.IsNearlyZero())
+    {
+        Transform.ConcatenateRotation(Rot.Quaternion());
+        Transform.NormalizeRotation();
+    }
+    (*Component)->SetWorldTransform(Transform);
+    (*Component)->MarkRenderTransformDirty();
+    InvalidatePreviewViewport();
+    return true;
+}
+
+void SWetClothingTransparencyPreviewViewport::BeginExternalSourceTransformInteraction()
+{
+    bExternalSourceTransformInteractionActive = IsExternalSourcePlacementActive();
+}
+
+void SWetClothingTransparencyPreviewViewport::FinishExternalSourceTransformInteraction()
+{
+    if (!bExternalSourceTransformInteractionActive)
+    {
+        return;
+    }
+    bExternalSourceTransformInteractionActive = false;
+    if (const TObjectPtr<USkeletalMeshComponent>* Component =
+            ExternalSourcePreviewComponents.Find(SelectedExternalSourceGuid))
+    {
+        if (*Component != nullptr && ExternalSourceTransformCommitted.IsBound())
+        {
+            ExternalSourceTransformCommitted.Execute(
+                SelectedExternalSourceGuid,
+                (*Component)->GetComponentTransform());
+        }
+    }
+}
+
+bool SWetClothingTransparencyPreviewViewport::NudgeExternalSourcePlacement(
+    const FKey& Key,
+    const bool bLargeStep,
+    const bool bRotate)
+{
+    if (!IsExternalSourcePlacementActive())
+    {
+        return false;
+    }
+
+    constexpr float SmallTranslationStep = 1.0f;
+    constexpr float LargeTranslationStep = 10.0f;
+    constexpr float SmallRotationStep = 1.0f;
+    constexpr float LargeRotationStep = 10.0f;
+    const float Step = bLargeStep
+        ? (bRotate ? LargeRotationStep : LargeTranslationStep)
+        : (bRotate ? SmallRotationStep : SmallTranslationStep);
+    FVector Translation = FVector::ZeroVector;
+    FRotator Rotation = FRotator::ZeroRotator;
+    if (Key == EKeys::Left)
+    {
+        bRotate ? Rotation.Yaw = -Step : Translation.Y = -Step;
+    }
+    else if (Key == EKeys::Right)
+    {
+        bRotate ? Rotation.Yaw = Step : Translation.Y = Step;
+    }
+    else if (Key == EKeys::Up)
+    {
+        bRotate ? Rotation.Pitch = Step : Translation.Z = Step;
+    }
+    else if (Key == EKeys::Down)
+    {
+        bRotate ? Rotation.Pitch = -Step : Translation.Z = -Step;
+    }
+    else if (Key == EKeys::PageUp)
+    {
+        bRotate ? Rotation.Roll = Step : Translation.X = Step;
+    }
+    else if (Key == EKeys::PageDown)
+    {
+        bRotate ? Rotation.Roll = -Step : Translation.X = -Step;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (!ApplyExternalSourceWidgetDelta(EAxisList::None, Translation, Rotation, FVector::ZeroVector))
+    {
+        return false;
+    }
+    if (const TObjectPtr<USkeletalMeshComponent>* Component =
+            ExternalSourcePreviewComponents.Find(SelectedExternalSourceGuid))
+    {
+        if (*Component != nullptr && ExternalSourceTransformCommitted.IsBound())
+        {
+            ExternalSourceTransformCommitted.Execute(
+                SelectedExternalSourceGuid,
+                (*Component)->GetComponentTransform());
+        }
+    }
+    return true;
+}
+
 void SWetClothingTransparencyPreviewViewport::SuspendPreview(const EDWCEditorPreviewSuspendReason Reason)
 {
     if (bPreviewSuspended)
@@ -697,7 +996,8 @@ void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
     int32 InMaterialSlotIndex,
     int32 InUVChannelIndex,
     EDWCTransparencyUVAddressMode InAddressMode,
-    EDWCTransparencyPaintTarget InPaintTarget)
+    EDWCTransparencyPaintTarget InPaintTarget,
+    const bool bInSurfacePaintingEnabled)
 {
     const int32 PreviousMaterialSlotIndex = SelectedMaterialSlotIndex;
     const bool bMaterialSlotChanged = SelectedMaterialSlotIndex != InMaterialSlotIndex;
@@ -709,8 +1009,10 @@ void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
     const bool bPaintTargetChanged =
         bTransparencyPaintingEnabled != bNewAlphaPaintingEnabled ||
         bRevealColorPaintingEnabled != bNewRevealColorPaintingEnabled;
+    const bool bInputEnabledChanged = bSurfacePaintingEnabled != bInSurfacePaintingEnabled;
     const bool bTopologyChanged = bMaterialSlotChanged || bUVChannelChanged;
-    const bool bContextChanged = bTopologyChanged || bLayerChanged || bAddressModeChanged || bPaintTargetChanged;
+    const bool bContextChanged =
+        bTopologyChanged || bLayerChanged || bAddressModeChanged || bPaintTargetChanged || bInputEnabledChanged;
     if (!bContextChanged)
     {
         return;
@@ -736,6 +1038,7 @@ void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
     RefreshWrinkleSuppressionDependency();
     bTransparencyPaintingEnabled = bNewAlphaPaintingEnabled;
     bRevealColorPaintingEnabled = bNewRevealColorPaintingEnabled;
+    bSurfacePaintingEnabled = bInSurfacePaintingEnabled;
     const bool bForcedTargetMeshPreview =
         (bTransparencyPaintingEnabled || bRevealColorPaintingEnabled) &&
         PreviewMode != EWetClothingTransparencyPreviewMode::TargetMeshOnly;
@@ -889,6 +1192,7 @@ void SWetClothingTransparencyPreviewViewport::SetShowSavedWrinkle(const bool bIn
     {
         PreviewOrchestrator->SetShowSavedCrossLayer(bShowSavedWrinkle);
     }
+    ApplyTransparencyPreviewParameters();
     InvalidatePreviewViewport();
 }
 
@@ -923,8 +1227,7 @@ void SWetClothingTransparencyPreviewViewport::SetPaintSettings(const FDWCTranspa
     NewSettings.Spacing = FMath::Clamp(NewSettings.Spacing, 0.01f, 2.0f);
     NewSettings.TargetAlpha = FMath::Clamp(NewSettings.TargetAlpha, 0.0f, 1.0f);
     // Session refreshes push both persistent setting groups. Only the group
-    // selected by the edit context may control the live tool; otherwise a
-    // disabled Stage 2 reveal setting can overwrite the Stage 3 alpha brush.
+    // selected by the edit context may control the live tool.
     const bool bTargetsRevealColor = NewSettings.bRevealColorPaint;
     if ((bTargetsRevealColor && !bRevealColorPaintingEnabled) ||
         (!bTargetsRevealColor && !bTransparencyPaintingEnabled))
@@ -993,13 +1296,49 @@ void SWetClothingTransparencyPreviewViewport::SetAutoBakePreviewResult(
     bRevealColorRequiresWorkerRebuild = false;
     if (const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer())
     {
-        bRevealColorRequiresWorkerRebuild = Layer->RevealColorPaintStrokes.ContainsByPredicate(
-            [this](const FDWCTransparencyRevealColorStroke& Stroke)
+        TArray<FColor> CorrectedRevealPixels;
+        FString RestoreError;
+        const EDWCTransparencyCorrectedRevealRestoreResult RestoreResult =
+            AutoBakePreviewResult.IsValid()
+                ? FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
+                    *Layer,
+                    *AutoBakePreviewResult,
+                    CorrectedRevealPixels,
+                    RestoreError)
+                : EDWCTransparencyCorrectedRevealRestoreResult::MissingOrStale;
+        if (RestoreResult == EDWCTransparencyCorrectedRevealRestoreResult::Restored)
+        {
+            // The reveal tile store owns RGB-only edits. Keep its comparison
+            // alpha aligned with the canonical color buffer so Stage 2's
+            // automatic alpha does not turn every tile into a color override.
+            for (int32 PixelIndex = 0; PixelIndex < CorrectedRevealPixels.Num(); ++PixelIndex)
             {
-                return Stroke.bEnabled &&
-                    Stroke.MaterialSlotIndex == SelectedMaterialSlotIndex &&
-                    !Stroke.Samples.IsEmpty();
-            });
+                CorrectedRevealPixels[PixelIndex].A =
+                    AutoBakePreviewResult->InnerColorBuffer[PixelIndex].A;
+            }
+            RevealColorTileStore.BuildFromDense(
+                MakeArrayView(CorrectedRevealPixels),
+                MakeArrayView(AutoBakePreviewResult->InnerColorBuffer));
+        }
+        else
+        {
+            if (RestoreResult == EDWCTransparencyCorrectedRevealRestoreResult::Invalid)
+            {
+                UE_LOG(
+                    LogWetTransparencyPreviewViewport,
+                    Warning,
+                    TEXT("Ignoring invalid Corrected Reveal Color for slot %d: %s"),
+                    SelectedMaterialSlotIndex,
+                    *RestoreError);
+            }
+            bRevealColorRequiresWorkerRebuild = Layer->RevealColorPaintStrokes.ContainsByPredicate(
+                [this](const FDWCTransparencyRevealColorStroke& Stroke)
+                {
+                    return Stroke.bEnabled &&
+                        Stroke.MaterialSlotIndex == SelectedMaterialSlotIndex &&
+                        !Stroke.Samples.IsEmpty();
+                });
+        }
     }
     if (bRevealColorRequiresWorkerRebuild)
     {
@@ -1117,6 +1456,13 @@ void SWetClothingTransparencyPreviewViewport::ClearPreview()
         {
             PreviewScene->RemoveComponent(BrushCursorComponent);
         }
+        for (const TPair<FGuid, TObjectPtr<USkeletalMeshComponent>>& Pair : ExternalSourcePreviewComponents)
+        {
+            if (Pair.Value != nullptr)
+            {
+                PreviewScene->RemoveComponent(Pair.Value);
+            }
+        }
         if (PreviewActor != nullptr && PreviewScene->GetWorld() != nullptr)
         {
             PreviewScene->GetWorld()->DestroyActor(PreviewActor);
@@ -1126,6 +1472,8 @@ void SWetClothingTransparencyPreviewViewport::ClearPreview()
     TargetMeshPreviewComponent = nullptr;
     PreviewActor = nullptr;
     PreviewMeshComponents.Reset();
+    ExternalSourcePreviewComponents.Reset();
+    bExternalSourceTransformInteractionActive = false;
     BrushCursorComponent = nullptr;
     CancelAuthoringLiveStroke();
 }
@@ -1268,13 +1616,21 @@ void SWetClothingTransparencyPreviewViewport::BuildTargetMeshPreview()
 void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !PreviewScene.IsValid() || PreviewScene->GetWorld() == nullptr)
+    FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    if (Asset == nullptr || Layer == nullptr || !PreviewScene.IsValid() || PreviewScene->GetWorld() == nullptr)
     {
         return;
     }
 
-    TSubclassOf<AActor> BlueprintClass = Asset->Authored.TransparencyData.SourceBlueprintClass.LoadSynchronous();
-    if (BlueprintClass == nullptr)
+    if (Layer->SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh)
+    {
+        BuildFullExternalMeshPreview();
+        return;
+    }
+
+    const FWetClothingTransparencyBlueprintSource& BlueprintSource = Layer->BlueprintSource;
+    TSubclassOf<AActor> BlueprintClass = BlueprintSource.BlueprintClass.LoadSynchronous();
+    if (BlueprintClass == nullptr || !BlueprintSource.TargetComponent.IsBound())
     {
         BuildTargetMeshPreview();
         return;
@@ -1293,6 +1649,15 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
         return;
     }
 
+    TSet<FName> VisibleSourceComponents;
+    for (const FWetClothingTransparencyBlueprintComponentBinding& Source : BlueprintSource.SourcePriority)
+    {
+        if (Source.IsBound())
+        {
+            VisibleSourceComponents.Add(Source.ComponentName);
+        }
+    }
+
     TArray<USkeletalMeshComponent*> MeshComponents;
     PreviewActor->GetComponents<USkeletalMeshComponent>(MeshComponents);
     for (USkeletalMeshComponent* MeshComponent : MeshComponents)
@@ -1302,22 +1667,94 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
             continue;
         }
 
-        MeshComponent->SetForcedLOD(TransparencyViewportForceRenderLOD0);
-        if (MeshComponent->GetSkeletalMeshAsset() == Asset->GetDWCSkeletalMesh())
+        const FName ComponentName = MeshComponent->GetFName();
+        const bool bIsTarget = ComponentName == BlueprintSource.TargetComponent.ComponentName;
+        const bool bIsSelectedSource = VisibleSourceComponents.Contains(ComponentName);
+        if (!bIsTarget && !bIsSelectedSource)
         {
+            MeshComponent->SetVisibility(false, true);
+            continue;
+        }
+
+        MeshComponent->SetVisibility(true, true);
+        MeshComponent->SetForcedLOD(TransparencyViewportForceRenderLOD0);
+        if (bIsTarget)
+        {
+            TargetMeshPreviewComponent = MeshComponent;
+            if (Asset->GetDWCSkeletalMesh() != nullptr &&
+                MeshComponent->GetSkeletalMeshAsset() != Asset->GetDWCSkeletalMesh())
+            {
+                MeshComponent->SetSkeletalMeshAsset(Asset->GetDWCSkeletalMesh());
+            }
             ConfigurePreviewMeshComponent(MeshComponent);
+        }
+        else
+        {
+            PreviewMeshComponents.AddUnique(MeshComponent);
         }
     }
 
-    for (USkeletalMeshComponent* MeshComponent : MeshComponents)
+    if (TargetMeshPreviewComponent == nullptr)
     {
-        PreviewMeshComponents.AddUnique(MeshComponent);
+        BuildTargetMeshPreview();
+        return;
     }
+
+    BrushCursorComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
+    BrushCursorComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    BrushCursorComponent->SetCastShadow(false);
+    BrushCursorComponent->SetReceivesDecals(false);
+    BrushCursorComponent->SetDepthPriorityGroup(SDPG_Foreground);
+    PreviewScene->AddComponent(BrushCursorComponent, FTransform::Identity);
+    EnsureBrushCursor();
+    RebuildHitTriangles();
+    ApplyRevealColorPaintTargetVisibility();
 
     if (USkeletalMeshComponent* FocusMesh = FindFocusMeshComponent())
     {
         const FBoxSphereBounds Bounds = FocusMesh->CalcBounds(FocusMesh->GetComponentTransform());
         PreviewScene->SetFloorOffset(-Bounds.Origin.Z + Bounds.BoxExtent.Z);
+    }
+}
+
+void SWetClothingTransparencyPreviewViewport::BuildFullExternalMeshPreview()
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    if (Asset == nullptr || Layer == nullptr || !PreviewScene.IsValid())
+    {
+        return;
+    }
+
+    // The target keeps the normal DWC preview material. Every Type 3 source
+    // stays on its original material and is only visual placement context.
+    BuildTargetMeshPreview();
+    for (const FWetClothingTransparencyExternalMeshEntry& Entry :
+         Layer->ExternalMeshSource.SourcePriority)
+    {
+        if (!Entry.SourceGuid.IsValid() || Entry.SkeletalMesh == nullptr)
+        {
+            continue;
+        }
+
+        USkeletalMeshComponent* SourceComponent = NewObject<USkeletalMeshComponent>(
+            GetTransientPackage(),
+            NAME_None,
+            RF_Transient);
+        SourceComponent->SetMobility(EComponentMobility::Movable);
+        SourceComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        SourceComponent->SetSkeletalMeshAsset(Entry.SkeletalMesh);
+        SourceComponent->SetForcedLOD(TransparencyViewportForceRenderLOD0);
+        SourceComponent->SetCastShadow(false);
+        PreviewScene->AddComponent(SourceComponent, Entry.BakeTransform);
+        PreviewMeshComponents.AddUnique(SourceComponent);
+        ExternalSourcePreviewComponents.Add(Entry.SourceGuid, SourceComponent);
+    }
+
+    if (!ExternalSourcePreviewComponents.Contains(SelectedExternalSourceGuid) &&
+        !Layer->ExternalMeshSource.SourcePriority.IsEmpty())
+    {
+        SelectedExternalSourceGuid = Layer->ExternalMeshSource.SourcePriority[0].SourceGuid;
     }
 }
 
@@ -1343,8 +1780,7 @@ void SWetClothingTransparencyPreviewViewport::ApplyPreviewMaterials(USkeletalMes
         return;
     }
 
-    const bool bIsTargetMesh = MeshComponent->GetSkeletalMeshAsset() == Asset->GetDWCSkeletalMesh();
-    if (!bIsTargetMesh)
+    if (MeshComponent != TargetMeshPreviewComponent)
     {
         return;
     }
@@ -1507,7 +1943,7 @@ void SWetClothingTransparencyPreviewViewport::UpdateMaterialHoverLayer()
         AutoBakePreviewResult->LayerGuid == SelectedLayerGuid &&
         AutoBakePreviewResult->MaterialSlotIndex == SelectedMaterialSlotIndex &&
         AutoBakePreviewResult->UVChannelIndex == SelectedUVChannelIndex;
-    if (bPreviewSuspended || !PreviewOrchestrator || !PaintSettings.bEnabled ||
+    if (bPreviewSuspended || !PreviewOrchestrator || !bSurfacePaintingEnabled || !PaintSettings.bEnabled ||
         (!bRevealTarget && !bAlphaTarget) || !bVisualizationSupported ||
         IsAuthoringInteractionActive() || !CurrentSurfaceHit.bHit ||
         PreviewMode != EWetClothingTransparencyPreviewMode::TargetMeshOnly ||
@@ -1669,7 +2105,16 @@ FDWCEditorPreviewLayer SWetClothingTransparencyPreviewViewport::BuildTransparenc
     UTexture2D* PreviewTransparencyMap = bResultMatchesSelection
         ? GetTransparencyPreviewTexture()
         : nullptr;
-    if (PreviewTransparencyMap == nullptr && LayerData != nullptr)
+    UTexture2D* PreviewRevealSurfaceMap = nullptr;
+    if (bResultMatchesSelection && LayerData != nullptr)
+    {
+        PreviewRevealSurfaceMap = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
+            *LayerData,
+            EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+            AutoBakePreviewResult->BuildSignature,
+            true);
+    }
+    if ((PreviewTransparencyMap == nullptr || PreviewRevealSurfaceMap == nullptr) && LayerData != nullptr)
     {
         if (const FWetClothingBakedTransparencyMap* BakedMap = LayerData->BakedMaps.FindByPredicate(
                 [this](const FWetClothingBakedTransparencyMap& Candidate)
@@ -1678,7 +2123,14 @@ FDWCEditorPreviewLayer SWetClothingTransparencyPreviewViewport::BuildTransparenc
                            Candidate.TransparencyMap != nullptr;
                 }))
         {
-            PreviewTransparencyMap = BakedMap->TransparencyMap;
+            if (PreviewTransparencyMap == nullptr)
+            {
+                PreviewTransparencyMap = BakedMap->TransparencyMap;
+            }
+            if (PreviewRevealSurfaceMap == nullptr)
+            {
+                PreviewRevealSurfaceMap = BakedMap->RevealSurfaceMap;
+            }
         }
     }
     const bool bUseMaterialDrivenPresentation = CanUseMaterialDrivenPreviewPresentation();
@@ -1686,7 +2138,7 @@ FDWCEditorPreviewLayer SWetClothingTransparencyPreviewViewport::BuildTransparenc
         (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
             VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
     UTexture2D* WrinkleCoverageTexture = GetWrinkleCoverageTexture();
-    const bool bUseCoverage = WrinkleCoverageTexture != nullptr &&
+    const bool bUseCoverage = bShowSavedWrinkle && WrinkleCoverageTexture != nullptr &&
         (bUsesMaterialDrivenAlpha ||
             VisualizationMode == EDWCTransparencyVisualizationMode::WrinkleSeparation);
 
@@ -1710,6 +2162,18 @@ FDWCEditorPreviewLayer SWetClothingTransparencyPreviewViewport::BuildTransparenc
     Layer.AddScalar(
         DWCTransparencyPreviewMaterialParameters::TransparencyStrength(),
         bUsesMaterialDrivenAlpha ? TransparencyPreviewStrength : 1.0f);
+    Layer.AddTexture(
+        DWCTransparencyPreviewMaterialParameters::RevealSurfaceMap(),
+        bUsesMaterialDrivenAlpha ? PreviewRevealSurfaceMap : nullptr);
+    Layer.AddScalar(
+        DWCTransparencyPreviewMaterialParameters::UseRevealSurfaceMap(),
+        bUsesMaterialDrivenAlpha && PreviewRevealSurfaceMap != nullptr ? 1.0f : 0.0f);
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    Layer.AddScalar(
+        DWCTransparencyPreviewMaterialParameters::RevealMetallicDarkeningStrength(),
+        bUsesMaterialDrivenAlpha && PreviewRevealSurfaceMap != nullptr && Asset != nullptr
+            ? Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength
+            : 0.0f);
     Layer.AddTexture(
         DWCTransparencyPreviewMaterialParameters::WrinkleCoverageMap(),
         bUseCoverage ? WrinkleCoverageTexture : nullptr);
@@ -1741,18 +2205,27 @@ FWetClothingTransparencyLayerData* SWetClothingTransparencyPreviewViewport::GetS
         }) : nullptr;
 }
 
+const FWetClothingTransparencyLayerData* SWetClothingTransparencyPreviewViewport::GetSelectedLayer() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    return Asset != nullptr ? Asset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
+        [this](const FWetClothingTransparencyLayerData& Layer)
+        {
+            return Layer.LayerGuid == SelectedLayerGuid;
+        }) : nullptr;
+}
+
 bool SWetClothingTransparencyPreviewViewport::CanPaint() const
 {
     const bool bCanRevealPaint = bRevealColorPaintingEnabled && PaintSettings.bRevealColorPaint &&
         SelectedMaterialSlotIndex != INDEX_NONE;
     const bool bCanAlphaPaint = bTransparencyPaintingEnabled && !PaintSettings.bRevealColorPaint;
     const bool bSupportsCurrentVisualization = bCanRevealPaint
-        ? (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
-           VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha ||
-           VisualizationMode == EDWCTransparencyVisualizationMode::InnerColor)
+        ? VisualizationMode == EDWCTransparencyVisualizationMode::InnerColor
         : (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
            VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
-    return !bPreviewSuspended && (bCanRevealPaint || bCanAlphaPaint) && PaintSettings.bEnabled &&
+    return !bPreviewSuspended && bSurfacePaintingEnabled &&
+        (bCanRevealPaint || bCanAlphaPaint) && PaintSettings.bEnabled &&
         PreviewMode == EWetClothingTransparencyPreviewMode::TargetMeshOnly &&
         AutoBakePreviewResult.IsValid() &&
         SelectedMaterialSlotIndex != INDEX_NONE && SelectedUVChannelIndex >= 0 &&
@@ -1762,7 +2235,13 @@ bool SWetClothingTransparencyPreviewViewport::CanPaint() const
 bool SWetClothingTransparencyPreviewViewport::CanShowBrushCursor() const
 {
     const bool bHasActivePaintTarget = bTransparencyPaintingEnabled || bRevealColorPaintingEnabled;
-    return !bPreviewSuspended && bHasActivePaintTarget &&
+    const bool bRevealVisualizationSupportsBrush = !PaintSettings.bRevealColorPaint ||
+        VisualizationMode == EDWCTransparencyVisualizationMode::InnerColor;
+    const bool bAlphaVisualizationSupportsBrush = PaintSettings.bRevealColorPaint ||
+        VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
+        VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha;
+    return !bPreviewSuspended && bSurfacePaintingEnabled && bHasActivePaintTarget &&
+        bRevealVisualizationSupportsBrush && bAlphaVisualizationSupportsBrush &&
         PreviewMode == EWetClothingTransparencyPreviewMode::TargetMeshOnly &&
         TargetMeshPreviewComponent != nullptr && SpatialLease.IsValid() && SpatialHandle.IsValid() &&
         SelectedMaterialSlotIndex != INDEX_NONE && SelectedUVChannelIndex >= 0;

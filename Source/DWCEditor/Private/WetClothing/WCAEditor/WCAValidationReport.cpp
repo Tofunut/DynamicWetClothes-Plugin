@@ -117,7 +117,19 @@ namespace
         {
             CheckIntermediate(
                 Reference.Texture.ToSoftObjectPath(),
-                FString::Printf(TEXT("Material color cache slot %d"), Reference.MaterialSlotIndex));
+                FString::Printf(TEXT("Material surface Base Color cache slot %d"), Reference.MaterialSlotIndex));
+            if (!Reference.NormalTexture.IsNull())
+            {
+                CheckIntermediate(
+                    Reference.NormalTexture.ToSoftObjectPath(),
+                    FString::Printf(TEXT("Material surface Normal cache slot %d"), Reference.MaterialSlotIndex));
+            }
+            if (!Reference.MetallicTexture.IsNull())
+            {
+                CheckIntermediate(
+                    Reference.MetallicTexture.ToSoftObjectPath(),
+                    FString::Printf(TEXT("Material surface Metallic cache slot %d"), Reference.MaterialSlotIndex));
+            }
         }
 
         for (const FWetClothingTransparencyLayerData& Layer :
@@ -136,24 +148,51 @@ namespace
 
             for (const FWetClothingBakedTransparencyMap& BakedMap : Layer.BakedMaps)
             {
-                if (BakedMap.TransparencyMap != nullptr)
+                auto CheckFinalTexture = [&OutFinalIssues, &BakedMap](
+                    UTexture2D* Texture,
+                    const TCHAR* Label)
                 {
-                    const FSoftObjectPath FinalPath(BakedMap.TransparencyMap.Get());
+                    if (Texture == nullptr)
+                    {
+                        return;
+                    }
+                    const FSoftObjectPath FinalPath(Texture);
                     if (FDWCTransparencyIntermediateAssetPolicy::IsIntermediatePackagePath(
                             FinalPath.GetLongPackageName()))
                     {
                         OutFinalIssues.AddUnique(FString::Printf(
-                            TEXT("Slot %d final Transparency Map is stored under the Temp directory: %s"),
+                            TEXT("Slot %d final %s is stored under the Temp directory: %s"),
                             BakedMap.MaterialSlotIndex,
+                            Label,
                             *FinalPath.ToString()));
                     }
                     else if (FDWCTransparencyIntermediateAssetPolicy::HasEditorOnlyPackageFlag(FinalPath))
                     {
                         OutFinalIssues.AddUnique(FString::Printf(
-                            TEXT("Slot %d final Transparency Map is marked Editor Only: %s"),
+                            TEXT("Slot %d final %s is marked Editor Only: %s"),
                             BakedMap.MaterialSlotIndex,
+                            Label,
                             *FinalPath.ToString()));
                     }
+                };
+
+                CheckFinalTexture(BakedMap.TransparencyMap.Get(), TEXT("Transparency Map"));
+                CheckFinalTexture(BakedMap.RevealSurfaceMap.Get(), TEXT("Reveal Surface Map"));
+                if (Layer.RequiresRevealSurface() && !BakedMap.HasCompleteRevealSurfacePayload())
+                {
+                    OutFinalIssues.AddUnique(FString::Printf(
+                        TEXT("Slot %d uses a raycast Transparency source but has no complete runtime Reveal Surface Map."),
+                        BakedMap.MaterialSlotIndex));
+                }
+                else if (!Layer.RequiresRevealSurface() &&
+                    (BakedMap.bContainsRevealNormalRG != BakedMap.bContainsInnerMetallicB ||
+                     BakedMap.bContainsRevealNormalRG != BakedMap.bContainsRevealSurfaceCoverageAlpha ||
+                     (BakedMap.bContainsRevealNormalRG && BakedMap.RevealSurfaceMap == nullptr) ||
+                     (!BakedMap.bContainsRevealNormalRG && BakedMap.RevealSurfaceMap != nullptr)))
+                {
+                    OutFinalIssues.AddUnique(FString::Printf(
+                        TEXT("Slot %d has an inconsistent optional Reveal Surface payload."),
+                        BakedMap.MaterialSlotIndex));
                 }
             }
         }

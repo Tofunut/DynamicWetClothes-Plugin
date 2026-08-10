@@ -38,6 +38,9 @@ class FDWCTransparencySignatureService
         const FString& SourceSignature,
         const FWetClothingTransparencyLayerData& Layer);
 
+    /** Identity for the final linear Reveal Surface payload produced from canonical Stage 2 data. */
+    static FString BuildRevealSurfaceSignature(const FString& SourceSignature);
+
     static FString BuildAlphaAuthoringSignature(
         const FWetClothingTransparencyLayerData& Layer);
 

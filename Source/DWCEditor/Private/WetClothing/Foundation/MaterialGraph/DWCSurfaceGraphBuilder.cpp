@@ -8,6 +8,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
+#include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionFunctionOutput.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
@@ -18,6 +19,7 @@
 #include "Materials/MaterialFunction.h"
 #include "Materials/MaterialFunctionInterface.h"
 #include "WetRendering/WetMaterialParameters.h"
+#include "WetClothing/Foundation/MaterialGraph/DWCRevealSurfaceMaterialGraph.h"
 
 namespace
 {
@@ -283,6 +285,45 @@ namespace
         }
         FunctionCall->UpdateFromFunctionResource();
         return FunctionCall;
+    }
+
+    UMaterialExpressionCustom* CreateTransparencyRevealVisibilityExpression(
+        UMaterial* Material,
+        const int32 NodeX,
+        const int32 NodeY)
+    {
+        UMaterialExpressionCustom* Visibility = Cast<UMaterialExpressionCustom>(
+            UMaterialEditingLibrary::CreateMaterialExpression(
+                Material, UMaterialExpressionCustom::StaticClass(), NodeX, NodeY));
+        if (Visibility == nullptr)
+        {
+            return nullptr;
+        }
+
+        static const FName InputNames[] = {
+            TEXT("TransparencyAlpha"),
+            TEXT("Wetness"),
+            TEXT("UseTransparencyMap"),
+            TEXT("TransparencyWetnessMin"),
+            TEXT("TransparencyWetnessMax"),
+        };
+        for (const FName InputName : InputNames)
+        {
+            FCustomInput& Input = Visibility->Inputs.AddDefaulted_GetRef();
+            Input.InputName = InputName;
+        }
+
+        Visibility->OutputType = CMOT_Float1;
+        Visibility->Description = TEXT("DWC Transparency Reveal Surface Visibility");
+        Visibility->Code = TEXT(R"(
+float SafeMin = saturate(TransparencyWetnessMin);
+float SafeMax = max(SafeMin, saturate(TransparencyWetnessMax));
+float WetnessRange = max(SafeMax - SafeMin, 0.00001);
+float WetnessWeight = saturate((Wetness - SafeMin) / WetnessRange);
+return saturate(TransparencyAlpha) * saturate(UseTransparencyMap) * WetnessWeight;
+)");
+        Visibility->RebuildOutputs();
+        return Visibility;
     }
 
     FDWCMaterialGraphPin ResolvePropertyInputOrFallback(
@@ -662,6 +703,59 @@ FDWCSurfaceGraphBuildResult FDWCSurfaceGraphBuilder::Build(const FDWCSurfaceGrap
         Result.SurfaceWaterNormalUVExpression = nullptr;
         return Result;
     }
+
+    UMaterialExpressionCustom* RevealVisibility = CreateTransparencyRevealVisibilityExpression(
+        Request.Material, 260, 700);
+    if (RevealVisibility == nullptr)
+    {
+        DeleteExpressionsCreatedAfter(Request.Material, PreExistingExpressions);
+        Result.FailureReasons.Add(TEXT("Could not create the transparency Reveal Surface visibility expression."));
+        return Result;
+    }
+
+    bConnected = true;
+    bConnected &= Connect({ TransparencyMap, TEXT("A") }, RevealVisibility, TEXT("TransparencyAlpha"), Result.FailureReasons);
+    bConnected &= Connect(Request.WetnessInput, RevealVisibility, TEXT("Wetness"), Result.FailureReasons);
+    bConnected &= Connect({ UseTransparencyMap, FString() }, RevealVisibility, TEXT("UseTransparencyMap"), Result.FailureReasons);
+    bConnected &= Connect({ TransparencyWetnessMin, FString() }, RevealVisibility, TEXT("TransparencyWetnessMin"), Result.FailureReasons);
+    bConnected &= Connect({ TransparencyWetnessMax, FString() }, RevealVisibility, TEXT("TransparencyWetnessMax"), Result.FailureReasons);
+    if (!bConnected)
+    {
+        DeleteExpressionsCreatedAfter(Request.Material, PreExistingExpressions);
+        Result.EvaluateExpression = nullptr;
+        Result.DWCDataUVExpression = nullptr;
+        Result.SurfaceWaterNormalUVExpression = nullptr;
+        return Result;
+    }
+
+    FDWCRevealSurfaceMaterialGraphRequest RevealSurfaceRequest;
+    RevealSurfaceRequest.Material = Request.Material;
+    RevealSurfaceRequest.BaseColor = Result.Outputs.BaseColor;
+    RevealSurfaceRequest.BaseNormal = Result.Outputs.Normal;
+    RevealSurfaceRequest.DataUV = { Result.DWCDataUVExpression, FString() };
+    RevealSurfaceRequest.Visibility = { RevealVisibility, FString() };
+    RevealSurfaceRequest.SurfaceTextureParameterName = DWCWetMaterialParameters::RevealSurfaceMap();
+    RevealSurfaceRequest.UseSurfaceParameterName = DWCWetMaterialParameters::UseRevealSurfaceMap();
+    RevealSurfaceRequest.MetallicDarkeningParameterName = DWCWetMaterialParameters::RevealMetallicDarkeningStrength();
+    RevealSurfaceRequest.NodePosX = 480;
+    RevealSurfaceRequest.NodePosY = 700;
+    RevealSurfaceRequest.Description = TEXT("DWC Runtime Reveal Surface Composite");
+    const FDWCRevealSurfaceMaterialGraphResult RevealSurfaceResult =
+        FDWCRevealSurfaceMaterialGraph::Build(RevealSurfaceRequest);
+    if (!RevealSurfaceResult.bSucceeded)
+    {
+        DeleteExpressionsCreatedAfter(Request.Material, PreExistingExpressions);
+        Result.EvaluateExpression = nullptr;
+        Result.DWCDataUVExpression = nullptr;
+        Result.SurfaceWaterNormalUVExpression = nullptr;
+        Result.FailureReasons.Add(RevealSurfaceResult.FailureReason.IsEmpty()
+            ? TEXT("Could not build the Reveal Surface material composite.")
+            : RevealSurfaceResult.FailureReason);
+        return Result;
+    }
+
+    Result.Outputs.BaseColor = RevealSurfaceResult.BaseColor;
+    Result.Outputs.Normal = RevealSurfaceResult.Normal;
 
     Result.bSucceeded = true;
     return Result;

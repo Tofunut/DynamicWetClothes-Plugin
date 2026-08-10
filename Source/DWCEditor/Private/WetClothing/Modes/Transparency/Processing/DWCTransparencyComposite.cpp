@@ -123,9 +123,23 @@ FColor FDWCTransparencyComposite::ComposeVisualizationPixel(
     Pixel.A = FeatheredAlpha;
     switch (Context.VisualizationMode)
     {
+    case EDWCTransparencyVisualizationMode::BaseRevealColor:
+        Pixel = Result.InnerColorBuffer[PixelIndex];
+        Pixel.A = 255;
+        break;
     case EDWCTransparencyVisualizationMode::InnerColor:
         Pixel.A = 255;
         break;
+    case EDWCTransparencyVisualizationMode::CorrectionDifference:
+    {
+        const FColor BaseColor = Result.InnerColorBuffer[PixelIndex];
+        Pixel = FColor(
+            FMath::Min(255, FMath::Abs(static_cast<int32>(Pixel.R) - BaseColor.R) * 2),
+            FMath::Min(255, FMath::Abs(static_cast<int32>(Pixel.G) - BaseColor.G) * 2),
+            FMath::Min(255, FMath::Abs(static_cast<int32>(Pixel.B) - BaseColor.B) * 2),
+            255);
+        break;
+    }
     case EDWCTransparencyVisualizationMode::AutoAlpha:
         if (!Context.bDeferPresentationToMaterial)
         {
@@ -150,6 +164,17 @@ FColor FDWCTransparencyComposite::ComposeVisualizationPixel(
             ? FColor(70, 210, 95, 255)
             : FColor(25, 25, 25, 255);
         break;
+    case EDWCTransparencyVisualizationMode::RaycastGaps:
+    {
+        const bool bCovered = Result.OuterCoverageBuffer.IsValidIndex(PixelIndex) &&
+            Result.OuterCoverageBuffer[PixelIndex] != 0;
+        const bool bValidHit = Result.ValidHitBuffer.IsValidIndex(PixelIndex) &&
+            Result.ValidHitBuffer[PixelIndex] != 0;
+        Pixel = bCovered && !bValidHit
+            ? FColor(255, 185, 0, 255)
+            : FColor(24, 24, 24, 255);
+        break;
+    }
     case EDWCTransparencyVisualizationMode::HitDistance:
     {
         const float Distance = Result.HitDistanceBuffer.IsValidIndex(PixelIndex)

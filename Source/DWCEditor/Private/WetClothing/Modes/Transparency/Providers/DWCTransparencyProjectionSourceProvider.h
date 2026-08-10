@@ -5,7 +5,9 @@
 #include "DataAssets/DWCBakeLayer.h"
 
 class UMaterialInterface;
+class USkeletalMesh;
 class UWetClothingAsset;
+class AActor;
 struct FWetClothingTransparencyLayerData;
 
 struct FDWCTransparencyProjectionSource
@@ -15,6 +17,25 @@ struct FDWCTransparencyProjectionSource
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 PriorityIndex = INDEX_NONE;
     FName MaterialSlotName;
+};
+
+/** Immutable, game-thread snapshot of Blueprint Skeletal Mesh Components. */
+struct FDWCTransparencyBlueprintMeshComponent
+{
+    FName ComponentName;
+    FName ParentComponentName;
+    FString DisplayPath;
+    int32 HierarchyDepth = 0;
+    TObjectPtr<USkeletalMesh> SkeletalMesh = nullptr;
+    TArray<TObjectPtr<UMaterialInterface>> Materials;
+    FTransform BakeTransform = FTransform::Identity;
+};
+
+/** Shared by the Type 2 hierarchy UI and the Type 2 raycast source provider. */
+struct FDWCTransparencyBlueprintHierarchy
+{
+    TArray<FDWCTransparencyBlueprintMeshComponent> MeshComponents;
+    FString BuildSignature;
 };
 
 /** Game-thread provider output shared by every ray-projected transparency source type. */
@@ -29,6 +50,11 @@ struct FDWCTransparencyProjectionSourceSet
 class FDWCTransparencyProjectionSourceProvider
 {
   public:
+    static bool BuildBlueprintHierarchy(
+        const TSubclassOf<AActor> BlueprintClass,
+        FDWCTransparencyBlueprintHierarchy& OutHierarchy,
+        FString& OutError);
+
     static bool BuildBlueprintSources(
         const UWetClothingAsset& Asset,
         const FWetClothingTransparencyLayerData& Layer,

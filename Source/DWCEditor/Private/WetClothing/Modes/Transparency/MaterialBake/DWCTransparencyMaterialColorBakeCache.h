@@ -24,7 +24,11 @@ struct FDWCTransparencyMaterialColorBakeKey
     friend uint32 GetTypeHash(const FDWCTransparencyMaterialColorBakeKey& Key);
 };
 
-/** Immutable CPU view of a GPU material-property bake. */
+/**
+ * Immutable CPU view of one evaluated source material. Base Color is consumed
+ * by the existing Stage 2 projection; tangent Normal and Metallic establish
+ * the shared surface-property contract used by the later Reveal Surface bake.
+ */
 struct FDWCTransparencyMaterialColorBakeResult
 {
     FDWCTransparencyMaterialColorBakeKey Key;
@@ -33,6 +37,16 @@ struct FDWCTransparencyMaterialColorBakeResult
     FIntPoint LogicalResolution = FIntPoint::ZeroValue;
     FIntPoint PhysicalResolution = FIntPoint::ZeroValue;
     FWetClothingTextureReadback TextureData;
+    EDWCTransparencyMaterialColorPayloadKind NormalPayloadKind =
+        EDWCTransparencyMaterialColorPayloadKind::Texture;
+    FIntPoint NormalPhysicalResolution = FIntPoint::ZeroValue;
+    FWetClothingTextureReadback NormalTextureData;
+    EDWCTransparencyMaterialColorPayloadKind MetallicPayloadKind =
+        EDWCTransparencyMaterialColorPayloadKind::Texture;
+    FIntPoint MetallicPhysicalResolution = FIntPoint::ZeroValue;
+    FWetClothingTextureReadback MetallicTextureData;
+    bool bHasBakedNormalProperty = false;
+    bool bHasBakedMetallicProperty = false;
     uint64 AllocatedBytes = 0;
     bool bLoadedFromPersistentCache = false;
     TSharedPtr<FDWCEditorMemoryLease, ESPMode::ThreadSafe> MemoryLease;
@@ -49,13 +63,25 @@ struct FDWCTransparencyMaterialColorBakeResult
         FIntPoint InLogicalResolution,
         FWetClothingTextureReadback&& InTextureData,
         FString& OutError);
+    bool InitializeSurfacePayloadFromReadbacks(
+        EDWCTransparencyMaterialColorPayloadKind InNormalPayloadKind,
+        FWetClothingTextureReadback&& InNormalTextureData,
+        bool bInHasBakedNormalProperty,
+        EDWCTransparencyMaterialColorPayloadKind InMetallicPayloadKind,
+        FWetClothingTextureReadback&& InMetallicTextureData,
+        bool bInHasBakedMetallicProperty,
+        FString& OutError);
     bool IsValid() const;
+    bool HasCompleteSurfacePayload() const;
     FLinearColor Sample(const FVector2D& UV) const;
+    FVector3f SampleTangentNormal(const FVector2D& UV) const;
+    float SampleMetallic(const FVector2D& UV) const;
 };
 
 /**
- * Process-local byte-budgeted cache. UObject access and MaterialBaking calls are
- * confined to the game thread; worker snapshots retain immutable shared results.
+ * Process-local byte-budgeted source-material surface cache. UObject access and
+ * MaterialBaking calls are confined to the game thread; worker snapshots retain
+ * immutable shared Base Color, Normal, and Metallic results.
  */
 class FDWCTransparencyMaterialColorBakeCache
 {

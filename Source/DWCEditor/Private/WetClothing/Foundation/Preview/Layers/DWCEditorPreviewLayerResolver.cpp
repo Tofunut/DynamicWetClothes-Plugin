@@ -25,7 +25,18 @@ FDWCEditorPreviewSavedLayers FDWCEditorPreviewLayerResolver::Resolve(
             WetClothingAsset->Authored.TransparencyData.FindBakedTransparencyMap(MaterialSlotIndex))
     {
         Result.TransparencyMap = Transparency->TransparencyMap;
-        Result.TransparencyState = Transparency->IsRuntimeUsable()
+        // Keep legacy transparency maps usable in editor preview, but only
+        // bind the new packed surface payload when its channel contract is
+        // complete. A partially authored/old map must not be decoded as RGBA
+        // Reveal Surface data.
+        const FWetClothingTransparencyLayerData* Layer =
+            WetClothingAsset->Authored.TransparencyData.FindTransparencyLayer(MaterialSlotIndex);
+        const bool bRequiresRevealSurface = Layer != nullptr && Layer->RequiresRevealSurface();
+        const bool bHasCompleteRevealSurface = Transparency->HasCompleteRevealSurfacePayload();
+        Result.RevealSurfaceMap = bHasCompleteRevealSurface
+            ? Transparency->RevealSurfaceMap.Get()
+            : nullptr;
+        Result.TransparencyState = Transparency->IsRuntimeUsableForLayer(bRequiresRevealSurface)
             ? EDWCEditorSavedLayerState::Current
             : EDWCEditorSavedLayerState::Stale;
     }

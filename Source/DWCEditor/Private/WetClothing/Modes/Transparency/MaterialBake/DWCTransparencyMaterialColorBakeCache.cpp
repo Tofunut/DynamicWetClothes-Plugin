@@ -25,6 +25,23 @@ namespace
         bool bSRGB = true;
     };
 
+    struct FBakedMaterialScalarPayload
+    {
+        EDWCTransparencyMaterialColorPayloadKind Kind =
+            EDWCTransparencyMaterialColorPayloadKind::Texture;
+        FIntPoint PhysicalResolution = FIntPoint::ZeroValue;
+        TArray<uint8> Values;
+    };
+
+    struct FBakedMaterialSurfacePayload
+    {
+        FBakedMaterialColorPayload BaseColor;
+        FBakedMaterialColorPayload TangentNormal;
+        FBakedMaterialScalarPayload Metallic;
+        bool bHasBakedNormalProperty = false;
+        bool bHasBakedMetallicProperty = false;
+    };
+
     struct FCacheEntry
     {
         TSharedPtr<const FDWCTransparencyMaterialColorBakeResult> Result;
@@ -119,18 +136,205 @@ namespace
         return OutReadback.IsValid();
     }
 
-    bool BakeMaterialColor(
+    bool MakeG8Readback(
+        TArray<uint8>&& Values,
+        const FIntPoint Resolution,
+        FWetClothingTextureReadback& OutReadback)
+    {
+        if (Resolution.X <= 0 || Resolution.Y <= 0 || Values.Num() != Resolution.X * Resolution.Y)
+        {
+            return false;
+        }
+        TSharedPtr<TArray64<uint8>> RawData = MakeShared<TArray64<uint8>>();
+        RawData->Append(Values.GetData(), Values.Num());
+        OutReadback.Width = Resolution.X;
+        OutReadback.Height = Resolution.Y;
+        OutReadback.BytesPerPixel = 1;
+        OutReadback.bSRGB = false;
+        OutReadback.Format = TSF_G8;
+        OutReadback.AddressX = TA_Clamp;
+        OutReadback.AddressY = TA_Clamp;
+        OutReadback.RawData = MoveTemp(RawData);
+        return OutReadback.IsValid();
+    }
+
+    bool IsPayloadShapeValid(
+        const EDWCTransparencyMaterialColorPayloadKind PayloadKind,
+        const FIntPoint LogicalResolution,
+        const FWetClothingTextureReadback& TextureData)
+    {
+        const FIntPoint PhysicalResolution(TextureData.Width, TextureData.Height);
+        return TextureData.IsValid() && LogicalResolution.X > 0 && LogicalResolution.Y > 0 &&
+            (PayloadKind == EDWCTransparencyMaterialColorPayloadKind::ConstantColor
+                ? PhysicalResolution == FIntPoint(1, 1)
+                : PhysicalResolution == LogicalResolution);
+    }
+
+    FLinearColor SamplePayload(
+        const EDWCTransparencyMaterialColorPayloadKind PayloadKind,
+        const FWetClothingTextureReadback& TextureData,
+        const FVector2D& UV)
+    {
+        if (!TextureData.IsValid())
+        {
+            return FLinearColor::Black;
+        }
+        if (PayloadKind == EDWCTransparencyMaterialColorPayloadKind::ConstantColor)
+        {
+            return TextureData.GetLinearColor(0, 0);
+        }
+
+        const auto ApplyAddress = [](const float Coordinate, const TextureAddress AddressMode)
+        {
+            switch (AddressMode)
+            {
+            case TA_Wrap:
+                return FMath::Frac(Coordinate);
+            case TA_Mirror:
+            {
+                const float Wrapped = FMath::Frac(Coordinate * 0.5f) * 2.0f;
+                return Wrapped <= 1.0f ? Wrapped : 2.0f - Wrapped;
+            }
+            case TA_Clamp:
+            default:
+                return FMath::Clamp(Coordinate, 0.0f, 1.0f);
+            }
+        };
+        const float U = ApplyAddress(static_cast<float>(UV.X), TextureData.AddressX);
+        const float V = ApplyAddress(static_cast<float>(UV.Y), TextureData.AddressY);
+        const float X = U * static_cast<float>(TextureData.Width - 1);
+        const float Y = V * static_cast<float>(TextureData.Height - 1);
+        const int32 X0 = FMath::FloorToInt(X);
+        const int32 Y0 = FMath::FloorToInt(Y);
+        const int32 X1 = FMath::Min(X0 + 1, TextureData.Width - 1);
+        const int32 Y1 = FMath::Min(Y0 + 1, TextureData.Height - 1);
+        const FLinearColor C0 = FMath::Lerp(
+            TextureData.GetLinearColor(X0, Y0), TextureData.GetLinearColor(X1, Y0), X - X0);
+        const FLinearColor C1 = FMath::Lerp(
+            TextureData.GetLinearColor(X0, Y1), TextureData.GetLinearColor(X1, Y1), X - X0);
+        return FMath::Lerp(C0, C1, Y - Y0);
+    }
+
+    bool ValidatePropertyShape(
+        const FIntPoint& PhysicalResolution,
+        const int32 LogicalResolution,
+        EDWCTransparencyMaterialColorPayloadKind& OutKind)
+    {
+        const FIntPoint LogicalSize(LogicalResolution, LogicalResolution);
+        if (PhysicalResolution == LogicalSize)
+        {
+            OutKind = EDWCTransparencyMaterialColorPayloadKind::Texture;
+            return true;
+        }
+        if (PhysicalResolution == FIntPoint(1, 1))
+        {
+            OutKind = EDWCTransparencyMaterialColorPayloadKind::ConstantColor;
+            return true;
+        }
+        return false;
+    }
+
+    bool ExtractColorPayload(
+        FBakeOutput& Output,
+        const EMaterialProperty Property,
+        const int32 LogicalResolution,
+        const FColor& Fallback,
+        const bool bRequired,
+        FBakedMaterialColorPayload& OutPayload,
+        bool& bOutPropertyAvailable,
+        FString& OutError)
+    {
+        OutPayload = FBakedMaterialColorPayload();
+        bOutPropertyAvailable = false;
+        TArray<FColor>* PropertyPixels = Output.PropertyData.Find(Property);
+        const FIntPoint* PropertySize = Output.PropertySizes.Find(Property);
+        if (PropertyPixels == nullptr || PropertySize == nullptr ||
+            PropertySize->X <= 0 || PropertySize->Y <= 0 ||
+            PropertyPixels->Num() != PropertySize->X * PropertySize->Y)
+        {
+            if (bRequired)
+            {
+                OutError = TEXT("The engine MaterialBaking module returned an incomplete Base Color texture.");
+                return false;
+            }
+            OutPayload.Kind = EDWCTransparencyMaterialColorPayloadKind::ConstantColor;
+            OutPayload.PhysicalResolution = FIntPoint(1, 1);
+            OutPayload.Pixels = { Fallback };
+            OutPayload.bSRGB = false;
+            return true;
+        }
+
+        if (!ValidatePropertyShape(*PropertySize, LogicalResolution, OutPayload.Kind))
+        {
+            if (bRequired)
+            {
+                OutError = FString::Printf(
+                    TEXT("The engine MaterialBaking module returned an unsupported Base Color size %dx%d; expected %dx%d or a uniform 1x1 result."),
+                    PropertySize->X, PropertySize->Y, LogicalResolution, LogicalResolution);
+                return false;
+            }
+            OutPayload.Kind = EDWCTransparencyMaterialColorPayloadKind::ConstantColor;
+            OutPayload.PhysicalResolution = FIntPoint(1, 1);
+            OutPayload.Pixels = { Fallback };
+            OutPayload.bSRGB = false;
+            return true;
+        }
+
+        for (FColor& Pixel : *PropertyPixels)
+        {
+            Pixel.A = 255;
+        }
+        const bool* bLinear = Output.PropertyIsLinearColor.Find(Property);
+        OutPayload.PhysicalResolution = *PropertySize;
+        OutPayload.Pixels = MoveTemp(*PropertyPixels);
+        OutPayload.bSRGB = bLinear == nullptr || !*bLinear;
+        bOutPropertyAvailable = true;
+        return true;
+    }
+
+    bool ExtractMetallicPayload(
+        FBakeOutput& Output,
+        const int32 LogicalResolution,
+        FBakedMaterialScalarPayload& OutPayload,
+        bool& bOutPropertyAvailable)
+    {
+        OutPayload = FBakedMaterialScalarPayload();
+        bOutPropertyAvailable = false;
+        TArray<FColor>* PropertyPixels = Output.PropertyData.Find(MP_Metallic);
+        const FIntPoint* PropertySize = Output.PropertySizes.Find(MP_Metallic);
+        if (PropertyPixels == nullptr || PropertySize == nullptr ||
+            PropertySize->X <= 0 || PropertySize->Y <= 0 ||
+            PropertyPixels->Num() != PropertySize->X * PropertySize->Y ||
+            !ValidatePropertyShape(*PropertySize, LogicalResolution, OutPayload.Kind))
+        {
+            OutPayload.Kind = EDWCTransparencyMaterialColorPayloadKind::ConstantColor;
+            OutPayload.PhysicalResolution = FIntPoint(1, 1);
+            OutPayload.Values = { 0 };
+            return true;
+        }
+
+        OutPayload.PhysicalResolution = *PropertySize;
+        OutPayload.Values.SetNumUninitialized(PropertyPixels->Num());
+        for (int32 PixelIndex = 0; PixelIndex < PropertyPixels->Num(); ++PixelIndex)
+        {
+            OutPayload.Values[PixelIndex] = (*PropertyPixels)[PixelIndex].R;
+        }
+        bOutPropertyAvailable = true;
+        return true;
+    }
+
+    bool BakeMaterialSurface(
         USkeletalMesh& SourceMesh,
         UMaterialInterface& Material,
         const FTransform& BakeTransform,
         const int32 MaterialSlotIndex,
         const int32 SourceUVChannel,
         const int32 Resolution,
-        FBakedMaterialColorPayload& OutPayload,
+        FBakedMaterialSurfacePayload& OutPayload,
         FString& OutError)
     {
         check(IsInGameThread());
-        OutPayload = FBakedMaterialColorPayload();
+        OutPayload = FBakedMaterialSurfacePayload();
         FMeshDescription* MeshDescription = SourceMesh.GetMeshDescription(0);
         if (MeshDescription == nullptr)
         {
@@ -192,6 +396,8 @@ namespace
         FMaterialData MaterialData;
         MaterialData.Material = &Material;
         MaterialData.PropertySizes.Add(MP_BaseColor, FIntPoint(Resolution, Resolution));
+        MaterialData.PropertySizes.Add(MP_Normal, FIntPoint(Resolution, Resolution));
+        MaterialData.PropertySizes.Add(MP_Metallic, FIntPoint(Resolution, Resolution));
         MaterialData.bPerformBorderSmear = true;
         MaterialData.bPerformShrinking = false;
         MaterialData.BlendMode = BLEND_Opaque;
@@ -216,42 +422,36 @@ namespace
         Module.BakeMaterials(MaterialSettings, MeshSettings, Outputs);
         if (Outputs.Num() != 1)
         {
-            OutError = TEXT("The engine MaterialBaking module returned no Base Color output.");
+            OutError = TEXT("The engine MaterialBaking module returned no material surface output.");
             return false;
         }
 
         FBakeOutput& Output = Outputs[0];
-        TArray<FColor>* PropertyPixels = Output.PropertyData.Find(MP_BaseColor);
-        const FIntPoint* PropertySize = Output.PropertySizes.Find(MP_BaseColor);
-        if (PropertyPixels == nullptr || PropertySize == nullptr ||
-            PropertySize->X <= 0 || PropertySize->Y <= 0 ||
-            PropertyPixels->Num() != PropertySize->X * PropertySize->Y)
+        bool bBaseColorAvailable = false;
+        if (!ExtractColorPayload(
+                Output, MP_BaseColor, Resolution, FColor::Black, true,
+                OutPayload.BaseColor, bBaseColorAvailable, OutError))
+        {
+            return false;
+        }
+        if (!bBaseColorAvailable)
         {
             OutError = TEXT("The engine MaterialBaking module returned an incomplete Base Color texture.");
             return false;
         }
-
-        const FIntPoint LogicalResolution(Resolution, Resolution);
-        const bool bIsTexturePayload = *PropertySize == LogicalResolution;
-        const bool bIsConstantPayload = *PropertySize == FIntPoint(1, 1);
-        if (!bIsTexturePayload && !bIsConstantPayload)
+        if (!ExtractColorPayload(
+                Output, MP_Normal, Resolution, FColor(128, 128, 255, 255), false,
+                OutPayload.TangentNormal, OutPayload.bHasBakedNormalProperty, OutError))
         {
-            OutError = FString::Printf(
-                TEXT("The engine MaterialBaking module returned an unsupported Base Color size %dx%d; expected %dx%d or a uniform 1x1 result."),
-                PropertySize->X, PropertySize->Y, Resolution, Resolution);
             return false;
         }
-        for (FColor& Pixel : *PropertyPixels)
+        OutPayload.TangentNormal.bSRGB = false;
+        if (!ExtractMetallicPayload(
+                Output, Resolution, OutPayload.Metallic, OutPayload.bHasBakedMetallicProperty))
         {
-            Pixel.A = 255;
+            OutError = TEXT("Could not normalize the baked material Metallic payload.");
+            return false;
         }
-        const bool* bLinear = Output.PropertyIsLinearColor.Find(MP_BaseColor);
-        OutPayload.Kind = bIsConstantPayload
-            ? EDWCTransparencyMaterialColorPayloadKind::ConstantColor
-            : EDWCTransparencyMaterialColorPayloadKind::Texture;
-        OutPayload.PhysicalResolution = *PropertySize;
-        OutPayload.bSRGB = bLinear == nullptr || !*bLinear;
-        OutPayload.Pixels = MoveTemp(*PropertyPixels);
         return true;
     }
 }
@@ -374,6 +574,43 @@ bool FDWCTransparencyMaterialColorBakeResult::InitializePayloadFromReadback(
     return true;
 }
 
+bool FDWCTransparencyMaterialColorBakeResult::InitializeSurfacePayloadFromReadbacks(
+    const EDWCTransparencyMaterialColorPayloadKind InNormalPayloadKind,
+    FWetClothingTextureReadback&& InNormalTextureData,
+    const bool bInHasBakedNormalProperty,
+    const EDWCTransparencyMaterialColorPayloadKind InMetallicPayloadKind,
+    FWetClothingTextureReadback&& InMetallicTextureData,
+    const bool bInHasBakedMetallicProperty,
+    FString& OutError)
+{
+    OutError.Reset();
+    if (!IsValid())
+    {
+        OutError = TEXT("A valid Base Color payload is required before adding material surface properties.");
+        return false;
+    }
+    if (!IsPayloadShapeValid(InNormalPayloadKind, LogicalResolution, InNormalTextureData) ||
+        !IsPayloadShapeValid(InMetallicPayloadKind, LogicalResolution, InMetallicTextureData))
+    {
+        OutError = TEXT("The cached material Normal or Metallic payload dimensions are incomplete.");
+        return false;
+    }
+
+    NormalPayloadKind = InNormalPayloadKind;
+    NormalPhysicalResolution = FIntPoint(InNormalTextureData.Width, InNormalTextureData.Height);
+    NormalTextureData = MoveTemp(InNormalTextureData);
+    MetallicPayloadKind = InMetallicPayloadKind;
+    MetallicPhysicalResolution = FIntPoint(InMetallicTextureData.Width, InMetallicTextureData.Height);
+    MetallicTextureData = MoveTemp(InMetallicTextureData);
+    bHasBakedNormalProperty = bInHasBakedNormalProperty;
+    bHasBakedMetallicProperty = bInHasBakedMetallicProperty;
+    AllocatedBytes =
+        (TextureData.RawData.IsValid() ? TextureData.RawData->GetAllocatedSize() : 0) +
+        (NormalTextureData.RawData.IsValid() ? NormalTextureData.RawData->GetAllocatedSize() : 0) +
+        (MetallicTextureData.RawData.IsValid() ? MetallicTextureData.RawData->GetAllocatedSize() : 0);
+    return true;
+}
+
 bool FDWCTransparencyMaterialColorBakeResult::IsValid() const
 {
     if (!Key.IsValid() || !TextureData.IsValid() ||
@@ -387,46 +624,41 @@ bool FDWCTransparencyMaterialColorBakeResult::IsValid() const
         : PhysicalResolution == LogicalResolution;
 }
 
+bool FDWCTransparencyMaterialColorBakeResult::HasCompleteSurfacePayload() const
+{
+    return IsValid() &&
+        IsPayloadShapeValid(NormalPayloadKind, LogicalResolution, NormalTextureData) &&
+        IsPayloadShapeValid(MetallicPayloadKind, LogicalResolution, MetallicTextureData);
+}
+
 FLinearColor FDWCTransparencyMaterialColorBakeResult::Sample(const FVector2D& UV) const
 {
     if (!IsValid())
     {
         return FLinearColor::White;
     }
-    if (PayloadKind == EDWCTransparencyMaterialColorPayloadKind::ConstantColor)
-    {
-        return TextureData.GetLinearColor(0, 0);
-    }
+    return SamplePayload(PayloadKind, TextureData, UV);
+}
 
-    const auto ApplyAddress = [](const float Coordinate, const TextureAddress AddressMode)
+FVector3f FDWCTransparencyMaterialColorBakeResult::SampleTangentNormal(const FVector2D& UV) const
+{
+    if (!HasCompleteSurfacePayload())
     {
-        switch (AddressMode)
-        {
-        case TA_Wrap:
-            return FMath::Frac(Coordinate);
-        case TA_Mirror:
-        {
-            const float Wrapped = FMath::Frac(Coordinate * 0.5f) * 2.0f;
-            return Wrapped <= 1.0f ? Wrapped : 2.0f - Wrapped;
-        }
-        case TA_Clamp:
-        default:
-            return FMath::Clamp(Coordinate, 0.0f, 1.0f);
-        }
-    };
-    const float U = ApplyAddress(static_cast<float>(UV.X), TextureData.AddressX);
-    const float V = ApplyAddress(static_cast<float>(UV.Y), TextureData.AddressY);
-    const float X = U * static_cast<float>(TextureData.Width - 1);
-    const float Y = V * static_cast<float>(TextureData.Height - 1);
-    const int32 X0 = FMath::FloorToInt(X);
-    const int32 Y0 = FMath::FloorToInt(Y);
-    const int32 X1 = FMath::Min(X0 + 1, TextureData.Width - 1);
-    const int32 Y1 = FMath::Min(Y0 + 1, TextureData.Height - 1);
-    const FLinearColor C0 = FMath::Lerp(
-        TextureData.GetLinearColor(X0, Y0), TextureData.GetLinearColor(X1, Y0), X - X0);
-    const FLinearColor C1 = FMath::Lerp(
-        TextureData.GetLinearColor(X0, Y1), TextureData.GetLinearColor(X1, Y1), X - X0);
-    return FMath::Lerp(C0, C1, Y - Y0);
+        return FVector3f(0.0f, 0.0f, 1.0f);
+    }
+    const FLinearColor Encoded = SamplePayload(NormalPayloadKind, NormalTextureData, UV);
+    const FVector3f Decoded(
+        Encoded.R * 2.0f - 1.0f,
+        Encoded.G * 2.0f - 1.0f,
+        Encoded.B * 2.0f - 1.0f);
+    return Decoded.IsNearlyZero() ? FVector3f(0.0f, 0.0f, 1.0f) : Decoded.GetSafeNormal();
+}
+
+float FDWCTransparencyMaterialColorBakeResult::SampleMetallic(const FVector2D& UV) const
+{
+    return HasCompleteSurfacePayload()
+        ? FMath::Clamp(SamplePayload(MetallicPayloadKind, MetallicTextureData, UV).R, 0.0f, 1.0f)
+        : 0.0f;
 }
 
 TSharedPtr<const FDWCTransparencyMaterialColorBakeResult>
@@ -505,76 +737,128 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
         MakeShared<FDWCTransparencyMaterialColorBakeResult>();
     Result->Key = Key;
     FDWCTransparencyMaterialColorCacheReference PersistentReference;
-    UTexture2D* PersistentTexture = nullptr;
-    if (FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialColor(
+    UTexture2D* PersistentBaseColorTexture = nullptr;
+    UTexture2D* PersistentNormalTexture = nullptr;
+    UTexture2D* PersistentMetallicTexture = nullptr;
+    if (FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialSurface(
             Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, Resolution,
-            Key.MaterialBakeSignature, true, PersistentReference, PersistentTexture))
+            Key.MaterialBakeSignature, true, PersistentReference,
+            PersistentBaseColorTexture, PersistentNormalTexture, PersistentMetallicTexture))
     {
-        FWetClothingTextureReadback PersistentReadback;
+        FWetClothingTextureReadback PersistentBaseColorReadback;
+        FWetClothingTextureReadback PersistentNormalReadback;
+        FWetClothingTextureReadback PersistentMetallicReadback;
         if (FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
-                PersistentTexture, PersistentReadback, OutError))
+                PersistentBaseColorTexture, PersistentBaseColorReadback, OutError) &&
+            FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
+                PersistentNormalTexture, PersistentNormalReadback, OutError) &&
+            FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
+                PersistentMetallicTexture, PersistentMetallicReadback, OutError))
         {
-            const FIntPoint ActualPhysicalResolution(
-                PersistentReadback.Width, PersistentReadback.Height);
-            const bool bMetadataResolutionMatches =
+            const FIntPoint ActualBaseColorResolution(
+                PersistentBaseColorReadback.Width, PersistentBaseColorReadback.Height);
+            const FIntPoint ActualNormalResolution(
+                PersistentNormalReadback.Width, PersistentNormalReadback.Height);
+            const FIntPoint ActualMetallicResolution(
+                PersistentMetallicReadback.Width, PersistentMetallicReadback.Height);
+            const bool bBaseColorMetadataMatches =
                 PersistentReference.PayloadResolution == FIntPoint::ZeroValue ||
-                PersistentReference.PayloadResolution == ActualPhysicalResolution;
-            EDWCTransparencyMaterialColorPayloadKind PayloadKind = PersistentReference.PayloadKind;
+                PersistentReference.PayloadResolution == ActualBaseColorResolution;
+            const bool bNormalMetadataMatches =
+                PersistentReference.NormalPayloadResolution == ActualNormalResolution;
+            const bool bMetallicMetadataMatches =
+                PersistentReference.MetallicPayloadResolution == ActualMetallicResolution;
+            EDWCTransparencyMaterialColorPayloadKind BaseColorPayloadKind = PersistentReference.PayloadKind;
             if (PersistentReference.PayloadResolution == FIntPoint::ZeroValue &&
-                ActualPhysicalResolution == FIntPoint(1, 1))
+                ActualBaseColorResolution == FIntPoint(1, 1))
             {
-                PayloadKind = EDWCTransparencyMaterialColorPayloadKind::ConstantColor;
+                BaseColorPayloadKind = EDWCTransparencyMaterialColorPayloadKind::ConstantColor;
             }
-            if (bMetadataResolutionMatches && Result->InitializePayloadFromReadback(
-                    PayloadKind, FIntPoint(Resolution, Resolution),
-                    MoveTemp(PersistentReadback), OutError))
+            if (bBaseColorMetadataMatches && bNormalMetadataMatches && bMetallicMetadataMatches &&
+                Result->InitializePayloadFromReadback(
+                    BaseColorPayloadKind, FIntPoint(Resolution, Resolution),
+                    MoveTemp(PersistentBaseColorReadback), OutError) &&
+                Result->InitializeSurfacePayloadFromReadbacks(
+                    PersistentReference.NormalPayloadKind, MoveTemp(PersistentNormalReadback),
+                    PersistentReference.bHasBakedNormalProperty,
+                    PersistentReference.MetallicPayloadKind, MoveTemp(PersistentMetallicReadback),
+                    PersistentReference.bHasBakedMetallicProperty, OutError))
             {
                 Result->bLoadedFromPersistentCache = true;
                 UE_LOG(
                     LogDWCTransparencyMaterialBake, Verbose,
-                    TEXT("Loaded persistent source material color for '%s' slot %d UV%d (logical=%d, physical=%dx%d, payload=%s)."),
+                    TEXT("Loaded persistent source material surface for '%s' slot %d UV%d (logical=%d, color=%dx%d, normal=%dx%d, metallic=%dx%d)."),
                     *SourceMesh.GetName(), MaterialSlotIndex, SourceUVChannel, Resolution,
                     Result->PhysicalResolution.X, Result->PhysicalResolution.Y,
-                    Result->PayloadKind == EDWCTransparencyMaterialColorPayloadKind::ConstantColor
-                        ? TEXT("constant") : TEXT("texture"));
+                    Result->NormalPhysicalResolution.X, Result->NormalPhysicalResolution.Y,
+                    Result->MetallicPhysicalResolution.X, Result->MetallicPhysicalResolution.Y);
             }
         }
     }
 
-    if (!Result->IsValid())
+    if (!Result->HasCompleteSurfacePayload())
     {
         const double BakeStartSeconds = FPlatformTime::Seconds();
-        FBakedMaterialColorPayload Payload;
-        if (!BakeMaterialColor(
+        FBakedMaterialSurfacePayload Payload;
+        if (!BakeMaterialSurface(
                 SourceMesh, EffectiveMaterial, BakeTransform, MaterialSlotIndex, SourceUVChannel,
                 Resolution, Payload, OutError))
         {
             return nullptr;
         }
-        UTexture2D* CommittedPersistentTexture = nullptr;
-        if (!FDWCTransparencyTempAssetStore::CommitSourceMaterialColor(
+        UTexture2D* CommittedBaseColorTexture = nullptr;
+        UTexture2D* CommittedNormalTexture = nullptr;
+        UTexture2D* CommittedMetallicTexture = nullptr;
+        if (!FDWCTransparencyTempAssetStore::CommitSourceMaterialSurface(
                 Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel,
-                FIntPoint(Resolution, Resolution), Payload.PhysicalResolution,
-                Payload.Kind, Key.MaterialBakeSignature,
-                Payload.Pixels, Payload.bSRGB, CommittedPersistentTexture, OutError))
+                FIntPoint(Resolution, Resolution),
+                Payload.BaseColor.PhysicalResolution, Payload.BaseColor.Kind,
+                Payload.BaseColor.Pixels, Payload.BaseColor.bSRGB,
+                Payload.TangentNormal.PhysicalResolution, Payload.TangentNormal.Kind,
+                Payload.TangentNormal.Pixels, Payload.bHasBakedNormalProperty,
+                Payload.Metallic.PhysicalResolution, Payload.Metallic.Kind,
+                Payload.Metallic.Values, Payload.bHasBakedMetallicProperty,
+                Key.MaterialBakeSignature, CommittedBaseColorTexture, CommittedNormalTexture,
+                CommittedMetallicTexture, OutError))
         {
             return nullptr;
         }
         if (!Result->InitializePayload(
-                Payload.Kind, FIntPoint(Resolution, Resolution), Payload.PhysicalResolution,
-                MoveTemp(Payload.Pixels), Payload.bSRGB, OutError))
+                Payload.BaseColor.Kind, FIntPoint(Resolution, Resolution), Payload.BaseColor.PhysicalResolution,
+                MoveTemp(Payload.BaseColor.Pixels), Payload.BaseColor.bSRGB, OutError))
         {
+            return nullptr;
+        }
+        FWetClothingTextureReadback NormalReadback;
+        FWetClothingTextureReadback MetallicReadback;
+        if (!MakeReadback(
+                MoveTemp(Payload.TangentNormal.Pixels), Payload.TangentNormal.PhysicalResolution,
+                false, NormalReadback) ||
+            !MakeG8Readback(
+                MoveTemp(Payload.Metallic.Values), Payload.Metallic.PhysicalResolution,
+                MetallicReadback) ||
+            !Result->InitializeSurfacePayloadFromReadbacks(
+                Payload.TangentNormal.Kind, MoveTemp(NormalReadback), Payload.bHasBakedNormalProperty,
+                Payload.Metallic.Kind, MoveTemp(MetallicReadback), Payload.bHasBakedMetallicProperty,
+                OutError))
+        {
+            if (OutError.IsEmpty())
+            {
+                OutError = TEXT("Could not create immutable material Normal or Metallic payloads.");
+            }
             return nullptr;
         }
         UE_LOG(
             LogDWCTransparencyMaterialBake, Display,
-            TEXT("Baked source material color for '%s' slot %d UV%d in %.1f ms (logical=%d, physical=%dx%d, payload=%s, %llu bytes)."),
+            TEXT("Baked source material surface for '%s' slot %d UV%d in %.1f ms (logical=%d, color=%dx%d, normal=%dx%d, metallic=%dx%d, normal=%s, metallic=%s, %llu bytes)."),
             *SourceMesh.GetName(), MaterialSlotIndex, SourceUVChannel,
             (FPlatformTime::Seconds() - BakeStartSeconds) * 1000.0,
             Resolution,
             Result->PhysicalResolution.X, Result->PhysicalResolution.Y,
-            Result->PayloadKind == EDWCTransparencyMaterialColorPayloadKind::ConstantColor
-                ? TEXT("constant") : TEXT("texture"),
+            Result->NormalPhysicalResolution.X, Result->NormalPhysicalResolution.Y,
+            Result->MetallicPhysicalResolution.X, Result->MetallicPhysicalResolution.Y,
+            Result->bHasBakedNormalProperty ? TEXT("baked") : TEXT("flat fallback"),
+            Result->bHasBakedMetallicProperty ? TEXT("baked") : TEXT("zero fallback"),
             Result->AllocatedBytes);
     }
 

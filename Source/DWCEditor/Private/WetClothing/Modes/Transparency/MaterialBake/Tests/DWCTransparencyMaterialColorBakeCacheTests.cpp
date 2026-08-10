@@ -4,6 +4,36 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+namespace
+{
+    FWetClothingTextureReadback MakeBGRA8Readback(const FColor& Pixel)
+    {
+        FWetClothingTextureReadback Result;
+        Result.Width = 1;
+        Result.Height = 1;
+        Result.BytesPerPixel = sizeof(FColor);
+        Result.bSRGB = false;
+        Result.Format = TSF_BGRA8;
+        Result.RawData = MakeShared<TArray64<uint8>>();
+        Result.RawData->SetNumUninitialized(sizeof(FColor));
+        FMemory::Memcpy(Result.RawData->GetData(), &Pixel, sizeof(FColor));
+        return Result;
+    }
+
+    FWetClothingTextureReadback MakeG8Readback(const uint8 Value)
+    {
+        FWetClothingTextureReadback Result;
+        Result.Width = 1;
+        Result.Height = 1;
+        Result.BytesPerPixel = 1;
+        Result.bSRGB = false;
+        Result.Format = TSF_G8;
+        Result.RawData = MakeShared<TArray64<uint8>>();
+        Result.RawData->Add(Value);
+        return Result;
+    }
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyMaterialColorBakeKeyTest,
     "DWC.Transparency.MaterialBake.KeyIdentity",
@@ -94,6 +124,48 @@ bool FDWCTransparencyMaterialColorPayloadShapeTest::RunTest(const FString& Param
             EDWCTransparencyMaterialColorPayloadKind::Texture,
             FIntPoint(4, 4), FIntPoint(2, 2), MoveTemp(Pixels), true, Error));
     TestTrue(TEXT("Rejected payloads report a useful reason."), !Error.IsEmpty());
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyMaterialSurfacePayloadTest,
+    "DWC.Transparency.MaterialBake.SurfacePayload",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyMaterialSurfacePayloadTest::RunTest(const FString& Parameters)
+{
+    FDWCTransparencyMaterialColorBakeResult Result;
+    Result.Key.OwnerAssetPath = FSoftObjectPath(TEXT("/Game/Test/WCA_A.WCA_A"));
+    Result.Key.SourceMeshPath = FSoftObjectPath(TEXT("/Game/Test/SK_Source.SK_Source"));
+    Result.Key.MaterialSlotIndex = 1;
+    Result.Key.SourceUVChannel = 0;
+    Result.Key.LogicalResolution = 1024;
+    Result.Key.MaterialBakeSignature = TEXT("Surface");
+
+    TArray<FColor> BaseColor{FColor(64, 96, 128, 255)};
+    FString Error;
+    TestTrue(
+        TEXT("A surface result accepts the required constant Base Color payload."),
+        Result.InitializePayload(
+            EDWCTransparencyMaterialColorPayloadKind::ConstantColor,
+            FIntPoint(1024, 1024), FIntPoint(1, 1), MoveTemp(BaseColor), false, Error));
+    TestTrue(
+        TEXT("A surface result accepts flat Normal and scalar Metallic payloads."),
+        Result.InitializeSurfacePayloadFromReadbacks(
+            EDWCTransparencyMaterialColorPayloadKind::ConstantColor,
+            MakeBGRA8Readback(FColor(128, 128, 255, 255)), false,
+            EDWCTransparencyMaterialColorPayloadKind::ConstantColor,
+            MakeG8Readback(96), true, Error));
+    TestTrue(TEXT("The combined material surface payload is complete."), Result.HasCompleteSurfacePayload());
+    const FVector3f Normal = Result.SampleTangentNormal(FVector2D(0.3, 0.7));
+    TestTrue(TEXT("Flat source normal decodes to tangent +Z."),
+        Normal.Equals(FVector3f(0.0f, 0.0f, 1.0f), 0.02f));
+    TestTrue(TEXT("Metallic scalar sampling preserves the linear G8 value."),
+        FMath::IsNearlyEqual(Result.SampleMetallic(FVector2D(0.3, 0.7)), 96.0f / 255.0f));
+    TestFalse(TEXT("The normal availability flag distinguishes an explicit flat fallback."),
+        Result.bHasBakedNormalProperty);
+    TestTrue(TEXT("The metallic availability flag records a material property result."),
+        Result.bHasBakedMetallicProperty);
     return true;
 }
 

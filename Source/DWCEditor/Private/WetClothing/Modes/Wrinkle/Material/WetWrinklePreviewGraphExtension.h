@@ -11,7 +11,7 @@ struct FDWCSurfaceGraphBuildResult;
 class FWetWrinklePreviewGraphExtension
 {
   public:
-    static constexpr uint32 GraphSchemaVersion = 2;
+    static constexpr uint32 GraphSchemaVersion = 3;
 
     static bool ExtendGraph(
         UMaterial* Material,

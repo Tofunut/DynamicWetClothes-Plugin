@@ -55,16 +55,14 @@ namespace DWCTransparencyWorkflow
     {
         TransparencyData.CharacterStructureType = NewType;
         TransparencyData.bCharacterStructureTypeConfigured = true;
-        if (NewType != EDWCTransparencySourceType::OtherSkeletalMeshComponents)
-        {
-            TransparencyData.SourceBlueprintClass.Reset();
-        }
+        TransparencyData.SourceBlueprintClass.Reset();
 
         for (FWetClothingTransparencyLayerData& Layer : TransparencyData.TransparencyLayers)
         {
             Layer.SourceType = NewType;
             Layer.bSourceTypeConfigured = true;
             Layer.SameMeshSource = FWetClothingTransparencySameMeshSource{};
+            Layer.BlueprintSource = FWetClothingTransparencyBlueprintSource{};
             Layer.ManualColorSource = FWetClothingTransparencyManualColorSource{};
             Layer.ExternalMeshSource = FWetClothingTransparencyExternalMeshSource{};
         }
@@ -87,8 +85,7 @@ namespace DWCTransparencyWorkflow
         const EDWCTransparencySourceType)
     {
         // Every source type enters the same reveal-color authoring contract
-        // after Stage 2 has produced a source working map. The separate
-        // bEnabled setting gates writes without removing hover context.
+        // after Stage 2 has produced a source working map.
         if (Stage == EDWCTransparencyEditorStage::RevealEditing)
         {
             return EDWCTransparencyPaintTarget::RevealColor;
@@ -99,12 +96,57 @@ namespace DWCTransparencyWorkflow
             : EDWCTransparencyPaintTarget::None;
     }
 
+    inline bool IsRaycastDiagnosticVisualization(
+        const EDWCTransparencyVisualizationMode Mode)
+    {
+        return Mode == EDWCTransparencyVisualizationMode::ValidHit ||
+            Mode == EDWCTransparencyVisualizationMode::HitDistance ||
+            Mode == EDWCTransparencyVisualizationMode::SourcePriority ||
+            Mode == EDWCTransparencyVisualizationMode::RaycastGaps;
+    }
+
+    inline bool IsVisualizationModeAllowed(
+        const EDWCTransparencyEditorStage Stage,
+        const EDWCTransparencySourceType SourceType,
+        const EDWCTransparencyVisualizationMode Mode)
+    {
+        if (Stage == EDWCTransparencyEditorStage::RevealEditing)
+        {
+            if (Mode == EDWCTransparencyVisualizationMode::InnerColor ||
+                Mode == EDWCTransparencyVisualizationMode::BaseRevealColor ||
+                Mode == EDWCTransparencyVisualizationMode::CorrectionDifference)
+            {
+                return true;
+            }
+            return SourceType != EDWCTransparencySourceType::ManualColorOrTexture &&
+                IsRaycastDiagnosticVisualization(Mode);
+        }
+
+        return Stage == EDWCTransparencyEditorStage::FinalEditing &&
+            (Mode == EDWCTransparencyVisualizationMode::Final ||
+             Mode == EDWCTransparencyVisualizationMode::AutoAlpha ||
+             Mode == EDWCTransparencyVisualizationMode::WrinkleSeparation);
+    }
+
+    inline EDWCTransparencyVisualizationMode ResolveVisualizationMode(
+        const EDWCTransparencyEditorStage Stage,
+        const EDWCTransparencySourceType SourceType,
+        const EDWCTransparencyVisualizationMode RequestedMode)
+    {
+        if (IsVisualizationModeAllowed(Stage, SourceType, RequestedMode))
+        {
+            return RequestedMode;
+        }
+        return Stage == EDWCTransparencyEditorStage::RevealEditing
+            ? EDWCTransparencyVisualizationMode::InnerColor
+            : EDWCTransparencyVisualizationMode::Final;
+    }
+
     inline FDWCTransparencyPreviewContext ResolvePreviewContext(
         const EDWCTransparencyEditorStage Stage,
         const EDWCTransparencySourceType SourceType,
         const EDWCTransparencyVisualizationMode RequestedVisualizationMode,
         const EWetClothingTransparencyPreviewMode RequestedPreviewMode,
-        const bool bRevealPaintEnabled,
         const bool bCanUseFullBlueprintPreview,
         const bool bHasRevealWorkingMap,
         const bool bHasFinalWorkingMap)
@@ -112,7 +154,10 @@ namespace DWCTransparencyWorkflow
         FDWCTransparencyPreviewContext Context;
         Context.Stage = Stage;
         Context.PaintTarget = ResolvePaintTarget(Stage, SourceType);
-        Context.VisualizationMode = RequestedVisualizationMode;
+        Context.VisualizationMode = ResolveVisualizationMode(
+            Stage,
+            SourceType,
+            RequestedVisualizationMode);
         Context.PreviewMode = RequestedPreviewMode;
         Context.bUseRevealWorkingMap =
             Context.PaintTarget == EDWCTransparencyPaintTarget::RevealColor &&
@@ -122,22 +167,17 @@ namespace DWCTransparencyWorkflow
             bHasFinalWorkingMap;
         Context.bEnableRevealColorPainting =
             Context.PaintTarget == EDWCTransparencyPaintTarget::RevealColor &&
-            bRevealPaintEnabled;
+            bHasRevealWorkingMap;
         Context.bEnableFinalAlphaPainting =
             Context.PaintTarget == EDWCTransparencyPaintTarget::FinalAlpha &&
             bHasFinalWorkingMap;
 
         if (Context.PaintTarget == EDWCTransparencyPaintTarget::RevealColor)
         {
-            Context.VisualizationMode = EDWCTransparencyVisualizationMode::InnerColor;
             Context.PreviewMode = EWetClothingTransparencyPreviewMode::TargetMeshOnly;
         }
         else if (Context.PaintTarget == EDWCTransparencyPaintTarget::FinalAlpha)
         {
-            if (!bHasFinalWorkingMap)
-            {
-                Context.VisualizationMode = EDWCTransparencyVisualizationMode::Final;
-            }
             Context.PreviewMode = EWetClothingTransparencyPreviewMode::TargetMeshOnly;
         }
         else if (!bCanUseFullBlueprintPreview)

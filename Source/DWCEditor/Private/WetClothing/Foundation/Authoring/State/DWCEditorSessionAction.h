@@ -50,6 +50,13 @@ struct FDWCSelectTransparencyLayerAction
     FGuid LayerGuid;
 };
 
+/** Selects a target part and its resolver-derived stage atomically. */
+struct FDWCSelectTransparencyLayerAndStageAction
+{
+    FGuid LayerGuid;
+    EDWCTransparencyEditorStage Stage = EDWCTransparencyEditorStage::StructureSetup;
+};
+
 struct FDWCSetTransparencyStageAction
 {
     FGuid LayerGuid;
@@ -84,6 +91,7 @@ struct FDWCReconcileTransparencyCharacterTypeAction
 
 struct FDWCSetTransparencyPreviewAction
 {
+    EDWCTransparencyEditorStage Stage = EDWCTransparencyEditorStage::StructureSetup;
     EWetClothingTransparencyPreviewMode PreviewMode =
         EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     EDWCTransparencyVisualizationMode VisualizationMode =

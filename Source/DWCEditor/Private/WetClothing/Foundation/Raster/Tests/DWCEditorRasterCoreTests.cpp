@@ -694,6 +694,7 @@ bool FDWCTransparencyPixelComposerParityTest::RunTest(const FString&)
     SourcePayload.Resolution = FIntPoint(2, 1);
     SourcePayload.InnerColorBuffer = { FColor(10, 20, 30, 255), FColor(40, 50, 60, 255) };
     SourcePayload.AutoAlphaBuffer = { 128, 220 };
+    SourcePayload.OuterCoverageBuffer = { 255, 255 };
     SourcePayload.ValidHitBuffer.Init(false, 2);
     SourcePayload.ValidHitBuffer[0] = true;
     SourcePayload.HitDistanceBuffer = { 2.0f, 0.0f };
@@ -709,6 +710,9 @@ bool FDWCTransparencyPixelComposerParityTest::RunTest(const FString&)
     Context.ManualWeightBuffer = MakeArrayView(ManualWeight);
     Context.WrinkleSuppressionBuffer = MakeArrayView(Suppression);
     Context.OuterEdgeFeatherBuffer = MakeArrayView(Feather);
+    const TArray<FColor> CorrectedReveal = {
+        FColor(30, 30, 40, 255), FColor(40, 50, 60, 255) };
+    Context.RevealColorBuffer = MakeArrayView(CorrectedReveal);
     Context.VisualizationMode = EDWCTransparencyVisualizationMode::AutoAlpha;
     TArray<FColor> Pixels;
     TestTrue(TEXT("Batch composition succeeds"),
@@ -717,6 +721,24 @@ bool FDWCTransparencyPixelComposerParityTest::RunTest(const FString&)
         Pixels[0], FDWCTransparencyComposite::ComposeVisualizationPixel(Context, 0));
     TestEqual(TEXT("Batch and single-pixel composition match for second pixel"),
         Pixels[1], FDWCTransparencyComposite::ComposeVisualizationPixel(Context, 1));
+
+    Context.VisualizationMode = EDWCTransparencyVisualizationMode::BaseRevealColor;
+    TestEqual(
+        TEXT("Base Reveal Color ignores authored reveal correction"),
+        FDWCTransparencyComposite::ComposeVisualizationPixel(Context, 0),
+        FColor(10, 20, 30, 255));
+
+    Context.VisualizationMode = EDWCTransparencyVisualizationMode::CorrectionDifference;
+    TestEqual(
+        TEXT("Correction Difference amplifies the authored color delta"),
+        FDWCTransparencyComposite::ComposeVisualizationPixel(Context, 0),
+        FColor(40, 20, 20, 255));
+
+    Context.VisualizationMode = EDWCTransparencyVisualizationMode::RaycastGaps;
+    TestEqual(
+        TEXT("Raycast Gaps marks covered texels without a valid source hit"),
+        FDWCTransparencyComposite::ComposeVisualizationPixel(Context, 1),
+        FColor(255, 185, 0, 255));
 
     TestTrue(
         TEXT("Outer island IDs fit in the compact representation"),

@@ -56,12 +56,15 @@ struct FDWCTransparencyFinalWorkingSet
     FDWCWrinkleSuppressionDependencySnapshot WrinkleDependency;
     FString SourceSignature;
     FString RevealSignature;
+    /** Stage 2 source-surface payload identity. It is independent of Stage 3 color and Stage 4 alpha edits. */
+    FString RevealSurfaceSignature;
     FString AlphaAuthoringSignature;
     FString SuppressionSettingsSignature;
     FString FinalSignature;
     uint64 AuthoringRevision = 0;
     uint64 OwnedBytes = 0;
     uint64 RetainedBytes = 0;
+    bool bRequiresRevealSurface = false;
 
     bool IsValid(FString* OutError = nullptr) const;
 };

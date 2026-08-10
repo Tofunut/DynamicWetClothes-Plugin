@@ -10,11 +10,19 @@ class USkeletalMesh;
 class UWetClothingAsset;
 struct FDWCTransparencySourcePayload;
 
+enum class EDWCTransparencyCorrectedRevealRestoreResult : uint8
+{
+    Restored,
+    MissingOrStale,
+    Invalid
+};
+
 /** Persistent, editor-only cache for rebuildable transparency stage artifacts. */
 class FDWCTransparencyTempAssetStore
 {
   public:
-    static bool FindCurrentSourceMaterialColor(
+    /** Loads a complete evaluated source-material surface cache entry. */
+    static bool FindCurrentSourceMaterialSurface(
         const UWetClothingAsset& Asset,
         const USkeletalMesh& SourceMesh,
         int32 MaterialSlotIndex,
@@ -23,20 +31,33 @@ class FDWCTransparencyTempAssetStore
         const FString& MaterialBakeSignature,
         bool bLoadIfNeeded,
         FDWCTransparencyMaterialColorCacheReference& OutReference,
-        UTexture2D*& OutTexture);
+        UTexture2D*& OutBaseColorTexture,
+        UTexture2D*& OutNormalTexture,
+        UTexture2D*& OutMetallicTexture);
 
-    static bool CommitSourceMaterialColor(
+    /** Persists the three-property source material bake as editor-only Temp assets. */
+    static bool CommitSourceMaterialSurface(
         UWetClothingAsset& Asset,
         USkeletalMesh& SourceMesh,
         int32 MaterialSlotIndex,
         int32 SourceUVChannel,
         FIntPoint LogicalResolution,
-        FIntPoint PhysicalResolution,
-        EDWCTransparencyMaterialColorPayloadKind PayloadKind,
+        FIntPoint BaseColorPhysicalResolution,
+        EDWCTransparencyMaterialColorPayloadKind BaseColorPayloadKind,
+        TConstArrayView<FColor> BaseColorPixels,
+        bool bBaseColorSRGB,
+        FIntPoint NormalPhysicalResolution,
+        EDWCTransparencyMaterialColorPayloadKind NormalPayloadKind,
+        TConstArrayView<FColor> NormalPixels,
+        bool bHasBakedNormalProperty,
+        FIntPoint MetallicPhysicalResolution,
+        EDWCTransparencyMaterialColorPayloadKind MetallicPayloadKind,
+        TConstArrayView<uint8> MetallicPixels,
+        bool bHasBakedMetallicProperty,
         const FString& MaterialBakeSignature,
-        TConstArrayView<FColor> Pixels,
-        bool bSRGB,
-        UTexture2D*& OutTexture,
+        UTexture2D*& OutBaseColorTexture,
+        UTexture2D*& OutNormalTexture,
+        UTexture2D*& OutMetallicTexture,
         FString& OutError);
 
     static bool CommitSourceArtifacts(
@@ -53,6 +74,16 @@ class FDWCTransparencyTempAssetStore
         FIntPoint Resolution,
         const FString& SourceSignature,
         const FString& RevealSignature,
+        FString& OutError);
+
+    /**
+     * Reads the current Stage 3 checkpoint. Its RGB contains the corrected
+     * reveal color and its alpha contains the Stage 2 automatic alpha.
+     */
+    static EDWCTransparencyCorrectedRevealRestoreResult RestoreCurrentCorrectedReveal(
+        const FWetClothingTransparencyLayerData& Layer,
+        const FDWCTransparencySourcePayload& SourcePayload,
+        TArray<FColor>& OutPixels,
         FString& OutError);
 
     static UTexture2D* FindCurrentArtifact(

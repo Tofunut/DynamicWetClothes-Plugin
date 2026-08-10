@@ -11,6 +11,7 @@
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "WetClothing/Foundation/MaterialGraph/DWCRevealSurfaceMaterialGraph.h"
 #include "WetClothing/Foundation/MaterialGraph/DWCSurfaceGraphBuilder.h"
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialParameters.h"
 #include "WetClothing/Modes/Transparency/Material/WetTransparencyPreviewMaterialParameters.h"
@@ -155,9 +156,10 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
 {
     OutErrorMessage.Reset();
     if (Material == nullptr || !SurfaceGraph.Outputs.BaseColor.IsValid() ||
+        !SurfaceGraph.Outputs.Normal.IsValid() ||
         SurfaceGraph.DWCDataUVExpression == nullptr)
     {
-        OutErrorMessage = TEXT("The common DWC surface graph is missing the Base Color or Data UV output required by the Transparency preview.");
+        OutErrorMessage = TEXT("The common DWC surface graph is missing the Base Color, Normal, or Data UV output required by the Transparency preview.");
         return false;
     }
 
@@ -236,6 +238,10 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         OutErrorMessage = TEXT("Failed to create one or more Transparency preview expressions.");
         return false;
     }
+
+    FCustomOutput& FinalRevealVisibility = Blend->AdditionalOutputs.AddDefaulted_GetRef();
+    FinalRevealVisibility.OutputName = TEXT("FinalRevealVisibility");
+    FinalRevealVisibility.OutputType = CMOT_Float1;
 
     static const FName InputNames[] = {
         TEXT("BaseColor"),
@@ -419,7 +425,9 @@ if (SelectedVisualizationMode == 1)
 else if (SelectedVisualizationMode == 2)
 {
     DisplayColor = float3(FinalAlpha, FinalAlpha, FinalAlpha);
-    MapBlendWeight = FinalAlpha;
+    // A grayscale alpha view must be fully visible. Blending it back by the
+    // same alpha made low-alpha regions look identical to the base material.
+    MapBlendWeight = 1.0;
 }
 else if (SelectedVisualizationMode == 3)
 {
@@ -434,6 +442,7 @@ else if (SelectedVisualizationMode >= 4)
 float InnerColorBlendWeight = saturate(ShowInnerColor);
 float BlendWeight = max(MapBlendWeight, InnerColorBlendWeight) *
     saturate(UseTransparencyMap) * saturate(PreviewWetness);
+FinalRevealVisibility = FinalAlpha * saturate(UseTransparencyMap) * saturate(PreviewWetness);
 return lerp(BaseColor, DisplayColor, BlendWeight);
 )");
     Blend->OutputType = CMOT_Float3;
@@ -468,11 +477,38 @@ return lerp(BaseColor, DisplayColor, BlendWeight);
     bConnected &= Connect({ UseHoverBaselineMap, FString() }, Blend, TEXT("UseHoverBaselineMap"), OutErrorMessage);
     bConnected &= Connect({ HoverEdgeFeatherMap, FString() }, Blend, TEXT("HoverEdgeFeatherMapTex"), OutErrorMessage);
     bConnected &= Connect({ UseHoverEdgeFeatherMap, FString() }, Blend, TEXT("UseHoverEdgeFeatherMap"), OutErrorMessage);
-    if (!bConnected || !UMaterialEditingLibrary::ConnectMaterialProperty(Blend, FString(), MP_BaseColor))
+    FDWCRevealSurfaceMaterialGraphRequest RevealSurfaceRequest;
+    RevealSurfaceRequest.Material = Material;
+    RevealSurfaceRequest.BaseColor = { Blend, TEXT("return") };
+    RevealSurfaceRequest.BaseNormal = SurfaceGraph.Outputs.Normal;
+    RevealSurfaceRequest.DataUV = DataUVPin;
+    RevealSurfaceRequest.Visibility = { Blend, TEXT("FinalRevealVisibility") };
+    RevealSurfaceRequest.SurfaceTextureParameterName =
+        DWCTransparencyPreviewMaterialParameters::RevealSurfaceMap();
+    RevealSurfaceRequest.UseSurfaceParameterName =
+        DWCTransparencyPreviewMaterialParameters::UseRevealSurfaceMap();
+    RevealSurfaceRequest.MetallicDarkeningParameterName =
+        DWCTransparencyPreviewMaterialParameters::RevealMetallicDarkeningStrength();
+    RevealSurfaceRequest.NodePosX = 520;
+    RevealSurfaceRequest.NodePosY = 2950;
+    RevealSurfaceRequest.Description = TEXT("DWC Transparency Preview Reveal Surface Composite");
+    const FDWCRevealSurfaceMaterialGraphResult RevealSurfaceResult =
+        FDWCRevealSurfaceMaterialGraph::Build(RevealSurfaceRequest);
+    if (!bConnected || !RevealSurfaceResult.bSucceeded ||
+        !UMaterialEditingLibrary::ConnectMaterialProperty(
+            RevealSurfaceResult.BaseColor.Expression,
+            RevealSurfaceResult.BaseColor.OutputName,
+            MP_BaseColor) ||
+        !UMaterialEditingLibrary::ConnectMaterialProperty(
+            RevealSurfaceResult.Normal.Expression,
+            RevealSurfaceResult.Normal.OutputName,
+            MP_Normal))
     {
         if (OutErrorMessage.IsEmpty())
         {
-            OutErrorMessage = TEXT("Failed to connect the Transparency preview Base Color output.");
+            OutErrorMessage = RevealSurfaceResult.FailureReason.IsEmpty()
+                ? TEXT("Failed to connect the Transparency preview Reveal Surface outputs.")
+                : RevealSurfaceResult.FailureReason;
         }
         return false;
     }
@@ -486,6 +522,11 @@ void FWetTransparencyPreviewGraphExtension::InitializeMID(
     PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::TransparencyMap(), nullptr);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseTransparencyMap(), 0.0f);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::TransparencyStrength(), 1.0f);
+    PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::RevealSurfaceMap(), nullptr);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseRevealSurfaceMap(), 0.0f);
+    PreviewMID.SetScalarParameterValue(
+        DWCTransparencyPreviewMaterialParameters::RevealMetallicDarkeningStrength(),
+        0.0f);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::ShowInnerColor(), 0.0f);
     PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::WrinkleCoverageMap(), nullptr);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseWrinkleCoverageMap(), 0.0f);

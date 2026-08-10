@@ -17,6 +17,7 @@ struct FDWCEditorPreviewSavedLayers
 {
     TObjectPtr<UTexture2D> WrinkleNormal = nullptr;
     TObjectPtr<UTexture2D> TransparencyMap = nullptr;
+    TObjectPtr<UTexture2D> RevealSurfaceMap = nullptr;
     bool bWrinkleUsesCustomTexture = false;
     EDWCEditorSavedLayerState TransparencyState = EDWCEditorSavedLayerState::Missing;
 };

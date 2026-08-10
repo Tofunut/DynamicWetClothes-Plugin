@@ -154,14 +154,17 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
 
     UMaterialExpressionConstant3Vector* BaseColor =
         CreateExpression<UMaterialExpressionConstant3Vector>(Material, -1200, 0);
+    UMaterialExpressionConstant3Vector* BaseNormal =
+        CreateExpression<UMaterialExpressionConstant3Vector>(Material, -1200, 50);
     UMaterialExpressionTextureCoordinate* DataUV =
         CreateExpression<UMaterialExpressionTextureCoordinate>(Material, -1200, 100);
     UMaterialExpressionScalarParameter* PreviewWetness =
         CreateExpression<UMaterialExpressionScalarParameter>(Material, -1200, 200);
     TestNotNull(TEXT("The fixture creates a Base Color expression"), BaseColor);
+    TestNotNull(TEXT("The fixture creates a Base Normal expression"), BaseNormal);
     TestNotNull(TEXT("The fixture creates a Data UV expression"), DataUV);
     TestNotNull(TEXT("The fixture creates a Preview Wetness expression"), PreviewWetness);
-    if (BaseColor == nullptr || DataUV == nullptr || PreviewWetness == nullptr)
+    if (BaseColor == nullptr || BaseNormal == nullptr || DataUV == nullptr || PreviewWetness == nullptr)
     {
         return false;
     }
@@ -170,6 +173,7 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
 
     FDWCSurfaceGraphBuildResult SurfaceGraph;
     SurfaceGraph.Outputs.BaseColor = { BaseColor, FString() };
+    SurfaceGraph.Outputs.Normal = { BaseNormal, FString() };
     SurfaceGraph.DWCDataUVExpression = DataUV;
 
     FString ErrorMessage;
@@ -210,6 +214,13 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
              HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleMaskSoftness()));
     TestTrue(TEXT("Transparency visualization mode is exposed as a scalar parameter"),
              HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::VisualizationMode()));
+    TestTrue(TEXT("Reveal Surface map is exposed as a texture parameter"),
+             HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::RevealSurfaceMap()));
+    TestTrue(TEXT("Reveal Surface enable is exposed as a scalar parameter"),
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseRevealSurfaceMap()));
+    TestTrue(TEXT("Reveal metallic darkening is exposed as a scalar parameter"),
+             HasScalarParameter(*Material,
+                 DWCTransparencyPreviewMaterialParameters::RevealMetallicDarkeningStrength()));
 
     const UMaterialExpressionCustom* HoverBlend = nullptr;
     for (UMaterialExpression* Expression : Material->GetExpressions())
@@ -240,14 +251,37 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
                  HoverBlend->Code.Contains(TEXT("smoothstep(SafeThreshold, TransitionEnd, Coverage)")));
         TestTrue(TEXT("Wrinkle suppression is applied to final alpha in the preview material"),
                  HoverBlend->Code.Contains(TEXT("(1.0 - SuppressionWeight)")));
+        TestTrue(TEXT("Reveal Surface visibility follows final transparency alpha"),
+                 HoverBlend->Code.Contains(TEXT("FinalRevealVisibility = FinalAlpha")));
+    }
+
+    const UMaterialExpressionCustom* RevealSurfaceComposite = nullptr;
+    for (UMaterialExpression* Expression : Material->GetExpressions())
+    {
+        const UMaterialExpressionCustom* Candidate = Cast<UMaterialExpressionCustom>(Expression);
+        if (Candidate != nullptr && Candidate->Description.Contains(TEXT("Reveal Surface Composite")))
+        {
+            RevealSurfaceComposite = Candidate;
+            break;
+        }
+    }
+    TestNotNull(TEXT("The graph owns the shared Reveal Surface composite"), RevealSurfaceComposite);
+    if (RevealSurfaceComposite != nullptr)
+    {
+        TestTrue(TEXT("Reveal Surface decodes its packed normal channels"),
+                 RevealSurfaceComposite->Code.Contains(TEXT("float2 RevealXY")));
+        TestTrue(TEXT("Reveal Surface exposes the composed normal output"),
+                 RevealSurfaceComposite->Code.Contains(TEXT("Normal = normalize")));
+        TestTrue(TEXT("Reveal Surface applies metallic darkening to Base Color"),
+                 RevealSurfaceComposite->Code.Contains(TEXT("MetallicDarkening")));
     }
 
     TestEqual(TEXT("The material hover target enum has a stable disabled value"),
               static_cast<uint8>(EDWCTransparencyMaterialHoverTarget::None), static_cast<uint8>(0));
     TestEqual(TEXT("The material hover operation enum has a stable smooth value"),
               static_cast<uint8>(EDWCTransparencyMaterialHoverOperation::Smooth), static_cast<uint8>(3));
-    TestTrue(TEXT("The feature schema invalidates pre-material-suppression cached graphs"),
-             FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 5);
+    TestTrue(TEXT("The feature schema invalidates graphs from before Reveal Surface composition"),
+             FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 6);
     return true;
 }
 

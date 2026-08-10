@@ -116,11 +116,12 @@ const FWetClothingBakedTransparencyMap* FWetClothingTransparencyData::FindRuntim
         return nullptr;
     }
 
+    const bool bRequiresRevealSurface = Layer->RequiresRevealSurface();
     return Layer->BakedMaps.FindByPredicate(
-        [MaterialSlotIndex](const FWetClothingBakedTransparencyMap& Candidate)
+        [MaterialSlotIndex, bRequiresRevealSurface](const FWetClothingBakedTransparencyMap& Candidate)
         {
             return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                   Candidate.IsRuntimeUsable();
+                   Candidate.IsRuntimeUsableForLayer(bRequiresRevealSurface);
         });
 }
 
@@ -195,37 +196,134 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
 
     if (Layer.SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents)
     {
+        const FWetClothingTransparencyBlueprintSource& BlueprintSource = Layer.BlueprintSource;
+        if (BlueprintSource.BlueprintClass.IsNull())
+        {
+            OutErrors.Add(TEXT("Blueprint transparency source is not set."));
+        }
+        if (!BlueprintSource.TargetComponent.IsBound())
+        {
+            OutErrors.Add(TEXT("Blueprint Target Component is not selected."));
+        }
+        if (BlueprintSource.SourcePriority.IsEmpty())
+        {
+            OutErrors.Add(TEXT("Select at least one Blueprint Raycast Source Component."));
+        }
+        else
+        {
+            TSet<FName> SeenComponents;
+            bool bHasRevealSource = false;
+            for (const FWetClothingTransparencyBlueprintComponentBinding& Source : BlueprintSource.SourcePriority)
+            {
+                if (!Source.IsBound())
+                {
+                    OutErrors.Add(TEXT("A Blueprint Raycast Source Component is not selected."));
+                    continue;
+                }
+                if (Source.ComponentName == BlueprintSource.TargetComponent.ComponentName)
+                {
+                    OutErrors.Add(TEXT("Blueprint Target Component cannot also be a Raycast Source Component."));
+                }
+                if (SeenComponents.Contains(Source.ComponentName))
+                {
+                    OutErrors.Add(FString::Printf(
+                        TEXT("Blueprint Raycast Source Component '%s' is listed more than once."),
+                        *Source.ComponentName.ToString()));
+                }
+                SeenComponents.Add(Source.ComponentName);
+                if (Source.SourceUVChannel < 0)
+                {
+                    OutErrors.Add(FString::Printf(
+                        TEXT("Blueprint Raycast Source Component '%s' has an invalid Source UV Channel."),
+                        *Source.ComponentName.ToString()));
+                }
+                bHasRevealSource |= Source.Role == EDWCTransparencyBlueprintSourceRole::RevealSource;
+            }
+            if (!bHasRevealSource)
+            {
+                OutErrors.Add(TEXT("Select at least one Blueprint Raycast Source that provides reveal color."));
+            }
+        }
         return OutErrors.IsEmpty();
     }
 
     if (Layer.SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh)
     {
-        const USkeletalMesh* ExternalMesh = Layer.ExternalMeshSource.SkeletalMesh;
-        if (ExternalMesh == nullptr)
+        const TArray<FWetClothingTransparencyExternalMeshEntry>& Sources =
+            Layer.ExternalMeshSource.SourcePriority;
+        if (Sources.IsEmpty())
         {
-            OutErrors.Add(TEXT("External Skeletal Mesh is not set."));
-            return false;
+            const USkeletalMesh* LegacyMesh = Layer.ExternalMeshSource.SkeletalMesh;
+            if (LegacyMesh == nullptr)
+            {
+                OutErrors.Add(TEXT("Add at least one External Skeletal Mesh raycast source."));
+                return false;
+            }
+
+            const FSkeletalMeshRenderData* LegacyRenderData = LegacyMesh->GetResourceForRendering();
+            const int32 LegacyUVCount = LegacyRenderData != nullptr &&
+                LegacyRenderData->LODRenderData.IsValidIndex(LODIndex)
+                    ? LegacyRenderData->LODRenderData[LODIndex].StaticVertexBuffers.StaticMeshVertexBuffer.GetNumTexCoords()
+                    : 0;
+            const TArray<FWetClothingTransparencyInnerSlot>& LegacySlots =
+                Layer.ExternalMeshSource.SourceSlotPriority;
+            if (LegacySlots.IsEmpty())
+            {
+                if (LegacyUVCount <= 0)
+                {
+                    OutErrors.Add(FString::Printf(
+                        TEXT("External raycast source '%s' has no usable UV channel."),
+                        *LegacyMesh->GetName()));
+                }
+            }
+            else
+            {
+                for (const FWetClothingTransparencyInnerSlot& LegacySlot : LegacySlots)
+                {
+                    if (!IsMaterialSlotValid(*LegacyMesh, LegacySlot.MaterialSlotIndex))
+                    {
+                        OutErrors.Add(FString::Printf(
+                            TEXT("External raycast source '%s' references missing material slot %d."),
+                            *LegacyMesh->GetName(), LegacySlot.MaterialSlotIndex));
+                    }
+                    if (LegacySlot.SourceUVChannel < 0 || LegacySlot.SourceUVChannel >= LegacyUVCount)
+                    {
+                        OutErrors.Add(FString::Printf(
+                            TEXT("External raycast source '%s' uses unavailable UV channel %d."),
+                            *LegacyMesh->GetName(), LegacySlot.SourceUVChannel));
+                    }
+                }
+            }
+            return OutErrors.IsEmpty();
         }
-        const FSkeletalMeshRenderData* ExternalRenderData = ExternalMesh->GetResourceForRendering();
-        const int32 ExternalUVCount = ExternalRenderData != nullptr &&
-            ExternalRenderData->LODRenderData.IsValidIndex(LODIndex)
-                ? ExternalRenderData->LODRenderData[LODIndex].StaticVertexBuffers.StaticMeshVertexBuffer.GetNumTexCoords()
-                : 0;
-        for (const FWetClothingTransparencyInnerSlot& SourceSlot :
-             Layer.ExternalMeshSource.SourceSlotPriority)
+        bool bHasRevealSource = false;
+        for (int32 SourceIndex = 0; SourceIndex < Sources.Num(); ++SourceIndex)
         {
-            if (!IsMaterialSlotValid(*ExternalMesh, SourceSlot.MaterialSlotIndex))
+            const FWetClothingTransparencyExternalMeshEntry& Source = Sources[SourceIndex];
+            const USkeletalMesh* ExternalMesh = Source.SkeletalMesh;
+            if (ExternalMesh == nullptr)
             {
                 OutErrors.Add(FString::Printf(
-                    TEXT("External source material slot %d is unavailable."),
-                    SourceSlot.MaterialSlotIndex));
+                    TEXT("External raycast source %d has no Skeletal Mesh."),
+                    SourceIndex + 1));
+                continue;
             }
-            if (SourceSlot.SourceUVChannel < 0 || SourceSlot.SourceUVChannel >= ExternalUVCount)
+            const FSkeletalMeshRenderData* ExternalRenderData = ExternalMesh->GetResourceForRendering();
+            const int32 ExternalUVCount = ExternalRenderData != nullptr &&
+                ExternalRenderData->LODRenderData.IsValidIndex(LODIndex)
+                    ? ExternalRenderData->LODRenderData[LODIndex].StaticVertexBuffers.StaticMeshVertexBuffer.GetNumTexCoords()
+                    : 0;
+            if (Source.SourceUVChannel < 0 || Source.SourceUVChannel >= ExternalUVCount)
             {
                 OutErrors.Add(FString::Printf(
-                    TEXT("External source slot %d uses unavailable UV channel %d."),
-                    SourceSlot.MaterialSlotIndex, SourceSlot.SourceUVChannel));
+                    TEXT("External raycast source '%s' uses unavailable UV channel %d."),
+                    *ExternalMesh->GetName(), Source.SourceUVChannel));
             }
+            bHasRevealSource |= Source.Role == EDWCTransparencyBlueprintSourceRole::RevealSource;
+        }
+        if (!bHasRevealSource)
+        {
+            OutErrors.Add(TEXT("Select at least one External Skeletal Mesh source that provides reveal color."));
         }
         return OutErrors.IsEmpty();
     }

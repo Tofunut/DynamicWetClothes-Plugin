@@ -12,7 +12,7 @@ struct FDWCSurfaceGraphBuildResult;
 class FWetTransparencyPreviewGraphExtension
 {
   public:
-    static constexpr uint32 GraphSchemaVersion = 5;
+    static constexpr uint32 GraphSchemaVersion = 6;
 
     static bool ExtendGraph(
         UMaterial*                         Material,

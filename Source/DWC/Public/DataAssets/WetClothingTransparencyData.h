@@ -18,6 +18,14 @@ enum class EDWCTransparencySourceType : uint8
     ExternalSkeletalMesh UMETA(DisplayName = "External Skeletal Mesh")
 };
 
+/** The selected Blueprint component contributes reveal color or only blocks rays. */
+UENUM(BlueprintType)
+enum class EDWCTransparencyBlueprintSourceRole : uint8
+{
+    RevealSource UMETA(DisplayName = "Reveal Source"),
+    BlockerOnly UMETA(DisplayName = "Blocker Only")
+};
+
 UENUM(BlueprintType)
 enum class EDWCTransparencyUVAddressMode : uint8
 {
@@ -56,7 +64,9 @@ enum class EDWCTransparencyTempArtifactKind : uint8
     /** Target surface coverage required by Stage 4 feathering and padding. */
     OuterCoverage,
     /** Per-texel target UV island identity required by brush stroke replay. */
-    OuterIslandID
+    OuterIslandID,
+    /** Reoriented inner normal XY, inner metallic, and valid source-surface coverage. */
+    BaseRevealSurface
 };
 
 USTRUCT()
@@ -95,7 +105,11 @@ enum class EDWCTransparencyMaterialColorPayloadKind : uint8
     ConstantColor
 };
 
-/** Shared editor cache entry for a source material evaluated in its original UV space. */
+/**
+ * Shared editor cache entry for a source material evaluated in its original UV
+ * space. Base Color remains required for ray projection; Normal and Metallic
+ * are retained alongside it for the later Reveal Surface bake.
+ */
 USTRUCT()
 struct DWC_API FDWCTransparencyMaterialColorCacheReference
 {
@@ -127,6 +141,34 @@ struct DWC_API FDWCTransparencyMaterialColorCacheReference
 
     UPROPERTY()
     TSoftObjectPtr<UTexture2D> Texture;
+
+    /** Evaluated tangent-space material normal. Flat normal is persisted when the property is unavailable. */
+    UPROPERTY()
+    FIntPoint NormalPayloadResolution = FIntPoint::ZeroValue;
+
+    UPROPERTY()
+    EDWCTransparencyMaterialColorPayloadKind NormalPayloadKind =
+        EDWCTransparencyMaterialColorPayloadKind::Texture;
+
+    UPROPERTY()
+    TSoftObjectPtr<UTexture2D> NormalTexture;
+
+    /** Evaluated material metallic, packed as a linear G8 payload. */
+    UPROPERTY()
+    FIntPoint MetallicPayloadResolution = FIntPoint::ZeroValue;
+
+    UPROPERTY()
+    EDWCTransparencyMaterialColorPayloadKind MetallicPayloadKind =
+        EDWCTransparencyMaterialColorPayloadKind::Texture;
+
+    UPROPERTY()
+    TSoftObjectPtr<UTexture2D> MetallicTexture;
+
+    UPROPERTY()
+    bool bHasBakedNormalProperty = false;
+
+    UPROPERTY()
+    bool bHasBakedMetallicProperty = false;
 
     UPROPERTY()
     bool bObsolete = false;
@@ -317,21 +359,103 @@ struct DWC_API FWetClothingTransparencySameMeshSource
     TArray<FWetClothingTransparencyInnerSlot> InnerSlotPriority;
 };
 
+/**
+ * Stable Type 2 binding to one Skeletal Mesh Component in the selected
+ * Blueprint. Component names are unique within an Actor; the expected mesh is
+ * retained to detect Blueprint edits that would otherwise silently retarget a
+ * transparency source.
+ */
+USTRUCT(BlueprintType)
+struct DWC_API FWetClothingTransparencyBlueprintComponentBinding
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Blueprint Source")
+    FName ComponentName;
+
+    UPROPERTY(VisibleAnywhere, Category = "Transparency Blueprint Source")
+    TSoftObjectPtr<USkeletalMesh> ExpectedSkeletalMesh;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Blueprint Source", meta = (ClampMin = "0"))
+    int32 SourceUVChannel = 0;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Blueprint Source")
+    EDWCTransparencyBlueprintSourceRole Role = EDWCTransparencyBlueprintSourceRole::RevealSource;
+
+    bool IsBound() const
+    {
+        return !ComponentName.IsNone();
+    }
+};
+
+/** Per-target Type 2 Blueprint selection and ordered raycast sources. */
+USTRUCT(BlueprintType)
+struct DWC_API FWetClothingTransparencyBlueprintSource
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Blueprint Source")
+    TSoftClassPtr<AActor> BlueprintClass;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Blueprint Source")
+    FWetClothingTransparencyBlueprintComponentBinding TargetComponent;
+
+    /** Array order is the explicit raycast source priority. */
+    UPROPERTY(EditAnywhere, Category = "Transparency Blueprint Source")
+    TArray<FWetClothingTransparencyBlueprintComponentBinding> SourcePriority;
+};
+
+/**
+ * One independently placed Skeletal Mesh used by the Type 3 raycast source.
+ * Array order is the raycast priority; every material slot on the mesh shares
+ * that entry's priority and transform.
+ */
+USTRUCT(BlueprintType)
+struct DWC_API FWetClothingTransparencyExternalMeshEntry
+{
+    GENERATED_BODY()
+
+    /** Stable identity permits multiple instances of the same Skeletal Mesh. */
+    UPROPERTY(EditAnywhere, Category = "Transparency External Mesh")
+    FGuid SourceGuid;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency External Mesh")
+    TObjectPtr<USkeletalMesh> SkeletalMesh = nullptr;
+
+    /** Places this reference-pose mesh in the target mesh bake space. */
+    UPROPERTY(EditAnywhere, Category = "Transparency External Mesh")
+    FTransform BakeTransform = FTransform::Identity;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency External Mesh", meta = (ClampMin = "0"))
+    int32 SourceUVChannel = 0;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency External Mesh")
+    EDWCTransparencyBlueprintSourceRole Role = EDWCTransparencyBlueprintSourceRole::RevealSource;
+
+    bool IsConfigured() const
+    {
+        return SkeletalMesh != nullptr;
+    }
+};
+
 /** Source geometry supplied independently from the WCA target mesh. */
 USTRUCT(BlueprintType)
 struct DWC_API FWetClothingTransparencyExternalMeshSource
 {
     GENERATED_BODY()
 
+    /** Array order is the explicit raycast source priority. */
     UPROPERTY(EditAnywhere, Category = "Transparency External Mesh")
+    TArray<FWetClothingTransparencyExternalMeshEntry> SourcePriority;
+
+    /** Legacy single-source data. Kept only so already-authored Type 3 data remains readable. */
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use SourcePriority."))
     TObjectPtr<USkeletalMesh> SkeletalMesh = nullptr;
 
-    /** Places the external reference-pose mesh in the target mesh bake space. */
-    UPROPERTY(EditAnywhere, Category = "Transparency External Mesh")
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use SourcePriority."))
     FTransform BakeTransform = FTransform::Identity;
 
-    /** Empty means every material slot on the external mesh, in slot order. */
-    UPROPERTY(EditAnywhere, Category = "Transparency External Mesh")
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use SourcePriority."))
     TArray<FWetClothingTransparencyInnerSlot> SourceSlotPriority;
 };
 
@@ -400,6 +524,26 @@ struct DWC_API FWetClothingBakedTransparencyMap
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     TObjectPtr<UTexture2D> TransparencyMap = nullptr;
 
+    /**
+     * Final linear surface payload. RG stores the inner material normal in
+     * outer tangent space, B stores inner Metallic, and A stores source hit
+     * coverage. Runtime material consumption is added separately.
+     */
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    TObjectPtr<UTexture2D> RevealSurfaceMap = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    FString RevealSurfaceBuildSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    bool bContainsRevealNormalRG = false;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    bool bContainsInnerMetallicB = false;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    bool bContainsRevealSurfaceCoverageAlpha = false;
+
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     int32 Resolution = 1024;
 
@@ -443,6 +587,22 @@ struct DWC_API FWetClothingBakedTransparencyMap
                bContainsColorRGB &&
                bContainsTransparencyAlpha;
     }
+
+    /** True only when every packed Reveal Surface channel has a runtime texture. */
+    bool HasCompleteRevealSurfacePayload() const
+    {
+        return RevealSurfaceMap != nullptr &&
+               !RevealSurfaceBuildSignature.IsEmpty() &&
+               bContainsRevealNormalRG &&
+               bContainsInnerMetallicB &&
+               bContainsRevealSurfaceCoverageAlpha;
+    }
+
+    bool IsRuntimeUsableForLayer(const bool bRequiresRevealSurface) const
+    {
+        return IsRuntimeUsable() &&
+               (!bRequiresRevealSurface || HasCompleteRevealSurfacePayload());
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -471,6 +631,9 @@ struct DWC_API FWetClothingTransparencyLayerData
     FWetClothingTransparencySameMeshSource SameMeshSource;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
+    FWetClothingTransparencyBlueprintSource BlueprintSource;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     FWetClothingTransparencyManualColorSource ManualColorSource;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
@@ -496,6 +659,12 @@ struct DWC_API FWetClothingTransparencyLayerData
     // Marks generated state stale while preserving the last usable texture for inspection.
     void MarkAutoBakeStale();
     void MarkFinalBakeStale();
+
+    /** Manual color has no inner surface to encode; all raycast source types do. */
+    bool RequiresRevealSurface() const
+    {
+        return SourceType != EDWCTransparencySourceType::ManualColorOrTexture;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -540,6 +709,11 @@ struct DWC_API FWetClothingTransparencyData
     UPROPERTY(EditAnywhere, Category = "Transparency Bake", meta = (DisplayName = "Transparency Strength", ClampMin = "0.0", UIMin = "0.0", UIMax = "2.0"))
     float TransparencyPreviewStrength = 0.4f;
 
+    // Darkens the revealed inner color in proportion to the baked inner
+    // metallic value. The normal/coverage payload remains independent.
+    UPROPERTY(EditAnywhere, Category = "Transparency Bake", meta = (DisplayName = "Reveal Metallic Darkening", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+    float RevealMetallicDarkeningStrength = 0.25f;
+
     // Legacy spatial expansion settings. Suppression now follows the baked
     // wrinkle mask exactly and does not create coverage outside that mask.
     UPROPERTY(meta = (DeprecatedProperty))
@@ -559,9 +733,9 @@ struct DWC_API FWetClothingTransparencyData
     UPROPERTY(EditAnywhere, Category = "Transparency Bake|Wrinkle Suppression", meta = (ClampMin = "0.0", ClampMax = "5.0", UIMin = "0.0", UIMax = "5.0"))
     float WrinkleSuppressionStrength = 0.6f;
 
-    // Type 2 resolves component meshes, effective materials, and transforms
-    // from exactly one DWC Bake Component on this Blueprint.
-    UPROPERTY(EditAnywhere, Category = "Multi-Mesh Source")
+    // Legacy WCA-wide Type 2 source. Type 2 now stores its Blueprint binding
+    // per target layer so separate garment slots can use distinct source sets.
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use the selected Transparency Layer's Blueprint Source settings."))
     TSoftClassPtr<AActor> SourceBlueprintClass;
 
     FWetClothingTransparencyLayerData* FindTransparencyLayer(int32 MaterialSlotIndex);
@@ -569,7 +743,7 @@ struct DWC_API FWetClothingTransparencyData
 
     const FWetClothingBakedTransparencyMap* FindBakedTransparencyMap(int32 MaterialSlotIndex) const;
 
-    /** Runtime lookup rejects stale baked output for the requested material slot. */
+    /** Runtime lookup rejects stale output and any required Reveal Surface payload that is incomplete. */
     const FWetClothingBakedTransparencyMap* FindRuntimeBakedTransparencyMap(int32 MaterialSlotIndex) const;
 
     UTexture2D* ResolveBakedTransparencyMap(int32 MaterialSlotIndex) const;

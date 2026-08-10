@@ -35,6 +35,7 @@
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureSample.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialFunction.h"
@@ -929,6 +930,28 @@ namespace
         return nullptr;
     }
 
+    UMaterialExpressionTextureObjectParameter* FindTextureObjectParameter(
+        UMaterial* Material,
+        const FName ParameterName)
+    {
+        if (Material == nullptr)
+        {
+            return nullptr;
+        }
+
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            UMaterialExpressionTextureObjectParameter* Parameter =
+                Cast<UMaterialExpressionTextureObjectParameter>(Expression);
+            if (Parameter != nullptr && Parameter->ParameterName == ParameterName)
+            {
+                return Parameter;
+            }
+        }
+
+        return nullptr;
+    }
+
     void AppendMissingGpuRuntimeMaterialParameters(
         UMaterialInterface* MaterialInterface,
         const bool          bRequireSurfaceWater,
@@ -1485,7 +1508,16 @@ namespace
                HasDwcBackendRuntimeParameter(Material) &&
                FindTextureSampleParameter(
                    const_cast<UMaterial*>(Material),
-                   DWCWetMaterialParameters::TransparencyMap()) != nullptr;
+                   DWCWetMaterialParameters::TransparencyMap()) != nullptr &&
+               FindTextureObjectParameter(
+                   const_cast<UMaterial*>(Material),
+                   DWCWetMaterialParameters::RevealSurfaceMap()) != nullptr &&
+               FindScalarParameter(
+                   const_cast<UMaterial*>(Material),
+                   DWCWetMaterialParameters::UseRevealSurfaceMap()) != nullptr &&
+               FindScalarParameter(
+                   const_cast<UMaterial*>(Material),
+                   DWCWetMaterialParameters::RevealMetallicDarkeningStrength()) != nullptr;
     }
 
     void DiscardNewGeneratedAsset(UObject* Asset)
@@ -2415,6 +2447,9 @@ bool FWCAMaterialGenerator::IsMaterialConfiguredForDwc(
         FindScalarParameter(Material, DWCWetMaterialParameters::SurfaceWaterDebugStrength()) == nullptr ||
         FindVectorParameter(Material, DWCWetMaterialParameters::SurfaceWaterDebugDropletColor()) == nullptr ||
         FindScalarParameter(Material, TEXT("DWC_WetRoughness")) == nullptr ||
+        FindTextureObjectParameter(Material, DWCWetMaterialParameters::RevealSurfaceMap()) == nullptr ||
+        FindScalarParameter(Material, DWCWetMaterialParameters::UseRevealSurfaceMap()) == nullptr ||
+        FindScalarParameter(Material, DWCWetMaterialParameters::RevealMetallicDarkeningStrength()) == nullptr ||
         !IsFunctionInputConnected(Evaluate, TEXT("Wetness")) ||
         !IsFunctionInputConnected(Evaluate, TEXT("DWCDataUV")) ||
         !IsFunctionInputConnected(Evaluate, TEXT("SurfaceWaterNormalUV")))

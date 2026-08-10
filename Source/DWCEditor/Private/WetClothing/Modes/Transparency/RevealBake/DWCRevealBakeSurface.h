@@ -19,6 +19,40 @@ struct FDWCRevealBakeSurfaceTriangle
     FBox      Bounds = FBox(ForceInit);
 };
 
+/** Orthonormal frame evaluated at one point on a baked source or target surface. */
+struct FDWCRevealBakeSurfaceFrame
+{
+    FVector Tangent = FVector::ForwardVector;
+    FVector Bitangent = FVector::RightVector;
+    FVector Normal = FVector::UpVector;
+
+    bool IsValid() const;
+};
+
+/**
+ * Shared tangent-frame rules for reveal surface baking. They deliberately use
+ * the copied Stage 2 geometry, so source normal reorientation remains worker-safe.
+ */
+class FDWCRevealBakeSurfaceFrameBuilder
+{
+  public:
+    static bool BuildInterpolatedFrame(
+        const FDWCRevealBakeSurfaceTriangle& Triangle,
+        const FVector& Barycentric,
+        FDWCRevealBakeSurfaceFrame& OutFrame);
+
+    static FVector3f ReorientTangentNormal(
+        const FVector3f& SourceTangentNormal,
+        const FDWCRevealBakeSurfaceFrame& SourceFrame,
+        const FDWCRevealBakeSurfaceFrame& TargetFrame);
+
+    /** RG = target tangent normal XY, B = Metallic, A = valid source hit coverage. */
+    static FColor EncodeRevealSurface(
+        const FVector3f& TargetTangentNormal,
+        float Metallic,
+        bool bHasValidSourceHit);
+};
+
 struct FDWCRevealBakeSurface
 {
     FName                                 LayerId;

@@ -300,6 +300,27 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     FDWCEditorSessionState& State,
+    const FDWCSelectTransparencyLayerAndStageAction& Action)
+{
+    FDWCEditorTransparencySessionState& Transparency = State.Transparency;
+    const EDWCTransparencyEditorStage* ExistingStage =
+        Transparency.StageByLayer.Find(Action.LayerGuid);
+    if (Transparency.SelectedLayerGuid == Action.LayerGuid &&
+        ExistingStage != nullptr && *ExistingStage == Action.Stage)
+    {
+        return EDWCEditorSessionEffect::None;
+    }
+
+    Transparency.SelectedLayerGuid = Action.LayerGuid;
+    Transparency.StageByLayer.FindOrAdd(Action.LayerGuid) = Action.Stage;
+    return EDWCEditorSessionEffect::SyncControls |
+        EDWCEditorSessionEffect::SyncSelection |
+        EDWCEditorSessionEffect::RefreshStageContent |
+        EDWCEditorSessionEffect::RebuildPreviewContent;
+}
+
+EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
+    FDWCEditorSessionState& State,
     const FDWCSetTransparencyStageAction& Action)
 {
     EDWCTransparencyEditorStage& Stage = State.Transparency.StageByLayer.FindOrAdd(Action.LayerGuid);
@@ -456,6 +477,10 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     NormalizeTransparencyPreviewSettings(Settings);
     const bool bChanged = Preview.PreviewMode != Action.PreviewMode ||
         Preview.VisualizationMode != Action.VisualizationMode ||
+        (Action.Stage == EDWCTransparencyEditorStage::RevealEditing &&
+            Preview.RevealVisualizationMode != Action.VisualizationMode) ||
+        (Action.Stage == EDWCTransparencyEditorStage::FinalEditing &&
+            Preview.FinalVisualizationMode != Action.VisualizationMode) ||
         !FMath::IsNearlyEqual(Preview.WetnessPreviewPercent, Wetness) ||
         !AreTransparencyPreviewSettingsEquivalent(Preview.PreviewSettings, Settings) ||
         Preview.bShowSavedWrinkle != Action.bShowSavedWrinkle;
@@ -465,6 +490,14 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     }
     Preview.PreviewMode = Action.PreviewMode;
     Preview.VisualizationMode = Action.VisualizationMode;
+    if (Action.Stage == EDWCTransparencyEditorStage::RevealEditing)
+    {
+        Preview.RevealVisualizationMode = Action.VisualizationMode;
+    }
+    else if (Action.Stage == EDWCTransparencyEditorStage::FinalEditing)
+    {
+        Preview.FinalVisualizationMode = Action.VisualizationMode;
+    }
     Preview.WetnessPreviewPercent = Wetness;
     Preview.PreviewSettings = Settings;
     Preview.bPreviewSettingsInitialized = true;
@@ -484,6 +517,7 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
         // Reveal Color is a distinct authoring layer. Keep its invariants in
         // the reducer so panel, input, and viewport code cannot diverge.
         Paint.bRevealColorPaint = true;
+        Paint.bEnabled = true;
         Paint.Spacing = 0.25f;
         Paint.TargetAlpha = 1.0f;
         Paint.RevealColor.A = 1.0f;
@@ -517,7 +551,8 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
         Current.MaterialSlotIndex == Next.MaterialSlotIndex &&
         Current.UVChannelIndex == Next.UVChannelIndex &&
         Current.AddressMode == Next.AddressMode &&
-        Current.PaintTarget == Next.PaintTarget)
+        Current.PaintTarget == Next.PaintTarget &&
+        Current.bSurfacePaintingEnabled == Next.bSurfacePaintingEnabled)
     {
         return EDWCEditorSessionEffect::None;
     }

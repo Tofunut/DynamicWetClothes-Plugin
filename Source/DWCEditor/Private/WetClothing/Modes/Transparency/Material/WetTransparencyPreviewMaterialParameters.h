@@ -24,6 +24,24 @@ namespace DWCTransparencyPreviewMaterialParameters
         return Name;
     }
 
+    inline const FName& RevealSurfaceMap()
+    {
+        static const FName Name(TEXT("DWC_TransparencyPreviewRevealSurfaceMap"));
+        return Name;
+    }
+
+    inline const FName& UseRevealSurfaceMap()
+    {
+        static const FName Name(TEXT("DWC_UseTransparencyPreviewRevealSurfaceMap"));
+        return Name;
+    }
+
+    inline const FName& RevealMetallicDarkeningStrength()
+    {
+        static const FName Name(TEXT("DWC_TransparencyPreviewRevealMetallicDarkeningStrength"));
+        return Name;
+    }
+
     inline const FName& ShowInnerColor()
     {
         static const FName Name(TEXT("DWC_TransparencyPreviewShowInnerColor"));

@@ -8,10 +8,10 @@ struct FDWCTransparencyMaterialColorBakeResult;
 struct FDWCRevealBakeSurface;
 struct FWetClothingTransparencyInnerSlot;
 
-/** Material-color dependencies prepared on the game thread for a Type 1 projection job. */
+/** Immutable material-surface dependencies prepared on the game thread for a Type 1 projection job. */
 struct FDWCTransparencyType1SourceBindings
 {
-    TMap<FName, TSharedPtr<const FDWCTransparencyMaterialColorBakeResult>> ColorsBySourceLayerId;
+    TMap<FName, TSharedPtr<const FDWCTransparencyMaterialColorBakeResult>> SurfacesBySourceLayerId;
     TArray<FString> Warnings;
 
     uint64 GetAllocatedBytes() const;
@@ -19,7 +19,7 @@ struct FDWCTransparencyType1SourceBindings
 
 /**
  * Same-mesh/material-slot Stage 2 provider. It resolves original source
- * materials and shares exact GPU material-color bakes across target layers.
+ * materials and shares exact GPU material-surface bakes across target layers.
  */
 class FDWCTransparencyType1SourceProvider
 {

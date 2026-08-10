@@ -64,6 +64,8 @@ struct FDWCTransparencySourcePayload
     int32 NoHitCount = 0;
     int32 OverlappedUVPixelCount = 0;
     TArray<FColor> InnerColorBuffer;
+    /** RG = source normal reoriented into the outer tangent frame, B = source Metallic, A = valid source hit. */
+    TArray<FColor> RevealSurfaceBuffer;
     TArray<uint8> AutoAlphaBuffer;
     TArray<uint8> OuterCoverageBuffer;
     TArray<uint16> OuterIslandIDBuffer;
@@ -75,6 +77,11 @@ struct FDWCTransparencySourcePayload
     // A restored baked baseline contains final authoring state. Generated
     // source payloads contain the pre-final automatic alpha instead.
     bool bIsFinalBakedBaseline = false;
+
+    // Snapshot-only flag used by Stage 4. When set, InnerColorBuffer and
+    // AutoAlphaBuffer were restored from a current CorrectedRevealColor
+    // checkpoint, so reveal strokes must not be replayed again.
+    bool bUsesCorrectedRevealCheckpoint = false;
     int32 BaselineStrokeCount = 0;
     FGuid BaselineBakeGuid;
 
@@ -83,6 +90,7 @@ struct FDWCTransparencySourcePayload
         return static_cast<uint64>(sizeof(FDWCTransparencySourcePayload)) +
             static_cast<uint64>(BuildSignature.GetAllocatedSize()) +
             static_cast<uint64>(InnerColorBuffer.GetAllocatedSize()) +
+            static_cast<uint64>(RevealSurfaceBuffer.GetAllocatedSize()) +
             static_cast<uint64>(AutoAlphaBuffer.GetAllocatedSize()) +
             static_cast<uint64>(OuterCoverageBuffer.GetAllocatedSize()) +
             static_cast<uint64>(OuterIslandIDBuffer.GetAllocatedSize()) +

@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingTransparencyData.h"
+#include "Styling/SlateBrush.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Input/SComboBox.h"
 #include "WetClothing/Foundation/Preview/Slots/DWCEditorPreviewSlotState.h"
@@ -30,9 +31,11 @@ class UObject;
 enum class EDWCEditorPreviewSuspendReason : uint8;
 struct FDWCTransparencySourcePayload;
 struct FAssetData;
+struct FDWCTransparencyBlueprintMeshComponent;
 namespace DWCTransparencyWorkflow
 {
 struct FDWCTransparencyTypeChangeImpact;
+struct FDWCTransparencyLayerWorkflowState;
 }
 
 enum class EDWCTransparencyPanelStatus : uint8
@@ -114,7 +117,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void DispatchRevealPaintState(
         FDWCTransparencyPaintSettings Settings,
         EDWCEditorSessionEffect Effects = EDWCEditorSessionEffect::None);
-    void DisableRevealPaintInSession();
     void DispatchTransparencyEditContext();
     void HandleSessionStateChanged(
         const FDWCEditorSessionState& State,
@@ -122,8 +124,22 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
         uint64 Revision);
     const UClass* GetSelectedSourceClass() const;
     void HandleSourceClassChanged(const UClass* NewClass);
-    FString GetExternalSourceMeshPath() const;
+    FString GetPendingExternalSourceMeshPath() const;
     void HandleExternalSourceMeshChanged(const FAssetData& AssetData);
+    FReply HandleAddExternalSourceClicked();
+    FReply HandleRemoveExternalSourceClicked(int32 PriorityIndex);
+    FReply HandleMoveExternalSourceClicked(int32 PriorityIndex, int32 Direction);
+    FReply HandleResetExternalSourceTransformClicked(int32 PriorityIndex);
+    FReply HandleSelectExternalSourceClicked(int32 PriorityIndex);
+    void HandleExternalSourceUVChannelChanged(
+        TSharedPtr<int32> Item,
+        ESelectInfo::Type SelectInfo,
+        int32 PriorityIndex);
+    void HandleExternalSourceRoleChanged(
+        TSharedPtr<EDWCTransparencyBlueprintSourceRole> Item,
+        ESelectInfo::Type SelectInfo,
+        int32 PriorityIndex);
+    void HandleExternalSourceTransformCommitted(const FGuid& SourceGuid, const FTransform& Transform);
     FReply HandleStageClicked(EDWCTransparencyEditorStage Stage);
     FReply HandleSourceTypeCardClicked(EDWCTransparencySourceType SourceType);
     FReply HandleContinueToGenerationClicked();
@@ -144,18 +160,44 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     bool CanEnterRevealEditingStage() const;
     bool CanEnterFinalEditingStage() const;
     void EnsureStageForSelectedLayer();
+    DWCTransparencyWorkflow::FDWCTransparencyLayerWorkflowState ResolveSelectedLayerWorkflowState() const;
+    EDWCTransparencyEditorStage ResolveStageForLayer(const FWetClothingTransparencyLayerData* Layer) const;
+    void SelectTransparencyLayerWithResolvedStage(
+        const FGuid& LayerGuid,
+        EDWCTransparencyEditorStage Stage);
     bool RefreshModelState();
     void RefreshStageContent();
     void RefreshMapGenerationSettings();
     void RefreshRevealEditingContent();
     void RefreshFinalEditingContent();
     void RefreshInnerSourceSlotItems();
+    void RefreshBlueprintHierarchy(bool bAllowAutoTarget = true);
+    void RefreshBlueprintSourcePriorityItems();
+    void RefreshExternalSourcePriorityItems();
+    bool IsBlueprintHierarchyCurrent() const;
+    bool IsBlueprintTargetCandidate(const FDWCTransparencyBlueprintMeshComponent& Component) const;
+    int32 GetBlueprintHierarchyDepth(const FDWCTransparencyBlueprintMeshComponent& Component) const;
+    FReply HandleRefreshBlueprintHierarchyClicked();
+    void HandleBlueprintTargetComponentChanged(ECheckBoxState NewState, FName ComponentName);
+    void HandleBlueprintSourceComponentChanged(ECheckBoxState NewState, FName ComponentName);
+    FReply HandleRemoveBlueprintSourceClicked(int32 PriorityIndex);
+    FReply HandleMoveBlueprintSourceClicked(int32 PriorityIndex, int32 Direction);
+    void HandleBlueprintSourceUVChannelChanged(
+        TSharedPtr<int32> Item,
+        ESelectInfo::Type SelectInfo,
+        int32 PriorityIndex);
+    void HandleBlueprintSourceRoleChanged(
+        TSharedPtr<EDWCTransparencyBlueprintSourceRole> Item,
+        ESelectInfo::Type SelectInfo,
+        int32 PriorityIndex);
     void RequestRefresh(EDWCTransparencyPanelRefreshFlags Flags);
     EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime, float DeltaTime);
     // Stage 4 owns final alpha; Stage 3 owns reveal-color authoring over the
     // Stage 2 source result.
     bool EnsureFinalEditingWorkingMap();
     bool EnsureRevealEditingWorkingMap();
+    bool RestoreCanonicalWorkingMap(FString& OutError);
+    bool HasRestorableCanonicalSource() const;
     bool LoadBakedMapAsWorkingResult(
         const FWetClothingBakedTransparencyMap& BakedMap,
         const FWetClothingTransparencyLayerData& Layer,
@@ -209,10 +251,22 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     FReply HandleDeleteStrokeClicked(FGuid StrokeGuid);
     void HandleStrokeEnabledChanged(ECheckBoxState NewState, FGuid StrokeGuid);
     TSharedRef<SWidget> GenerateVisualizationModeComboItem(TSharedPtr<EDWCTransparencyVisualizationMode> Item) const;
-    void HandleVisualizationModeChanged(TSharedPtr<EDWCTransparencyVisualizationMode> Item, ESelectInfo::Type SelectInfo);
+    void HandleVisualizationModeChanged(
+        TSharedPtr<EDWCTransparencyVisualizationMode> Item,
+        ESelectInfo::Type SelectInfo,
+        EDWCTransparencyEditorStage Stage);
     FText GetVisualizationModeLabel(EDWCTransparencyVisualizationMode Mode) const;
-    bool IsVisualizationModeAvailable(EDWCTransparencyVisualizationMode Mode) const;
-    TSharedPtr<EDWCTransparencyVisualizationMode> FindVisualizationModeItem(EDWCTransparencyVisualizationMode Mode) const;
+    bool IsVisualizationModeAvailable(
+        EDWCTransparencyVisualizationMode Mode,
+        EDWCTransparencyEditorStage Stage) const;
+    TSharedPtr<EDWCTransparencyVisualizationMode> FindVisualizationModeItem(
+        EDWCTransparencyVisualizationMode Mode,
+        EDWCTransparencyEditorStage Stage) const;
+    EDWCTransparencyVisualizationMode GetVisualizationModeForStage(
+        EDWCTransparencyEditorStage Stage) const;
+    void SetVisualizationModeForStage(
+        EDWCTransparencyVisualizationMode Mode,
+        EDWCTransparencyEditorStage Stage);
     ECheckBoxState IsPreviewModeChecked(EWetClothingTransparencyPreviewMode Mode) const;
     void HandlePreviewModeChanged(ECheckBoxState NewState, EWetClothingTransparencyPreviewMode Mode);
     bool IsGenerateEnabled() const;
@@ -249,6 +303,15 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
 
     TSharedRef<ITableRow> GenerateLayerRow(FLayerItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     TSharedRef<ITableRow> GenerateInnerSourceRow(TSharedPtr<int32> Item, const TSharedRef<STableViewBase>& OwnerTable);
+    TSharedRef<ITableRow> GenerateBlueprintHierarchyRow(
+        TSharedPtr<FDWCTransparencyBlueprintMeshComponent> Item,
+        const TSharedRef<STableViewBase>& OwnerTable);
+    TSharedRef<ITableRow> GenerateBlueprintSourcePriorityRow(
+        TSharedPtr<int32> Item,
+        const TSharedRef<STableViewBase>& OwnerTable);
+    TSharedRef<ITableRow> GenerateExternalSourcePriorityRow(
+        TSharedPtr<int32> Item,
+        const TSharedRef<STableViewBase>& OwnerTable);
     void HandleLayerSelectionChanged(FLayerItemPtr Item, ESelectInfo::Type SelectInfo);
     FReply HandleRemoveLayerClicked();
     bool CanRemoveSelectedLayer() const;
@@ -259,8 +322,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void HandleManualBaseColorCommitted(FLinearColor NewColor);
     FReply HandleRevealPaintColorClicked();
     void HandleRevealPaintColorCommitted(FLinearColor NewColor);
-    ECheckBoxState IsRevealColorPaintEnabledChecked() const;
-    void HandleRevealColorPaintEnabledChanged(ECheckBoxState NewState);
     ECheckBoxState IsRevealColorPaintModeChecked(EDWCTransparencyRevealColorBrushMode Mode) const;
     void HandleRevealColorPaintModeChanged(ECheckBoxState NewState, EDWCTransparencyRevealColorBrushMode Mode);
     float GetRevealPaintSizeCm() const;
@@ -307,7 +368,10 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedRef<SWidget> BuildTransparencyLayersSection();
     TSharedRef<SWidget> BuildSameMeshSourceSection();
     TSharedRef<SWidget> BuildOtherMeshSourceSection();
+    TSharedRef<SWidget> BuildBlueprintHierarchySection();
+    TSharedRef<SWidget> BuildBlueprintSourcePrioritySection();
     TSharedRef<SWidget> BuildExternalMeshSourceSection();
+    TSharedRef<SWidget> BuildExternalMeshSourcePrioritySection();
     TSharedRef<SWidget> BuildManualSourceSection();
     TSharedRef<SWidget> BuildRevealColorEditingSection();
     TSharedRef<SWidget> BuildRaySettingsSection();
@@ -317,8 +381,11 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedRef<SWidget> BuildBrushSizeMenu(EDWCTransparencyBrushSizeTarget Target);
     TSharedRef<SWidget> BuildTransparencyStrokeList();
     TSharedRef<SWidget> BuildGeneratedOutputsSection();
+    TSharedRef<SWidget> BuildRevealSurfaceStatusSection();
     TSharedRef<SWidget> BuildPackedTransparencyMapSection();
     TSharedRef<SWidget> BuildTransparencyPreviewSection();
+    TSharedRef<SWidget> BuildVisualizationModeControl(EDWCTransparencyEditorStage Stage);
+    TSharedRef<SWidget> BuildRevealVisualizationSection();
     TSharedRef<SWidget> BuildPreviewSettingsSection();
     TSharedRef<SWidget> BuildPreviewModeButton(EWetClothingTransparencyPreviewMode Mode, const FText& Label);
     TSharedRef<SWidget> BuildAssetSummaryRow(
@@ -327,6 +394,8 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
         const FText& Detail,
         TArray<TSharedPtr<FAssetThumbnail>>& ThumbnailStorage);
     TSharedRef<SWidget> BuildEmptyAssetRow(const FText& Label) const;
+    const FSlateBrush* GetRevealVisualizationBrush() const;
+    EVisibility GetRevealVisualizationVisibility() const;
 
   private:
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
@@ -369,18 +438,32 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<class SListView<FLayerItemPtr>> LayerListView;
     TArray<TSharedPtr<int32>> InnerSourceSlotItems;
     TSharedPtr<class SListView<TSharedPtr<int32>>> InnerSourceListView;
+    TArray<TSharedPtr<FDWCTransparencyBlueprintMeshComponent>> BlueprintHierarchyItems;
+    TSharedPtr<class SListView<TSharedPtr<FDWCTransparencyBlueprintMeshComponent>>> BlueprintHierarchyListView;
+    TArray<TSharedPtr<int32>> BlueprintSourcePriorityItems;
+    TSharedPtr<class SListView<TSharedPtr<int32>>> BlueprintSourcePriorityListView;
+    TArray<TSharedPtr<int32>> ExternalSourcePriorityItems;
+    TSharedPtr<class SListView<TSharedPtr<int32>>> ExternalSourcePriorityListView;
+    TArray<TSharedPtr<EDWCTransparencyBlueprintSourceRole>> BlueprintSourceRoleItems;
+    FGuid BlueprintHierarchyLayerGuid;
+    FString BlueprintHierarchyClassPath;
+    FString BlueprintHierarchyError;
+    TSoftObjectPtr<USkeletalMesh> PendingExternalSourceMesh;
+    FGuid SelectedExternalSourceGuid;
     // Inner source slots remain unrestricted. Target slots are limited to Wettable slots.
     TArray<FMaterialSlotItemPtr> MaterialSlotItems;
     TArray<FMaterialSlotItemPtr> TargetMaterialSlotItems;
     FDWCEditorPreviewSlotCollection PreviewSlotStates;
     TArray<TSharedPtr<int32>> UVChannelItems;
-    TArray<TSharedPtr<EDWCTransparencyVisualizationMode>> VisualizationModeItems;
+    TArray<TSharedPtr<EDWCTransparencyVisualizationMode>> RevealVisualizationModeItems;
+    TArray<TSharedPtr<EDWCTransparencyVisualizationMode>> FinalVisualizationModeItems;
     TWeakObjectPtr<USkeletalMesh> OptionItemsTargetMesh;
     int32 OptionItemsMaterialSlotCount = INDEX_NONE;
     int32 OptionItemsUVChannelCount = INDEX_NONE;
     uint32 OptionItemsPreviewStateSignature = 0;
     bool bPreviewSlotStateRefreshRequested = true;
     EDWCTransparencyVisualizationMode SelectedVisualizationMode = static_cast<EDWCTransparencyVisualizationMode>(0);
+    mutable FSlateBrush RevealVisualizationBrush;
     float WetnessPreviewPercent = 100.0f;
     bool bShowSavedWrinkle = true;
     EDWCTransparencyBrushMode BrushMode = EDWCTransparencyBrushMode::Apply;
@@ -394,7 +477,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     float RevealPaintRadiusUV = 0.0677f;
     float RevealPaintStrength = 1.0f;
     float RevealPaintFalloff = 0.5f;
-    bool bRevealColorPaintEnabled = false;
     float TransparencyTargetPartsListHeight = 170.0f;
     bool bRefreshingLayerSelection = false;
     bool bRefreshTimerRegistered = false;

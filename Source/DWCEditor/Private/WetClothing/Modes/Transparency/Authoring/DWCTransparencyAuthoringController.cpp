@@ -36,7 +36,8 @@ namespace
                A.MaterialSlotIndex == B.MaterialSlotIndex &&
                A.UVChannelIndex == B.UVChannelIndex &&
                A.AddressMode == B.AddressMode &&
-               A.PaintTarget == B.PaintTarget;
+               A.PaintTarget == B.PaintTarget &&
+               A.bSurfacePaintingEnabled == B.bSurfacePaintingEnabled;
     }
 
     EDWCEditorAuthoringImpact GetInteractiveImpact(const EDWCTransparencyPaintTarget Target)
@@ -106,8 +107,11 @@ bool FDWCTransparencyAuthoringController::CanBeginSurfaceInteraction(
         Context.PaintTarget == EDWCTransparencyPaintTarget::RevealColor
                  ? State.RevealPaint
                  : State.Paint;
+    const bool bPaintSettingsEnabled =
+        Context.PaintTarget == EDWCTransparencyPaintTarget::RevealColor || Paint.bEnabled;
     return Asset.IsValid() && AuthoringDocument.IsValid() && SurfaceHit.bHit &&
-           Context.PaintTarget != EDWCTransparencyPaintTarget::None && Paint.bEnabled &&
+           Context.PaintTarget != EDWCTransparencyPaintTarget::None &&
+           Context.bSurfacePaintingEnabled && bPaintSettingsEnabled &&
            Context.LayerGuid.IsValid() && Context.MaterialSlotIndex != INDEX_NONE &&
            Context.UVChannelIndex != INDEX_NONE &&
            SurfaceHit.MaterialSlotIndex == Context.MaterialSlotIndex &&

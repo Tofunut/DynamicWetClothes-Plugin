@@ -42,9 +42,10 @@ FDWCTransparencyRevealCommitWorker::Build(
 
     const int64 PixelCount = static_cast<int64>(Input.SourceResult->Resolution.X) *
         Input.SourceResult->Resolution.Y;
-    if (PixelCount <= 0 || Input.SourceResult->InnerColorBuffer.Num() != PixelCount)
+    if (PixelCount <= 0 || Input.SourceResult->InnerColorBuffer.Num() != PixelCount ||
+        Input.SourceResult->AutoAlphaBuffer.Num() != PixelCount)
     {
-        Output->Error = TEXT("The reveal-color source has an invalid resolution or pixel buffer.");
+        Output->Error = TEXT("The reveal-color source has an invalid resolution, color buffer, or automatic alpha buffer.");
         return Output;
     }
 
@@ -83,6 +84,17 @@ FDWCTransparencyRevealCommitWorker::Build(
             Input.SourceResult->MaterialSlotIndex,
             Input.BaseRevealColor,
             Output->CorrectedRevealPixels);
+    }
+
+    // CorrectedRevealColor is the Stage 3 checkpoint consumed by Stage 4.
+    // Preserve Stage 2's automatic alpha in its A channel while Stage 3
+    // authoring continues to modify RGB only.
+    for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
+    {
+        Output->CorrectedRevealPixels[PixelIndex].A =
+            Input.SourceResult->AutoAlphaBuffer.IsValidIndex(PixelIndex)
+                ? Input.SourceResult->AutoAlphaBuffer[PixelIndex]
+                : 0;
     }
 
     if (CancellationToken->IsCanceled())

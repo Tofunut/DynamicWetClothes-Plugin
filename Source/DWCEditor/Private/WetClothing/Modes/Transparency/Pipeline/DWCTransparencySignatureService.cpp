@@ -3,6 +3,7 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/DWCBakeLayer.h"
+#include "DataAssets/WetClothingPartData.h"
 #include "WetClothing/Modes/Transparency/Providers/DWCTransparencyProjectionSourceProvider.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "Engine/SkeletalMesh.h"
@@ -158,6 +159,46 @@ namespace
             }
         }
     }
+
+    void AppendTargetWetPartEligibility(
+        const UWetClothingAsset& Asset,
+        const int32 MaterialSlotIndex,
+        FString& InOutCanonical)
+    {
+        const FWetClothingAuthoredMaterialSlot* Slot =
+            Asset.Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
+        if (Slot == nullptr)
+        {
+            InOutCanonical += TEXT("|TargetWetParts=MissingSlot");
+            return;
+        }
+
+        InOutCanonical += FString::Printf(
+            TEXT("|TargetWettable=%d"),
+            Slot->bIsWettableSlot ? 1 : 0);
+
+        TArray<const FWetClothingWetPartEntry*> Parts;
+        Parts.Reserve(Slot->WetPartEntries.Num());
+        for (const FWetClothingWetPartEntry& Part : Slot->WetPartEntries)
+        {
+            Parts.Add(&Part);
+        }
+        Parts.Sort([](const FWetClothingWetPartEntry& A, const FWetClothingWetPartEntry& B)
+        {
+            return A.WetPartID < B.WetPartID;
+        });
+
+        for (const FWetClothingWetPartEntry* Part : Parts)
+        {
+            TArray<int32> IslandIDs = Part->AssignedUVIslandIDs;
+            IslandIDs.Sort();
+            InOutCanonical += FString::Printf(TEXT("|WetPart=%d:Islands="), Part->WetPartID);
+            for (const int32 IslandID : IslandIDs)
+            {
+                InOutCanonical += FString::Printf(TEXT("%d,"), IslandID);
+            }
+        }
+    }
 }
 
 FString FDWCTransparencySignatureService::BuildMaterialBakeSignature(
@@ -166,7 +207,7 @@ FString FDWCTransparencySignatureService::BuildMaterialBakeSignature(
     const int32 Resolution)
 {
     FString Canonical = FString::Printf(
-        TEXT("DWC.Transparency.MaterialBake.v1|Material=%s|UV=%d|Resolution=%d"),
+        TEXT("DWC.Transparency.MaterialBake.v2|Properties=BaseColor,Normal,Metallic|Material=%s|UV=%d|Resolution=%d"),
         *GetPathNameSafe(Material), SourceUVChannel, Resolution);
     AppendMaterialParameters(Material, Canonical);
     return HashCanonical(Canonical);
@@ -203,11 +244,12 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
     const int32 Resolution = FMath::Clamp(
         Asset.Authored.TransparencyData.TransparencyBakeResolution, 16, 4096);
     FString Canonical = FString::Printf(
-        TEXT("DWC.Transparency.Source.v1|Mesh=%s|Layer=%s|Type=%d|Slot=%d|UV=%d|LOD=0|Resolution=%d|Address=%d|DataUV=%s"),
+        TEXT("DWC.Transparency.Source.v2|Mesh=%s|Layer=%s|Type=%d|Slot=%d|UV=%d|LOD=0|Resolution=%d|Address=%d|DataUV=%s"),
         *GetPathNameSafe(Mesh), *Layer.LayerGuid.ToString(EGuidFormats::DigitsWithHyphens),
         static_cast<int32>(Layer.SourceType), Layer.TargetSurface.OuterMaterialSlotIndex,
         DataUV, Resolution, static_cast<int32>(Layer.TargetSurface.UVAddressMode),
         *DataUVMetadata->DataUVOutputSignature);
+    AppendTargetWetPartEligibility(Asset, Layer.TargetSurface.OuterMaterialSlotIndex, Canonical);
 
     if (Layer.SourceType == EDWCTransparencySourceType::ManualColorOrTexture)
     {
@@ -258,7 +300,7 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
     }
     else if (Layer.SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents)
     {
-        if (Asset.Authored.TransparencyData.SourceBlueprintClass.IsNull())
+        if (Layer.BlueprintSource.BlueprintClass.IsNull())
         {
             OutError = TEXT("Transparency source signature requires a Source Blueprint.");
             return false;
@@ -276,7 +318,7 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
         }
         Canonical += FString::Printf(
             TEXT("|Blueprint=%s|Snapshot=%s"),
-            *Asset.Authored.TransparencyData.SourceBlueprintClass.ToSoftObjectPath().ToString(),
+            *Layer.BlueprintSource.BlueprintClass.ToSoftObjectPath().ToString(),
             *BlueprintSources.ProviderSignature);
         FString MaterialCanonical;
         for (const FDWCTransparencyProjectionSource& Source : BlueprintSources.Sources)
@@ -290,45 +332,29 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
     }
     else if (Layer.SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh)
     {
-        const USkeletalMesh* ExternalMesh = Layer.ExternalMeshSource.SkeletalMesh;
-        if (ExternalMesh == nullptr)
+        FDWCTransparencyProjectionSourceSet ExternalSources;
+        FString SourceError;
+        if (!FDWCTransparencyProjectionSourceProvider::BuildExternalMeshSources(
+                Asset,
+                Layer,
+                ExternalSources,
+                SourceError))
         {
-            OutError = TEXT("Transparency source signature requires an External Skeletal Mesh.");
+            OutError = MoveTemp(SourceError);
             return false;
         }
         Canonical += FString::Printf(
-            TEXT("|ExternalMesh=%s|Transform=%s"), *GetPathNameSafe(ExternalMesh),
-            *Layer.ExternalMeshSource.BakeTransform.ToHumanReadableString());
-        const TArray<FWetClothingTransparencyInnerSlot>& Slots =
-            Layer.ExternalMeshSource.SourceSlotPriority;
-        if (Slots.IsEmpty())
+            TEXT("|ExternalSources=%s"),
+            *ExternalSources.ProviderSignature);
+        FString MaterialCanonical;
+        for (const FDWCTransparencyProjectionSource& Source : ExternalSources.Sources)
         {
-            for (int32 SlotIndex = 0; SlotIndex < ExternalMesh->GetMaterials().Num(); ++SlotIndex)
-            {
-                const UMaterialInterface* Material =
-                    ExternalMesh->GetMaterials()[SlotIndex].MaterialInterface;
-                const FString MaterialSignature = BuildMaterialBakeSignature(Material, 0, Resolution);
-                Canonical += FString::Printf(TEXT("|ExternalSlot=%d,0,%s"), SlotIndex, *MaterialSignature);
-                OutMaterialBakeSignature += MaterialSignature;
-            }
+            MaterialCanonical += BuildMaterialBakeSignature(
+                Source.EffectiveMaterial,
+                Source.Layer.SourceUVChannel,
+                Resolution);
         }
-        else
-        {
-            for (int32 Priority = 0; Priority < Slots.Num(); ++Priority)
-            {
-                const FWetClothingTransparencyInnerSlot& Slot = Slots[Priority];
-                const UMaterialInterface* Material = ExternalMesh->GetMaterials().IsValidIndex(Slot.MaterialSlotIndex)
-                    ? ExternalMesh->GetMaterials()[Slot.MaterialSlotIndex].MaterialInterface
-                    : nullptr;
-                const FString MaterialSignature = BuildMaterialBakeSignature(
-                    Material, Slot.SourceUVChannel, Resolution);
-                Canonical += FString::Printf(
-                    TEXT("|ExternalSlot=%d,%d,%d,%s"), Priority, Slot.MaterialSlotIndex,
-                    Slot.SourceUVChannel, *MaterialSignature);
-                OutMaterialBakeSignature += MaterialSignature;
-            }
-        }
-        OutMaterialBakeSignature = HashCanonical(OutMaterialBakeSignature);
+        OutMaterialBakeSignature = HashCanonical(MaterialCanonical);
     }
     else
     {
@@ -347,6 +373,15 @@ FString FDWCTransparencySignatureService::BuildRevealSignature(
     FString Canonical = FString::Printf(
         TEXT("DWC.Transparency.Reveal.v1|Source=%s"), *SourceSignature);
     AppendRevealStrokes(Layer, Canonical);
+    return HashCanonical(Canonical);
+}
+
+FString FDWCTransparencySignatureService::BuildRevealSurfaceSignature(
+    const FString& SourceSignature)
+{
+    const FString Canonical = FString::Printf(
+        TEXT("DWC.Transparency.RevealSurface.v1|Encoding=OuterTangentNormalRG,InnerMetallicB,SourceCoverageA|Source=%s"),
+        *SourceSignature);
     return HashCanonical(Canonical);
 }
 

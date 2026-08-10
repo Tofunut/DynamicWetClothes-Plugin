@@ -34,6 +34,11 @@ namespace
         const int32 PixelIndex,
         const int32 UVIslandID)
     {
+        if (!SourcePayload.OuterCoverageBuffer.IsValidIndex(PixelIndex) ||
+            SourcePayload.OuterCoverageBuffer[PixelIndex] == 0)
+        {
+            return false;
+        }
         if (UVIslandID == INDEX_NONE)
         {
             return true;

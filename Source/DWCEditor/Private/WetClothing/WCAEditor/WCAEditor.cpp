@@ -2858,12 +2858,20 @@ namespace
             FDWCTransparencySourcePayload SourcePayload;
             FString GenerateSummary;
             TArray<FString> GenerateWarnings;
-            if (!FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
+            const bool bGenerated = Layer.SourceType == EDWCTransparencySourceType::ManualColorOrTexture
+                ? FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
                     Asset,
                     Layer,
                     SourcePayload,
                     GenerateSummary,
-                    GenerateWarnings))
+                    GenerateWarnings)
+                : FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
+                    Asset,
+                    Layer,
+                    SourcePayload,
+                    GenerateSummary,
+                    GenerateWarnings);
+            if (!bGenerated)
             {
                 OutFailure = FString::Printf(
                     TEXT("Transparency Textures: slot %d auto-generation failed.\n%s"),
@@ -2893,13 +2901,19 @@ namespace
             Layer.AutoBakeMetadata.NoHitCount = SourcePayload.NoHitCount;
 
             ++BakedLayerCount;
+            const FString RevealSurfaceSummary = BakeResult.RevealSurfaceMap != nullptr
+                ? FString::Printf(
+                    TEXT(" | Reveal Surface: %s"),
+                    *GetPathNameSafe(BakeResult.RevealSurfaceMap))
+                : FString();
             BakedLayerSummaries.Add(FString::Printf(
-                TEXT("%s (Slot %d, UV%d, LOD%d) -> %s"),
+                TEXT("%s (Slot %d, UV%d, LOD%d) -> Transparency: %s%s"),
                 *Layer.TargetSurface.OuterMaterialSlotName.ToString(),
                 MaterialSlotIndex,
                 SourcePayload.UVChannelIndex,
                 SourcePayload.LODIndex,
-                *GetPathNameSafe(BakeResult.TransparencyMap)));
+                *GetPathNameSafe(BakeResult.TransparencyMap),
+                *RevealSurfaceSummary));
 
             for (const FString& Warning : GenerateWarnings)
             {

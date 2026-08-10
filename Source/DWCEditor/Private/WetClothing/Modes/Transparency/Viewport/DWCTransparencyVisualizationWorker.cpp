@@ -2,6 +2,7 @@
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyVisualizationWorker.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
+#include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyAlphaSnapshotMaterializer.h"
 

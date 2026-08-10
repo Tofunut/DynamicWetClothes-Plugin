@@ -131,7 +131,8 @@ bool FDWCTransparencyIntermediateArtifactKindCoverageTest::RunTest(const FString
         EDWCTransparencyTempArtifactKind::HitDistance,
         EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
         EDWCTransparencyTempArtifactKind::OuterCoverage,
-        EDWCTransparencyTempArtifactKind::OuterIslandID
+        EDWCTransparencyTempArtifactKind::OuterIslandID,
+        EDWCTransparencyTempArtifactKind::BaseRevealSurface
     };
 
     for (const EDWCTransparencyTempArtifactKind Kind : IntermediateKinds)
@@ -166,6 +167,8 @@ bool FDWCTransparencyLoadedReferenceCookBoundaryTest::RunTest(const FString& Par
     };
 
     UTexture2D* MaterialColorTexture = MakeTexture(TEXT("T_MaterialColor"), true);
+    UTexture2D* MaterialNormalTexture = MakeTexture(TEXT("T_MaterialNormal"), true);
+    UTexture2D* MaterialMetallicTexture = MakeTexture(TEXT("T_MaterialMetallic"), true);
     UTexture2D* StageArtifactTexture = MakeTexture(TEXT("T_StageArtifact"), true);
     UTexture2D* FinalTexture = MakeTexture(TEXT("T_Final"), false);
     UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
@@ -173,6 +176,8 @@ bool FDWCTransparencyLoadedReferenceCookBoundaryTest::RunTest(const FString& Par
     FDWCTransparencyMaterialColorCacheReference& MaterialColorReference =
         Asset->Authored.TransparencyData.MaterialColorCache.AddDefaulted_GetRef();
     MaterialColorReference.Texture = MaterialColorTexture;
+    MaterialColorReference.NormalTexture = MaterialNormalTexture;
+    MaterialColorReference.MetallicTexture = MaterialMetallicTexture;
 
     FWetClothingTransparencyLayerData& Layer =
         Asset->Authored.TransparencyData.TransparencyLayers.AddDefaulted_GetRef();
@@ -189,12 +194,16 @@ bool FDWCTransparencyLoadedReferenceCookBoundaryTest::RunTest(const FString& Par
     FDWCTransparencyIntermediateAssetPolicy::RepairLoadedReferences(
         *Asset, ChangedPackages, Warnings);
 
-    TestEqual(TEXT("Both loaded intermediate packages are repaired."),
-        ChangedPackages.Num(), 2);
+    TestEqual(TEXT("All loaded source-surface and stage intermediate packages are repaired."),
+        ChangedPackages.Num(), 4);
     TestTrue(TEXT("Valid loaded intermediate references produce no warnings."),
         Warnings.IsEmpty());
     TestTrue(TEXT("The material color cache package is editor-only."),
         MaterialColorTexture->GetOutermost()->HasAnyPackageFlags(PKG_EditorOnly));
+    TestTrue(TEXT("The material normal cache package is editor-only."),
+        MaterialNormalTexture->GetOutermost()->HasAnyPackageFlags(PKG_EditorOnly));
+    TestTrue(TEXT("The material metallic cache package is editor-only."),
+        MaterialMetallicTexture->GetOutermost()->HasAnyPackageFlags(PKG_EditorOnly));
     TestTrue(TEXT("The Stage cache artifact package is editor-only."),
         StageArtifactTexture->GetOutermost()->HasAnyPackageFlags(PKG_EditorOnly));
     TestFalse(TEXT("Repair never marks the final runtime map editor-only."),
@@ -209,6 +218,8 @@ bool FDWCTransparencyLoadedReferenceCookBoundaryTest::RunTest(const FString& Par
     TestTrue(TEXT("Loaded-reference repair is idempotent."), ChangedPackages.IsEmpty());
 
     MaterialColorTexture->GetOutermost()->SetDirtyFlag(false);
+    MaterialNormalTexture->GetOutermost()->SetDirtyFlag(false);
+    MaterialMetallicTexture->GetOutermost()->SetDirtyFlag(false);
     StageArtifactTexture->GetOutermost()->SetDirtyFlag(false);
     FinalTexture->GetOutermost()->SetDirtyFlag(false);
     return true;

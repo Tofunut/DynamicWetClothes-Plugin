@@ -13,39 +13,52 @@
 
 namespace
 {
-    FString BuildSourceMaterialColorAssetName(
+    FString BuildCorrectedRevealArtifactSignature(const FString& RevealSignature)
+    {
+        return FMD5::HashAnsiString(*FString::Printf(
+            TEXT("DWC.Transparency.CorrectedReveal.v2|Reveal=%s"),
+            *RevealSignature));
+    }
+
+    FString BuildSourceMaterialPropertyAssetName(
         const UWetClothingAsset& Asset,
         const USkeletalMesh& SourceMesh,
         const int32 MaterialSlotIndex,
-        const int32 SourceUVChannel)
+        const int32 SourceUVChannel,
+        const TCHAR* PropertyToken)
     {
         const FString MeshHash = FMD5::HashAnsiString(*SourceMesh.GetPathName()).Left(8);
         return FString::Printf(
-            TEXT("T_%s_Src%s_Slot%d_UV%d_SourceMaterialColor"),
+            TEXT("T_%s_Src%s_Slot%d_UV%d_%s"),
             *FDWCRevealBakeUtilities::SanitizeAssetToken(Asset.GetName()),
             *MeshHash,
             MaterialSlotIndex,
-            SourceUVChannel);
+            SourceUVChannel,
+            PropertyToken);
     }
 
-    UTexture2D* FindOrCreateSourceMaterialColorTexture(
+    UTexture2D* FindOrCreateSourceMaterialPropertyTexture(
         UWetClothingAsset& Asset,
         const USkeletalMesh& SourceMesh,
         const int32 MaterialSlotIndex,
         const int32 SourceUVChannel,
+        const TCHAR* PropertyToken,
         FString& OutError)
     {
         const FString PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(
             Asset, TEXT("Textures/Transparency/Temp"));
-        const FString AssetName = BuildSourceMaterialColorAssetName(
-            Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel);
+        const FString AssetName = BuildSourceMaterialPropertyAssetName(
+            Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, PropertyToken);
         const FString PackageName = PackagePath / AssetName;
         const FString ObjectPath = PackageName + TEXT(".") + AssetName;
-        UObject* Existing = LoadObject<UObject>(nullptr, *ObjectPath);
+        // A missing generated cache is the normal first-build case. Avoid
+        // emitting a LoadErrors warning before creating its package below.
+        UObject* Existing = LoadObject<UObject>(
+            nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
         if (Existing != nullptr && !Existing->IsA<UTexture2D>())
         {
             OutError = FString::Printf(
-                TEXT("Transparency source-color path '%s' is occupied by '%s'."),
+                TEXT("Transparency source-material property path '%s' is occupied by '%s'."),
                 *ObjectPath,
                 *GetNameSafe(Existing->GetClass()));
             return nullptr;
@@ -66,14 +79,14 @@ namespace
                 OwnerGuid != Asset.GetAssetGuid())
             {
                 OutError = FString::Printf(
-                    TEXT("Transparency source-color artifact '%s' is not owned by this WCA."),
+                TEXT("Transparency source-material property artifact '%s' is not owned by this WCA."),
                     *ObjectPath);
                 return nullptr;
             }
         }
         if (Texture == nullptr || !Asset.TagGeneratedAsset(Texture))
         {
-            OutError = FString::Printf(TEXT("Could not create source-color artifact '%s'."), *ObjectPath);
+            OutError = FString::Printf(TEXT("Could not create source-material property artifact '%s'."), *ObjectPath);
             return nullptr;
         }
         if (!FDWCTransparencyIntermediateAssetPolicy::EnsureEditorOnlyPackage(
@@ -130,7 +143,10 @@ namespace
         const FString PackageName = PackagePath / AssetName;
         const FString ObjectPath = PackageName + TEXT(".") + AssetName;
 
-        UObject* Existing = LoadObject<UObject>(nullptr, *ObjectPath);
+        // Stage artifacts are created lazily, so an absent object is expected
+        // and must not be reported as an editor load failure.
+        UObject* Existing = LoadObject<UObject>(
+            nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
         if (Existing != nullptr && !Existing->IsA<UTexture2D>())
         {
             OutError = FString::Printf(
@@ -218,7 +234,7 @@ namespace
     }
 }
 
-bool FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialColor(
+bool FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialSurface(
     const UWetClothingAsset& Asset,
     const USkeletalMesh& SourceMesh,
     const int32 MaterialSlotIndex,
@@ -227,10 +243,14 @@ bool FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialColor(
     const FString& MaterialBakeSignature,
     const bool bLoadIfNeeded,
     FDWCTransparencyMaterialColorCacheReference& OutReference,
-    UTexture2D*& OutTexture)
+    UTexture2D*& OutBaseColorTexture,
+    UTexture2D*& OutNormalTexture,
+    UTexture2D*& OutMetallicTexture)
 {
     OutReference = FDWCTransparencyMaterialColorCacheReference();
-    OutTexture = nullptr;
+    OutBaseColorTexture = nullptr;
+    OutNormalTexture = nullptr;
+    OutMetallicTexture = nullptr;
 #if WITH_EDITORONLY_DATA
     const FDWCTransparencyMaterialColorCacheReference* Reference =
         Asset.Authored.TransparencyData.MaterialColorCache.FindByPredicate(
@@ -244,71 +264,114 @@ bool FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialColor(
                     Candidate.Resolution == LogicalResolution &&
                     Candidate.MaterialBakeSignature == MaterialBakeSignature;
             });
-    if (Reference == nullptr || Reference->Texture.IsNull())
+    if (Reference == nullptr || Reference->Texture.IsNull() || Reference->NormalTexture.IsNull() ||
+        Reference->MetallicTexture.IsNull())
     {
         return false;
     }
-    UTexture2D* Texture = bLoadIfNeeded ? Reference->Texture.LoadSynchronous() : Reference->Texture.Get();
+
+    OutBaseColorTexture = bLoadIfNeeded ? Reference->Texture.LoadSynchronous() : Reference->Texture.Get();
+    OutNormalTexture = bLoadIfNeeded ? Reference->NormalTexture.LoadSynchronous() : Reference->NormalTexture.Get();
+    OutMetallicTexture = bLoadIfNeeded ? Reference->MetallicTexture.LoadSynchronous() : Reference->MetallicTexture.Get();
+    if (OutBaseColorTexture == nullptr || OutNormalTexture == nullptr || OutMetallicTexture == nullptr)
+    {
+        OutBaseColorTexture = nullptr;
+        OutNormalTexture = nullptr;
+        OutMetallicTexture = nullptr;
+        return false;
+    }
+
     FString PolicyError;
-    if (Texture != nullptr)
-    {
-        // Existing caches remain readable even if they predate the canonical
-        // Temp path. New writes are strict; validation reports legacy paths.
-        FDWCTransparencyIntermediateAssetPolicy::EnsureEditorOnlyPackage(
-            *Texture, nullptr, &PolicyError);
-    }
-    if (Texture == nullptr)
-    {
-        return false;
-    }
+    FDWCTransparencyIntermediateAssetPolicy::EnsureEditorOnlyPackage(
+        *OutBaseColorTexture, nullptr, &PolicyError);
+    FDWCTransparencyIntermediateAssetPolicy::EnsureEditorOnlyPackage(
+        *OutNormalTexture, nullptr, &PolicyError);
+    FDWCTransparencyIntermediateAssetPolicy::EnsureEditorOnlyPackage(
+        *OutMetallicTexture, nullptr, &PolicyError);
     OutReference = *Reference;
-    OutTexture = Texture;
     return true;
 #else
     return false;
 #endif
 }
-bool FDWCTransparencyTempAssetStore::CommitSourceMaterialColor(
+
+bool FDWCTransparencyTempAssetStore::CommitSourceMaterialSurface(
     UWetClothingAsset& Asset,
     USkeletalMesh& SourceMesh,
     const int32 MaterialSlotIndex,
     const int32 SourceUVChannel,
     const FIntPoint LogicalResolution,
-    const FIntPoint PhysicalResolution,
-    const EDWCTransparencyMaterialColorPayloadKind PayloadKind,
+    const FIntPoint BaseColorPhysicalResolution,
+    const EDWCTransparencyMaterialColorPayloadKind BaseColorPayloadKind,
+    const TConstArrayView<FColor> BaseColorPixels,
+    const bool bBaseColorSRGB,
+    const FIntPoint NormalPhysicalResolution,
+    const EDWCTransparencyMaterialColorPayloadKind NormalPayloadKind,
+    const TConstArrayView<FColor> NormalPixels,
+    const bool bHasBakedNormalProperty,
+    const FIntPoint MetallicPhysicalResolution,
+    const EDWCTransparencyMaterialColorPayloadKind MetallicPayloadKind,
+    const TConstArrayView<uint8> MetallicPixels,
+    const bool bHasBakedMetallicProperty,
     const FString& MaterialBakeSignature,
-    const TConstArrayView<FColor> Pixels,
-    const bool bSRGB,
-    UTexture2D*& OutTexture,
+    UTexture2D*& OutBaseColorTexture,
+    UTexture2D*& OutNormalTexture,
+    UTexture2D*& OutMetallicTexture,
     FString& OutError)
 {
     check(IsInGameThread());
-    OutTexture = nullptr;
+    OutBaseColorTexture = nullptr;
+    OutNormalTexture = nullptr;
+    OutMetallicTexture = nullptr;
     OutError.Reset();
-    const bool bValidPayloadShape =
-        PayloadKind == EDWCTransparencyMaterialColorPayloadKind::ConstantColor
+
+    const auto IsValidPayload = [LogicalResolution](
+                                    const EDWCTransparencyMaterialColorPayloadKind Kind,
+                                    const FIntPoint PhysicalResolution,
+                                    const int32 NumPixels)
+    {
+        const bool bShapeValid = Kind == EDWCTransparencyMaterialColorPayloadKind::ConstantColor
             ? PhysicalResolution == FIntPoint(1, 1)
             : PhysicalResolution == LogicalResolution;
-    if (LogicalResolution.X <= 0 || LogicalResolution.Y <= 0 ||
-        PhysicalResolution.X <= 0 || PhysicalResolution.Y <= 0 ||
-        Pixels.Num() != PhysicalResolution.X * PhysicalResolution.Y ||
-        !bValidPayloadShape || MaterialBakeSignature.IsEmpty())
+        return PhysicalResolution.X > 0 && PhysicalResolution.Y > 0 &&
+            NumPixels == PhysicalResolution.X * PhysicalResolution.Y && bShapeValid;
+    };
+    if (LogicalResolution.X <= 0 || LogicalResolution.Y <= 0 || MaterialBakeSignature.IsEmpty() ||
+        !IsValidPayload(BaseColorPayloadKind, BaseColorPhysicalResolution, BaseColorPixels.Num()) ||
+        !IsValidPayload(NormalPayloadKind, NormalPhysicalResolution, NormalPixels.Num()) ||
+        !IsValidPayload(MetallicPayloadKind, MetallicPhysicalResolution, MetallicPixels.Num()))
     {
-        OutError = TEXT("Source material color payload is incomplete.");
+        OutError = TEXT("Source material surface payload is incomplete.");
         return false;
     }
 
-    UTexture2D* Texture = FindOrCreateSourceMaterialColorTexture(
-        Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, OutError);
-    if (Texture == nullptr)
-    {
-        return false;
-    }
-    Texture->Source.Init(
-        PhysicalResolution.X, PhysicalResolution.Y, 1, 1, TSF_BGRA8,
-        reinterpret_cast<const uint8*>(Pixels.GetData()));
-    Texture->CompressionSettings = TC_Default;
-    ConfigureCommon(*Texture, bSRGB);
+    UTexture2D* BaseColorTexture = FindOrCreateSourceMaterialPropertyTexture(
+        Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, TEXT("SourceMaterialColor"), OutError);
+    if (BaseColorTexture == nullptr) return false;
+    UTexture2D* NormalTexture = FindOrCreateSourceMaterialPropertyTexture(
+        Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, TEXT("SourceMaterialNormal"), OutError);
+    if (NormalTexture == nullptr) return false;
+    UTexture2D* MetallicTexture = FindOrCreateSourceMaterialPropertyTexture(
+        Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, TEXT("SourceMaterialMetallic"), OutError);
+    if (MetallicTexture == nullptr) return false;
+
+    BaseColorTexture->Source.Init(
+        BaseColorPhysicalResolution.X, BaseColorPhysicalResolution.Y, 1, 1, TSF_BGRA8,
+        reinterpret_cast<const uint8*>(BaseColorPixels.GetData()));
+    BaseColorTexture->CompressionSettings = TC_Default;
+    ConfigureCommon(*BaseColorTexture, bBaseColorSRGB);
+
+    NormalTexture->Source.Init(
+        NormalPhysicalResolution.X, NormalPhysicalResolution.Y, 1, 1, TSF_BGRA8,
+        reinterpret_cast<const uint8*>(NormalPixels.GetData()));
+    NormalTexture->CompressionSettings = TC_Default;
+    ConfigureCommon(*NormalTexture, false);
+
+    MetallicTexture->Source.Init(
+        MetallicPhysicalResolution.X, MetallicPhysicalResolution.Y, 1, 1, TSF_G8,
+        MetallicPixels.GetData());
+    MetallicTexture->CompressionSettings = TC_Grayscale;
+    ConfigureCommon(*MetallicTexture, false);
 
 #if WITH_EDITORONLY_DATA
     TArray<FDWCTransparencyMaterialColorCacheReference>& References =
@@ -340,16 +403,24 @@ bool FDWCTransparencyTempAssetStore::CommitSourceMaterialColor(
     Reference->MaterialSlotIndex = MaterialSlotIndex;
     Reference->SourceUVChannel = SourceUVChannel;
     Reference->Resolution = LogicalResolution.X;
-    Reference->PayloadResolution = PhysicalResolution;
-    Reference->PayloadKind = PayloadKind;
+    Reference->PayloadResolution = BaseColorPhysicalResolution;
+    Reference->PayloadKind = BaseColorPayloadKind;
+    Reference->Texture = BaseColorTexture;
+    Reference->NormalPayloadResolution = NormalPhysicalResolution;
+    Reference->NormalPayloadKind = NormalPayloadKind;
+    Reference->NormalTexture = NormalTexture;
+    Reference->MetallicPayloadResolution = MetallicPhysicalResolution;
+    Reference->MetallicPayloadKind = MetallicPayloadKind;
+    Reference->MetallicTexture = MetallicTexture;
+    Reference->bHasBakedNormalProperty = bHasBakedNormalProperty;
+    Reference->bHasBakedMetallicProperty = bHasBakedMetallicProperty;
     Reference->MaterialBakeSignature = MaterialBakeSignature;
-    Reference->Texture = Texture;
     Reference->bObsolete = false;
-    // Cache metadata is rebuildable editor state, so it is persisted without
-    // placing the full WCA payload into an undo transaction.
     Asset.MarkPackageDirty();
 #endif
-    OutTexture = Texture;
+    OutBaseColorTexture = BaseColorTexture;
+    OutNormalTexture = NormalTexture;
+    OutMetallicTexture = MetallicTexture;
     return true;
 }
 
@@ -364,6 +435,7 @@ bool FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
     OutError.Reset();
     const int32 PixelCount = Result.Resolution.X * Result.Resolution.Y;
     if (PixelCount <= 0 || Result.InnerColorBuffer.Num() != PixelCount ||
+        Result.RevealSurfaceBuffer.Num() != PixelCount ||
         Result.AutoAlphaBuffer.Num() != PixelCount ||
         Result.OuterCoverageBuffer.Num() != PixelCount ||
         Result.OuterIslandIDBuffer.Num() != PixelCount ||
@@ -390,6 +462,16 @@ bool FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
     ConfigureCommon(*BaseReveal, true);
     UpdateReference(Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor,
         BaseReveal, Result.BuildSignature, Result.Resolution);
+
+    UTexture2D* BaseRevealSurface = FindOrCreateTexture(
+        Asset, Layer, EDWCTransparencyTempArtifactKind::BaseRevealSurface, OutError);
+    if (BaseRevealSurface == nullptr) return false;
+    BaseRevealSurface->Source.Init(Result.Resolution.X, Result.Resolution.Y, 1, 1, TSF_BGRA8,
+        reinterpret_cast<const uint8*>(Result.RevealSurfaceBuffer.GetData()));
+    BaseRevealSurface->CompressionSettings = TC_Default;
+    ConfigureCommon(*BaseRevealSurface, false);
+    UpdateReference(Layer, EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+        BaseRevealSurface, Result.BuildSignature, Result.Resolution);
 
     TArray<uint8> ValidHit;
     ValidHit.SetNumUninitialized(PixelCount);
@@ -506,7 +588,7 @@ bool FDWCTransparencyTempAssetStore::CommitRevealArtifact(
     Texture->CompressionSettings = TC_Default;
     ConfigureCommon(*Texture, true);
     UpdateReference(Layer, EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
-        Texture, RevealSignature, Resolution);
+        Texture, BuildCorrectedRevealArtifactSignature(RevealSignature), Resolution);
 #if WITH_EDITORONLY_DATA
     Layer.EditorStageCache.SourceSignature = SourceSignature;
     Layer.EditorStageCache.RevealSignature = RevealSignature;
@@ -514,6 +596,73 @@ bool FDWCTransparencyTempAssetStore::CommitRevealArtifact(
     Layer.EditorStageCache.bRevealReviewed = true;
 #endif
     return true;
+}
+
+EDWCTransparencyCorrectedRevealRestoreResult
+FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
+    const FWetClothingTransparencyLayerData& Layer,
+    const FDWCTransparencySourcePayload& SourcePayload,
+    TArray<FColor>& OutPixels,
+    FString& OutError)
+{
+    check(IsInGameThread());
+    OutPixels.Reset();
+    OutError.Reset();
+
+    const int32 PixelCount = SourcePayload.Resolution.X * SourcePayload.Resolution.Y;
+    if (SourcePayload.BuildSignature.IsEmpty() || SourcePayload.Resolution.X <= 0 ||
+        SourcePayload.Resolution.Y <= 0 || PixelCount <= 0)
+    {
+        OutError = TEXT("The Stage 2 source identity is invalid for Corrected Reveal Color restoration.");
+        return EDWCTransparencyCorrectedRevealRestoreResult::Invalid;
+    }
+
+    const FString ExpectedRevealSignature = BuildCorrectedRevealArtifactSignature(
+        FDWCTransparencySignatureService::BuildRevealSignature(SourcePayload.BuildSignature, Layer));
+    if (!HasCurrentArtifact(
+            Layer,
+            EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
+            ExpectedRevealSignature))
+    {
+        return EDWCTransparencyCorrectedRevealRestoreResult::MissingOrStale;
+    }
+
+    UTexture2D* Texture = FindCurrentArtifact(
+        Layer,
+        EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
+        ExpectedRevealSignature,
+        true);
+    if (Texture == nullptr || !Texture->Source.IsValid())
+    {
+        OutError = TEXT("The current Corrected Reveal Color artifact could not be loaded.");
+        return EDWCTransparencyCorrectedRevealRestoreResult::Invalid;
+    }
+    if (Texture->Source.GetFormat() != TSF_BGRA8 ||
+        Texture->Source.GetSizeX() != SourcePayload.Resolution.X ||
+        Texture->Source.GetSizeY() != SourcePayload.Resolution.Y)
+    {
+        OutError = FString::Printf(
+            TEXT("Corrected Reveal Color '%s' does not match the current Stage 2 BGRA8 resolution."),
+            *GetNameSafe(Texture));
+        return EDWCTransparencyCorrectedRevealRestoreResult::Invalid;
+    }
+
+    TArray64<uint8> RawMipData;
+    if (!Texture->Source.GetMipData(RawMipData, 0) ||
+        RawMipData.Num() != static_cast<int64>(PixelCount) * sizeof(FColor))
+    {
+        OutError = FString::Printf(
+            TEXT("Corrected Reveal Color '%s' has incomplete source pixels."),
+            *GetNameSafe(Texture));
+        return EDWCTransparencyCorrectedRevealRestoreResult::Invalid;
+    }
+
+    OutPixels.SetNumUninitialized(PixelCount);
+    FMemory::Memcpy(
+        OutPixels.GetData(),
+        RawMipData.GetData(),
+        static_cast<SIZE_T>(PixelCount) * sizeof(FColor));
+    return EDWCTransparencyCorrectedRevealRestoreResult::Restored;
 }
 
 UTexture2D* FDWCTransparencyTempAssetStore::FindCurrentArtifact(

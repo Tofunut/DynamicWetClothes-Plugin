@@ -17,11 +17,11 @@ namespace
 
 uint64 FDWCTransparencyType1SourceBindings::GetAllocatedBytes() const
 {
-    uint64 Bytes = ColorsBySourceLayerId.GetAllocatedSize() + Warnings.GetAllocatedSize();
+    uint64 Bytes = SurfacesBySourceLayerId.GetAllocatedSize() + Warnings.GetAllocatedSize();
     // Pixel payloads are shared cache residents. Account them once in the job
     // estimate so scheduler admission reflects the memory held by this snapshot.
     TSet<const FDWCTransparencyMaterialColorBakeResult*> UniqueResults;
-    for (const TPair<FName, TSharedPtr<const FDWCTransparencyMaterialColorBakeResult>>& Pair : ColorsBySourceLayerId)
+    for (const TPair<FName, TSharedPtr<const FDWCTransparencyMaterialColorBakeResult>>& Pair : SurfacesBySourceLayerId)
     {
         if (Pair.Value.IsValid() && !UniqueResults.Contains(Pair.Value.Get()))
         {
@@ -104,6 +104,6 @@ bool FDWCTransparencyType1SourceProvider::AddValidatedBinding(
             *InnerSlot.MaterialSlotName.ToString());
         return false;
     }
-    OutBindings.ColorsBySourceLayerId.Add(MakeSourceLayerId(PriorityIndex), MoveTemp(Result));
+    OutBindings.SurfacesBySourceLayerId.Add(MakeSourceLayerId(PriorityIndex), MoveTemp(Result));
     return true;
 }

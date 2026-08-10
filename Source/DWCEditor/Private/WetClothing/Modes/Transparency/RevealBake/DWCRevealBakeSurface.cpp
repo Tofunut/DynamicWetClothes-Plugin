@@ -7,6 +7,122 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyPaintIslandBuilder.h"
 
+bool FDWCRevealBakeSurfaceFrame::IsValid() const
+{
+    return !Tangent.IsNearlyZero() && !Bitangent.IsNearlyZero() && !Normal.IsNearlyZero();
+}
+
+bool FDWCRevealBakeSurfaceFrameBuilder::BuildInterpolatedFrame(
+    const FDWCRevealBakeSurfaceTriangle& Triangle,
+    const FVector& Barycentric,
+    FDWCRevealBakeSurfaceFrame& OutFrame)
+{
+    OutFrame = FDWCRevealBakeSurfaceFrame();
+    const FVector InterpolatedNormal = (
+        Triangle.Normals[0] * Barycentric.X +
+        Triangle.Normals[1] * Barycentric.Y +
+        Triangle.Normals[2] * Barycentric.Z).GetSafeNormal();
+    if (InterpolatedNormal.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const FVector EdgeU = Triangle.Positions[1] - Triangle.Positions[0];
+    const FVector EdgeV = Triangle.Positions[2] - Triangle.Positions[0];
+    const FVector2D UVU = Triangle.UVs[1] - Triangle.UVs[0];
+    const FVector2D UVV = Triangle.UVs[2] - Triangle.UVs[0];
+    const double Determinant = static_cast<double>(UVU.X) * UVV.Y -
+        static_cast<double>(UVU.Y) * UVV.X;
+
+    FVector RawTangent = FVector::ZeroVector;
+    FVector RawBitangent = FVector::ZeroVector;
+    if (!FMath::IsNearlyZero(Determinant, SMALL_NUMBER))
+    {
+        const double InverseDeterminant = 1.0 / Determinant;
+        RawTangent = (EdgeU * UVV.Y - EdgeV * UVU.Y) * InverseDeterminant;
+        RawBitangent = (EdgeV * UVU.X - EdgeU * UVV.X) * InverseDeterminant;
+    }
+
+    FVector Tangent = (RawTangent - InterpolatedNormal * FVector::DotProduct(RawTangent, InterpolatedNormal)).GetSafeNormal();
+    if (Tangent.IsNearlyZero())
+    {
+        InterpolatedNormal.FindBestAxisVectors(Tangent, RawBitangent);
+        Tangent.Normalize();
+    }
+    if (Tangent.IsNearlyZero())
+    {
+        return false;
+    }
+
+    FVector Bitangent = FVector::CrossProduct(InterpolatedNormal, Tangent).GetSafeNormal();
+    if (Bitangent.IsNearlyZero())
+    {
+        return false;
+    }
+    if (!RawBitangent.IsNearlyZero() && FVector::DotProduct(Bitangent, RawBitangent) < 0.0f)
+    {
+        Bitangent *= -1.0f;
+    }
+
+    OutFrame.Tangent = Tangent;
+    OutFrame.Bitangent = Bitangent;
+    OutFrame.Normal = InterpolatedNormal;
+    return OutFrame.IsValid();
+}
+
+FVector3f FDWCRevealBakeSurfaceFrameBuilder::ReorientTangentNormal(
+    const FVector3f& SourceTangentNormal,
+    const FDWCRevealBakeSurfaceFrame& SourceFrame,
+    const FDWCRevealBakeSurfaceFrame& TargetFrame)
+{
+    const FVector SourceWorldNormal = (
+        SourceFrame.Tangent * SourceTangentNormal.X +
+        SourceFrame.Bitangent * SourceTangentNormal.Y +
+        SourceFrame.Normal * SourceTangentNormal.Z).GetSafeNormal();
+    if (SourceWorldNormal.IsNearlyZero() || !SourceFrame.IsValid() || !TargetFrame.IsValid())
+    {
+        return FVector3f(0.0f, 0.0f, 1.0f);
+    }
+
+    FVector TargetTangentNormal(
+        FVector::DotProduct(SourceWorldNormal, TargetFrame.Tangent),
+        FVector::DotProduct(SourceWorldNormal, TargetFrame.Bitangent),
+        FVector::DotProduct(SourceWorldNormal, TargetFrame.Normal));
+    TargetTangentNormal = TargetTangentNormal.GetSafeNormal();
+    if (TargetTangentNormal.IsNearlyZero())
+    {
+        return FVector3f(0.0f, 0.0f, 1.0f);
+    }
+    // RG encoding reconstructs +Z in the material, so preserve the visible side
+    // of the outer surface even if an imported source surface flips its normal.
+    if (TargetTangentNormal.Z < 0.0f)
+    {
+        TargetTangentNormal *= -1.0f;
+    }
+    return FVector3f(TargetTangentNormal);
+}
+
+FColor FDWCRevealBakeSurfaceFrameBuilder::EncodeRevealSurface(
+    const FVector3f& TargetTangentNormal,
+    const float Metallic,
+    const bool bHasValidSourceHit)
+{
+    FVector3f SafeNormal = TargetTangentNormal.GetSafeNormal();
+    if (SafeNormal.IsNearlyZero())
+    {
+        SafeNormal = FVector3f(0.0f, 0.0f, 1.0f);
+    }
+    const auto EncodeNormalComponent = [](const float Component)
+    {
+        return static_cast<uint8>(FMath::Clamp(FMath::RoundToInt((Component * 0.5f + 0.5f) * 255.0f), 0, 255));
+    };
+    return FColor(
+        EncodeNormalComponent(SafeNormal.X),
+        EncodeNormalComponent(SafeNormal.Y),
+        static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Metallic * 255.0f), 0, 255)),
+        bHasValidSourceHit ? 255 : 0);
+}
+
 void FDWCRevealBakeSurface::Reset()
 {
     LayerId = NAME_None;

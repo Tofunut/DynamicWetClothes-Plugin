@@ -58,6 +58,7 @@ bool FDWCTransparencyIntermediateAssetPolicy::IsIntermediateArtifactKind(
     case EDWCTransparencyTempArtifactKind::CorrectedRevealColor:
     case EDWCTransparencyTempArtifactKind::OuterCoverage:
     case EDWCTransparencyTempArtifactKind::OuterIslandID:
+    case EDWCTransparencyTempArtifactKind::BaseRevealSurface:
         return true;
     default:
         return false;
@@ -195,6 +196,8 @@ void FDWCTransparencyIntermediateAssetPolicy::RepairLoadedReferences(
          Asset.Authored.TransparencyData.MaterialColorCache)
     {
         RepairLoadedObject(GetLoadedObject(Reference.Texture), OutChangedPackages, OutWarnings);
+        RepairLoadedObject(GetLoadedObject(Reference.NormalTexture), OutChangedPackages, OutWarnings);
+        RepairLoadedObject(GetLoadedObject(Reference.MetallicTexture), OutChangedPackages, OutWarnings);
     }
 
     for (const FWetClothingTransparencyLayerData& Layer :

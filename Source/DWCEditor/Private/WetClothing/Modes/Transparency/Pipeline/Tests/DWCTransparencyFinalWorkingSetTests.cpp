@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Misc/AutomationTest.h"
+#include "Misc/SecureHash.h"
 
 #include "Engine/Texture2D.h"
 #include "UObject/Package.h"
@@ -8,6 +9,7 @@
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
+#include "WetClothing/Modes/Transparency/Temp/DWCTransparencyTempAssetStore.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -57,12 +59,60 @@ namespace
         const TArray<FColor>& PackedReveal,
         const TArray<uint8>& ValidHit,
         const TArray<uint8>& Coverage,
-        const TArray<uint16>& IslandIDs)
+        const TArray<uint16>& IslandIDs,
+        const TArray<uint16>* EncodedSourcePriorities = nullptr,
+        const TArray<FFloat16>* HitDistances = nullptr)
     {
+        const int32 PixelCount = Resolution.X * Resolution.Y;
+        check(PackedReveal.Num() == PixelCount);
+        check(ValidHit.Num() == PixelCount);
+        check(Coverage.Num() == PixelCount);
+        check(IslandIDs.Num() == PixelCount);
+
+        TArray<uint16> DefaultSourcePriorities;
+        TArray<FFloat16> DefaultHitDistances;
+        if (EncodedSourcePriorities == nullptr)
+        {
+            DefaultSourcePriorities.SetNumUninitialized(PixelCount);
+            for (int32 Index = 0; Index < PixelCount; ++Index)
+            {
+                DefaultSourcePriorities[Index] = ValidHit[Index] != 0 ? 1 : 0;
+            }
+            EncodedSourcePriorities = &DefaultSourcePriorities;
+        }
+        if (HitDistances == nullptr)
+        {
+            DefaultHitDistances.SetNumUninitialized(PixelCount);
+            for (int32 Index = 0; Index < PixelCount; ++Index)
+            {
+                DefaultHitDistances[Index] = FFloat16(ValidHit[Index] != 0 ? 1.0f : 0.0f);
+            }
+            HitDistances = &DefaultHitDistances;
+        }
+        check(EncodedSourcePriorities->Num() == PixelCount);
+        check(HitDistances->Num() == PixelCount);
+
+        TArray<FColor> PackedRevealSurface;
+        PackedRevealSurface.SetNumUninitialized(PixelCount);
+        for (int32 Index = 0; Index < PixelCount; ++Index)
+        {
+            PackedRevealSurface[Index] = FColor(
+                128,
+                128,
+                0,
+                ValidHit[Index] != 0 ? 255 : 0);
+        }
+
         AddArtifactReference(
             Layer,
             EDWCTransparencyTempArtifactKind::BaseRevealColor,
             MakeArtifactTexture(Resolution, TSF_BGRA8, PackedReveal.GetData()),
+            Signature,
+            Resolution);
+        AddArtifactReference(
+            Layer,
+            EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+            MakeArtifactTexture(Resolution, TSF_BGRA8, PackedRevealSurface.GetData()),
             Signature,
             Resolution);
         AddArtifactReference(
@@ -81,6 +131,18 @@ namespace
             Layer,
             EDWCTransparencyTempArtifactKind::OuterIslandID,
             MakeArtifactTexture(Resolution, TSF_G16, IslandIDs.GetData()),
+            Signature,
+            Resolution);
+        AddArtifactReference(
+            Layer,
+            EDWCTransparencyTempArtifactKind::HitSource,
+            MakeArtifactTexture(Resolution, TSF_G16, EncodedSourcePriorities->GetData()),
+            Signature,
+            Resolution);
+        AddArtifactReference(
+            Layer,
+            EDWCTransparencyTempArtifactKind::HitDistance,
+            MakeArtifactTexture(Resolution, TSF_R16F, HitDistances->GetData()),
             Signature,
             Resolution);
     }
@@ -136,6 +198,66 @@ bool FDWCTransparencyFinalSignatureContractTest::RunTest(const FString& Paramete
     Inputs.AlphaAuthoringSignature = TEXT("ChangedAlpha");
     TestNotEqual(TEXT("Alpha authoring changes invalidate the final signature."),
         Signature, FDWCTransparencySignatureService::BuildFinalSignature(Inputs));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyCorrectedRevealArtifactContractTest,
+    "DWC.Transparency.Pipeline.CorrectedRevealArtifactContract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyCorrectedRevealArtifactContractTest::RunTest(const FString& Parameters)
+{
+    const FIntPoint Resolution(2, 2);
+    FWetClothingTransparencyLayerData Layer;
+    Layer.LayerGuid = FGuid::NewGuid();
+    Layer.TargetSurface.OuterMaterialSlotIndex = 4;
+    FDWCTransparencySourcePayload Source = MakeCanonicalIdentity(
+        Layer,
+        TEXT("CorrectedRevealStage2"),
+        Resolution);
+
+    const FString RevealSignature =
+        FDWCTransparencySignatureService::BuildRevealSignature(Source.BuildSignature, Layer);
+    const FString CorrectedArtifactSignature = FMD5::HashAnsiString(*FString::Printf(
+        TEXT("DWC.Transparency.CorrectedReveal.v2|Reveal=%s"),
+        *RevealSignature));
+    const TArray<FColor> CorrectedPixels = {
+        FColor(10, 20, 30, 40),
+        FColor(50, 60, 70, 80),
+        FColor(90, 100, 110, 120),
+        FColor(130, 140, 150, 160)
+    };
+    AddArtifactReference(
+        Layer,
+        EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
+        MakeArtifactTexture(Resolution, TSF_BGRA8, CorrectedPixels.GetData()),
+        CorrectedArtifactSignature,
+        Resolution);
+
+    TArray<FColor> RestoredPixels;
+    FString Error;
+    TestEqual(
+        TEXT("A current corrected reveal checkpoint restores directly."),
+        FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
+            Layer,
+            Source,
+            RestoredPixels,
+            Error),
+        EDWCTransparencyCorrectedRevealRestoreResult::Restored);
+    TestEqual(TEXT("Corrected reveal RGB and automatic alpha are preserved."),
+        RestoredPixels,
+        CorrectedPixels);
+
+    Layer.EditorStageCache.Artifacts[0].BuildSignature = RevealSignature;
+    TestEqual(
+        TEXT("The pre-alpha-contract checkpoint is treated as stale."),
+        FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
+            Layer,
+            Source,
+            RestoredPixels,
+            Error),
+        EDWCTransparencyCorrectedRevealRestoreResult::MissingOrStale);
     return true;
 }
 
@@ -197,12 +319,38 @@ bool FDWCTransparencyFinalCurrentnessContractTest::RunTest(const FString& Parame
     Baked.SourceWrinkleMaskBakeGuid = WorkingSet.WrinkleDependency.BakeGuid;
     Baked.WrinkleSuppressionSettingsSignature = TEXT("Settings");
 
-    TestTrue(TEXT("Matching baked metadata is current."),
+    TestTrue(TEXT("Manual Color accepts a baked map without a Reveal Surface payload."),
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).IsCurrent());
+    WorkingSet.RevealSurfaceSignature = TEXT("ManualRevealSurfaceIsOptional");
+    Baked.RevealSurfaceBuildSignature = TEXT("LegacyOptionalRevealSurface");
+    TestTrue(TEXT("Manual Color ignores an optional Reveal Surface signature mismatch."),
+        FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).IsCurrent());
+    WorkingSet.RevealSurfaceSignature.Reset();
+    Baked.RevealSurfaceBuildSignature.Reset();
     Baked.SourceWrinkleMaskBuildSignature = TEXT("ChangedWrinkle");
     TestEqual(TEXT("Wrinkle changes have a precise stale reason."),
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).Reason,
         EDWCTransparencyStaleReason::WrinkleDependencyChanged);
+    Baked.SourceWrinkleMaskBuildSignature = TEXT("Wrinkle");
+    Baked.RevealSurfaceMap = NewObject<UTexture2D>();
+    Baked.bContainsRevealNormalRG = true;
+    Baked.bContainsInnerMetallicB = true;
+    Baked.bContainsRevealSurfaceCoverageAlpha = true;
+    WorkingSet.bRequiresRevealSurface = true;
+    WorkingSet.RevealSurfaceSignature = TEXT("RevealSurface");
+    Baked.RevealSurfaceBuildSignature = TEXT("PreviousRevealSurface");
+    TestEqual(TEXT("Raycast Reveal Surface identity has its own stale reason."),
+        FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).Reason,
+        EDWCTransparencyStaleReason::SourceInputsChanged);
+
+    Baked.RevealSurfaceBuildSignature = TEXT("RevealSurface");
+    TestTrue(TEXT("Raycast layers accept a complete Reveal Surface payload."),
+        FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).IsCurrent());
+
+    Baked.RevealSurfaceMap = nullptr;
+    TestEqual(TEXT("Raycast layers require their Reveal Surface runtime payload."),
+        FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).Reason,
+        EDWCTransparencyStaleReason::MissingArtifact);
     return true;
 }
 
@@ -237,23 +385,41 @@ bool FDWCTransparencyAffectedStage4ArtifactRestoreTest::RunTest(const FString& P
         FColor(90, 100, 110, 120), FColor(130, 140, 150, 160)
     };
     const uint8 ValidPixels[PixelCount] = {255, 0, 255, 0};
+    const FColor SurfacePixels[PixelCount] = {
+        FColor(128, 128, 8, 255), FColor(128, 128, 0, 0),
+        FColor(160, 96, 255, 255), FColor(128, 128, 0, 0)};
     const uint8 CoveragePixels[PixelCount] = {255, 255, 0, 0};
     const uint16 IslandPixels[PixelCount] = {4, 4, MAX_uint16, MAX_uint16};
+    const uint16 SourcePriorityPixels[PixelCount] = {1, 0, 3, 0};
+    const FFloat16 HitDistancePixels[PixelCount] = {
+        FFloat16(1.25f), FFloat16(0.0f), FFloat16(2.5f), FFloat16(0.0f)};
 
     UTexture2D* Base = NewObject<UTexture2D>();
     Base->Source.Init(2, 2, 1, 1, TSF_BGRA8,
         reinterpret_cast<const uint8*>(BasePixels));
     UTexture2D* Valid = NewObject<UTexture2D>();
     Valid->Source.Init(2, 2, 1, 1, TSF_G8, ValidPixels);
+    UTexture2D* Surface = NewObject<UTexture2D>();
+    Surface->Source.Init(2, 2, 1, 1, TSF_BGRA8,
+        reinterpret_cast<const uint8*>(SurfacePixels));
     UTexture2D* Coverage = NewObject<UTexture2D>();
     Coverage->Source.Init(2, 2, 1, 1, TSF_G8, CoveragePixels);
     UTexture2D* Islands = NewObject<UTexture2D>();
     Islands->Source.Init(2, 2, 1, 1, TSF_G16,
         reinterpret_cast<const uint8*>(IslandPixels));
+    UTexture2D* HitSource = NewObject<UTexture2D>();
+    HitSource->Source.Init(2, 2, 1, 1, TSF_G16,
+        reinterpret_cast<const uint8*>(SourcePriorityPixels));
+    UTexture2D* HitDistance = NewObject<UTexture2D>();
+    HitDistance->Source.Init(2, 2, 1, 1, TSF_R16F,
+        reinterpret_cast<const uint8*>(HitDistancePixels));
     AddArtifact(EDWCTransparencyTempArtifactKind::BaseRevealColor, Base);
+    AddArtifact(EDWCTransparencyTempArtifactKind::BaseRevealSurface, Surface);
     AddArtifact(EDWCTransparencyTempArtifactKind::ValidHit, Valid);
     AddArtifact(EDWCTransparencyTempArtifactKind::OuterCoverage, Coverage);
     AddArtifact(EDWCTransparencyTempArtifactKind::OuterIslandID, Islands);
+    AddArtifact(EDWCTransparencyTempArtifactKind::HitSource, HitSource);
+    AddArtifact(EDWCTransparencyTempArtifactKind::HitDistance, HitDistance);
 
     FDWCTransparencySourcePayload Identity;
     Identity.LayerGuid = Layer.LayerGuid;
@@ -270,9 +436,16 @@ bool FDWCTransparencyAffectedStage4ArtifactRestoreTest::RunTest(const FString& P
     TestTrue(TEXT("Restore error remains empty."), Error.IsEmpty());
     TestEqual(TEXT("Reveal RGB is preserved."), Restored.InnerColorBuffer[1], FColor(50, 60, 70, 255));
     TestEqual(TEXT("Packed alpha is restored."), Restored.AutoAlphaBuffer[1], static_cast<uint8>(80));
+    TestEqual(TEXT("Reveal Surface payload is restored."), Restored.RevealSurfaceBuffer[2], SurfacePixels[2]);
     TestTrue(TEXT("Valid-hit bit is restored."), Restored.ValidHitBuffer[2]);
     TestEqual(TEXT("Coverage is restored."), Restored.OuterCoverageBuffer[0], static_cast<uint8>(255));
     TestEqual(TEXT("Island identity is restored exactly."), Restored.OuterIslandIDBuffer[0], static_cast<uint16>(4));
+    TestEqual(TEXT("Hit source priority is decoded from the packed Temp artifact."),
+        Restored.SourcePriorityBuffer[2], static_cast<int16>(2));
+    TestEqual(TEXT("No hit source remains explicitly unset."),
+        Restored.SourcePriorityBuffer[1], static_cast<int16>(INDEX_NONE));
+    TestEqual(TEXT("Hit distance is restored from the half-float Temp artifact."),
+        Restored.HitDistanceBuffer[2], 2.5f);
     TestEqual(TEXT("No-hit count is derived from covered texels."), Restored.NoHitCount, 1);
     return true;
 }
@@ -437,10 +610,17 @@ bool FDWCTransparencyAffectedStage4FinalParityTest::RunTest(const FString& Param
     FDWCTransparencySourcePayload Original =
         MakeCanonicalIdentity(Layer, Signature, Resolution);
     Original.InnerColorBuffer.SetNumUninitialized(PixelCount);
+    Original.RevealSurfaceBuffer.SetNumUninitialized(PixelCount);
     Original.AutoAlphaBuffer.SetNumUninitialized(PixelCount);
     Original.OuterCoverageBuffer.SetNumUninitialized(PixelCount);
     Original.OuterIslandIDBuffer.SetNumUninitialized(PixelCount);
     Original.ValidHitBuffer.Init(false, PixelCount);
+    Original.HitDistanceBuffer.SetNumUninitialized(PixelCount);
+    Original.SourcePriorityBuffer.SetNumUninitialized(PixelCount);
+    TArray<uint16> EncodedSourcePriorities;
+    TArray<FFloat16> HitDistances;
+    EncodedSourcePriorities.SetNumUninitialized(PixelCount);
+    HitDistances.SetNumUninitialized(PixelCount);
     for (int32 Index = 0; Index < PixelCount; ++Index)
     {
         const uint8 Alpha = static_cast<uint8>((Index * 37) & 0xff);
@@ -454,13 +634,27 @@ bool FDWCTransparencyAffectedStage4FinalParityTest::RunTest(const FString& Param
         Coverage[Index] = Index < PixelCount - 4 ? 255 : 0;
         Islands[Index] = Coverage[Index] != 0 ? static_cast<uint16>(Index % 4) : MAX_uint16;
         Original.InnerColorBuffer[Index] = Reveal;
+        Original.RevealSurfaceBuffer[Index] = FColor(
+            128,
+            128,
+            0,
+            ValidHit[Index] != 0 ? 255 : 0);
         Original.AutoAlphaBuffer[Index] = Alpha;
         Original.OuterCoverageBuffer[Index] = Coverage[Index];
         Original.OuterIslandIDBuffer[Index] = Islands[Index];
         Original.ValidHitBuffer[Index] = ValidHit[Index] != 0;
+        Original.SourcePriorityBuffer[Index] = ValidHit[Index] != 0
+            ? static_cast<int16>(Index % 3)
+            : INDEX_NONE;
+        Original.HitDistanceBuffer[Index] = static_cast<float>(Index) * 0.125f;
+        EncodedSourcePriorities[Index] = Original.SourcePriorityBuffer[Index] >= 0
+            ? static_cast<uint16>(Original.SourcePriorityBuffer[Index] + 1)
+            : 0;
+        HitDistances[Index] = FFloat16(Original.HitDistanceBuffer[Index]);
     }
     AddCanonicalArtifacts(
-        Layer, Signature, Resolution, PackedReveal, ValidHit, Coverage, Islands);
+        Layer, Signature, Resolution, PackedReveal, ValidHit, Coverage, Islands,
+        &EncodedSourcePriorities, &HitDistances);
 
     FDWCTransparencySourcePayload Restored;
     FString Error;
@@ -472,10 +666,16 @@ bool FDWCTransparencyAffectedStage4FinalParityTest::RunTest(const FString& Param
         Restored.InnerColorBuffer, Original.InnerColorBuffer);
     TestEqual(TEXT("Alpha payload is byte-identical after restore."),
         Restored.AutoAlphaBuffer, Original.AutoAlphaBuffer);
+    TestEqual(TEXT("Reveal Surface payload is byte-identical after restore."),
+        Restored.RevealSurfaceBuffer, Original.RevealSurfaceBuffer);
     TestEqual(TEXT("Coverage payload is byte-identical after restore."),
         Restored.OuterCoverageBuffer, Original.OuterCoverageBuffer);
     TestEqual(TEXT("Island payload is byte-identical after restore."),
         Restored.OuterIslandIDBuffer, Original.OuterIslandIDBuffer);
+    TestEqual(TEXT("Hit-distance payload is preserved after restore."),
+        Restored.HitDistanceBuffer, Original.HitDistanceBuffer);
+    TestEqual(TEXT("Hit-source priority payload is preserved after restore."),
+        Restored.SourcePriorityBuffer, Original.SourcePriorityBuffer);
 
     TArray<uint8> ManualPremultiplied;
     TArray<uint8> ManualWeight;
@@ -570,7 +770,9 @@ bool FDWCTransparencyAffectedStage4MemoryRegressionTest::RunTest(const FString& 
             FirstBytes);
     }
 
-    const uint64 PerPixelUpperBound = 9;
+    // Canonical Stage 2 now retains color, alpha/hit data, and one packed
+    // Reveal Surface payload (normal RG, metallic B, coverage A).
+    const uint64 PerPixelUpperBound = 24;
     const uint64 FixedAllowance = 64ull * 1024ull;
     TestTrue(
         TEXT("Canonical affected source remains within the packed per-pixel memory contract."),
@@ -578,8 +780,8 @@ bool FDWCTransparencyAffectedStage4MemoryRegressionTest::RunTest(const FString& 
     const uint64 Projected4KBytes =
         4096ull * 4096ull * PerPixelUpperBound + FixedAllowance;
     TestTrue(
-        TEXT("One restored 4K canonical source remains below the 160 MiB scheduler envelope."),
-        Projected4KBytes < 160ull * 1024ull * 1024ull);
+        TEXT("One restored 4K canonical source remains below the 512 MiB scheduler envelope."),
+        Projected4KBytes < 512ull * 1024ull * 1024ull);
     return true;
 }
 

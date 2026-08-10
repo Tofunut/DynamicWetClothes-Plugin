@@ -636,6 +636,8 @@ FDWCRevealBakeRayHit FDWCRevealBakeRayProjector::MakeRayHit(
     Hit.bHit = true;
     Hit.Pixel = Sample.Pixel;
     Hit.SourceLayerId = Candidate.SourceSurface != nullptr ? Candidate.SourceSurface->LayerId : NAME_None;
+    Hit.OuterTriangleIndex = Sample.TriangleIndex;
+    Hit.OuterBarycentric = Sample.Barycentric;
     Hit.SourceTriangleIndex = Candidate.Triangle != nullptr ? Candidate.Triangle->TriangleIndex : INDEX_NONE;
     Hit.SourceMaterialSlotIndex = Candidate.Triangle != nullptr ? Candidate.Triangle->MaterialSlotIndex : INDEX_NONE;
     Hit.Distance = Candidate.Distance;
@@ -646,6 +648,7 @@ FDWCRevealBakeRayHit FDWCRevealBakeRayProjector::MakeRayHit(
         Hit.Position = InterpolateVector(Candidate.Barycentric, Candidate.Triangle->Positions);
         Hit.Normal = InterpolateVector(Candidate.Barycentric, Candidate.Triangle->Normals).GetSafeNormal();
         Hit.SourceUV = InterpolateVector2D(Candidate.Barycentric, Candidate.Triangle->UVs);
+        Hit.SourceBarycentric = Candidate.Barycentric;
     }
 
     return Hit;

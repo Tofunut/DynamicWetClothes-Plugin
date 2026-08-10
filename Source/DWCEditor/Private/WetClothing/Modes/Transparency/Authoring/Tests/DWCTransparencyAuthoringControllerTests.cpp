@@ -36,6 +36,7 @@ namespace
             ContextAction.Context.MaterialSlotIndex = 2;
             ContextAction.Context.UVChannelIndex = 1;
             ContextAction.Context.PaintTarget = Target;
+            ContextAction.Context.bSurfacePaintingEnabled = true;
             Store->Dispatch(ContextAction);
 
             FDWCSetTransparencyPaintAction PaintAction;
@@ -49,13 +50,12 @@ namespace
             Controller->HandleSessionStateChanged(Store->GetState());
         }
 
-        void SetRevealPaintEnabled(const bool bEnabled)
+        void SetSurfacePaintingEnabled(const bool bEnabled)
         {
-            FDWCSetTransparencyPaintAction PaintAction;
-            PaintAction.bRevealPaint = true;
-            PaintAction.Paint = Store->GetState().Transparency.RevealPaint;
-            PaintAction.Paint.bEnabled = bEnabled;
-            Store->Dispatch(PaintAction);
+            FDWCSetTransparencyEditContextAction ContextAction;
+            ContextAction.Context = Store->GetState().Transparency.EditContext;
+            ContextAction.Context.bSurfacePaintingEnabled = bEnabled;
+            Store->Dispatch(ContextAction);
             Controller->HandleSessionStateChanged(Store->GetState());
         }
 
@@ -136,32 +136,32 @@ bool FDWCTransparencyAuthoringControllerRevealCancelTest::RunTest(const FString&
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FDWCTransparencyAuthoringControllerRevealToggleTest,
-    "DWC.Editor.Transparency.Authoring.RevealToggleLifecycle",
+    FDWCTransparencyAuthoringControllerRevealInputAvailabilityTest,
+    "DWC.Editor.Transparency.Authoring.RevealInputAvailability",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FDWCTransparencyAuthoringControllerRevealToggleTest::RunTest(const FString& Parameters)
+bool FDWCTransparencyAuthoringControllerRevealInputAvailabilityTest::RunTest(const FString& Parameters)
 {
     FTransparencyAuthoringFixture Fixture;
     Fixture.SetContext(EDWCTransparencyPaintTarget::RevealColor);
 
     const FDWCTransparencyEditContext OriginalContext =
         Fixture.Store->GetState().Transparency.EditContext;
-    Fixture.SetRevealPaintEnabled(false);
+    Fixture.SetSurfacePaintingEnabled(false);
 
-    TestEqual(TEXT("Disabling Reveal Paint keeps the reveal target context"),
+    TestEqual(TEXT("An unavailable reveal working map keeps the reveal target context"),
               Fixture.Store->GetState().Transparency.EditContext.PaintTarget,
               EDWCTransparencyPaintTarget::RevealColor);
-    TestFalse(TEXT("Disabled Reveal Paint blocks stroke begin"),
+    TestFalse(TEXT("An unavailable reveal working map blocks stroke begin"),
               Fixture.Controller->CanBeginSurfaceInteraction(Fixture.MakeHit(FVector2D(0.2, 0.2))));
-    TestFalse(TEXT("Disabling Reveal Paint does not create an interaction"),
+    TestFalse(TEXT("An unavailable reveal working map does not create an interaction"),
               Fixture.Controller->IsInteracting());
 
-    Fixture.SetRevealPaintEnabled(true);
-    TestEqual(TEXT("Re-enabling Reveal Paint preserves the context"),
+    Fixture.SetSurfacePaintingEnabled(true);
+    TestEqual(TEXT("A ready reveal working map preserves the context"),
               Fixture.Store->GetState().Transparency.EditContext.PaintTarget,
               OriginalContext.PaintTarget);
-    TestTrue(TEXT("Re-enabling Reveal Paint restores stroke input"),
+    TestTrue(TEXT("A ready reveal working map restores stroke input"),
              Fixture.Controller->CanBeginSurfaceInteraction(Fixture.MakeHit(FVector2D(0.2, 0.2))));
 
     Fixture.Controller->BeginSurfaceInteraction(Fixture.MakeHit(FVector2D(0.2, 0.2)));

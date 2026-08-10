@@ -11,6 +11,7 @@
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinklePalettePanel.h"
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleUVPanel.h"
 #include "WetClothing/Modes/Wrinkle/Editor/WetWrinklePreviewController.h"
+#include "WetClothing/Modes/Wrinkle/Generate/SWetWrinkleTextureGeneratorDialog.h"
 #include "WetClothing/WCAEditor/WCAEditorTypes.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/WCAEditor/UI/UVView/SWCAUVView.h"
@@ -47,12 +48,6 @@ struct FAssetData;
 struct FWetWrinklePatchPlacement;
 struct FWetProceduralRidgeStroke;
 struct FWetProceduralRidgeStrokePoint;
-
-struct FWetWrinkleBrushPresetOption
-{
-    FText DisplayName;
-    FSoftObjectPath TexturePath;
-};
 
 class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
 {

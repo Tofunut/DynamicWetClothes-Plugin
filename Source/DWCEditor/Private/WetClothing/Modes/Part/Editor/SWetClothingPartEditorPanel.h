@@ -133,7 +133,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     const FSlateBrush*        GetUVSelectionToolBrush(FUVSelectionToolItemPtr Item) const;
     FSlateColor               GetUVSelectionToolIconColor(FUVSelectionToolItemPtr Item) const;
 
-    FText                 GetSelectedMaterialSlotText() const;
     FText                 GetMaterialSlotStatusText(int32 MaterialSlotIndex) const;
     FSlateColor           GetMaterialSlotStatusColor(int32 MaterialSlotIndex) const;
     FText                 GetMaterialSlotStatusTooltip(int32 MaterialSlotIndex) const;
@@ -145,7 +144,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FSlateColor           GetMaterialSlotRowAccentColor(int32 MaterialSlotIndex) const;
     bool                  IsMaterialSlotIncludedInDataUVLayout(int32 MaterialSlotIndex) const;
     bool                  DoesMaterialSlotHaveDataUVWarnings(int32 MaterialSlotIndex) const;
-    bool                  DoesMaterialSlotHaveDataUVDiagnostics(int32 MaterialSlotIndex) const;
     bool                  HasCompleteDataUVDiagnosticRecords(int32 MaterialSlotIndex) const;
     bool                  IsMaterialSlotPartMapComplete(int32 MaterialSlotIndex) const;
     bool                  DoesMaterialSlotNeedPartMapAttention(int32 MaterialSlotIndex) const;
@@ -153,13 +151,10 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSet<int32>           CollectExistingDataUVSlotIndices() const;
     TSet<int32>           CollectSelectableDataUVOperationSlotIndices() const;
     TSet<int32>           CollectSelectedGenerateDataUVSlotIndices() const;
-    TSet<int32>           CollectSelectedUpdateDataUVSlotIndices() const;
     bool                  IsMissingPreparedMeshRecoveryRequired() const;
     bool                  ConfirmMissingPreparedMeshRecovery() const;
     bool                  IsDataUVOperationSelectable(int32 MaterialSlotIndex) const;
-    ECheckBoxState        GetDataUVOperationCheckState(int32 MaterialSlotIndex) const;
     void                  HandleDataUVOperationCheckStateChanged(ECheckBoxState NewState, int32 MaterialSlotIndex);
-    ECheckBoxState        GetAllDataUVOperationCheckState() const;
     void                  HandleAllDataUVOperationCheckStateChanged(ECheckBoxState NewState);
     void                  SyncDataUVOperationSelection();
     FDWCDataUVBuildResult GenerateDataUVForTargetSlots(
@@ -174,12 +169,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                               GetDataUVOperationButtonTooltip() const;
     bool                                IsDataUVOperationEnabled() const;
     FReply                              HandleDataUVOperationClicked();
-    FText                               GetSelectedTextureText() const;
-    FText                               GetRenderProfileBakeSourceText() const;
-    FText                               GetRenderProfileBakeSlotsText() const;
-    FText                               GetRenderProfileBakeStatusText() const;
-    FText                               GetRenderProfileBakeSettingsText() const;
-    FText                               GetOriginalUVChannelText() const;
     float                               GetUVViewBackgroundTextureOpacity() const;
     float                               GetUVViewIslandLineOpacity() const;
     float                               GetUVViewIslandLineThicknessScale() const;
@@ -211,8 +200,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     bool                                IsMaterialSlotDataUVReadyForEditing(int32 MaterialSlotIndex) const;
     bool                                IsSelectedMaterialSlotPartEditingReady() const;
     bool                                IsAssignUVIslandToWetPartEnabled() const;
-    FText                               GetBlendModeText(FWetPartEntryPtr Item) const;
-    FText                               GetWetnessProfileButtonText(FWetPartEntryPtr Item) const;
     FString                             GetWetnessProfileObjectPath(FWetPartEntryPtr Item) const;
     bool                                IsWetnessProfileControlEnabled(FWetPartEntryPtr Item) const;
     bool                                IsWetnessProfileBrowseEnabled(FWetPartEntryPtr Item) const;
@@ -242,27 +229,18 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void                                ResetSelectedDropletDetailSizeToApplied();
     void                                ResetSelectedDropletFlowDetailSizeToApplied();
     void                                HandleSurfaceWaterTilingWindowClosed(const TSharedRef<SWindow>& Window);
-    ECheckBoxState                      GetSelectedDropletStampSizeOverrideCheckState() const;
     void                                HandleSelectedDropletStampSizeOverrideChanged(ECheckBoxState NewState);
     bool                                IsSelectedDropletStampSizeOverrideEnabled() const;
-    float                               GetSelectedDropletRadiusScale() const;
-    ECheckBoxState                      GetSelectedDropletFlowStampSizeOverrideCheckState() const;
     void                                HandleSelectedDropletFlowStampSizeOverrideChanged(ECheckBoxState NewState);
     bool                                IsSelectedDropletFlowStampSizeOverrideEnabled() const;
-    float                               GetSelectedDropletFlowSizeScale() const;
     float                               GetSelectedDropletDetailSize() const;
-    FText                               GetSelectedDropletDetailSizeText() const;
     float                               GetSelectedDropletFlowDetailSize() const;
-    FText                               GetSelectedDropletFlowDetailSizeText() const;
     void                                HandleSelectedDropletRadiusScaleChanged(float InValue);
     void                                HandleSelectedDropletFlowSizeScaleChanged(float InValue);
     void                                HandleSelectedDropletDetailSizeChanged(float InValue);
     void                                HandleSelectedDropletFlowDetailSizeChanged(float InValue);
-    ECheckBoxState                      GetSurfaceWaterPreviewCoverageModeState(EDWCSurfaceWaterTilingPreviewCoverageMode Mode) const;
     void                                HandleSurfaceWaterPreviewCoverageModeChanged(ECheckBoxState NewState, EDWCSurfaceWaterTilingPreviewCoverageMode Mode);
-    ECheckBoxState                      GetSurfaceWaterPreviewDisplayModeState(EDWCSurfaceWaterTilingPreviewDisplayMode Mode) const;
     void                                HandleSurfaceWaterPreviewDisplayModeChanged(ECheckBoxState NewState, EDWCSurfaceWaterTilingPreviewDisplayMode Mode);
-    EVisibility                         GetSingleCirclePreviewVisibility() const;
     ECheckBoxState                      GetShowPartColorsCheckState() const;
     void                                HandleShowPartColorsChanged(ECheckBoxState NewState);
     float                               GetPartColorIntensity() const;
@@ -274,7 +252,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FReply                              HandleSaveAssetClicked();
     FReply                              HandleBakeAllMapsClicked();
     bool                                IsRenderProfileBakeSourceValid() const;
-    bool                                CanBakeAnyRenderProfileData() const;
     FReply                              HandleBakeRenderProfileDataClicked();
     UTexture*                           ResolveSelectedMaterialTexture() const;
     UTexture*                           ResolveTextureAddressTexture() const;

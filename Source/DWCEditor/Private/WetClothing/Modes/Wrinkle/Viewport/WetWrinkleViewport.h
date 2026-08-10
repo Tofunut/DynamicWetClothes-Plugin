@@ -8,6 +8,7 @@
 #include "UObject/WeakObjectPtr.h"
 #include "WetClothing/Foundation/Preview/Session/DWCEditorPreviewSession.h"
 #include "WetClothing/Foundation/Preview/Orchestration/DWCEditorPreviewOrchestrator.h"
+#include "WetClothing/Foundation/Preview/Orchestration/DWCEditorPreviewMaterialBinding.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryTypes.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitTypes.h"
@@ -33,6 +34,7 @@ class FPrimitiveDrawInterface;
 class FWetWrinkleViewportClient;
 class STextBlock;
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class USkeletalMesh;
 class USkeletalMeshComponent;
 class UTexture;
@@ -245,6 +247,11 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     void InitializePreviewSession();
     void HandlePreviewSessionSlotsChanged();
     void HandlePreviewSessionMaterialReady(int32 MaterialSlotIndex, UMaterialInstanceDynamic* PreviewMID);
+    UMaterialInterface* ResolvePreviewMaterialForSlot(
+        const FDWCEditorPreviewSlotState& SlotState,
+        TConstArrayView<int32> PreviewMaterialSlotIndices) const;
+    bool ApplyPreviewMaterialToMeshSlot(int32 MaterialSlotIndex, UMaterialInterface* MaterialToApply);
+    void InvalidatePreviewMaterialAssignmentCache();
     void ApplyPreviewMaterialsToMesh();
     void MarkPreviewMaterialsNeedReapply();
     void RefreshWrinklePreviewMaterials();
@@ -275,11 +282,16 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     bool EnsurePatchHoverPreviewState(int32 MaterialSlotIndex, int32 UVChannelIndex);
     bool SchedulePatchHoverPreview();
     void InvalidatePatchHoverRequest();
+    void CancelPatchHoverAsyncWork();
+    void ClearPatchHoverPresentation(bool bPreserveCommitHandoff);
+    static bool IsSurfaceHitAnchoredAtDescriptor(
+        const FWetWrinkleSurfaceHit& SurfaceHit,
+        const FDWCEditorWrinklePatchDescriptor& Descriptor);
     void HandlePatchHoverUploadStatus(
         const FDWCEditorTextureUploadTicket& UploadTicket,
         uint64 RequestSerial,
         EDWCEditorTextureUploadStatus Status);
-    bool CommitPresentedPatch();
+    bool CommitPresentedPatch(const FWetWrinkleSurfaceHit* ExpectedSurfaceHit = nullptr);
     void CompletePatchHoverHandoff(
         int32 MaterialSlotIndex,
         int32 UVChannelIndex,
@@ -324,12 +336,18 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     uint64 AccumulatedPreviewUseSerial = 0;
     FWetProceduralRidgeTransientPreviewState TransientProceduralPreviewState;
     FWetWrinklePatchHoverPreviewState PatchHoverPreviewState;
+    FString PatchPreviewValidationError;
     TSharedPtr<STextBlock> OverlayText;
     FDWCEditorSpatialLease SpatialLease;
     FDWCEditorSpatialHandle SpatialHandle;
     uint64 PreviewMeshRefreshCount = 0;
     uint64 AccumulatedPreviewRebuildCount = 0;
     uint64 HitTriangleBuildCount = 0;
+    FDWCEditorPreviewMaterialBindingCache PreviewMaterialBindingCache;
+    uint64 PreviewMaterialAssignmentCheckCount = 0;
+    uint64 PreviewMaterialAssignmentWriteCount = 0;
+    uint64 PreviewMaterialAssignmentSkipCount = 0;
+    uint64 PreviewMaterialAssignmentCacheHitCount = 0;
     int32 LastAppliedActivePreviewMaterialSlot = INDEX_NONE;
     bool bPreviewMaterialsNeedReapply = true;
     bool bPreviewSuspended = false;

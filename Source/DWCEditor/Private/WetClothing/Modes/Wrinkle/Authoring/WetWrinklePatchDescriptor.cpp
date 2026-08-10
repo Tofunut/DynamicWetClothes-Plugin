@@ -202,6 +202,34 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
     return true;
 }
 
+bool FDWCEditorWrinklePatchDescriptorBuilder::ValidatePlacement(
+    const FWetWrinklePatchPlacement& Placement,
+    const int32 UVChannelIndex,
+    FDWCEditorWrinklePatchValidationResult& OutResult)
+{
+    OutResult = {};
+    if (!Placement.HasValidSurfaceAnchor() || !Placement.HasValidSurfaceFootprint() ||
+        !Placement.HasValidSurfaceFrame() || Placement.WrinkleNormalTexture == nullptr)
+    {
+        OutResult.Status = EDWCEditorWrinklePatchValidationStatus::InvalidSurfaceContract;
+        OutResult.Error = TEXT("The authored patch has no valid physical surface contract.");
+        return false;
+    }
+
+    if (!BuildFromPlacement(Placement, UVChannelIndex, OutResult.Descriptor, &OutResult.Error))
+    {
+        OutResult.Status = EDWCEditorWrinklePatchValidationStatus::InvalidDescriptor;
+        if (OutResult.Error.IsEmpty())
+        {
+            OutResult.Error = TEXT("The authored patch descriptor is invalid.");
+        }
+        return false;
+    }
+
+    OutResult.Status = EDWCEditorWrinklePatchValidationStatus::Valid;
+    return true;
+}
+
 bool FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInput(
     const FDWCEditorWrinklePatchDescriptor& Descriptor,
     const FDWCEditorSpatialHandle& SpatialHandle,

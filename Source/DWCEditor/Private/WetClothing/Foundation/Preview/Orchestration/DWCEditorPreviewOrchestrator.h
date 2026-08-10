@@ -28,7 +28,7 @@ class FDWCEditorPreviewOrchestrator final
     void SetShowSavedCrossLayer(bool bShow);
     void SetPreviewWetness(float PreviewWetness);
 
-    void SetLiveLayer(int32 MaterialSlotIndex, FDWCEditorPreviewLayer Layer);
+    bool SetLiveLayer(int32 MaterialSlotIndex, FDWCEditorPreviewLayer Layer);
     void ClearLiveLayer(int32 MaterialSlotIndex, EDWCEditorPreviewLayerKind LayerKind);
     void ClearLiveLayers(int32 MaterialSlotIndex);
     void ClearAllLiveLayers();
@@ -39,6 +39,8 @@ class FDWCEditorPreviewOrchestrator final
 
     uint64 GetComposeCount() const { return ComposeCount; }
     uint64 GetNoChangeCount() const { return NoChangeCount; }
+    uint64 GetLiveLayerUpdateCount() const { return LiveLayerUpdateCount; }
+    uint64 GetIdenticalLiveLayerSkipCount() const { return IdenticalLiveLayerSkipCount; }
 
   private:
     FDWCEditorPreviewLayerStack BuildStack(int32 MaterialSlotIndex) const;
@@ -57,4 +59,6 @@ class FDWCEditorPreviewOrchestrator final
     bool bShowSavedCrossLayer = true;
     uint64 ComposeCount = 0;
     uint64 NoChangeCount = 0;
+    uint64 LiveLayerUpdateCount = 0;
+    uint64 IdenticalLiveLayerSkipCount = 0;
 };

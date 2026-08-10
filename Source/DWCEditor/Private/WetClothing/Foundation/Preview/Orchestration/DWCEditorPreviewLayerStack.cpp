@@ -25,6 +25,28 @@ namespace
         }
         Bindings.Add(Binding);
     }
+
+    template <typename BindingType, int32 InlineSize, typename EqualityPredicate>
+    bool AreBindingArraysEqual(
+        const TArray<BindingType, TInlineAllocator<InlineSize>>& A,
+        const TArray<BindingType, TInlineAllocator<InlineSize>>& B,
+        EqualityPredicate&& Equal)
+    {
+        if (A.Num() != B.Num())
+        {
+            return false;
+        }
+
+        for (int32 Index = 0; Index < A.Num(); ++Index)
+        {
+            if (!Equal(A[Index], B[Index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 } // namespace
 
 void FDWCEditorPreviewLayer::AddScalar(
@@ -46,6 +68,45 @@ void FDWCEditorPreviewLayer::AddVector(
 void FDWCEditorPreviewLayer::AddTexture(const FName ParameterName, UTexture* Value)
 {
     Textures.Add({ ParameterName, Value });
+}
+
+bool FDWCEditorPreviewLayer::IsEquivalentTo(const FDWCEditorPreviewLayer& Other) const
+{
+    if (Kind != Other.Kind ||
+        MaterialSlotIndex != Other.MaterialSlotIndex ||
+        AuthoringRevision != Other.AuthoringRevision ||
+        ResourceRevision != Other.ResourceRevision ||
+        bEnabled != Other.bEnabled)
+    {
+        return false;
+    }
+
+    return AreBindingArraysEqual(
+               Scalars,
+               Other.Scalars,
+               [](const FDWCEditorPreviewScalarBinding& A, const FDWCEditorPreviewScalarBinding& B)
+               {
+                   return A.ParameterName == B.ParameterName &&
+                          A.Value == B.Value &&
+                          A.ResetValue == B.ResetValue;
+               }) &&
+           AreBindingArraysEqual(
+               Vectors,
+               Other.Vectors,
+               [](const FDWCEditorPreviewVectorBinding& A, const FDWCEditorPreviewVectorBinding& B)
+               {
+                   return A.ParameterName == B.ParameterName &&
+                          A.Value == B.Value &&
+                          A.ResetValue == B.ResetValue;
+               }) &&
+           AreBindingArraysEqual(
+               Textures,
+               Other.Textures,
+               [](const FDWCEditorPreviewTextureBinding& A, const FDWCEditorPreviewTextureBinding& B)
+               {
+                   return A.ParameterName == B.ParameterName &&
+                          A.Value.Get() == B.Value.Get();
+               });
 }
 
 bool FDWCEditorPreviewParameterSet::IsEmpty() const

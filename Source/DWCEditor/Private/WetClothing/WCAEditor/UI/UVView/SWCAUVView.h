@@ -56,7 +56,9 @@ class SWCAUVView : public SLeafWidget
     void                SetSelectedIslands(const TSet<int32>& InUVIslandIDs);
     void                SetIslandColors(const TMap<int32, FLinearColor>& InIslandColors);
     void                SetHiddenUVIslandIDs(const TSet<int32>& InUVIslandIDs);
-    void                SetCircleMarkers(const TArray<FWCAUVViewCircleMarker>& InCircleMarkers);
+    bool                SetPersistentCircleMarkers(const TArray<FWCAUVViewCircleMarker>& InCircleMarkers);
+    bool                SetHoverCircleMarker(const TOptional<FWCAUVViewCircleMarker>& InCircleMarker);
+    bool                ClearHoverCircleMarker();
     void                SetBackgroundTexture(UTexture* InTexture);
     void                SetDrawBackgroundTexture(bool bInDrawBackgroundTexture);
     void                SetBackgroundTextureOpacity(float InOpacity);
@@ -171,7 +173,8 @@ class SWCAUVView : public SLeafWidget
     TSet<int32>                             SelectedUVIslandIDs;
     TMap<int32, FLinearColor>               IslandColors;
     TSet<int32>                             HiddenUVIslandIDs;
-    TArray<FWCAUVViewCircleMarker>          CircleMarkers;
+    TArray<FWCAUVViewCircleMarker>          PersistentCircleMarkers;
+    TOptional<FWCAUVViewCircleMarker>       HoverCircleMarker;
     FOnWetClothingUVIslandSelectionChanged  OnIslandSelectionChanged;
     FSlateBrush                             BackgroundTextureBrush;
     TWeakObjectPtr<UTexture>                BackgroundTexture;

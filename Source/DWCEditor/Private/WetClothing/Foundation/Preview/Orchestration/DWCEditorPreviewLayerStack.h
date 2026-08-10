@@ -58,6 +58,7 @@ struct FDWCEditorPreviewLayer
         const FLinearColor& Value,
         const FLinearColor& ResetValue = FLinearColor::Black);
     void AddTexture(FName ParameterName, UTexture* Value);
+    bool IsEquivalentTo(const FDWCEditorPreviewLayer& Other) const;
 };
 
 /** Flattened parameter set consumed by a preview MID. */

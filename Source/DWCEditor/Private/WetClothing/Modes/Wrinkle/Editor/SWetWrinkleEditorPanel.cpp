@@ -44,7 +44,7 @@
 #include "WetClothing/Modes/Part/Partition/WetPartEditingService.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
 #include "WetClothing/Modes/Wrinkle/Correction/SWetWrinkleNormalCorrectionDialog.h"
-#include "WetClothing/Modes/Wrinkle/Generate/WetWrinkleTextureGenerator.h"
+#include "WetClothing/Modes/Wrinkle/Generate/SWetWrinkleTextureGeneratorDialog.h"
 #include "WetClothing/Modes/Wrinkle/Editor/WetWrinkleEditorSettings.h"
 #include "WetClothing/Modes/Wrinkle/Authoring/WetWrinkleAuthoringController.h"
 #include "WetClothing/Modes/Wrinkle/Authoring/WetWrinkleBrushConstants.h"
@@ -59,7 +59,6 @@
 #include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/SNullWidget.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -72,7 +71,6 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STableRow.h"
-#include "UObject/GCObject.h"
 #include "Widgets/SWindow.h"
 #include "Framework/Application/SlateApplication.h"
 
@@ -80,35 +78,6 @@
 
 namespace
 {
-    DECLARE_DELEGATE_RetVal_OneParam(FReply, FOnWetWrinkleTextureTileContextMenu, const FPointerEvent&);
-
-    class SWetWrinkleTexturePaletteTile : public SCompoundWidget
-    {
-      public:
-        SLATE_BEGIN_ARGS(SWetWrinkleTexturePaletteTile) {}
-        SLATE_DEFAULT_SLOT(FArguments, Content)
-        SLATE_EVENT(FOnWetWrinkleTextureTileContextMenu, OnContextMenu)
-        SLATE_END_ARGS()
-
-        void Construct(const FArguments& InArgs)
-        {
-            OnContextMenu = InArgs._OnContextMenu;
-            ChildSlot[InArgs._Content.Widget];
-        }
-
-        virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
-        {
-            if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && OnContextMenu.IsBound())
-            {
-                return OnContextMenu.Execute(MouseEvent);
-            }
-            return SCompoundWidget::OnMouseButtonUp(MyGeometry, MouseEvent);
-        }
-
-      private:
-        FOnWetWrinkleTextureTileContextMenu OnContextMenu;
-    };
-
     float WrapWetRidgeDelta(const float Delta)
     {
         return Delta - FMath::RoundToFloat(Delta);
@@ -130,8 +99,6 @@ namespace
     {
         return Asset != nullptr ? Asset->GetDWCDataUVChannelIndex() : INDEX_NONE;
     }
-    constexpr int32 WetWrinkleGeneratedPreviewMaxResolution = 1024;
-    constexpr float WetWrinkleGeneratedPreviewRebuildDelaySeconds = 0.1f;
     constexpr int32 WetWrinkleUVIslandCacheLimit = 8;
 
     FText FormatWetWrinkleBrushSizeCm(float SizeCm)
@@ -141,609 +108,6 @@ namespace
         Options.MaximumFractionalDigits = 1;
         return FText::AsNumber(SizeCm, &Options);
     }
-
-
-    DECLARE_DELEGATE_OneParam(FOnWetWrinkleGeneratedTextureFloatValueChanged, float);
-
-    class SWetWrinkleZoomableImage : public SCompoundWidget
-    {
-      public:
-        SLATE_BEGIN_ARGS(SWetWrinkleZoomableImage) {}
-        SLATE_ARGUMENT(const FSlateBrush*, Image)
-        SLATE_END_ARGS()
-
-        void Construct(const FArguments& InArgs)
-        {
-            ImageBrush = InArgs._Image;
-
-            ChildSlot
-                [SNew(SBorder)
-                     .Padding(0.0f)
-                     .Clipping(EWidgetClipping::ClipToBounds)
-                         [SAssignNew(ImageScaleBox, SScaleBox)
-                              .Stretch(EStretch::ScaleToFit)
-                              .StretchDirection(EStretchDirection::Both)
-                              .RenderTransform(this, &SWetWrinkleZoomableImage::GetImageRenderTransform)
-                              .RenderTransformPivot(FVector2D(0.5f, 0.5f))
-                                  [SAssignNew(ImageWidget, SImage)
-                                       .Image(ImageBrush)]]];
-        }
-
-        virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
-        {
-            const float WheelDelta = MouseEvent.GetWheelDelta();
-            if (FMath::IsNearlyZero(WheelDelta))
-            {
-                return FReply::Handled();
-            }
-
-            Zoom = FMath::Clamp(Zoom * FMath::Pow(1.15f, WheelDelta), 0.5f, 8.0f);
-            return FReply::Handled();
-        }
-
-        void SetImage(const FSlateBrush* InImageBrush)
-        {
-            ImageBrush = InImageBrush;
-            if (ImageWidget.IsValid())
-            {
-                ImageWidget->SetImage(ImageBrush);
-            }
-            if (ImageScaleBox.IsValid())
-            {
-                ImageScaleBox->Invalidate(EInvalidateWidgetReason::Paint);
-            }
-        }
-
-      private:
-        TOptional<FSlateRenderTransform> GetImageRenderTransform() const
-        {
-            return FSlateRenderTransform(Zoom);
-        }
-
-      private:
-        const FSlateBrush* ImageBrush = nullptr;
-        TSharedPtr<SImage> ImageWidget;
-        TSharedPtr<SScaleBox> ImageScaleBox;
-        float Zoom = 1.0f;
-    };
-
-    class SWetWrinkleTextureGeneratorDialog : public SCompoundWidget, public FGCObject
-    {
-      public:
-        SLATE_BEGIN_ARGS(SWetWrinkleTextureGeneratorDialog) {}
-        SLATE_ARGUMENT(TSharedPtr<SWindow>, ParentWindow)
-        SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
-        SLATE_ARGUMENT(int32, MaterialSlotIndex)
-        SLATE_ARGUMENT(int32, UVChannelIndex)
-        SLATE_ARGUMENT(int32, Resolution)
-        SLATE_ARGUMENT(TArray<TSharedPtr<FWetWrinkleBrushPresetOption>>, BaseNormalOptions)
-        SLATE_END_ARGS()
-
-        void Construct(const FArguments& InArgs)
-        {
-            ParentWindow = InArgs._ParentWindow;
-            WetClothingAsset = InArgs._WetClothingAsset;
-            MaterialSlotIndex = InArgs._MaterialSlotIndex;
-            UVChannelIndex = InArgs._UVChannelIndex;
-            Resolution = FMath::Clamp(InArgs._Resolution, 16, WetWrinkleGeneratedPreviewMaxResolution);
-            BaseNormalOptions = InArgs._BaseNormalOptions;
-            if (BaseNormalOptions.Num() > 0)
-            {
-                SelectedBaseNormalOption = BaseNormalOptions[0];
-            }
-
-            GeneratedNormalBrush.DrawAs = ESlateBrushDrawType::Image;
-            GeneratedNormalBrush.Tiling = ESlateBrushTileType::NoTile;
-            GeneratedNormalBrush.ImageSize = FVector2D(1024.0f, 1024.0f);
-
-            const FSlateFontInfo SectionHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 12);
-
-            ChildSlot
-                [SNew(SVerticalBox)
-
-                 + SVerticalBox::Slot()
-                       .FillHeight(1.0f)
-                           [SNew(SSplitter)
-                                .Orientation(Orient_Horizontal)
-
-                            + SSplitter::Slot()
-                                  .Value(0.48f)
-                                      [SNew(SBorder)
-                                           .Padding(10.0f)
-                                               [SNew(SVerticalBox)
-
-                                                + SVerticalBox::Slot()
-                                                      .AutoHeight()
-                                                      .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                          [SNew(STextBlock)
-                                                               .Text(LOCTEXT("GeneratedNormalTexturePreviewLabel", "Generated Normal Texture"))
-                                                               .Font(SectionHeadingFont)]
-
-                                                + SVerticalBox::Slot()
-                                                      .FillHeight(1.0f)
-                                                              [SNew(SBorder)
-                                                                   .Padding(6.0f)
-                                                                   .HAlign(HAlign_Center)
-                                                                   .VAlign(VAlign_Center)
-                                                                       [SAssignNew(GeneratedNormalImage, SWetWrinkleZoomableImage)
-                                                                            .Image(&GeneratedNormalBrush)]]
-
-                                                + SVerticalBox::Slot()
-                                                      .AutoHeight()
-                                                      .Padding(0.0f, 8.0f, 0.0f, 0.0f)
-                                                          [SNew(STextBlock)
-                                                               .AutoWrapText(true)
-                                                               .Text(this, &SWetWrinkleTextureGeneratorDialog::GetGenerationStatusText)]]]
-
-                            + SSplitter::Slot()
-                                  .Value(0.52f)
-                                      [SNew(SBorder)
-                                           .Padding(10.0f)
-                                               [SNew(SVerticalBox)
-
-                                                + SVerticalBox::Slot()
-                                                      .AutoHeight()
-                                                      .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                          [SNew(STextBlock)
-                                                               .Text(LOCTEXT("GeneratedNormal3DPreviewLabel", "Preview"))
-                                                               .Font(SectionHeadingFont)]
-
-                                                + SVerticalBox::Slot()
-                                                      .FillHeight(1.0f)
-                                                          [SAssignNew(PreviewViewport, SWetWrinkleViewport)
-                                                               .WetClothingAsset(WetClothingAsset.Get())
-                                                               ]]]]
-
-                 + SVerticalBox::Slot()
-                       .AutoHeight()
-                       .Padding(10.0f, 8.0f, 10.0f, 8.0f)
-                           [SNew(SBorder)
-                                .Padding(10.0f)
-                                    [SNew(SVerticalBox)
-
-                                     + SVerticalBox::Slot()
-                                           .AutoHeight()
-                                           .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                               [SNew(STextBlock)
-                                                    .Text(LOCTEXT("GeneratedWrinkleTextureParamsLabel", "Generation Settings"))
-                                                    .Font(SectionHeadingFont)]
-
-                                     + SVerticalBox::Slot()
-                                           .AutoHeight()
-                                           .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                               [SNew(SHorizontalBox)
-
-                                                + SHorizontalBox::Slot()
-                                                      .AutoWidth()
-                                                      .VAlign(VAlign_Center)
-                                                      .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                                                          [SNew(STextBlock)
-                                                               .Text(LOCTEXT("BaseNormalTextureLabel", "Base Normal"))]
-
-                                                + SHorizontalBox::Slot()
-                                                      .FillWidth(1.0f)
-                                                      .VAlign(VAlign_Center)
-                                                          [SAssignNew(BaseNormalComboBox, SComboBox<TSharedPtr<FWetWrinkleBrushPresetOption>>)
-                                                               .OptionsSource(&BaseNormalOptions)
-                                                               .OnGenerateWidget(this, &SWetWrinkleTextureGeneratorDialog::GenerateBaseNormalComboRow)
-                                                               .OnSelectionChanged(this, &SWetWrinkleTextureGeneratorDialog::HandleBaseNormalChanged)
-                                                                   [SNew(STextBlock)
-                                                                        .Text(this, &SWetWrinkleTextureGeneratorDialog::GetSelectedBaseNormalText)]]]
-
-                                     + SVerticalBox::Slot()
-                                           .AutoHeight()
-                                           .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                                               [BuildFloatControl(
-                                                   LOCTEXT("GeneratedWrinkleIntensityLabel", "Intensity"),
-                                                   TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::GetIntensity)),
-                                                   FOnWetWrinkleGeneratedTextureFloatValueChanged::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::HandleIntensityChanged),
-                                                   0.0f,
-                                                   4.0f)]
-
-                                     + SVerticalBox::Slot()
-                                           .AutoHeight()
-                                           .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                                               [BuildFloatControl(
-                                                   LOCTEXT("GeneratedWrinkleScaleLabel", "Scale"),
-                                                   TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::GetPatternScale)),
-                                                   FOnWetWrinkleGeneratedTextureFloatValueChanged::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::HandlePatternScaleChanged),
-                                                   0.25f,
-                                                   4.0f)]
-
-                                     + SVerticalBox::Slot()
-                                           .AutoHeight()
-                                           .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                                               [BuildFloatControl(
-                                                   LOCTEXT("GeneratedWrinkleOffsetXLabel", "Offset X"),
-                                                   TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::GetPatternOffsetX)),
-                                                   FOnWetWrinkleGeneratedTextureFloatValueChanged::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::HandlePatternOffsetXChanged),
-                                                   -0.5f,
-                                                   0.5f)]
-
-                                     + SVerticalBox::Slot()
-                                           .AutoHeight()
-                                           .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                                               [BuildFloatControl(
-                                                   LOCTEXT("GeneratedWrinkleOffsetYLabel", "Offset Y"),
-                                                   TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::GetPatternOffsetY)),
-                                                   FOnWetWrinkleGeneratedTextureFloatValueChanged::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::HandlePatternOffsetYChanged),
-                                                   -0.5f,
-                                                   0.5f)]
-
-                                     + SVerticalBox::Slot()
-                                           .AutoHeight()
-                                           .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                                               [BuildFloatControl(
-                                                   LOCTEXT("GeneratedWrinkleDirectionLabel", "Direction"),
-                                                   TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::GetDirectionDegrees)),
-                                                   FOnWetWrinkleGeneratedTextureFloatValueChanged::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::HandleDirectionDegreesChanged),
-                                                   -180.0f,
-                                                   180.0f)]
-
-                                     + SVerticalBox::Slot()
-                                           .AutoHeight()
-                                               [BuildFloatControl(
-                                                   LOCTEXT("GeneratedWrinkleNoiseLabel", "Wave Warp"),
-                                                   TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::GetNoise)),
-                                                   FOnWetWrinkleGeneratedTextureFloatValueChanged::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::HandleNoiseChanged),
-                                                   0.0f,
-                                                   1.0f)]]]
-
-                 + SVerticalBox::Slot()
-                       .AutoHeight()
-                       .Padding(10.0f, 0.0f, 10.0f, 10.0f)
-                       .HAlign(HAlign_Right)
-                           [SNew(SUniformGridPanel)
-                                .SlotPadding(FMargin(6.0f, 0.0f))
-
-                            + SUniformGridPanel::Slot(0, 0)
-                                  [SNew(SButton)
-                                       .Text(LOCTEXT("CancelGeneratedWrinkleTexture", "Cancel"))
-                                       .OnClicked(this, &SWetWrinkleTextureGeneratorDialog::HandleCancelClicked)]
-
-                            + SUniformGridPanel::Slot(1, 0)
-                                  [SNew(SButton)
-                                       .Text(LOCTEXT("ApplyGeneratedWrinkleTexture", "Apply"))
-                                       .OnClicked(this, &SWetWrinkleTextureGeneratorDialog::HandleApplyClicked)]]];
-
-            if (BaseNormalComboBox.IsValid() && SelectedBaseNormalOption.IsValid())
-            {
-                BaseNormalComboBox->SetSelectedItem(SelectedBaseNormalOption);
-            }
-
-            ConfigurePreviewViewport();
-            RebuildPreviewTexture();
-        }
-
-        virtual void AddReferencedObjects(FReferenceCollector& Collector) override
-        {
-            Collector.AddReferencedObject(GeneratedNormalTexture);
-            Collector.AddReferencedObject(DisplayPreviewTexture);
-            Collector.AddReferencedObject(WetClothingAsset);
-        }
-
-        virtual FString GetReferencerName() const override
-        {
-            return TEXT("SWetWrinkleTextureGeneratorDialog");
-        }
-
-        bool WasApplied() const
-        {
-            return bApplied;
-        }
-
-        UTexture2D* GetGeneratedNormalTexture() const
-        {
-            return bGeneratedPreviewValid ? GeneratedNormalTexture.Get() : nullptr;
-        }
-
-      private:
-        TSharedRef<SWidget> BuildFloatControl(
-            const FText& Label,
-            TAttribute<float> ValueAttribute,
-            FOnWetWrinkleGeneratedTextureFloatValueChanged OnValueChanged,
-            float MinValue,
-            float MaxValue)
-        {
-            return SNew(SHorizontalBox)
-
-                + SHorizontalBox::Slot()
-                      .AutoWidth()
-                      .VAlign(VAlign_Center)
-                      .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                          [SNew(SBox)
-                               .WidthOverride(92.0f)
-                                   [SNew(STextBlock)
-                                        .Text(Label)]]
-
-                + SHorizontalBox::Slot()
-                      .FillWidth(1.0f)
-                      .VAlign(VAlign_Center)
-                          [SNew(SSpinBox<float>)
-                               .MinValue(MinValue)
-                               .MaxValue(MaxValue)
-                               .MinSliderValue(MinValue)
-                               .MaxSliderValue(MaxValue)
-                               .Value(ValueAttribute)
-                               .OnValueChanged_Lambda([OnValueChanged](float NewValue) mutable
-                                                     {
-                                                         OnValueChanged.ExecuteIfBound(NewValue);
-                                                     })];
-        }
-
-        TSharedRef<SWidget> GenerateBaseNormalComboRow(TSharedPtr<FWetWrinkleBrushPresetOption> Item) const
-        {
-            return SNew(STextBlock)
-                .Text(Item.IsValid() ? Item->DisplayName : LOCTEXT("MissingGeneratedBaseNormal", "<missing>"));
-        }
-
-        FText GetSelectedBaseNormalText() const
-        {
-            return SelectedBaseNormalOption.IsValid()
-                       ? SelectedBaseNormalOption->DisplayName
-                       : LOCTEXT("NoGeneratedBaseNormalSelected", "None");
-        }
-
-        float GetIntensity() const
-        {
-            return Intensity;
-        }
-
-        float GetDirectionDegrees() const
-        {
-            return DirectionDegrees;
-        }
-
-        float GetPatternScale() const
-        {
-            return PatternScale;
-        }
-
-        float GetPatternOffsetX() const
-        {
-            return static_cast<float>(PatternOffset.X);
-        }
-
-        float GetPatternOffsetY() const
-        {
-            return static_cast<float>(PatternOffset.Y);
-        }
-
-        float GetNoise() const
-        {
-            return Noise;
-        }
-
-        FText GetGenerationStatusText() const
-        {
-            if (bGeneratedPreviewValid && GeneratedNormalTexture != nullptr)
-            {
-                return FText::FromString(FString::Printf(TEXT("Generated %dx%d preview normal."), GeneratedTextureWidth, GeneratedTextureHeight));
-            }
-
-            return LastGenerationError.IsEmpty()
-                       ? LOCTEXT("GeneratedWrinkleTextureWaiting", "Waiting for a valid generated preview.")
-                       : FText::FromString(LastGenerationError);
-        }
-
-        void HandleBaseNormalChanged(TSharedPtr<FWetWrinkleBrushPresetOption> Item, ESelectInfo::Type SelectInfo)
-        {
-            if (!Item.IsValid())
-            {
-                return;
-            }
-
-            SelectedBaseNormalOption = Item;
-            RequestPreviewTextureRebuild();
-        }
-
-        void HandleIntensityChanged(float NewValue)
-        {
-            Intensity = FMath::Clamp(NewValue, 0.0f, 4.0f);
-            RequestPreviewTextureRebuild();
-        }
-
-        void HandleDirectionDegreesChanged(float NewValue)
-        {
-            DirectionDegrees = FMath::Clamp(NewValue, -180.0f, 180.0f);
-            RequestPreviewTextureRebuild();
-        }
-
-        void HandlePatternScaleChanged(float NewValue)
-        {
-            PatternScale = FMath::Clamp(NewValue, 0.25f, 4.0f);
-            RequestPreviewTextureRebuild();
-        }
-
-        void HandlePatternOffsetXChanged(float NewValue)
-        {
-            PatternOffset.X = FMath::Clamp(NewValue, -0.5f, 0.5f);
-            RequestPreviewTextureRebuild();
-        }
-
-        void HandlePatternOffsetYChanged(float NewValue)
-        {
-            PatternOffset.Y = FMath::Clamp(NewValue, -0.5f, 0.5f);
-            RequestPreviewTextureRebuild();
-        }
-
-        void HandleNoiseChanged(float NewValue)
-        {
-            Noise = FMath::Clamp(NewValue, 0.0f, 1.0f);
-            RequestPreviewTextureRebuild();
-        }
-
-        UTexture2D* ResolveSelectedBaseNormalTexture() const
-        {
-            return SelectedBaseNormalOption.IsValid()
-                       ? Cast<UTexture2D>(SelectedBaseNormalOption->TexturePath.TryLoad())
-                       : nullptr;
-        }
-
-        void ConfigurePreviewViewport()
-        {
-            if (!PreviewViewport.IsValid())
-            {
-                return;
-            }
-
-            PreviewViewport->RefreshPreviewMesh();
-
-            FWetWrinkleBrushSettings PreviewBrushSettings;
-            PreviewBrushSettings.MaterialSlotIndex = MaterialSlotIndex;
-            PreviewBrushSettings.UVChannelIndex = UVChannelIndex;
-            PreviewBrushSettings.PreviewWetness = 1.0f;
-            PreviewBrushSettings.bShowPreview = false;
-            PreviewViewport->SynchronizeBrushSettings(PreviewBrushSettings);
-            PreviewViewport->FocusOnPreviewMesh(true);
-        }
-
-        void RequestPreviewTextureRebuild()
-        {
-            bPendingPreviewRebuild = true;
-            if (bPreviewRebuildTimerActive)
-            {
-                return;
-            }
-
-            bPreviewRebuildTimerActive = true;
-            RegisterActiveTimer(
-                WetWrinkleGeneratedPreviewRebuildDelaySeconds,
-                FWidgetActiveTimerDelegate::CreateSP(this, &SWetWrinkleTextureGeneratorDialog::HandlePreviewRebuildTimer));
-        }
-
-        EActiveTimerReturnType HandlePreviewRebuildTimer(double, float)
-        {
-            bPreviewRebuildTimerActive = false;
-            if (bPendingPreviewRebuild)
-            {
-                RebuildPreviewTexture();
-            }
-            return EActiveTimerReturnType::Stop;
-        }
-
-        void RebuildPreviewTexture()
-        {
-            bPendingPreviewRebuild = false;
-
-            FString ErrorMessage;
-            FWetWrinkleTextureGenerationResult GenerationResult;
-            FWetWrinkleTextureGenerationSettings GenerationSettings;
-            GenerationSettings.BaseNormalTexture = ResolveSelectedBaseNormalTexture();
-            GenerationSettings.LODIndex = 0;
-            GenerationSettings.UVChannelIndex = UVChannelIndex;
-            GenerationSettings.Resolution = Resolution;
-            GenerationSettings.Intensity = Intensity;
-            GenerationSettings.PatternScale = PatternScale;
-            GenerationSettings.PatternOffset = PatternOffset;
-            GenerationSettings.DirectionRadians = FMath::DegreesToRadians(DirectionDegrees);
-            GenerationSettings.Noise = Noise;
-
-            if (FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
-                    WetClothingAsset.Get(),
-                    MaterialSlotIndex,
-                    GenerationSettings,
-                    GenerationResult,
-                    ErrorMessage))
-            {
-                GeneratedNormalTexture = GenerationResult.GeneratedNormalMap;
-                DisplayPreviewTexture = GenerationResult.PreviewDisplayMap != nullptr
-                                            ? GenerationResult.PreviewDisplayMap
-                                            : GenerationResult.GeneratedNormalMap;
-                GeneratedTextureWidth = GenerationResult.Width;
-                GeneratedTextureHeight = GenerationResult.Height;
-                LastGenerationError.Reset();
-                bGeneratedPreviewValid = GeneratedNormalTexture != nullptr;
-            }
-            else
-            {
-                GeneratedNormalTexture = nullptr;
-                DisplayPreviewTexture = nullptr;
-                GeneratedTextureWidth = 0;
-                GeneratedTextureHeight = 0;
-                LastGenerationError = ErrorMessage;
-                bGeneratedPreviewValid = false;
-            }
-
-            GeneratedNormalBrush.SetResourceObject(DisplayPreviewTexture.Get());
-            GeneratedNormalBrush.ImageSize =
-                GeneratedTextureWidth > 0 && GeneratedTextureHeight > 0
-                    ? FVector2D(static_cast<float>(GeneratedTextureWidth), static_cast<float>(GeneratedTextureHeight))
-                    : FVector2D(1024.0f, 1024.0f);
-
-            if (GeneratedNormalImage.IsValid())
-            {
-                GeneratedNormalImage->SetImage(&GeneratedNormalBrush);
-            }
-
-            if (PreviewViewport.IsValid())
-            {
-                PreviewViewport->SetGeneratedNormalPreviewTexture(MaterialSlotIndex, UVChannelIndex, GeneratedNormalTexture.Get());
-            }
-        }
-
-        FReply HandleCancelClicked()
-        {
-            if (TSharedPtr<SWindow> Window = ParentWindow.Pin())
-            {
-                Window->RequestDestroyWindow();
-            }
-            return FReply::Handled();
-        }
-
-        FReply HandleApplyClicked()
-        {
-            if (bPendingPreviewRebuild)
-            {
-                RebuildPreviewTexture();
-            }
-
-            if (!bGeneratedPreviewValid || GeneratedNormalTexture == nullptr)
-            {
-                FMessageDialog::Open(
-                    EAppMsgType::Ok,
-                    LastGenerationError.IsEmpty()
-                        ? LOCTEXT("ApplyGeneratedWrinkleTextureNoPreview", "A generated wrinkle texture preview is not available.")
-                        : FText::FromString(LastGenerationError));
-                return FReply::Handled();
-            }
-
-            bApplied = true;
-            if (TSharedPtr<SWindow> Window = ParentWindow.Pin())
-            {
-                Window->RequestDestroyWindow();
-            }
-            return FReply::Handled();
-        }
-
-      private:
-        TWeakPtr<SWindow> ParentWindow;
-        TObjectPtr<UWetClothingAsset> WetClothingAsset = nullptr;
-        TSharedPtr<SWetWrinkleViewport> PreviewViewport;
-        TSharedPtr<SWetWrinkleZoomableImage> GeneratedNormalImage;
-        TSharedPtr<SComboBox<TSharedPtr<FWetWrinkleBrushPresetOption>>> BaseNormalComboBox;
-        TArray<TSharedPtr<FWetWrinkleBrushPresetOption>> BaseNormalOptions;
-        TSharedPtr<FWetWrinkleBrushPresetOption> SelectedBaseNormalOption;
-        FSlateBrush GeneratedNormalBrush;
-        TObjectPtr<UTexture2D> GeneratedNormalTexture = nullptr;
-        TObjectPtr<UTexture2D> DisplayPreviewTexture = nullptr;
-        int32 MaterialSlotIndex = INDEX_NONE;
-        int32 UVChannelIndex = INDEX_NONE;
-        int32 Resolution = 1024;
-        int32 GeneratedTextureWidth = 0;
-        int32 GeneratedTextureHeight = 0;
-        float Intensity = 1.0f;
-        float PatternScale = 1.0f;
-        FVector2D PatternOffset = FVector2D::ZeroVector;
-        float DirectionDegrees = 0.0f;
-        float Noise = 0.0f;
-        FString LastGenerationError;
-        bool bGeneratedPreviewValid = false;
-        bool bPendingPreviewRebuild = false;
-        bool bPreviewRebuildTimerActive = false;
-        bool bApplied = false;
-    };
-
 }
 
 void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
@@ -1523,7 +887,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                    .Padding(0.0f, 0.0f, 0.0f, 6.0f)
                         [SNew(STextBlock)
                             .Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
-                            .Text(LOCTEXT("RotationLabel", "Rotation (°)"))]
+                            .Text(LOCTEXT("RotationLabel", "Rotation (째)"))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -2634,7 +1998,8 @@ void SWetWrinkleEditorPanel::RefreshWrinkleUVView()
             WrinkleUVView->SetHiddenUVIslandIDs(TSet<int32>());
             WrinkleUVView->SetSelectedIslands(TSet<int32>());
         }
-        WrinkleUVView->SetCircleMarkers(TArray<FWCAUVViewCircleMarker>());
+        WrinkleUVView->SetPersistentCircleMarkers(TArray<FWCAUVViewCircleMarker>());
+        WrinkleUVView->ClearHoverCircleMarker();
         return;
     }
 
@@ -2771,7 +2136,13 @@ void SWetWrinkleEditorPanel::RefreshWrinkleUVView()
         WrinkleUVView->SetSelectedIslands(TSet<int32>());
     }
 
-    RebuildWrinkleUVViewPatchMarkerCache();
+    const bool bPatchMarkerTargetChanged =
+        CachedWrinkleUVViewPatchMarkerMaterialSlotIndex != MaterialSlotIndex ||
+        CachedWrinkleUVViewPatchMarkerChannelIndex != UVChannelIndex;
+    if (bGeometryChanged || bPatchMarkerTargetChanged)
+    {
+        RebuildWrinkleUVViewPatchMarkerCache();
+    }
     RefreshWrinkleUVViewMarkersOnly();
 }
 
@@ -2787,6 +2158,10 @@ void SWetWrinkleEditorPanel::RebuildWrinkleUVViewPatchMarkerCache()
 
     if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE || UVChannelIndex == INDEX_NONE || IsUsingCustomWrinkleMap(MaterialSlotIndex))
     {
+        if (WrinkleUVView.IsValid())
+        {
+            WrinkleUVView->SetPersistentCircleMarkers(CachedWrinkleUVViewPatchMarkers);
+        }
         return;
     }
 
@@ -2812,6 +2187,11 @@ void SWetWrinkleEditorPanel::RebuildWrinkleUVViewPatchMarkerCache()
         Marker.OutlineThickness = 1.0f;
         CachedWrinkleUVViewPatchMarkers.Add(Marker);
     }
+
+    if (WrinkleUVView.IsValid())
+    {
+        WrinkleUVView->SetPersistentCircleMarkers(CachedWrinkleUVViewPatchMarkers);
+    }
 }
 
 void SWetWrinkleEditorPanel::RefreshWrinkleUVViewMarkersOnly()
@@ -2829,7 +2209,6 @@ void SWetWrinkleEditorPanel::RefreshWrinkleUVViewMarkersOnly()
         RebuildWrinkleUVViewPatchMarkerCache();
     }
 
-    TArray<FWCAUVViewCircleMarker> CircleMarkers = CachedWrinkleUVViewPatchMarkers;
     if (!IsUsingCustomWrinkleMap(MaterialSlotIndex) &&
         BrushSettings.bShowPreview &&
         CurrentHit.bHit &&
@@ -2842,10 +2221,11 @@ void SWetWrinkleEditorPanel::RefreshWrinkleUVViewMarkersOnly()
         Marker.FillColor = FLinearColor(1.0f, 0.55f, 0.08f, 0.45f);
         Marker.OutlineColor = FLinearColor(1.0f, 0.55f, 0.08f, 1.0f);
         Marker.OutlineThickness = 1.4f;
-        CircleMarkers.Add(Marker);
+        WrinkleUVView->SetHoverCircleMarker(Marker);
+        return;
     }
 
-    WrinkleUVView->SetCircleMarkers(CircleMarkers);
+    WrinkleUVView->ClearHoverCircleMarker();
 }
 
 void SWetWrinkleEditorPanel::RefreshBrushPresetOptions()
@@ -2882,369 +2262,6 @@ void SWetWrinkleEditorPanel::RefreshBrushPresetOptions()
     }
 
 }
-
-void SWetWrinkleEditorPanel::RefreshWrinkleTexturePalette(bool bForceAssetScan)
-{
-    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-    TArray<FString> SearchPaths;
-    GetDefault<UWetWrinkleEditorSettings>()->GetNormalTextureSearchPaths(SearchPaths);
-    if (bForceAssetScan && !SearchPaths.IsEmpty())
-    {
-        AssetRegistryModule.Get().ScanPathsSynchronous(SearchPaths, true);
-    }
-
-    TMap<FSoftObjectPath, FAssetData> UniqueTextureAssets;
-    for (const FString& SearchPath : SearchPaths)
-    {
-        TArray<FAssetData> PathAssets;
-        AssetRegistryModule.Get().GetAssetsByPath(FName(*SearchPath), PathAssets, true);
-        for (const FAssetData& AssetData : PathAssets)
-        {
-            if (AssetData.AssetClassPath == UTexture2D::StaticClass()->GetClassPathName())
-            {
-                UniqueTextureAssets.FindOrAdd(AssetData.ToSoftObjectPath()) = AssetData;
-            }
-        }
-    }
-
-    TArray<FAssetData> TextureAssets;
-    UniqueTextureAssets.GenerateValueArray(TextureAssets);
-    TextureAssets.Sort([](const FAssetData& A, const FAssetData& B)
-    {
-        const int32 NameCompare = A.AssetName.ToString().Compare(B.AssetName.ToString());
-        return NameCompare == 0 ? A.PackageName.ToString() < B.PackageName.ToString() : NameCompare < 0;
-    });
-
-    TMap<FSoftObjectPath, FWrinkleTexturePaletteItemPtr> PreviousItems =
-        MoveTemp(WrinklePalettePanel->GetItemsByPath());
-    WrinklePalettePanel->GetAllItems().Reset(TextureAssets.Num());
-    WrinklePalettePanel->GetItemsByPath().Reset();
-
-    const UWetWrinkleEditorSettings* UserSettings = GetDefault<UWetWrinkleEditorSettings>();
-    for (const FAssetData& TextureAsset : TextureAssets)
-    {
-        const FSoftObjectPath TexturePath = TextureAsset.ToSoftObjectPath();
-        FWrinkleTexturePaletteItemPtr Item = PreviousItems.FindRef(TexturePath);
-        if (!Item.IsValid())
-        {
-            Item = MakeShared<FWetWrinkleTexturePaletteItem>();
-        }
-        Item->DisplayName = FText::FromName(TextureAsset.AssetName);
-        Item->TexturePath = TexturePath;
-        Item->bHidden = UserSettings->IsNormalTextureHidden(Item->TexturePath);
-        Item->bAssetAvailable = true;
-        Item->bRemoved = false;
-        WrinklePalettePanel->GetAllItems().Add(Item);
-        WrinklePalettePanel->GetItemsByPath().Add(TexturePath, Item);
-    }
-
-    RefreshWrinkleTexturePaletteView();
-}
-
-void SWetWrinkleEditorPanel::RefreshWrinkleTexturePaletteView()
-{
-    WrinklePalettePanel->GetVisibleItems().Reset();
-    const bool bShowHidden = GetDefault<UWetWrinkleEditorSettings>()->bShowHiddenNormalTextures;
-    for (const FWrinkleTexturePaletteItemPtr& Item : WrinklePalettePanel->GetAllItems())
-    {
-        if (Item.IsValid() && !Item->bRemoved && (!Item->bHidden || bShowHidden))
-        {
-            WrinklePalettePanel->GetVisibleItems().Add(Item);
-        }
-    }
-
-    WrinklePalettePanel->RequestRefresh();
-}
-
-void SWetWrinkleEditorPanel::SortWrinkleTexturePaletteItems()
-{
-    WrinklePalettePanel->GetAllItems().Sort(
-        [](const FWrinkleTexturePaletteItemPtr& A, const FWrinkleTexturePaletteItemPtr& B)
-        {
-            if (!A.IsValid() || !B.IsValid())
-            {
-                return A.IsValid();
-            }
-            const int32 NameCompare = A->DisplayName.ToString().Compare(B->DisplayName.ToString());
-            return NameCompare == 0
-                ? A->TexturePath.ToString() < B->TexturePath.ToString()
-                : NameCompare < 0;
-        });
-}
-
-SWetWrinkleEditorPanel::FWrinkleTexturePaletteItemPtr SWetWrinkleEditorPanel::UpsertWrinkleTexturePaletteItem(
-    const FAssetData& AssetData)
-{
-    if (!IsAssetInsideWrinkleTextureSearchPaths(AssetData))
-    {
-        return nullptr;
-    }
-
-    const FSoftObjectPath TexturePath = AssetData.ToSoftObjectPath();
-    FWrinkleTexturePaletteItemPtr Item = WrinklePalettePanel->GetItemsByPath().FindRef(TexturePath);
-    if (!Item.IsValid())
-    {
-        Item = MakeShared<FWetWrinkleTexturePaletteItem>();
-        WrinklePalettePanel->GetAllItems().Add(Item);
-        WrinklePalettePanel->GetItemsByPath().Add(TexturePath, Item);
-    }
-
-    Item->DisplayName = FText::FromName(AssetData.AssetName);
-    Item->TexturePath = TexturePath;
-    Item->bHidden = GetDefault<UWetWrinkleEditorSettings>()->IsNormalTextureHidden(TexturePath);
-    Item->bAssetAvailable = true;
-    Item->bRemoved = false;
-    SortWrinkleTexturePaletteItems();
-    return Item;
-}
-
-bool SWetWrinkleEditorPanel::RemoveWrinkleTexturePaletteItem(const FSoftObjectPath& TexturePath)
-{
-    FWrinkleTexturePaletteItemPtr Item;
-    if (!WrinklePalettePanel->GetItemsByPath().RemoveAndCopyValue(TexturePath, Item))
-    {
-        return false;
-    }
-
-    WrinklePalettePanel->GetAllItems().RemoveSingle(Item);
-    if (Item.IsValid())
-    {
-        Item->Texture.Reset();
-        Item->AssetThumbnail.Reset();
-        Item->bAssetAvailable = false;
-        Item->bRemoved = true;
-    }
-    return true;
-}
-
-bool SWetWrinkleEditorPanel::IsAssetInsideWrinkleTextureSearchPaths(const FAssetData& AssetData) const
-{
-    if (AssetData.AssetClassPath != UTexture2D::StaticClass()->GetClassPathName())
-    {
-        return false;
-    }
-
-    TArray<FString> SearchPaths;
-    GetDefault<UWetWrinkleEditorSettings>()->GetNormalTextureSearchPaths(SearchPaths);
-    const FString PackagePath = AssetData.PackagePath.ToString();
-    return SearchPaths.ContainsByPredicate(
-        [&PackagePath](const FString& SearchPath)
-        {
-            return PackagePath == SearchPath || PackagePath.StartsWith(SearchPath + TEXT("/"));
-        });
-}
-
-void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetAdded(const FAssetData& AssetData)
-{
-    if (UpsertWrinkleTexturePaletteItem(AssetData).IsValid())
-    {
-        RefreshWrinkleTexturePaletteView();
-    }
-}
-
-void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetRemoved(const FAssetData& AssetData)
-{
-    const FSoftObjectPath RemovedPath = AssetData.ToSoftObjectPath();
-    GetMutableDefault<UWetWrinkleEditorSettings>()->SetNormalTextureHidden(RemovedPath, false);
-    if (BrushSettings.WrinkleNormalTexture != nullptr &&
-        FSoftObjectPath(BrushSettings.WrinkleNormalTexture.Get()) == RemovedPath)
-    {
-        BrushSettings.WrinkleNormalTexture = nullptr;
-        PushBrushPreviewSettingsToViewport();
-    }
-    RemoveWrinkleTexturePaletteItem(RemovedPath);
-    RefreshWrinkleTexturePaletteView();
-    RefreshWrinkleNormalThumbnail();
-}
-
-void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetUpdated(const FAssetData& AssetData)
-{
-    if (FWrinkleTexturePaletteItemPtr Item = UpsertWrinkleTexturePaletteItem(AssetData))
-    {
-        Item->AssetThumbnail.Reset();
-        RefreshWrinkleTexturePaletteView();
-        RefreshWrinkleNormalThumbnail();
-        if (BrushSettings.WrinkleNormalTexture != nullptr &&
-            FSoftObjectPath(BrushSettings.WrinkleNormalTexture.Get()) == AssetData.ToSoftObjectPath())
-        {
-            PushBrushPreviewSettingsToViewport();
-        }
-    }
-}
-
-TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinkleTexturePalette()
-{
-    check(WrinklePalettePanel.IsValid());
-    return WrinklePalettePanel.ToSharedRef();
-}
-
-TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateWrinkleTexturePaletteTileRow(
-    FWrinkleTexturePaletteItemPtr Item,
-    const TSharedRef<STableViewBase>& OwnerTable)
-{
-    return SNew(STableRow<FWrinkleTexturePaletteItemPtr>, OwnerTable)
-        .Padding(2.0f)
-            [GenerateWrinkleTexturePaletteTile(Item)];
-}
-
-TSharedRef<SWidget> SWetWrinkleEditorPanel::GenerateWrinkleTexturePaletteTile(FWrinkleTexturePaletteItemPtr Item)
-{
-    if (Item.IsValid() && Item->bAssetAvailable && !Item->AssetThumbnail.IsValid())
-    {
-        const FAssetData AssetData = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"))
-                                         .Get()
-                                         .GetAssetByObjectPath(Item->TexturePath);
-        if (AssetData.IsValid())
-        {
-            Item->AssetThumbnail = MakeShared<FAssetThumbnail>(AssetData, 144, 144, MaterialThumbnailPool);
-        }
-    }
-
-    FAssetThumbnailConfig ThumbnailConfig;
-    ThumbnailConfig.bAllowHintText = false;
-    ThumbnailConfig.AllowAssetSpecificThumbnailOverlay = false;
-    ThumbnailConfig.AllowAssetStatusThumbnailOverlay = false;
-    ThumbnailConfig.ShowAssetColor = false;
-    ThumbnailConfig.ShowAssetBorder = false;
-    ThumbnailConfig.BorderPadding = FMargin(0.0f);
-
-    return SNew(SWetWrinkleTexturePaletteTile)
-        .OnContextMenu(FOnWetWrinkleTextureTileContextMenu::CreateSP(
-            this,
-            &SWetWrinkleEditorPanel::HandleWrinkleTexturePaletteContextMenu,
-            Item))
-            [SNew(SButton)
-             .ButtonStyle(&WrinklePalettePanel->GetButtonStyle())
-             .ContentPadding(6.0f)
-             .ButtonColorAndOpacity(this, &SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTileColor, Item)
-             .ToolTipText(this, &SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTooltipText, Item)
-             .OnClicked(this, &SWetWrinkleEditorPanel::HandleWrinkleTexturePaletteClicked, Item)
-                 [SNew(SBox)
-                  .WidthOverride(144.0f)
-                  .HeightOverride(144.0f)
-                      [SNew(SScaleBox)
-                       .Stretch(EStretch::ScaleToFit)
-                       .StretchDirection(EStretchDirection::Both)
-                            [Item.IsValid() && Item->AssetThumbnail.IsValid()
-                                 ? Item->AssetThumbnail->MakeThumbnailWidget(ThumbnailConfig)
-                                 : SNullWidget::NullWidget]]]];
-}
-
-FReply SWetWrinkleEditorPanel::HandleWrinkleTexturePaletteClicked(TSharedPtr<FWetWrinkleTexturePaletteItem> Item)
-{
-    if (!Item.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    UTexture2D* Texture = Item->Texture.Get();
-    if (Texture == nullptr && Item->TexturePath.IsValid())
-    {
-        Texture = Cast<UTexture2D>(Item->TexturePath.TryLoad());
-        Item->Texture = Texture;
-    }
-
-    BrushSettings.WrinkleNormalTexture = Texture;
-    RefreshWrinkleNormalThumbnail();
-    PushBrushPreviewSettingsToViewport();
-    WrinklePalettePanel->RequestRefresh();
-    return FReply::Handled();
-}
-
-FReply SWetWrinkleEditorPanel::HandleWrinkleTexturePaletteContextMenu(
-    const FPointerEvent& MouseEvent,
-    TSharedPtr<FWetWrinkleTexturePaletteItem> Item)
-{
-    if (!Item.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    FMenuBuilder MenuBuilder(true, nullptr);
-    MenuBuilder.AddMenuEntry(
-        Item->bHidden ? LOCTEXT("UnhideWrinkleTexture", "Unhide") : LOCTEXT("HideWrinkleTexture", "Hide"),
-        LOCTEXT("HideWrinkleTextureTooltip", "Change whether this texture is shown in the Wrinkle Editor palette."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateSP(
-            this,
-            &SWetWrinkleEditorPanel::HandleSetWrinkleTextureHidden,
-            Item,
-            !Item->bHidden)));
-    MenuBuilder.AddMenuEntry(
-        LOCTEXT("CorrectWrinkleTexture", "Correct Normal"),
-        LOCTEXT("CorrectWrinkleTextureTooltip", "Open the normal correction preview and create a corrected Texture2D."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateSP(this, &SWetWrinkleEditorPanel::HandleCorrectWrinkleTexture, Item)));
-    MenuBuilder.AddMenuEntry(
-        LOCTEXT("BrowseWrinkleTexture", "Browse to Asset"),
-        LOCTEXT("BrowseWrinkleTextureTooltip", "Select this texture in the Content Browser."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([Item]()
-        {
-            if (GEditor != nullptr && Item.IsValid())
-            {
-                UObject* Asset = Item->Texture.Get();
-                if (Asset == nullptr && Item->TexturePath.IsValid())
-                {
-                    Asset = Item->TexturePath.TryLoad();
-                }
-                if (Asset != nullptr)
-                {
-                    TArray<UObject*> Objects{Asset};
-                    GEditor->SyncBrowserToObjects(Objects);
-                }
-            }
-        })));
-
-    FSlateApplication::Get().PushMenu(
-        AsShared(),
-        FWidgetPath(),
-        MenuBuilder.MakeWidget(),
-        MouseEvent.GetScreenSpacePosition(),
-        FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu));
-    return FReply::Handled();
-}
-
-FReply SWetWrinkleEditorPanel::HandleRefreshWrinkleTexturePaletteClicked()
-{
-    RefreshWrinkleTexturePalette(true);
-    RefreshWrinkleNormalThumbnail();
-    PushBrushPreviewSettingsToViewport();
-    return FReply::Handled();
-}
-
-FText SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTooltipText(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const
-{
-    if (!Item.IsValid())
-    {
-        return FText::GetEmpty();
-    }
-
-    return FText::Format(
-        LOCTEXT("WrinkleTexturePaletteTooltip", "{0}\n{1}\nTexture Status : {2}"),
-        Item->DisplayName,
-        FText::FromString(Item->TexturePath.ToString()),
-        Item->bHidden ? LOCTEXT("TextureHidden", "Hidden") : LOCTEXT("TextureVisible", "Visible"));
-}
-
-FSlateColor SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTileColor(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const
-{
-    if (!Item.IsValid() || !Item->bAssetAvailable)
-    {
-        return FSlateColor(FLinearColor(0.15f, 0.08f, 0.08f, 1.0f));
-    }
-    const UTexture2D* SelectedTexture = BrushSettings.WrinkleNormalTexture.Get();
-    if (SelectedTexture != nullptr && Item->TexturePath == FSoftObjectPath(SelectedTexture))
-    {
-        return FSlateColor(FLinearColor(0.18f, 0.42f, 0.80f, 1.0f));
-    }
-    if (Item->bHidden)
-    {
-        return FSlateColor(FLinearColor(0.16f, 0.12f, 0.06f, 1.0f));
-    }
-    return FSlateColor(FLinearColor(0.10f, 0.10f, 0.10f, 1.0f));
-}
-
 
 FText SWetWrinkleEditorPanel::GetDWCDataUVChannelText() const
 {

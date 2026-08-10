@@ -912,8 +912,11 @@ namespace DWCEditorSurfacePatchProjectorPrivate
                             Fragment.PatchAxisVInTargetTangent[Corner]))
                     {
                         ++Result.Diagnostics.DegenerateTangentFrameCount;
-                        Fragment.PatchAxisUInTargetTangent[Corner] = FVector2f(1.0f, 0.0f);
-                        Fragment.PatchAxisVInTargetTangent[Corner] = FVector2f(0.0f, 1.0f);
+                        SetFailure(
+                            Result,
+                            EDWCEditorSurfacePatchProjectionStatus::DegenerateSurface,
+                            TEXT("The surface decal cannot derive a valid target tangent frame."));
+                        return Result;
                     }
                 }
                 AffectedIslands.Add(Triangle.UVIslandID);

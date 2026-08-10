@@ -40,6 +40,31 @@ struct FDWCEditorWrinklePatchDescriptor
     uint32 GetStableHash() const;
 };
 
+/**
+ * Canonical validation outcome for an authored Patch before preview or bake
+ * turns it into a surface projection command.
+ */
+enum class EDWCEditorWrinklePatchValidationStatus : uint8
+{
+    Valid,
+    InvalidSurfaceContract,
+    InvalidDescriptor
+};
+
+struct FDWCEditorWrinklePatchValidationResult
+{
+    EDWCEditorWrinklePatchValidationStatus Status =
+        EDWCEditorWrinklePatchValidationStatus::InvalidSurfaceContract;
+    FDWCEditorWrinklePatchDescriptor Descriptor;
+    FString Error;
+
+    bool IsValid() const
+    {
+        return Status == EDWCEditorWrinklePatchValidationStatus::Valid &&
+            Descriptor.IsValid();
+    }
+};
+
 class FDWCEditorWrinklePatchDescriptorBuilder final
 {
   public:
@@ -65,6 +90,11 @@ class FDWCEditorWrinklePatchDescriptorBuilder final
         int32 UVChannelIndex,
         FDWCEditorWrinklePatchDescriptor& OutDescriptor,
         FString* OutError = nullptr);
+
+    static bool ValidatePlacement(
+        const FWetWrinklePatchPlacement& Placement,
+        int32 UVChannelIndex,
+        FDWCEditorWrinklePatchValidationResult& OutResult);
 
     static bool BuildRasterInput(
         const FDWCEditorWrinklePatchDescriptor& Descriptor,

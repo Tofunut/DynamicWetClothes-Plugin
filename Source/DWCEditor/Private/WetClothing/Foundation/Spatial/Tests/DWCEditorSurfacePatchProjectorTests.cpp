@@ -816,6 +816,31 @@ bool FDWCEditorSurfacePatchBudgetAndCancellationTest::RunTest(const FString& Par
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorSurfacePatchDegenerateTangentFrameTest,
+    "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.DegenerateTangentFrame",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorSurfacePatchDegenerateTangentFrameTest::RunTest(const FString&)
+{
+    using namespace DWCEditorSurfacePatchProjectorTestsPrivate;
+    const TSharedRef<FDWCEditorSpatialData, ESPMode::ThreadSafe> Data =
+        BuildTwoTriangleSurface(false);
+    Data->Triangles[0].LocalTangents[1] = FVector3f::ZeroVector;
+    const FDWCEditorSurfacePatchProjectionResult Result =
+        FDWCEditorSurfacePatchProjector::Project(MakeRequest(Data));
+
+    TestEqual(
+        TEXT("A degenerate target tangent frame fails instead of substituting identity axes"),
+        Result.Status,
+        EDWCEditorSurfacePatchProjectionStatus::DegenerateSurface);
+    TestEqual(TEXT("A degenerate tangent frame publishes no partial fragments"), Result.Fragments.Num(), 0);
+    TestTrue(
+        TEXT("The failure diagnostics identify the rejected target tangent frame"),
+        Result.Diagnostics.DegenerateTangentFrameCount > 0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorLargeSurfacePatchProjectionTest,
     "DWC.Editor.Foundation.Spatial.SurfacePatchProjection.LargeMultiSeamDeterminism",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -7,7 +7,6 @@
 #include "WetClothing/Foundation/Raster/DWCEditorRasterPostProcess.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 #include "WetClothing/Modes/Wrinkle/Stroke/WetProceduralRidgeRasterizer.h"
-#include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleAccumulatedPreviewWorker.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleIncrementalPreviewWorker.h"
 
 namespace
@@ -622,17 +621,18 @@ bool FDWCEditorWrinkleMixedIncrementalLifecycleParityTest::RunTest(const FString
     WrappedPatch.Strength = 0.72f;
     const FWetProceduralRidgeStroke Ridge = MakeTestRidge();
 
-    FWetWrinkleAccumulatedPreviewJobInput FullInput;
-    FullInput.TextureSize = OutputSize;
-    FullInput.WorkingTextureSize = WorkingSize;
-    FullInput.Patches = {FirstPatch, WrappedPatch};
-    FullInput.RidgeStrokes = {Ridge};
-    const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> FullToken =
-        MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
-    const TSharedPtr<FWetWrinkleAccumulatedPreviewJobResult, ESPMode::ThreadSafe> FullResult =
-        FWetWrinkleAccumulatedPreviewWorker::Build(MoveTemp(FullInput), FullToken);
-    TestTrue(TEXT("Full mixed wrinkle replay succeeds"), FullResult.IsValid() && FullResult->bSucceeded);
-    if (!FullResult.IsValid() || !FullResult->bSucceeded)
+    FDWCEditorNormalRasterSurface FullSurface;
+    FullSurface.Initialize(WorkingSize, false);
+    FDWCEditorNormalRasterCore::RasterizeStamp(FirstPatch, FullSurface);
+    FDWCEditorNormalRasterCore::RasterizeStamp(WrappedPatch, FullSurface);
+    FWetProceduralRidgeRasterizer::RasterizeToSurface(Ridge, FullSurface);
+    TArray<FColor> FullPixels;
+    if (!TestTrue(
+            TEXT("Full mixed wrinkle replay encodes"),
+            FDWCEditorRasterPostProcess::ResampleAndEncodeNormalPixels(
+                FullSurface,
+                OutputSize,
+                FullPixels)))
     {
         return false;
     }
@@ -675,11 +675,11 @@ bool FDWCEditorWrinkleMixedIncrementalLifecycleParityTest::RunTest(const FString
     TestEqual(
         TEXT("Incremental mixed wrinkle packed normals match a full replay"),
         IncrementalSurface.PackedNormalXY,
-        FullResult->WorkingSurface.PackedNormalXY);
+        FullSurface.PackedNormalXY);
     TestEqual(
         TEXT("Incremental mixed wrinkle pixels match a full replay"),
         IncrementalPixels,
-        FullResult->Pixels);
+        FullPixels);
     return true;
 }
 

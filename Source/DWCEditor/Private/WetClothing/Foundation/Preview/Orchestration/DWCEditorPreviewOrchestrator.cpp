@@ -46,6 +46,8 @@ void FDWCEditorPreviewOrchestrator::Shutdown()
     bShowSavedCrossLayer = true;
     ComposeCount = 0;
     NoChangeCount = 0;
+    LiveLayerUpdateCount = 0;
+    IdenticalLiveLayerSkipCount = 0;
 }
 
 void FDWCEditorPreviewOrchestrator::SetShowSavedCrossLayer(const bool bShow)
@@ -66,13 +68,13 @@ void FDWCEditorPreviewOrchestrator::SetPreviewWetness(const float PreviewWetness
     }
 }
 
-void FDWCEditorPreviewOrchestrator::SetLiveLayer(
+bool FDWCEditorPreviewOrchestrator::SetLiveLayer(
     const int32 MaterialSlotIndex,
     FDWCEditorPreviewLayer Layer)
 {
     if (Layer.MaterialSlotIndex != MaterialSlotIndex)
     {
-        return;
+        return false;
     }
 
     TArray<FDWCEditorPreviewLayer>& Layers = LiveLayersBySlot.FindOrAdd(MaterialSlotIndex);
@@ -82,13 +84,21 @@ void FDWCEditorPreviewOrchestrator::SetLiveLayer(
                 return Candidate.Kind == Layer.Kind;
             }))
     {
+        if (Existing->IsEquivalentTo(Layer))
+        {
+            ++IdenticalLiveLayerSkipCount;
+            return false;
+        }
         *Existing = MoveTemp(Layer);
     }
     else
     {
         Layers.Add(MoveTemp(Layer));
     }
+
+    ++LiveLayerUpdateCount;
     RecomposeSlot(MaterialSlotIndex);
+    return true;
 }
 
 void FDWCEditorPreviewOrchestrator::ClearLiveLayer(

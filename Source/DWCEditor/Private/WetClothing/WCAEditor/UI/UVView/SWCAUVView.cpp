@@ -43,6 +43,33 @@ namespace
         }
     }
 
+    bool AreEqual(const FWCAUVViewCircleMarker& A, const FWCAUVViewCircleMarker& B)
+    {
+        return A.CenterUV == B.CenterUV &&
+               A.RadiusUV == B.RadiusUV &&
+               A.FillColor == B.FillColor &&
+               A.OutlineColor == B.OutlineColor &&
+               A.OutlineThickness == B.OutlineThickness;
+    }
+
+    bool AreEqual(const TArray<FWCAUVViewCircleMarker>& A, const TArray<FWCAUVViewCircleMarker>& B)
+    {
+        if (A.Num() != B.Num())
+        {
+            return false;
+        }
+
+        for (int32 Index = 0; Index < A.Num(); ++Index)
+        {
+            if (!AreEqual(A[Index], B[Index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     void DrawFilledPolygon(
         FSlateWindowElementList& OutDrawElements,
         int32                    LayerId,
@@ -282,10 +309,43 @@ void SWCAUVView::SetHiddenUVIslandIDs(const TSet<int32>& InUVIslandIDs)
     Invalidate(EInvalidateWidget::Paint);
 }
 
-void SWCAUVView::SetCircleMarkers(const TArray<FWCAUVViewCircleMarker>& InCircleMarkers)
+bool SWCAUVView::SetPersistentCircleMarkers(const TArray<FWCAUVViewCircleMarker>& InCircleMarkers)
 {
-    CircleMarkers = InCircleMarkers;
+    if (AreEqual(PersistentCircleMarkers, InCircleMarkers))
+    {
+        return false;
+    }
+
+    PersistentCircleMarkers = InCircleMarkers;
     Invalidate(EInvalidateWidget::Paint);
+    return true;
+}
+
+bool SWCAUVView::SetHoverCircleMarker(const TOptional<FWCAUVViewCircleMarker>& InCircleMarker)
+{
+    const bool bUnchanged =
+        HoverCircleMarker.IsSet() == InCircleMarker.IsSet() &&
+        (!HoverCircleMarker.IsSet() || AreEqual(HoverCircleMarker.GetValue(), InCircleMarker.GetValue()));
+    if (bUnchanged)
+    {
+        return false;
+    }
+
+    HoverCircleMarker = InCircleMarker;
+    Invalidate(EInvalidateWidget::Paint);
+    return true;
+}
+
+bool SWCAUVView::ClearHoverCircleMarker()
+{
+    if (!HoverCircleMarker.IsSet())
+    {
+        return false;
+    }
+
+    HoverCircleMarker.Reset();
+    Invalidate(EInvalidateWidget::Paint);
+    return true;
 }
 
 void SWCAUVView::SetBackgroundTexture(UTexture* InTexture)
@@ -366,7 +426,8 @@ void SWCAUVView::Clear()
     SelectedUVIslandIDs.Reset();
     IslandColors.Reset();
     HiddenUVIslandIDs.Reset();
-    CircleMarkers.Reset();
+    PersistentCircleMarkers.Reset();
+    HoverCircleMarker.Reset();
     CachedWireEdgesByIsland.Reset();
     CachedOutlineEdgesByIsland.Reset();
     CachedContentUVBounds = FBox2D(ForceInit);
@@ -565,11 +626,11 @@ int32 SWCAUVView::OnPaint(
         }
     }
 
-    for (const FWCAUVViewCircleMarker& Marker : CircleMarkers)
+    auto DrawCircleMarker = [&](const FWCAUVViewCircleMarker& Marker)
     {
         if (Marker.RadiusUV <= UE_SMALL_NUMBER)
         {
-            continue;
+            return;
         }
 
         const FVector2D CenterLocal = UVToLocal(Marker.CenterUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
@@ -608,6 +669,16 @@ int32 SWCAUVView::OnPaint(
             Marker.OutlineColor,
             true,
             Marker.OutlineThickness);
+    };
+
+    for (const FWCAUVViewCircleMarker& Marker : PersistentCircleMarkers)
+    {
+        DrawCircleMarker(Marker);
+    }
+
+    if (HoverCircleMarker.IsSet())
+    {
+        DrawCircleMarker(HoverCircleMarker.GetValue());
     }
 
     if (bIsDraggingSelectionShape)

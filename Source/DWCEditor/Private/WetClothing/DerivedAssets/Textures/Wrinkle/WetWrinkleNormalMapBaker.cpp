@@ -634,14 +634,20 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
     for (const FWetWrinklePatchPlacement* StampPtr : Group.Stamps)
     {
         const FWetWrinklePatchPlacement& Stamp = *StampPtr;
-        if (!Stamp.HasValidSurfaceAnchor() || !Stamp.HasValidSurfaceFootprint())
+        FDWCEditorWrinklePatchValidationResult PatchValidation;
+        if (!FDWCEditorWrinklePatchDescriptorBuilder::ValidatePlacement(
+                Stamp,
+                Group.UVChannelIndex,
+                PatchValidation))
         {
             OutErrorMessage = FString::Printf(
-                TEXT("Wrinkle patch '%s' (%s) has no valid surface anchor or footprint. Re-place the patch before baking."),
+                TEXT("Could not validate the physical projection contract for patch '%s' (%s): %s"),
                 Stamp.DisplayName.IsEmpty() ? TEXT("Unnamed Patch") : *Stamp.DisplayName,
-                *Stamp.PatchGuid.ToString(EGuidFormats::Digits));
+                *Stamp.PatchGuid.ToString(EGuidFormats::Digits),
+                PatchValidation.Error.IsEmpty() ? TEXT("invalid descriptor") : *PatchValidation.Error);
             return false;
         }
+        const FDWCEditorWrinklePatchDescriptor& PatchDescriptor = PatchValidation.Descriptor;
         UTexture2D* CorrectedNormalTexture = Stamp.WrinkleNormalTexture;
         const FGuid SourceId = CorrectedNormalTexture != nullptr
             ? CorrectedNormalTexture->Source.GetId()
@@ -739,17 +745,7 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
         PatchCommandInput.PatchGuid = Stamp.PatchGuid;
         PatchCommandInput.DisplayName = Stamp.DisplayName;
         PatchCommandInput.AuthoredMode = Stamp.ProjectionMode;
-        FDWCEditorWrinklePatchDescriptor PatchDescriptor;
         FString DescriptorError;
-        if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
-                Stamp, Group.UVChannelIndex, PatchDescriptor, &DescriptorError))
-        {
-            OutErrorMessage = FString::Printf(
-                TEXT("Could not build the physical projection contract for patch '%s': %s"),
-                Stamp.DisplayName.IsEmpty() ? TEXT("Unnamed Patch") : *Stamp.DisplayName,
-                DescriptorError.IsEmpty() ? TEXT("invalid descriptor") : *DescriptorError);
-            return false;
-        }
         FDWCEditorNormalSourceSnapshot NormalSourceSnapshot;
         NormalSourceSnapshot.Texture = NormalSource->Readback;
         NormalSourceSnapshot.bFlipGreenChannel = NormalSource->bFlipGreenChannel;

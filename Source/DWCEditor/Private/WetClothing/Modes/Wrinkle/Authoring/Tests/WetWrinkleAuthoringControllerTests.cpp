@@ -100,6 +100,31 @@ bool FWetWrinkleAuthoringControllerCommitTest::RunTest(const FString& Parameters
         TEXT("The local footprint stores half of the authored physical brush diameter"),
         Patch.SurfaceHalfExtentLocal.Equals(FVector2f(4.0f, 4.0f), UE_KINDA_SMALL_NUMBER));
 
+    FDWCEditorWrinklePatchValidationResult ValidPatchValidation;
+    TestTrue(
+        TEXT("The committed patch passes the shared preview and bake validation contract"),
+        FDWCEditorWrinklePatchDescriptorBuilder::ValidatePlacement(
+            Patch,
+            0,
+            ValidPatchValidation));
+    TestTrue(
+        TEXT("A successful shared patch validation retains a usable descriptor"),
+        ValidPatchValidation.IsValid());
+
+    FWetWrinklePatchPlacement InvalidPatch = Patch;
+    InvalidPatch.SurfaceFrameU = FVector3f::ZeroVector;
+    FDWCEditorWrinklePatchValidationResult InvalidPatchValidation;
+    TestFalse(
+        TEXT("An invalid surface frame is rejected before preview or bake rasterization"),
+        FDWCEditorWrinklePatchDescriptorBuilder::ValidatePlacement(
+            InvalidPatch,
+            0,
+            InvalidPatchValidation));
+    TestEqual(
+        TEXT("Invalid surface contracts report their canonical validation status"),
+        InvalidPatchValidation.Status,
+        EDWCEditorWrinklePatchValidationStatus::InvalidSurfaceContract);
+
     BrushAction.Brush.ToolMode = EWetWrinkleToolMode::ProceduralRidgeStroke;
     BrushAction.Brush.RidgeEditMode = EWetProceduralRidgeEditMode::Draw;
     Store->Dispatch(BrushAction);

@@ -25,19 +25,20 @@ FWetWrinkleAccumulatedPreviewWorker::Build(
         return Result;
     }
 
-    for (const FDWCEditorNormalStampCommand& Patch : Input.Patches)
+    if (Input.InvalidSurfacePatchCount > 0)
     {
-        const FDWCEditorRasterResult RasterResult = FDWCEditorNormalRasterCore::RasterizeStamp(
-            Patch,
-            Result->WorkingSurface,
-            &CancellationToken.Get());
-        if (RasterResult.bCanceled)
-        {
-            Result->bSucceeded = false;
-            Result->Error = TEXT("The wrinkle preview job was canceled.");
-            return Result;
-        }
+        Result->bSucceeded = false;
+        Result->InvalidSurfacePatchCount = Input.InvalidSurfacePatchCount;
+        Result->FirstSurfacePatchError = MoveTemp(Input.FirstSurfacePatchError);
+        Result->Error = FString::Printf(
+            TEXT("%d enabled wrinkle patch(es) cannot build a valid surface projection: %s"),
+            Result->InvalidSurfacePatchCount,
+            Result->FirstSurfacePatchError.IsEmpty()
+                ? TEXT("unknown authored patch error")
+                : *Result->FirstSurfacePatchError);
+        return Result;
     }
+
     for (const FWetWrinkleSurfacePatchPreviewInput& SurfacePatch : Input.SurfacePatches)
     {
         FDWCEditorProjectedNormalPatchCommand Command;
@@ -56,12 +57,13 @@ FWetWrinkleAccumulatedPreviewWorker::Build(
                 Result->Error = TEXT("The wrinkle surface projection was canceled.");
                 return Result;
             }
-            ++Result->SkippedSurfacePatchCount;
-            if (Result->FirstSurfacePatchError.IsEmpty())
-            {
-                Result->FirstSurfacePatchError = MoveTemp(ProjectionError);
-            }
-            continue;
+            Result->bSucceeded = false;
+            Result->InvalidSurfacePatchCount = 1;
+            Result->FirstSurfacePatchError = MoveTemp(ProjectionError);
+            Result->Error = Result->FirstSurfacePatchError.IsEmpty()
+                ? TEXT("A wrinkle patch could not build a surface projection.")
+                : Result->FirstSurfacePatchError;
+            return Result;
         }
         const FDWCEditorRasterResult RasterResult = FDWCEditorNormalRasterCore::RasterizeProjectedPatch(
             Command,

@@ -13,8 +13,6 @@
 #include "WetClothing/Modes/Part/Partition/WetPartEditingService.h"
 #include "WetClothing/Asset/Setup/DWCDataUVBuildService.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
-#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
-#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
@@ -2047,25 +2045,6 @@ bool SWetClothingPartEditorPanel::DoesMaterialSlotHaveDataUVWarnings(const int32
     return false;
 }
 
-bool SWetClothingPartEditorPanel::DoesMaterialSlotHaveDataUVDiagnostics(const int32 MaterialSlotIndex) const
-{
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
-    {
-        return false;
-    }
-    for (const FDWCDataUVLODMetadata& Metadata : Asset->GetDataUVMetadata())
-    {
-        const FDWCDataUVSlotWarning* Diagnostic =
-            SWetClothingPartEditorPanelLocal::FindDataUVSlotDiagnostic(Metadata, MaterialSlotIndex);
-        if (Diagnostic != nullptr && Diagnostic->HasDiagnostics())
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool SWetClothingPartEditorPanel::HasCompleteDataUVDiagnosticRecords(const int32 MaterialSlotIndex) const
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
@@ -2339,11 +2318,6 @@ TSet<int32> SWetClothingPartEditorPanel::CollectSelectedGenerateDataUVSlotIndice
     return Result;
 }
 
-TSet<int32> SWetClothingPartEditorPanel::CollectSelectedUpdateDataUVSlotIndices() const
-{
-    return TSet<int32>();
-}
-
 bool SWetClothingPartEditorPanel::IsMissingPreparedMeshRecoveryRequired() const
 {
     return SWetClothingPartEditorPanelLocal::IsMissingPreparedMeshForSealedLayout(WetClothingAsset.Get());
@@ -2371,13 +2345,6 @@ bool SWetClothingPartEditorPanel::IsDataUVOperationSelectable(const int32 Materi
            CollectSelectableDataUVOperationSlotIndices().Contains(MaterialSlotIndex);
 }
 
-ECheckBoxState SWetClothingPartEditorPanel::GetDataUVOperationCheckState(const int32 MaterialSlotIndex) const
-{
-    return SelectedDataUVOperationSlotIndices.Contains(MaterialSlotIndex)
-               ? ECheckBoxState::Checked
-               : ECheckBoxState::Unchecked;
-}
-
 void SWetClothingPartEditorPanel::HandleDataUVOperationCheckStateChanged(
     const ECheckBoxState NewState,
     const int32          MaterialSlotIndex)
@@ -2401,32 +2368,6 @@ void SWetClothingPartEditorPanel::HandleDataUVOperationCheckStateChanged(
     {
         MaterialSlotListView->RequestListRefresh();
     }
-}
-
-ECheckBoxState SWetClothingPartEditorPanel::GetAllDataUVOperationCheckState() const
-{
-    const TSet<int32> SelectableSlots = CollectSelectableDataUVOperationSlotIndices();
-    if (SelectableSlots.IsEmpty())
-    {
-        return ECheckBoxState::Unchecked;
-    }
-
-    int32 SelectedCount = 0;
-    for (const int32 MaterialSlotIndex : SelectableSlots)
-    {
-        if (SelectedDataUVOperationSlotIndices.Contains(MaterialSlotIndex))
-        {
-            ++SelectedCount;
-        }
-    }
-
-    if (SelectedCount == 0)
-    {
-        return ECheckBoxState::Unchecked;
-    }
-    return SelectedCount == SelectableSlots.Num()
-               ? ECheckBoxState::Checked
-               : ECheckBoxState::Undetermined;
 }
 
 void SWetClothingPartEditorPanel::HandleAllDataUVOperationCheckStateChanged(const ECheckBoxState NewState)
@@ -4568,40 +4509,6 @@ FReply SWetClothingPartEditorPanel::HandleAssignSelectedUVIslandToWetPartClicked
     return FReply::Handled();
 }
 
-FText SWetClothingPartEditorPanel::GetSelectedMaterialSlotText() const
-{
-    const FMaterialSlotItemPtr Item = FindMaterialSlotItem(SelectedMaterialSlotIndex);
-    if (!Item.IsValid())
-    {
-        return LOCTEXT("NoMaterialSlotSelected", "Select a material slot to isolate its coverage on the preview mesh.");
-    }
-
-    if (Item->SlotIndex == INDEX_NONE)
-    {
-        return LOCTEXT("SelectedAllMaterialSlots", "Selected: All Slots (preview only)");
-    }
-
-    const FString MaterialName = Item->Material.IsValid() ? Item->Material->GetName() : TEXT("None");
-
-    return FText::Format(
-        LOCTEXT("SelectedMaterialSlot", "Selected: [{0}] {1} ({2})"),
-        FText::AsNumber(Item->SlotIndex),
-        FText::FromName(Item->SlotName),
-        FText::FromString(MaterialName));
-}
-
-FText SWetClothingPartEditorPanel::GetOriginalUVChannelText() const
-{
-    if (!HasValidOriginalUVChannel())
-    {
-        return LOCTEXT("NoOriginalUVChannel", "Unavailable");
-    }
-
-    return FText::Format(
-        LOCTEXT("SelectedOriginalUVChannel", "UV {0}"),
-        FText::AsNumber(GetOriginalUVChannelIndex()));
-}
-
 float SWetClothingPartEditorPanel::GetUVViewBackgroundTextureOpacity() const
 {
     return UVViewBackgroundTextureOpacity;
@@ -4642,88 +4549,6 @@ void SWetClothingPartEditorPanel::HandleUVViewIslandLineThicknessScaleChanged(fl
     {
         UVView->SetUVIslandLineThicknessScale(UVViewIslandLineThicknessScale);
     }
-}
-
-FText SWetClothingPartEditorPanel::GetSelectedTextureText() const
-{
-    if (!SelectedTextureItem.IsValid())
-    {
-        return LOCTEXT("NoTextureSelected", "No Texture");
-    }
-
-    return FText::FromString(SelectedTextureItem->Label);
-}
-
-FText SWetClothingPartEditorPanel::GetRenderProfileBakeSourceText() const
-{
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    return Asset != nullptr
-               ? FText::Format(
-                     LOCTEXT("WetPartDataBakeSource", "Output UV: DWC UV Channel {0}"),
-                     FText::AsNumber(Asset->GetDWCDataUVChannelIndex()))
-               : LOCTEXT("WetPartDataBakeNoAsset", "Output UV: unavailable");
-}
-
-FText SWetClothingPartEditorPanel::GetRenderProfileBakeSlotsText() const
-{
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
-    {
-        return LOCTEXT("WetPartDataBakeNoSlots", "Material Slots: None");
-    }
-
-    TArray<int32> Slots;
-    for (const FWetClothingAuthoredMaterialSlot& SlotData : Asset->Authored.PartData.EditableWetPartData.MaterialSlots)
-    {
-        const bool bHasRuntimePart = SlotData.WetPartEntries.ContainsByPredicate(
-            [](const FWetClothingWetPartEntry& Entry)
-            {
-                return Entry.WetPartID != 0 && !Entry.AssignedUVIslandIDs.IsEmpty();
-            });
-        if (SlotData.MaterialSlotIndex != INDEX_NONE && SlotData.bIsWettableSlot && bHasRuntimePart)
-        {
-            Slots.AddUnique(SlotData.MaterialSlotIndex);
-        }
-    }
-    Slots.Sort();
-    TArray<FString> Labels;
-    for (const int32 Slot : Slots)
-    {
-        Labels.Add(FString::FromInt(Slot));
-    }
-    return Labels.IsEmpty()
-               ? LOCTEXT("WetPartDataBakeNoSlots2", "Material Slots: None")
-               : FText::Format(
-                     LOCTEXT("WetPartDataBakeSlots", "Material Slots: {0}"),
-                     FText::FromString(FString::Join(Labels, TEXT(", "))));
-}
-
-FText SWetClothingPartEditorPanel::GetRenderProfileBakeStatusText() const
-{
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
-    {
-        return LOCTEXT("WetPartDataBakeNoAssetStatus", "Status: No WCA.");
-    }
-
-    const FWetClothingBakedWetPartData& Baked = Asset->Derived.Inline.BakedWetPartData;
-    if (!Baked.IsValid())
-    {
-        return LOCTEXT("WetPartDataBakeRequired", "Status: Wet Part Data Texture bake required.");
-    }
-    return FText::Format(
-        LOCTEXT("WetPartDataBakeReady", "Status: {0} slot textures / {1} local profiles"),
-        FText::AsNumber(Baked.SlotTextures.Num()),
-        FText::AsNumber(Baked.LocalProfiles.Num()));
-}
-
-FText SWetClothingPartEditorPanel::GetRenderProfileBakeSettingsText() const
-{
-    return FText::Format(
-        LOCTEXT("WetPartDataBakeSettings", "Wet Part Data: {0}x{0} / Padding {1} px / Point Sample / DWC UV Channel  |  Surface Textures: {2}x{2}"),
-        FText::AsNumber(DWCWetPartDataTextureBake::Resolution),
-        FText::AsNumber(DWCWetPartDataTextureBake::PaddingPixels),
-        FText::AsNumber(DWCSurfaceTextureNormalization::Resolution));
 }
 
 FText SWetClothingPartEditorPanel::GetUVIslandCountText() const
@@ -4981,30 +4806,6 @@ bool SWetClothingPartEditorPanel::IsAssignUVIslandToWetPartEnabled() const
     return IsSelectedMaterialSlotPartEditingReady() &&
            SelectedUVIslandIDs.Num() > 0 &&
            SelectedAssignWetPartID != INDEX_NONE;
-}
-
-FText SWetClothingPartEditorPanel::GetBlendModeText(FWetPartEntryPtr Item) const
-{
-    if (!Item.IsValid())
-    {
-        return LOCTEXT("InvalidBlendMode", "Standard");
-    }
-
-    const UWetClothingAsset*         Asset = WetClothingAsset.Get();
-    const FWetPartProfileAssignment* Profile = Asset != nullptr
-                                                   ? Asset->Authored.PartData.EditableWetPartData.FindProfile(*Item)
-                                                   : nullptr;
-    const UEnum*                     BlendModeEnum = StaticEnum<EWetPartProfileBlendMode>();
-    return BlendModeEnum != nullptr && Profile != nullptr
-               ? BlendModeEnum->GetDisplayNameTextByValue(static_cast<int64>(Profile->BlendMode))
-               : LOCTEXT("BlendModeFallback", "Standard");
-}
-
-FText SWetClothingPartEditorPanel::GetWetnessProfileButtonText(FWetPartEntryPtr Item) const
-{
-    return Item.IsValid()
-               ? FText::FromString(GetAssignedProfileLabel(*Item))
-               : LOCTEXT("NoProfileSelected", "Select Profile");
 }
 
 FString SWetClothingPartEditorPanel::GetWetnessProfileObjectPath(FWetPartEntryPtr Item) const
@@ -5627,50 +5428,6 @@ void SWetClothingPartEditorPanel::HandleSurfaceWaterTilingWindowClosed(const TSh
     SurfaceWaterTilingEditPartDisplayName.Reset();
 }
 
-float SWetClothingPartEditorPanel::GetSelectedDropletRadiusScale() const
-{
-    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
-    {
-        return FMath::Clamp(Settings->DropletRadiusScale, 0.25f, 4.0f);
-    }
-    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
-    return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletRadiusScale, 0.25f, 4.0f) : 1.0f;
-}
-
-float SWetClothingPartEditorPanel::GetSelectedDropletFlowSizeScale() const
-{
-    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
-    {
-        return FMath::Clamp(Settings->DropletFlowSizeScale, 0.25f, 4.0f);
-    }
-    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
-    return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletFlowSizeScale, 0.25f, 4.0f) : 1.0f;
-}
-
-ECheckBoxState SWetClothingPartEditorPanel::GetSelectedDropletStampSizeOverrideCheckState() const
-{
-    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
-    {
-        return Settings->bOverrideDropletStampSize ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-    }
-    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
-    return Entry != nullptr && Entry->SurfaceWater.bOverrideDropletStampSize
-               ? ECheckBoxState::Checked
-               : ECheckBoxState::Unchecked;
-}
-
-ECheckBoxState SWetClothingPartEditorPanel::GetSelectedDropletFlowStampSizeOverrideCheckState() const
-{
-    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
-    {
-        return Settings->bOverrideDropletFlowStampSize ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-    }
-    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
-    return Entry != nullptr && Entry->SurfaceWater.bOverrideDropletFlowStampSize
-               ? ECheckBoxState::Checked
-               : ECheckBoxState::Unchecked;
-}
-
 void SWetClothingPartEditorPanel::HandleSelectedDropletStampSizeOverrideChanged(const ECheckBoxState NewState)
 {
     if (GetSurfaceWaterTilingWorkingSettings() == nullptr)
@@ -5732,14 +5489,6 @@ float SWetClothingPartEditorPanel::GetSelectedDropletDetailSize() const
     return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletDetailSize, 0.0f, 4.0f) : 1.0f;
 }
 
-FText SWetClothingPartEditorPanel::GetSelectedDropletDetailSizeText() const
-{
-    FNumberFormattingOptions Options;
-    Options.MinimumFractionalDigits = 2;
-    Options.MaximumFractionalDigits = 2;
-    return FText::AsNumber(GetSelectedDropletDetailSize(), &Options);
-}
-
 float SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSize() const
 {
     if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
@@ -5748,14 +5497,6 @@ float SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSize() const
     }
     const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
     return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletFlowDetailSize, 0.0f, 4.0f) : 1.0f;
-}
-
-FText SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSizeText() const
-{
-    FNumberFormattingOptions Options;
-    Options.MinimumFractionalDigits = 2;
-    Options.MaximumFractionalDigits = 2;
-    return FText::AsNumber(GetSelectedDropletFlowDetailSize(), &Options);
 }
 
 void SWetClothingPartEditorPanel::HandleSelectedDropletRadiusScaleChanged(const float InValue)
@@ -5826,14 +5567,6 @@ void SWetClothingPartEditorPanel::HandleSelectedDropletFlowDetailSizeChanged(con
     NotifySurfaceWaterTilingWorkingSettingsChanged();
 }
 
-ECheckBoxState SWetClothingPartEditorPanel::GetSurfaceWaterPreviewCoverageModeState(
-    const EDWCSurfaceWaterTilingPreviewCoverageMode Mode) const
-{
-    return SurfaceWaterPreviewCoverageMode == Mode
-               ? ECheckBoxState::Checked
-               : ECheckBoxState::Unchecked;
-}
-
 void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewCoverageModeChanged(
     const ECheckBoxState                            NewState,
     const EDWCSurfaceWaterTilingPreviewCoverageMode Mode)
@@ -5850,14 +5583,6 @@ void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewCoverageModeChanged(
     }
 }
 
-ECheckBoxState SWetClothingPartEditorPanel::GetSurfaceWaterPreviewDisplayModeState(
-    const EDWCSurfaceWaterTilingPreviewDisplayMode Mode) const
-{
-    return SurfaceWaterPreviewDisplayMode == Mode
-               ? ECheckBoxState::Checked
-               : ECheckBoxState::Unchecked;
-}
-
 void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewDisplayModeChanged(
     const ECheckBoxState                           NewState,
     const EDWCSurfaceWaterTilingPreviewDisplayMode Mode)
@@ -5872,13 +5597,6 @@ void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewDisplayModeChanged(
     {
         SurfaceWaterTilingPreviewViewport->SetSurfaceWaterTilingPreviewDisplayMode(SurfaceWaterPreviewDisplayMode);
     }
-}
-
-EVisibility SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility() const
-{
-    return SurfaceWaterPreviewCoverageMode == EDWCSurfaceWaterTilingPreviewCoverageMode::SingleCircle
-               ? EVisibility::Visible
-               : EVisibility::Collapsed;
 }
 
 ECheckBoxState SWetClothingPartEditorPanel::GetShowPartColorsCheckState() const
@@ -6069,16 +5787,6 @@ bool SWetClothingPartEditorPanel::IsRenderProfileBakeSourceValid() const
     return WetClothingAsset.IsValid() &&
            WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr &&
            WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex());
-}
-
-bool SWetClothingPartEditorPanel::CanBakeAnyRenderProfileData() const
-{
-    return IsRenderProfileBakeSourceValid() &&
-           WetClothingAsset->Authored.PartData.EditableWetPartData.MaterialSlots.ContainsByPredicate(
-               [](const FWetClothingAuthoredMaterialSlot& SlotData)
-               {
-                   return SlotData.bIsWettableSlot && !SlotData.WetPartEntries.IsEmpty();
-               });
 }
 
 FReply SWetClothingPartEditorPanel::HandleBakeRenderProfileDataClicked()

@@ -186,8 +186,8 @@ namespace
 
         // The source readbacks are immutable shared snapshots. Count only the
         // per-job arrays and allocations that coexist while this worker runs.
-        Estimate.SnapshotBytes = Input.Patches.GetAllocatedSize() +
-            Input.SurfacePatches.GetAllocatedSize() + Input.RidgeStrokes.GetAllocatedSize();
+        Estimate.SnapshotBytes = Input.SurfacePatches.GetAllocatedSize() +
+            Input.RidgeStrokes.GetAllocatedSize();
         uint64 ProjectionScratchBytes = 0;
         for (const FWetWrinkleSurfacePatchPreviewInput& Patch : Input.SurfacePatches)
         {
@@ -300,15 +300,22 @@ namespace
     bool BuildWetWrinkleSurfacePatchPreviewInput(
         const FWetWrinklePatchPlacement& Stamp,
         const FDWCEditorSpatialHandle& SpatialHandle,
-        FWetWrinkleSurfacePatchPreviewInput& OutInput)
+        FWetWrinkleSurfacePatchPreviewInput& OutInput,
+        FString& OutError)
     {
-        FDWCEditorWrinklePatchDescriptor Descriptor;
-        FString Error;
-        return FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
-                Stamp, SpatialHandle.IsValid() ? SpatialHandle->UVChannelIndex : INDEX_NONE,
-                Descriptor, &Error) &&
+        FDWCEditorWrinklePatchValidationResult Validation;
+        if (!FDWCEditorWrinklePatchDescriptorBuilder::ValidatePlacement(
+                Stamp,
+                SpatialHandle.IsValid() ? SpatialHandle->UVChannelIndex : INDEX_NONE,
+                Validation))
+        {
+            OutError = MoveTemp(Validation.Error);
+            return false;
+        }
+
+        return
             FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInput(
-                Descriptor, SpatialHandle, OutInput, &Error);
+                Validation.Descriptor, SpatialHandle, OutInput, &OutError);
     }
 
 } // namespace
@@ -627,6 +634,7 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
         SpatialLease.Reset();
         SpatialHandle.Reset();
         PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
+        InvalidatePreviewMaterialAssignmentCache();
     }
     else if (bForceMaterialRebuild)
     {
@@ -1176,10 +1184,37 @@ bool SWetWrinkleViewport::HitTestSurface(const FRay& WorldRay, double& OutHitDep
     return true;
 }
 
+bool SWetWrinkleViewport::IsSurfaceHitAnchoredAtDescriptor(
+    const FWetWrinkleSurfaceHit& SurfaceHit,
+    const FDWCEditorWrinklePatchDescriptor& Descriptor)
+{
+    if (!SurfaceHit.bHit ||
+        SurfaceHit.MaterialSlotIndex != Descriptor.MaterialSlotIndex ||
+        SurfaceHit.UVChannelIndex != Descriptor.UVChannelIndex ||
+        SurfaceHit.TriangleID != Descriptor.AnchorTriangleID)
+    {
+        return false;
+    }
+
+    const FVector3f HitBarycentric(
+        static_cast<float>(SurfaceHit.Barycentric.X),
+        static_cast<float>(SurfaceHit.Barycentric.Y),
+        static_cast<float>(SurfaceHit.Barycentric.Z));
+    constexpr float AnchorTolerance = 1.0e-4f;
+    return FVector3f::DistSquared(HitBarycentric, Descriptor.AnchorBarycentric) <=
+        FMath::Square(AnchorTolerance);
+}
+
 bool SWetWrinkleViewport::CanBeginSurfaceInteraction(const FRay& WorldRay, double& OutHitDepth)
 {
     if (BrushSettings.ToolMode == EWetWrinkleToolMode::Patch)
     {
+        FWetWrinkleSurfaceHit SurfaceHit;
+        if (!TraceSurface(WorldRay.Origin, WorldRay.Direction, SurfaceHit))
+        {
+            return false;
+        }
+        OutHitDepth = FVector::Distance(WorldRay.Origin, SurfaceHit.WorldPosition);
         const bool bCanCommitPresentedPatch =
             !bPreviewSuspended &&
             !PatchHoverPreviewState.IsCommitHandoffPending() &&
@@ -1190,7 +1225,10 @@ bool SWetWrinkleViewport::CanBeginSurfaceInteraction(const FRay& WorldRay, doubl
                 BrushSettings.MaterialSlotIndex &&
             PatchHoverPreviewState.PresentedPayload->Descriptor.UVChannelIndex ==
                 BrushSettings.UVChannelIndex;
-        return bCanCommitPresentedPatch && HitTestSurface(WorldRay, OutHitDepth);
+        return bCanCommitPresentedPatch &&
+            IsSurfaceHitAnchoredAtDescriptor(
+                SurfaceHit,
+                PatchHoverPreviewState.PresentedPayload->Descriptor);
     }
     return HitTestSurface(WorldRay, OutHitDepth);
 }
@@ -1199,7 +1237,11 @@ void SWetWrinkleViewport::BeginSurfaceInteraction(const FRay& WorldRay)
 {
     if (BrushSettings.ToolMode == EWetWrinkleToolMode::Patch)
     {
-        CommitPresentedPatch();
+        FWetWrinkleSurfaceHit SurfaceHit;
+        if (TraceSurface(WorldRay.Origin, WorldRay.Direction, SurfaceHit))
+        {
+            CommitPresentedPatch(&SurfaceHit);
+        }
         return;
     }
 
@@ -1214,7 +1256,7 @@ void SWetWrinkleViewport::BeginSurfaceInteraction(const FRay& WorldRay)
     }
 }
 
-bool SWetWrinkleViewport::CommitPresentedPatch()
+bool SWetWrinkleViewport::CommitPresentedPatch(const FWetWrinkleSurfaceHit* ExpectedSurfaceHit)
 {
     if (bPreviewSuspended || !PatchHoverPreviewState.bBound ||
         PatchHoverPreviewState.IsCommitHandoffPending() ||
@@ -1228,6 +1270,11 @@ bool SWetWrinkleViewport::CommitPresentedPatch()
     const FDWCEditorWrinklePatchDescriptor& Descriptor = PresentedPayload.Descriptor;
     if (Descriptor.MaterialSlotIndex != BrushSettings.MaterialSlotIndex ||
         Descriptor.UVChannelIndex != BrushSettings.UVChannelIndex)
+    {
+        return false;
+    }
+    if (ExpectedSurfaceHit != nullptr &&
+        !IsSurfaceHitAnchoredAtDescriptor(*ExpectedSurfaceHit, Descriptor))
     {
         return false;
     }
@@ -1487,24 +1534,9 @@ void SWetWrinkleViewport::ApplyPreviewMaterialsToMesh()
 
     for (const FDWCEditorPreviewSlotState& SlotState : PreviewSession->GetSlotStates().Slots)
     {
-        UMaterialInterface* MaterialToApply = SlotState.SourceMaterial.Get();
-        const bool bUsePreviewMaterial = SlotState.bPreviewReady &&
-            PreviewMaterialSlotIndices.Contains(SlotState.MaterialSlotIndex);
-        if (bUsePreviewMaterial)
-        {
-            const FDWCEditorPreviewSessionSlot* PreviewSlot =
-                PreviewSession->FindSlot(SlotState.MaterialSlotIndex);
-            if (UMaterialInstanceDynamic* PreviewMID =
-                    PreviewSlot != nullptr ? PreviewSlot->PreviewMID.Get() : nullptr)
-            {
-                MaterialToApply = PreviewMID;
-            }
-        }
-        if (MaterialToApply == nullptr)
-        {
-            MaterialToApply = UMaterial::GetDefaultMaterial(MD_Surface);
-        }
-        PreviewMeshComponent->SetMaterial(SlotState.MaterialSlotIndex, MaterialToApply);
+        ApplyPreviewMaterialToMeshSlot(
+            SlotState.MaterialSlotIndex,
+            ResolvePreviewMaterialForSlot(SlotState, PreviewMaterialSlotIndices));
     }
 
     LastAppliedActivePreviewMaterialSlot = ActiveMaterialSlotIndex;
@@ -1625,36 +1657,74 @@ void SWetWrinkleViewport::RefreshWrinklePreviewHoverParameters()
     }
     else
     {
-        if (PatchHoverPreviewState.PendingTicket.IsValid() && WorkerJobScheduler.IsValid())
-        {
-            WorkerJobScheduler->Cancel(PatchHoverPreviewState.PendingTicket.Key);
-        }
-        if (RenderUploadQueue.IsValid())
-        {
-            RenderUploadQueue->RemoveObserver(PatchHoverPreviewState.PendingPresentationObserver);
-            if (PatchHoverPreviewState.bPresentationSwapPending &&
-                PatchHoverPreviewState.StagingTextureHandle.IsValid())
-            {
-                RenderUploadQueue->Cancel(PatchHoverPreviewState.StagingTextureHandle->GetKey());
-            }
-        }
-        PatchHoverPreviewState.PendingTicket = {};
-        ++PatchHoverPreviewState.RequestSerial;
-        PatchHoverPreviewState.RequestedDescriptor.Reset();
-        PatchHoverPreviewState.PendingPresentedPayload.Reset();
-        PatchHoverPreviewState.PendingPresentationUpload = {};
-        PatchHoverPreviewState.bPresentationSwapPending = false;
-        if (!PatchHoverPreviewState.IsCommitHandoffPending())
-        {
-            PatchHoverPreviewState.bBound = false;
-            PatchHoverPreviewState.RequestHash = 0;
-            PatchHoverPreviewState.PresentedPayload.Reset();
-            PatchHoverPreviewState.PendingAccumulatedUpload = {};
-            PatchHoverPreviewState.PendingAccumulatedSequence = 0;
-            PatchHoverPreviewState.PendingAccumulatedContentRevision = 0;
-        }
+        InvalidatePatchHoverRequest();
+        return;
     }
     ApplyPatchHoverPreviewLayer();
+}
+
+UMaterialInterface* SWetWrinkleViewport::ResolvePreviewMaterialForSlot(
+    const FDWCEditorPreviewSlotState& SlotState,
+    const TConstArrayView<int32> PreviewMaterialSlotIndices) const
+{
+    UMaterialInterface* MaterialToApply = SlotState.SourceMaterial.Get();
+    const bool bUsePreviewMaterial = SlotState.bPreviewReady &&
+        PreviewMaterialSlotIndices.Contains(SlotState.MaterialSlotIndex);
+    if (bUsePreviewMaterial)
+    {
+        const FDWCEditorPreviewSessionSlot* PreviewSlot =
+            PreviewSession->FindSlot(SlotState.MaterialSlotIndex);
+        if (UMaterialInstanceDynamic* PreviewMID =
+                PreviewSlot != nullptr ? PreviewSlot->PreviewMID.Get() : nullptr)
+        {
+            MaterialToApply = PreviewMID;
+        }
+    }
+
+    return MaterialToApply != nullptr
+               ? MaterialToApply
+               : UMaterial::GetDefaultMaterial(MD_Surface);
+}
+
+bool SWetWrinkleViewport::ApplyPreviewMaterialToMeshSlot(
+    const int32 MaterialSlotIndex,
+    UMaterialInterface* MaterialToApply)
+{
+    if (PreviewMeshComponent == nullptr || MaterialSlotIndex < 0)
+    {
+        return false;
+    }
+
+    ++PreviewMaterialAssignmentCheckCount;
+    const FDWCEditorPreviewMaterialBindingDecision BindingDecision = PreviewMaterialBindingCache.Evaluate(
+        PreviewMeshComponent->GetSkeletalMeshAsset(),
+        PreviewMeshComponent->GetNumMaterials(),
+        MaterialSlotIndex,
+        MaterialToApply,
+        PreviewMeshComponent->GetMaterial(MaterialSlotIndex));
+    if (!BindingDecision.bNeedsAssignment)
+    {
+        ++PreviewMaterialAssignmentSkipCount;
+        if (BindingDecision.bCacheMatched)
+        {
+            ++PreviewMaterialAssignmentCacheHitCount;
+        }
+        return false;
+    }
+
+    PreviewMeshComponent->SetMaterial(MaterialSlotIndex, MaterialToApply);
+    PreviewMaterialBindingCache.RecordApplied(
+        PreviewMeshComponent->GetSkeletalMeshAsset(),
+        PreviewMeshComponent->GetNumMaterials(),
+        MaterialSlotIndex,
+        MaterialToApply);
+    ++PreviewMaterialAssignmentWriteCount;
+    return true;
+}
+
+void SWetWrinkleViewport::InvalidatePreviewMaterialAssignmentCache()
+{
+    PreviewMaterialBindingCache.Reset();
 }
 
 void SWetWrinkleViewport::ApplyPatchHoverPreviewLayer()
@@ -1813,7 +1883,7 @@ bool SWetWrinkleViewport::AppendPresentedPatchToAccumulatedPreview(
     return true;
 }
 
-void SWetWrinkleViewport::InvalidatePatchHoverRequest()
+void SWetWrinkleViewport::CancelPatchHoverAsyncWork()
 {
     if (PatchHoverPreviewState.PendingTicket.IsValid() && WorkerJobScheduler.IsValid())
     {
@@ -1830,20 +1900,37 @@ void SWetWrinkleViewport::InvalidatePatchHoverRequest()
     }
 
     PatchHoverPreviewState.PendingTicket = {};
-    PatchHoverPreviewState.RequestedDescriptor.Reset();
-    PatchHoverPreviewState.PendingPresentedPayload.Reset();
     PatchHoverPreviewState.PendingPresentationUpload = {};
+    PatchHoverPreviewState.PendingPresentationObserver = {};
     PatchHoverPreviewState.PendingPerformanceDiagnostics.Reset();
     PatchHoverPreviewState.bPresentationSwapPending = false;
-    if (!PatchHoverPreviewState.IsCommitHandoffPending())
+}
+
+void SWetWrinkleViewport::ClearPatchHoverPresentation(const bool bPreserveCommitHandoff)
+{
+    const bool bKeepCommitHandoff =
+        bPreserveCommitHandoff && PatchHoverPreviewState.IsCommitHandoffPending();
+    CancelPatchHoverAsyncWork();
+
+    ++PatchHoverPreviewState.RequestSerial;
+    PatchHoverPreviewState.RequestedDescriptor.Reset();
+    PatchHoverPreviewState.PendingPresentedPayload.Reset();
+    if (!bKeepCommitHandoff)
     {
         PatchHoverPreviewState.bBound = false;
         PatchHoverPreviewState.PresentedPayload.Reset();
         PatchHoverPreviewState.RequestHash = 0;
+        PatchHoverPreviewState.PendingAccumulatedUpload = {};
+        PatchHoverPreviewState.PendingAccumulatedSequence = 0;
+        PatchHoverPreviewState.PendingAccumulatedContentRevision = 0;
     }
-    ++PatchHoverPreviewState.RequestSerial;
 
     ApplyPatchHoverPreviewLayer();
+}
+
+void SWetWrinkleViewport::InvalidatePatchHoverRequest()
+{
+    ClearPatchHoverPresentation(true);
 }
 
 void SWetWrinkleViewport::HandlePatchHoverUploadStatus(
@@ -2175,19 +2262,7 @@ bool SWetWrinkleViewport::UpdateTransientProceduralPreview(const FWetProceduralR
 
 void SWetWrinkleViewport::ResetPatchHoverPreviewState()
 {
-    if (PatchHoverPreviewState.PendingTicket.IsValid() && WorkerJobScheduler.IsValid())
-    {
-        WorkerJobScheduler->CancelTicket(PatchHoverPreviewState.PendingTicket);
-    }
-    if (RenderUploadQueue.IsValid())
-    {
-        RenderUploadQueue->RemoveObserver(PatchHoverPreviewState.PendingPresentationObserver);
-        if (PatchHoverPreviewState.bPresentationSwapPending &&
-            PatchHoverPreviewState.StagingTextureHandle.IsValid())
-        {
-            RenderUploadQueue->Cancel(PatchHoverPreviewState.StagingTextureHandle->GetKey());
-        }
-    }
+    ClearPatchHoverPresentation(false);
     if (TextureWorkspace.IsValid() && PatchHoverPreviewState.TextureHandle.IsValid())
     {
         TextureWorkspace->Discard(PatchHoverPreviewState.TextureHandle);
@@ -2197,6 +2272,7 @@ void SWetWrinkleViewport::ResetPatchHoverPreviewState()
         TextureWorkspace->Discard(PatchHoverPreviewState.StagingTextureHandle);
     }
     PatchHoverPreviewState = FWetWrinklePatchHoverPreviewState();
+    ApplyPatchHoverPreviewLayer();
 }
 
 void SWetWrinkleViewport::RecordPatchHoverDiagnostics(
@@ -2439,6 +2515,11 @@ bool SWetWrinkleViewport::SchedulePatchHoverPreview()
     if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildFromHit(
             CurrentSurfaceHit, BrushSettings, RequestSerial, PatchDescriptor, &ProjectionError))
     {
+        PatchPreviewValidationError = ProjectionError.IsEmpty()
+            ? TEXT("The wrinkle patch cannot build a valid surface placement here.")
+            : MoveTemp(ProjectionError);
+        InvalidatePatchHoverRequest();
+        RefreshViewportHint();
         return false;
     }
     const double DescriptorBuildMs = bCollectDiagnostics
@@ -2461,8 +2542,15 @@ bool SWetWrinkleViewport::SchedulePatchHoverPreview()
     if (!FDWCEditorWrinklePatchDescriptorBuilder::BuildRasterInput(
             PatchDescriptor, SpatialHandle, SurfaceInput, &ProjectionError))
     {
+        PatchPreviewValidationError = ProjectionError.IsEmpty()
+            ? TEXT("The wrinkle patch cannot build a valid surface projection here.")
+            : MoveTemp(ProjectionError);
+        InvalidatePatchHoverRequest();
+        RefreshViewportHint();
         return false;
     }
+
+    PatchPreviewValidationError.Reset();
     const double TextureResolveMs = bCollectDiagnostics
         ? (FPlatformTime::Seconds() - TextureResolveStartSeconds) * 1000.0
         : 0.0;
@@ -2572,11 +2660,10 @@ bool SWetWrinkleViewport::SchedulePatchHoverPreview()
                 if (State.PendingTicket.JobId == CompletedTicket.JobId &&
                     State.PendingTicket.Generation == CompletedTicket.Generation)
                 {
-                    State.PendingTicket = {};
-                    State.RequestedDescriptor.Reset();
-                    State.RequestHash = State.PresentedPayload.IsSet()
-                        ? State.PresentedPayload->Descriptor.GetStableHash()
-                        : 0;
+                    Viewport->PatchPreviewValidationError =
+                        TEXT("The wrinkle hover projection did not produce a valid patch.");
+                    Viewport->ClearPatchHoverPresentation(true);
+                    Viewport->RefreshViewportHint();
                 }
                 UE_LOG(
                     LogWetWrinklePreviewViewport,
@@ -2626,6 +2713,8 @@ bool SWetWrinkleViewport::SchedulePatchHoverPreview()
             if (CommitResult == EDWCEditorPreviewCommitResult::Applied)
             {
                 ++Viewport->PatchHoverAppliedCount;
+                Viewport->PatchPreviewValidationError.Reset();
+                Viewport->RefreshViewportHint();
                 State.StagingOutputRects = MoveTemp(Result->ProjectedOutputRects);
                 FWetWrinklePresentedPatchPayload PendingPayload;
                 PendingPayload.Descriptor = PatchDescriptor;
@@ -2735,22 +2824,31 @@ bool SWetWrinkleViewport::SchedulePatchHoverPreview()
                     : 0;
                 if (Completion == EDWCEditorWorkerJobCompletion::Failed)
                 {
+                    Viewport->PatchPreviewValidationError = Error.IsEmpty()
+                        ? TEXT("The wrinkle hover projection failed.")
+                        : Error;
                     UE_LOG(
                         LogWetWrinklePreviewViewport,
                         Warning,
                         TEXT("Projected wrinkle hover failed for slot %d: %s"),
                         MaterialSlotIndex,
                         Error.IsEmpty() ? TEXT("unknown worker failure") : *Error);
+                    Viewport->ClearPatchHoverPresentation(true);
+                    Viewport->RefreshViewportHint();
                 }
             }
         });
     PatchHoverPreviewState.PendingTicket = Ticket;
     if (!Ticket.IsValid())
     {
+        PatchPreviewValidationError = SubmitError.IsEmpty()
+            ? TEXT("The wrinkle hover request could not be scheduled.")
+            : MoveTemp(SubmitError);
         PatchHoverPreviewState.RequestedDescriptor.Reset();
         PatchHoverPreviewState.RequestHash = PatchHoverPreviewState.PresentedPayload.IsSet()
             ? PatchHoverPreviewState.PresentedPayload->Descriptor.GetStableHash()
             : 0;
+        RefreshViewportHint();
         return false;
     }
     ++PatchHoverSubmittedCount;
@@ -3641,9 +3739,26 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                 }
 
                 FWetWrinkleSurfacePatchPreviewInput PatchInput;
-                if (BuildWetWrinkleSurfacePatchPreviewInput(Stamp, JobSpatialHandle, PatchInput))
+                FString PatchError;
+                if (BuildWetWrinkleSurfacePatchPreviewInput(
+                        Stamp,
+                        JobSpatialHandle,
+                        PatchInput,
+                        PatchError))
                 {
                     Input.SurfacePatches.Add(MoveTemp(PatchInput));
+                }
+                else
+                {
+                    ++Input.InvalidSurfacePatchCount;
+                    if (Input.FirstSurfacePatchError.IsEmpty())
+                    {
+                        Input.FirstSurfacePatchError = FString::Printf(
+                            TEXT("Patch '%s' (%s): %s"),
+                            Stamp.DisplayName.IsEmpty() ? TEXT("Unnamed Patch") : *Stamp.DisplayName,
+                            *Stamp.PatchGuid.ToString(EGuidFormats::Digits),
+                            PatchError.IsEmpty() ? TEXT("invalid surface patch input") : *PatchError);
+                    }
                 }
             }
             for (const FWetProceduralRidgeStroke& Stroke :
@@ -3722,20 +3837,6 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                 MoveTemp(Result->WorkingSurface),
                 NewLease,
                 EDWCEditorTextureUploadPriority::Interactive);
-            if (CommitResult == EDWCEditorPreviewCommitResult::Applied &&
-                Result->SkippedSurfacePatchCount > 0)
-            {
-                UE_LOG(
-                    LogWetWrinklePreviewViewport,
-                    Warning,
-                    TEXT("Wrinkle preview skipped %d surface patch(es) in slot %d: %s"),
-                    Result->SkippedSurfacePatchCount,
-                    MaterialSlotIndex,
-                    Result->FirstSurfacePatchError.IsEmpty()
-                        ? TEXT("surface projection unavailable")
-                        : *Result->FirstSurfacePatchError);
-            }
-
             const bool bOwnsPendingTicket =
                 State->PendingTicket.JobId == Ticket.JobId &&
                 State->PendingTicket.Generation == Ticket.Generation;
@@ -3754,6 +3855,8 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                 State->TextureHandle = MoveTemp(NewLease);
                 State->bDirty = false;
                 State->Recovery.MarkSucceeded();
+                Viewport->PatchPreviewValidationError.Reset();
+                Viewport->RefreshViewportHint();
                 ++Viewport->AccumulatedPreviewRebuildCount;
                 Viewport->RefreshWrinklePreviewAccumulatedParameters();
                 Viewport->CompletePatchHoverHandoff(
@@ -3837,6 +3940,10 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
                 State->bDirty = true;
                 if (Completion == EDWCEditorWorkerJobCompletion::Failed)
                 {
+                    Viewport->PatchPreviewValidationError = Error.IsEmpty()
+                        ? TEXT("The wrinkle preview could not validate one or more surface patches.")
+                        : Error;
+                    Viewport->RefreshViewportHint();
                     const EDWCEditorPreviewRecoveryAction RecoveryAction =
                         State->Recovery.MarkFailure(
                         EDWCEditorPreviewInvalidationReason::WorkerFailed,
@@ -3978,6 +4085,10 @@ void SWetWrinkleViewport::CollectDiagnosticOperationStats(
     OutCounters.Add({TEXT("Wrinkle patch hover canceled"), PatchHoverCanceledCount, 0});
     OutCounters.Add({TEXT("Wrinkle patch hover failures"), PatchHoverFailedCount, 0});
     OutCounters.Add({TEXT("Wrinkle spatial-cache acquisitions"), HitTriangleBuildCount, 0});
+    OutCounters.Add({TEXT("Wrinkle preview material assignment checks"), PreviewMaterialAssignmentCheckCount, 0});
+    OutCounters.Add({TEXT("Wrinkle preview material assignment writes"), PreviewMaterialAssignmentWriteCount, 0});
+    OutCounters.Add({TEXT("Wrinkle preview material assignment skips"), PreviewMaterialAssignmentSkipCount, 0});
+    OutCounters.Add({TEXT("Wrinkle preview material assignment cache hits"), PreviewMaterialAssignmentCacheHitCount, 0});
     uint64 RecoveryRetries = 0;
     uint64 RecoveryStaleDrops = 0;
     uint64 RecoveryDegraded = 0;
@@ -4031,6 +4142,10 @@ void SWetWrinkleViewport::ResetDiagnosticCounters()
     PatchHoverCanceledCount = 0;
     PatchHoverFailedCount = 0;
     HitTriangleBuildCount = 0;
+    PreviewMaterialAssignmentCheckCount = 0;
+    PreviewMaterialAssignmentWriteCount = 0;
+    PreviewMaterialAssignmentSkipCount = 0;
+    PreviewMaterialAssignmentCacheHitCount = 0;
     for (FWetWrinkleAccumulatedPreviewState& State : AccumulatedPreviewStates)
     {
         State.Recovery.ResetDiagnostics();
@@ -4233,6 +4348,12 @@ FText SWetWrinkleViewport::GetViewportHintText() const
         return LOCTEXT("NoHitTrianglesHint", "No triangles available for the selected UV channel/material slot.");
     }
 
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::Patch &&
+        !PatchPreviewValidationError.IsEmpty())
+    {
+        return FText::FromString(PatchPreviewValidationError);
+    }
+
     if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke)
     {
         if (BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Draw &&
@@ -4262,6 +4383,11 @@ FText SWetWrinkleViewport::GetViewportHintText() const
 
 FSlateColor SWetWrinkleViewport::GetViewportHintColor() const
 {
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::Patch &&
+        !PatchPreviewValidationError.IsEmpty())
+    {
+        return FSlateColor(FLinearColor(1.0f, 0.72f, 0.15f));
+    }
     return FSlateColor::UseForeground();
 }
 

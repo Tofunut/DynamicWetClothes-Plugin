@@ -21,9 +21,10 @@ struct FWetWrinkleAccumulatedPreviewJobInput
 {
     FIntPoint TextureSize = FIntPoint::ZeroValue;
     FIntPoint WorkingTextureSize = FIntPoint::ZeroValue;
-    TArray<FDWCEditorNormalStampCommand> Patches;
     TArray<FWetWrinkleSurfacePatchPreviewInput> SurfacePatches;
     TArray<FWetProceduralRidgeStroke> RidgeStrokes;
+    int32 InvalidSurfacePatchCount = 0;
+    FString FirstSurfacePatchError;
     TSharedPtr<FWetWrinkleSpatialLeaseOwner, ESPMode::ThreadSafe> SpatialLeaseOwner;
     TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService> SurfacePatchProjectionCache;
 };
@@ -34,7 +35,7 @@ struct FWetWrinkleAccumulatedPreviewJobResult final : FDWCEditorWorkerJobResult
     FIntPoint WorkingTextureSize = FIntPoint::ZeroValue;
     TArray<FColor> Pixels;
     FDWCEditorNormalRasterSurface WorkingSurface;
-    int32 SkippedSurfacePatchCount = 0;
+    int32 InvalidSurfacePatchCount = 0;
     FString FirstSurfacePatchError;
     TSharedPtr<FWetWrinkleSpatialLeaseOwner, ESPMode::ThreadSafe> SpatialLeaseOwner;
 };

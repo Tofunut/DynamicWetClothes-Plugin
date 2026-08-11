@@ -165,6 +165,46 @@ float ApplyPendingWaterLimit(float PendingWater, uint ProfileIndex)
     return Limit > 0.0 ? min(SafePendingWater, Limit) : SafePendingWater;
 }
 
+float OutgoingPendingFromSource(
+    int2 SourceTexel,
+    uint4 SourceLookup,
+    float SourceSpreadableWetness)
+{
+    float SourceTotalWeight = 0.0;
+
+    [unroll]
+    for (uint DirectionIndex = 0u;
+         DirectionIndex < DWCNeighborCount;
+         ++DirectionIndex)
+    {
+        const int2 CandidateTexel =
+            SourceTexel + DWCNeighborOffsets[DirectionIndex];
+        if (!IsInside(CandidateTexel))
+        {
+            continue;
+        }
+
+        const uint4 CandidateLookup =
+            TexelLookup[Flatten(CandidateTexel)];
+        if (!IsConnectedNeighbor(SourceLookup, CandidateLookup))
+        {
+            continue;
+        }
+
+        const float CandidateWetness =
+            SanitizeWetness(SourceWetnessTexture.Load(int3(CandidateTexel, 0)));
+        const float CandidateCapacity =
+            max(MaxWetness - min(CandidateWetness, MaxWetness), 0.0);
+        SourceTotalWeight +=
+            CandidateCapacity *
+            PendingGravityBias(SourceLookup, DirectionIndex);
+    }
+
+    return SourceTotalWeight > 1.0e-8
+        ? SourceSpreadableWetness * PendingSpreadAlpha(SourceLookup)
+        : 0.0;
+}
+
 float IncomingPendingFromNeighbor(
     int2 CenterTexel,
     uint DirectionIndex,
@@ -272,13 +312,20 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         SanitizeWetness(PendingWetnessTexture.Load(int3(Texel, 0)));
 
     float AbsorbedWetness = 0.0;
-    ComputePendingSpreadableWetness(
-        CenterWetness,
-        CenterPendingWetness,
-        AbsorbedWetness);
+    const float CenterSpreadableWetness =
+        ComputePendingSpreadableWetness(
+            CenterWetness,
+            CenterPendingWetness,
+            AbsorbedWetness);
 
     float NewWetness = CenterWetness + AbsorbedWetness;
-    float PendingNextWetness = 0.0;
+    const float OutgoingPendingWetness =
+        OutgoingPendingFromSource(
+            Texel,
+            CenterLookup,
+            CenterSpreadableWetness);
+    float PendingNextWetness =
+        max(CenterSpreadableWetness - OutgoingPendingWetness, 0.0);
 
     [unroll]
     for (uint DirectionIndex = 0u;

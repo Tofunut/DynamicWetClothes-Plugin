@@ -103,8 +103,9 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         NewMass += SourceWetness * SourceArea * InFraction;
 
         // Pending wetness is already an amount waiting to be processed. Keep it
-        // out of the stored-mass calculation and move a fraction of it across
-        // the seam so the next diffuse pass can absorb/spread it normally.
+        // out of the stored-mass calculation and exchange a fraction across the
+        // seam so the next diffuse pass can absorb/spread it normally.
+        NewPendingWetness -= DestinationPendingWetness * OutFraction;
         NewPendingWetness += SourcePendingWetness * InFraction;
     }
 

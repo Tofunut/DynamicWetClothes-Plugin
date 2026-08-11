@@ -66,6 +66,33 @@ namespace
         default: return TEXT("completed");
         }
     }
+
+    uint64 EstimateAuthoredAlphaSnapshotBytes(
+        const FWetClothingTransparencyLayerData& Layer)
+    {
+        uint64 Bytes = static_cast<uint64>(Layer.EditableStrokes.Num()) *
+            sizeof(FDWCTransparencyBrushStroke);
+        for (const FDWCTransparencyBrushStroke& Stroke : Layer.EditableStrokes)
+        {
+            Bytes += static_cast<uint64>(Stroke.DisplayName.Len() + 1) * sizeof(TCHAR);
+            Bytes += static_cast<uint64>(Stroke.Samples.Num()) *
+                sizeof(FDWCTransparencyBrushSample);
+        }
+        return Bytes;
+    }
+
+    uint64 EstimateRevealColorAuthoringBytes(
+        const FWetClothingTransparencyLayerData& Layer)
+    {
+        uint64 Bytes = static_cast<uint64>(Layer.RevealColorPaintStrokes.Num()) *
+            sizeof(FDWCTransparencyRevealColorStroke);
+        for (const FDWCTransparencyRevealColorStroke& Stroke : Layer.RevealColorPaintStrokes)
+        {
+            Bytes += static_cast<uint64>(Stroke.Samples.Num()) *
+                sizeof(FDWCTransparencyBrushSample);
+        }
+        return Bytes;
+    }
 }
 
 struct FDWCEditorBakeCoordinator::FWrinkleBatch
@@ -98,7 +125,7 @@ struct FDWCEditorBakeCoordinator::FTransparencyBatch
     int32 SubmittedCount = 0;
     int32 FinishedCount = 0;
     int32 BakedMapCount = 0;
-    int32 BakedRevealSurfaceCount = 0;
+    int32 BakedRevealNormalCount = 0;
     int32 AppliedStrokeCount = 0;
     int32 AppliedSampleCount = 0;
     bool bSaveAfterCommit = false;
@@ -1033,26 +1060,22 @@ bool FDWCEditorBakeCoordinator::PumpAffectedTransparencyStage4Jobs(
     FGuid LayerGuid;
     while (TargetAsset != nullptr && Batch->AffectedSequence.TryBeginNext(LayerGuid))
     {
-        TSharedRef<FDWCTransparencySourcePayload> SourcePayload =
-            MakeShared<FDWCTransparencySourcePayload>();
-        FString RestoreError;
-        if (!FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalSource(
-                *TargetAsset, LayerGuid, *SourcePayload, RestoreError))
-        {
-            Batch->Failures.Add(RestoreError);
-            Batch->AffectedSequence.CompleteActive();
-            continue;
-        }
-        Batch->AffectedSequence.SetActivePayloadBytes(SourcePayload->GetAllocatedBytes());
-
         FString SubmitError;
-        if (SubmitTransparencyJob(Batch, LayerGuid, SourcePayload, SubmitError, true))
+        if (SubmitTransparencyJob(
+                Batch,
+                LayerGuid,
+                nullptr,
+                SubmitError,
+                true,
+                nullptr,
+                nullptr,
+                true))
         {
-            // Only one restored full-resolution source is retained at a time.
+            // The full-resolution source is restored only after scheduler
+            // admission and only one affected layer is submitted at a time.
             return true;
         }
-        Batch->Failures.Add(FString::Printf(
-            TEXT("Slot %d: %s"), SourcePayload->MaterialSlotIndex, *SubmitError));
+        Batch->Failures.Add(SubmitError);
         Batch->AffectedSequence.CompleteActive();
     }
 
@@ -1067,11 +1090,12 @@ bool FDWCEditorBakeCoordinator::PumpAffectedTransparencyStage4Jobs(
 bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
     const TSharedRef<FTransparencyBatch>& Batch,
     const FGuid LayerGuid,
-    TSharedRef<const FDWCTransparencySourcePayload> SourcePayload,
+    TSharedPtr<const FDWCTransparencySourcePayload> SourcePayload,
     FString& OutError,
     const bool bCountAsBatchJob,
     TSharedPtr<const FDWCTransparencyAlphaWorkingSnapshot> AlphaSnapshot,
-    TSharedPtr<const FDWCTransparencyFinalSettingsSnapshot> FinalSettingsOverride)
+    TSharedPtr<const FDWCTransparencyFinalSettingsSnapshot> FinalSettingsOverride,
+    const bool bRestoreCanonicalSourceDuringPrepare)
 {
     UWetClothingAsset* TargetAsset = Asset.Get();
     if (TargetAsset == nullptr || !Scheduler.IsValid())
@@ -1091,6 +1115,52 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
         return false;
     }
 
+    TSharedPtr<const FDWCTransparencySourcePayload> PlannedSourceIdentity = SourcePayload;
+    uint64 PlannedSourceBytes = 0;
+    if (bRestoreCanonicalSourceDuringPrepare)
+    {
+        TSharedRef<FDWCTransparencySourcePayload> Identity =
+            MakeShared<FDWCTransparencySourcePayload>();
+        if (!FDWCTransparencyAutoMapGenerator::BuildSignatureOnlyResult(
+                *TargetAsset,
+                *Layer,
+                *Identity,
+                OutError))
+        {
+            return false;
+        }
+        PlannedSourceIdentity = Identity;
+        PlannedSourceBytes =
+            FDWCTransparencyEditedMapBaker::EstimateCanonicalSourcePayloadBytes(
+                Identity->Resolution);
+    }
+    else if (!SourcePayload.IsValid())
+    {
+        OutError = TEXT("The transparency bake source payload is unavailable.");
+        return false;
+    }
+    else
+    {
+        PlannedSourceBytes = SourcePayload->GetAllocatedBytes();
+    }
+
+    const uint64 AlphaInputBytes = AlphaSnapshot.IsValid()
+        ? AlphaSnapshot->GetAllocatedBytes()
+        : EstimateAuthoredAlphaSnapshotBytes(*Layer);
+    const uint64 AuthoringInputBytes = AlphaInputBytes +
+        EstimateRevealColorAuthoringBytes(*Layer);
+    FDWCTransparencyStage4MemoryPlan MemoryPlan;
+    if (!FDWCTransparencyEditedMapBaker::BuildMemoryPlan(
+            PlannedSourceIdentity->Resolution,
+            PlannedSourceBytes,
+            AuthoringInputBytes,
+            bRestoreCanonicalSourceDuringPrepare,
+            MemoryPlan,
+            OutError))
+    {
+        return false;
+    }
+
     FDWCEditorWorkerJobDescriptor Descriptor;
     Descriptor.Key.Kind = EDWCEditorWorkerJobKind::TransparencyFinalBake;
     Descriptor.Key.MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
@@ -1099,8 +1169,10 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
     Descriptor.DomainRevision = Scheduler->GetCurrentDomainRevision(Descriptor.Domain);
     Descriptor.Priority = EDWCEditorWorkerJobPriority::UserInitiated;
     Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
-    Descriptor.MemoryEstimate.ResidentSharedBytes = SourcePayload->GetAllocatedBytes() +
-        (AlphaSnapshot.IsValid() ? AlphaSnapshot->GetAllocatedBytes() : 0);
+    Descriptor.MemoryEstimate.ResidentSharedBytes = MemoryPlan.ResidentSharedBytes;
+    Descriptor.MemoryEstimate.SnapshotBytes = MemoryPlan.SnapshotBytes;
+    Descriptor.MemoryEstimate.OutputBytes = MemoryPlan.OutputBytes;
+    Descriptor.MemoryEstimate.ScratchBytes = MemoryPlan.ScratchBytes;
     Descriptor.DebugName = FString::Printf(
         TEXT("Transparency bake slot %d"),
         Descriptor.Key.MaterialSlotIndex);
@@ -1109,7 +1181,14 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
     const int32 MaterialSlotIndex = Descriptor.Key.MaterialSlotIndex;
     const FDWCEditorWorkerJobTicket Ticket = Scheduler->SubmitPrepared(
         Descriptor,
-        [WeakThis, LayerGuid, SourcePayload, AlphaSnapshot, FinalSettingsOverride](
+        [WeakThis,
+         Batch,
+         LayerGuid,
+         SourcePayload,
+         PlannedSourceIdentity,
+         AlphaSnapshot,
+         FinalSettingsOverride,
+         bRestoreCanonicalSourceDuringPrepare](
             const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& Token,
             FDWCEditorWorkerJobScheduler::FPreparedWorkerJob& OutPrepared,
             FString& PrepareError)
@@ -1133,6 +1212,46 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
                 PrepareError = TEXT("The transparency layer was removed before snapshot preparation.");
                 return false;
             }
+            TSharedPtr<const FDWCTransparencySourcePayload> PreparedSourcePayload = SourcePayload;
+            if (bRestoreCanonicalSourceDuringPrepare)
+            {
+                FDWCTransparencySourcePayload CurrentIdentity;
+                if (!FDWCTransparencyAutoMapGenerator::BuildSignatureOnlyResult(
+                        *CurrentAsset,
+                        *CurrentLayer,
+                        CurrentIdentity,
+                        PrepareError))
+                {
+                    return false;
+                }
+                if (!PlannedSourceIdentity.IsValid() ||
+                    CurrentIdentity.BuildSignature != PlannedSourceIdentity->BuildSignature ||
+                    CurrentIdentity.Resolution != PlannedSourceIdentity->Resolution)
+                {
+                    PrepareError =
+                        TEXT("The canonical Stage 2 identity changed while the affected Stage 4 rebake was waiting for admission.");
+                    return false;
+                }
+
+                TSharedRef<FDWCTransparencySourcePayload> RestoredSource =
+                    MakeShared<FDWCTransparencySourcePayload>();
+                if (!FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
+                        *CurrentLayer,
+                        CurrentIdentity,
+                        *RestoredSource,
+                        PrepareError))
+                {
+                    return false;
+                }
+                PreparedSourcePayload = RestoredSource;
+                Batch->AffectedSequence.SetActivePayloadBytes(
+                    RestoredSource->GetAllocatedBytes());
+            }
+            if (!PreparedSourcePayload.IsValid())
+            {
+                PrepareError = TEXT("The transparency source payload was unavailable during snapshot preparation.");
+                return false;
+            }
             TSharedRef<FDWCTransparencyEditedMapBakeSnapshot, ESPMode::ThreadSafe> Snapshot =
                 MakeShared<FDWCTransparencyEditedMapBakeSnapshot, ESPMode::ThreadSafe>();
             if (FinalSettingsOverride.IsValid() && !AlphaSnapshot.IsValid())
@@ -1142,9 +1261,9 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
             }
             const bool bSnapshotBuilt = FinalSettingsOverride.IsValid()
                 ? FDWCTransparencyEditedMapBaker::BuildSnapshot(
-                    *CurrentAsset,
-                    *CurrentLayer,
-                    SourcePayload,
+                     *CurrentAsset,
+                     *CurrentLayer,
+                     PreparedSourcePayload.ToSharedRef(),
                     *AlphaSnapshot,
                     Self->CoverageService,
                     *FinalSettingsOverride,
@@ -1152,17 +1271,17 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
                     PrepareError)
                 : AlphaSnapshot.IsValid()
                 ? FDWCTransparencyEditedMapBaker::BuildSnapshot(
-                    *CurrentAsset,
-                    *CurrentLayer,
-                    SourcePayload,
+                     *CurrentAsset,
+                     *CurrentLayer,
+                     PreparedSourcePayload.ToSharedRef(),
                     *AlphaSnapshot,
                     Self->CoverageService,
                     *Snapshot,
                     PrepareError)
                 : FDWCTransparencyEditedMapBaker::BuildSnapshot(
-                    *CurrentAsset,
-                    *CurrentLayer,
-                    SourcePayload,
+                     *CurrentAsset,
+                     *CurrentLayer,
+                     PreparedSourcePayload.ToSharedRef(),
                     Self->CoverageService,
                     *Snapshot,
                     PrepareError);
@@ -1170,7 +1289,8 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
             {
                 return false;
             }
-            OutPrepared.ActualMemoryEstimate.ResidentSharedBytes = SourcePayload->GetAllocatedBytes();
+            OutPrepared.ActualMemoryEstimate.ResidentSharedBytes =
+                PreparedSourcePayload->GetAllocatedBytes();
             OutPrepared.ActualMemoryEstimate.SnapshotBytes = Snapshot->GetEstimatedPrivateBytes();
             OutPrepared.ActualMemoryEstimate.OutputBytes = Snapshot->GetEstimatedOutputBytes();
             OutPrepared.ActualMemoryEstimate.ScratchBytes = Snapshot->GetEstimatedScratchBytes();
@@ -1188,7 +1308,7 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
             };
             return true;
         },
-        [WeakThis, Batch, SourcePayload, LayerGuid, MaterialSlotIndex](
+        [WeakThis, Batch, LayerGuid, MaterialSlotIndex](
             const FDWCEditorWorkerJobTicket& FinishedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
@@ -1226,12 +1346,16 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
 
             CurrentAsset->Modify();
             CurrentLayer->AutoBakeMetadata.AutoBakeGuid = FGuid::NewGuid();
-            CurrentLayer->AutoBakeMetadata.BuildSignature = SourcePayload->BuildSignature;
-            CurrentLayer->AutoBakeMetadata.Resolution = SourcePayload->Resolution.X;
+            CurrentLayer->AutoBakeMetadata.BuildSignature =
+                Result->Snapshot->GetSourceBuildSignature();
+            CurrentLayer->AutoBakeMetadata.Resolution =
+                Result->Snapshot->GetSourceResolution().X;
             CurrentLayer->AutoBakeMetadata.PaddingPixels =
                 CurrentAsset->Authored.TransparencyData.TransparencyPaddingPixels;
-            CurrentLayer->AutoBakeMetadata.ValidHitCount = SourcePayload->ValidHitCount;
-            CurrentLayer->AutoBakeMetadata.NoHitCount = SourcePayload->NoHitCount;
+            CurrentLayer->AutoBakeMetadata.ValidHitCount =
+                Result->Snapshot->GetSourceValidHitCount();
+            CurrentLayer->AutoBakeMetadata.NoHitCount =
+                Result->Snapshot->GetSourceNoHitCount();
             FString CurrentnessReason;
             if (!FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
                     *CurrentAsset,
@@ -1247,10 +1371,10 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
             Batch->AppliedStrokeCount += CommitResult.AppliedStrokeCount;
             Batch->AppliedSampleCount += CommitResult.AppliedSampleCount;
             Batch->TextureNames.Add(GetPathNameSafe(CommitResult.TransparencyMap));
-            if (CommitResult.RevealSurfaceMap != nullptr)
+            if (CommitResult.RevealNormalMap != nullptr)
             {
-                Batch->TextureNames.Add(GetPathNameSafe(CommitResult.RevealSurfaceMap));
-                ++Batch->BakedRevealSurfaceCount;
+                Batch->TextureNames.Add(GetPathNameSafe(CommitResult.RevealNormalMap));
+                ++Batch->BakedRevealNormalCount;
             }
             if (CommitResult.IgnoredNoHitOverridePixelCount > 0)
             {
@@ -1421,9 +1545,9 @@ void FDWCEditorBakeCoordinator::FinalizeTransparencyBatch(
     Result.bHadWarnings = !Batch->Warnings.IsEmpty() || !Batch->Failures.IsEmpty() || !bSaved;
     Result.bCanceled = Batch->bCanceled;
     Result.Summary = FString::Printf(
-        TEXT("Baked %d transparency map(s), including %d Reveal Surface map(s). Applied strokes: %d, samples: %d."),
+        TEXT("Baked %d transparency map(s), including %d Reveal Normal map(s). Applied strokes: %d, samples: %d."),
         Batch->BakedMapCount,
-        Batch->BakedRevealSurfaceCount,
+        Batch->BakedRevealNormalCount,
         Batch->AppliedStrokeCount,
         Batch->AppliedSampleCount);
     if (!Batch->TextureNames.IsEmpty())

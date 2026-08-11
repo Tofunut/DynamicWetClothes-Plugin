@@ -96,11 +96,12 @@ class FDWCEditorBakeCoordinator final
     bool SubmitTransparencyJob(
         const TSharedRef<FTransparencyBatch>& Batch,
         FGuid LayerGuid,
-        TSharedRef<const FDWCTransparencySourcePayload> SourcePayload,
+        TSharedPtr<const FDWCTransparencySourcePayload> SourcePayload,
         FString& OutError,
         bool bCountAsBatchJob = true,
         TSharedPtr<const FDWCTransparencyAlphaWorkingSnapshot> AlphaSnapshot = nullptr,
-        TSharedPtr<const FDWCTransparencyFinalSettingsSnapshot> FinalSettingsOverride = nullptr);
+        TSharedPtr<const FDWCTransparencyFinalSettingsSnapshot> FinalSettingsOverride = nullptr,
+        bool bRestoreCanonicalSourceDuringPrepare = false);
     void HandleTransparencyJobFinished(
         const TSharedRef<FTransparencyBatch>& Batch,
         const struct FDWCEditorWorkerJobTicket& Ticket,

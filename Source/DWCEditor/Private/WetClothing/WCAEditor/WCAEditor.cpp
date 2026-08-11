@@ -2716,13 +2716,6 @@ namespace
                 continue;
             }
 
-            FWetClothingGeneratedWetMaterialOverride* ExistingOverride =
-                Asset.Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
-                    [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
-                    {
-                        return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
-                    });
-
             const FWCAMaterialGenerator::FOptions MaterialSetupOptions =
                 FWCAMaterialGenerator::MakeOptionsForAsset(
                     &Asset,
@@ -2740,30 +2733,23 @@ namespace
                 continue;
             }
 
-            if (ExistingOverride == nullptr)
+            FString MetadataError;
+            if (!FWCAMaterialGenerator::CommitGeneratedMaterialOverride(
+                    &Asset,
+                    MaterialSlotIndex,
+                    SourceMaterial,
+                    MaterialSet,
+                    &MetadataError))
             {
-                ExistingOverride = &Asset.Derived.Inline.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
-                ExistingOverride->MaterialSlotIndex = MaterialSlotIndex;
+                Failures.Add(FString::Printf(TEXT("Slot %d: %s"), MaterialSlotIndex, *MetadataError));
+                continue;
             }
-
-#if WITH_EDITORONLY_DATA
-            Asset.Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction =
-                MaterialSet.EvaluateSurfaceAppearanceFunction;
-#endif
-            ExistingOverride->SourceMaterial = SourceMaterial;
-            ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-            ExistingOverride->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
-            ExistingOverride->GeneratorVersion = FWCAMaterialGenerator::GeneratedMaterialGeneratorVersion;
-            ExistingOverride->GenerationSignature = FWCAMaterialGenerator::BuildGeneratedMaterialSignature(
-                &Asset,
-                MaterialSlotIndex,
-                SourceMaterial);
 
             UMaterialInterface* CurrentMaterial = RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface;
             const bool bCanApplyGeneratedMaterial = CurrentMaterial == nullptr ||
                 CurrentMaterial == SourceMaterial ||
-                CurrentMaterial == ExistingOverride->GeneratedMaterial ||
-                CurrentMaterial == ExistingOverride->GeneratedMaterialInstance ||
+                CurrentMaterial == MaterialSet.GeneratedMaterial ||
+                CurrentMaterial == MaterialSet.GeneratedMaterialInstance ||
                 IsSameMaterialFamily(CurrentMaterial, SourceMaterial);
             if (bCanApplyGeneratedMaterial)
             {
@@ -2901,10 +2887,10 @@ namespace
             Layer.AutoBakeMetadata.NoHitCount = SourcePayload.NoHitCount;
 
             ++BakedLayerCount;
-            const FString RevealSurfaceSummary = BakeResult.RevealSurfaceMap != nullptr
+            const FString RevealNormalSummary = BakeResult.RevealNormalMap != nullptr
                 ? FString::Printf(
-                    TEXT(" | Reveal Surface: %s"),
-                    *GetPathNameSafe(BakeResult.RevealSurfaceMap))
+                    TEXT(" | Reveal Normal: %s"),
+                    *GetPathNameSafe(BakeResult.RevealNormalMap))
                 : FString();
             BakedLayerSummaries.Add(FString::Printf(
                 TEXT("%s (Slot %d, UV%d, LOD%d) -> Transparency: %s%s"),
@@ -2913,7 +2899,7 @@ namespace
                 SourcePayload.UVChannelIndex,
                 SourcePayload.LODIndex,
                 *GetPathNameSafe(BakeResult.TransparencyMap),
-                *RevealSurfaceSummary));
+                *RevealNormalSummary));
 
             for (const FString& Warning : GenerateWarnings)
             {
@@ -4689,31 +4675,23 @@ FReply FWCAEditor::GenerateWetMaterials()
             continue;
         }
 
-        if (ExistingOverride == nullptr)
+        FString MetadataError;
+        if (!FWCAMaterialGenerator::CommitGeneratedMaterialOverride(
+                Asset,
+                MaterialSlotIndex,
+                SourceMaterial,
+                MaterialSet,
+                &MetadataError))
         {
-            ExistingOverride = &Asset->Derived.Inline.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
-            ExistingOverride->MaterialSlotIndex = MaterialSlotIndex;
+            Failures.Add(FString::Printf(TEXT("Slot %d: %s"), MaterialSlotIndex, *MetadataError));
+            continue;
         }
-
-#if WITH_EDITORONLY_DATA
-        Asset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction =
-            MaterialSet.EvaluateSurfaceAppearanceFunction;
-#endif
-        ExistingOverride->SourceMaterial = SourceMaterial;
-        ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-        ExistingOverride->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
-        ExistingOverride->GeneratorVersion = FWCAMaterialGenerator::GeneratedMaterialGeneratorVersion;
-        ExistingOverride->GenerationSignature = FWCAMaterialGenerator::BuildGeneratedMaterialSignature(
-            Asset,
-            MaterialSlotIndex,
-            SourceMaterial);
 
         UMaterialInterface* CurrentMaterial = RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface;
         const bool bCanApplyGeneratedMaterial = CurrentMaterial == nullptr ||
             CurrentMaterial == SourceMaterial ||
-            (ExistingOverride != nullptr &&
-                (CurrentMaterial == ExistingOverride->GeneratedMaterial ||
-                 CurrentMaterial == ExistingOverride->GeneratedMaterialInstance)) ||
+            CurrentMaterial == MaterialSet.GeneratedMaterial ||
+            CurrentMaterial == MaterialSet.GeneratedMaterialInstance ||
             IsSameMaterialFamily(CurrentMaterial, SourceMaterial);
         if (bCanApplyGeneratedMaterial)
         {

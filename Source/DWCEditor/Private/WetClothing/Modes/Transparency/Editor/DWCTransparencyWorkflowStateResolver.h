@@ -3,6 +3,7 @@
 
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionState.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
 
 /**
  * Lightweight, metadata-only description of a Transparency Target Part's
@@ -36,29 +37,16 @@ namespace DWCTransparencyWorkflow
         }
     };
 
-    inline bool HasCurrentArtifactReference(
-        const FWetClothingTransparencyLayerData& Layer,
-        const EDWCTransparencyTempArtifactKind Kind,
-        const FString& ExpectedSignature)
+    inline FIntPoint ResolveSourceArtifactResolution(
+        const FWetClothingTransparencyLayerData& Layer)
     {
 #if WITH_EDITORONLY_DATA
-        if (ExpectedSignature.IsEmpty())
-        {
-            return false;
-        }
-
         const FDWCTransparencyTempArtifactReference* Reference =
-            Layer.EditorStageCache.Artifacts.FindByPredicate(
-                [Kind](const FDWCTransparencyTempArtifactReference& Candidate)
-                {
-                    return Candidate.Kind == Kind;
-                });
-        return Reference != nullptr && !Reference->bObsolete &&
-            Reference->BuildSignature == ExpectedSignature &&
-            Reference->Resolution.X > 0 && Reference->Resolution.Y > 0 &&
-            !Reference->Texture.IsNull();
+            FDWCTransparencyStageArtifactContract::FindReference(
+                Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor);
+        return Reference != nullptr ? Reference->Resolution : FIntPoint::ZeroValue;
 #else
-        return false;
+        return FIntPoint::ZeroValue;
 #endif
     }
 
@@ -87,18 +75,19 @@ namespace DWCTransparencyWorkflow
         const FDWCTransparencyEditorStageCacheMetadata& Cache = Layer->EditorStageCache;
         const bool bHasSourceMetadata = Cache.bSourceGenerated || !Cache.SourceSignature.IsEmpty();
         const FString& SourceSignature = Cache.SourceSignature;
+        const FIntPoint ArtifactResolution = ResolveSourceArtifactResolution(*Layer);
+        FString ArtifactError;
         State.bHasCanonicalSource = Cache.bSourceGenerated &&
-            HasCurrentArtifactReference(*Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor, SourceSignature) &&
-            HasCurrentArtifactReference(*Layer, EDWCTransparencyTempArtifactKind::ValidHit, SourceSignature) &&
-            HasCurrentArtifactReference(*Layer, EDWCTransparencyTempArtifactKind::OuterCoverage, SourceSignature) &&
-            HasCurrentArtifactReference(*Layer, EDWCTransparencyTempArtifactKind::OuterIslandID, SourceSignature) &&
-            HasCurrentArtifactReference(*Layer, EDWCTransparencyTempArtifactKind::HitSource, SourceSignature) &&
-            HasCurrentArtifactReference(*Layer, EDWCTransparencyTempArtifactKind::HitDistance, SourceSignature);
+            FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+                *Layer, SourceSignature, ArtifactResolution, false, ArtifactError);
         State.bHasReviewedReveal = State.bHasCanonicalSource && Cache.bRevealReviewed &&
-            HasCurrentArtifactReference(
+            FDWCTransparencyStageArtifactContract::InspectRevealArtifact(
                 *Layer,
-                EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
-                Cache.RevealSignature);
+                SourceSignature,
+                Cache.RevealSignature,
+                ArtifactResolution,
+                false,
+                ArtifactError);
         State.bRequiresSourceRegeneration = bHasSourceMetadata && !State.bHasCanonicalSource;
 #endif
 

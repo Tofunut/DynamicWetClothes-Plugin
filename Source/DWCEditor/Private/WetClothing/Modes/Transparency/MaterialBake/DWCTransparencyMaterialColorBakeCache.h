@@ -17,7 +17,11 @@ struct FDWCTransparencyMaterialColorBakeKey
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 SourceUVChannel = 0;
     int32 LogicalResolution = 0;
-    FString MaterialBakeSignature;
+    int32 IdentityVersion = 0;
+    FString CacheIdentity;
+    FString SourceMeshContentSignature;
+    FString EffectiveMaterialSignature;
+    FString PlacementSignature;
 
     bool IsValid() const;
     bool operator==(const FDWCTransparencyMaterialColorBakeKey& Other) const;

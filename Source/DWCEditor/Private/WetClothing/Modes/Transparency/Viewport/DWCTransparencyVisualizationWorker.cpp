@@ -85,6 +85,7 @@ FDWCTransparencyVisualizationWorker::Build(
     Context.AlphaSnapshotView = &AlphaView;
     Context.OuterEdgeFeatherBuffer = MakeArrayView(Input.OuterEdgeFeatherBuffer);
     Context.VisualizationMode = Input.VisualizationMode;
+    Context.RevealMetallicDarkeningStrength = Input.RevealMetallicDarkeningStrength;
     Context.bDeferPresentationToMaterial = true;
     Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
         ? FDWCTransparencyComposite::ComputeMaximumHitDistance(Result)

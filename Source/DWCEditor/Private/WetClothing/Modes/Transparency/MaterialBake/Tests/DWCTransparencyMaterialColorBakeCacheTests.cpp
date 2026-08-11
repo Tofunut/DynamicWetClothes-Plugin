@@ -1,11 +1,28 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Misc/AutomationTest.h"
 #include "WetClothing/Modes/Transparency/MaterialBake/DWCTransparencyMaterialColorBakeCache.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
 namespace
 {
+    void InitializeValidKey(
+        FDWCTransparencyMaterialColorBakeKey& Key,
+        const TCHAR* Identity)
+    {
+        Key.OwnerAssetPath = FSoftObjectPath(TEXT("/Game/Test/WCA_A.WCA_A"));
+        Key.SourceMeshPath = FSoftObjectPath(TEXT("/Game/Test/SK_Source.SK_Source"));
+        Key.MaterialSlotIndex = 3;
+        Key.SourceUVChannel = 1;
+        Key.LogicalResolution = 2048;
+        Key.IdentityVersion = FDWCTransparencyMaterialSurfaceBakeIdentity::Version;
+        Key.CacheIdentity = Identity;
+        Key.SourceMeshContentSignature = TEXT("MeshContent");
+        Key.EffectiveMaterialSignature = TEXT("MaterialState");
+        Key.PlacementSignature = TEXT("Placement");
+    }
+
     FWetClothingTextureReadback MakeBGRA8Readback(const FColor& Pixel)
     {
         FWetClothingTextureReadback Result;
@@ -42,12 +59,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCTransparencyMaterialColorBakeKeyTest::RunTest(const FString& Parameters)
 {
     FDWCTransparencyMaterialColorBakeKey A;
-    A.OwnerAssetPath = FSoftObjectPath(TEXT("/Game/Test/WCA_A.WCA_A"));
-    A.SourceMeshPath = FSoftObjectPath(TEXT("/Game/Test/SK_Source.SK_Source"));
-    A.MaterialSlotIndex = 3;
-    A.SourceUVChannel = 1;
-    A.LogicalResolution = 2048;
-    A.MaterialBakeSignature = TEXT("ABC");
+    InitializeValidKey(A, TEXT("ABC"));
 
     FDWCTransparencyMaterialColorBakeKey B = A;
     TestTrue(TEXT("An exact source dependency produces the same cache key."), A == B);
@@ -60,8 +72,20 @@ bool FDWCTransparencyMaterialColorBakeKeyTest::RunTest(const FString& Parameters
     B.LogicalResolution = 4096;
     TestFalse(TEXT("Resolution participates in cache identity."), A == B);
     B = A;
-    B.MaterialBakeSignature = TEXT("DEF");
+    B.CacheIdentity = TEXT("DEF");
     TestFalse(TEXT("Material state participates in cache identity."), A == B);
+    B = A;
+    B.SourceMeshContentSignature = TEXT("ChangedMeshContent");
+    TestFalse(TEXT("Source mesh content participates in cache identity."), A == B);
+    B = A;
+    B.EffectiveMaterialSignature = TEXT("ChangedMaterialState");
+    TestFalse(TEXT("Effective material parameters participate in cache identity."), A == B);
+    B = A;
+    B.PlacementSignature = TEXT("ChangedPlacement");
+    TestFalse(TEXT("Type 2/3 source placement participates in cache identity."), A == B);
+    B = A;
+    ++B.IdentityVersion;
+    TestFalse(TEXT("Cache schema changes invalidate old resident entries."), A == B);
     B = A;
     B.OwnerAssetPath = FSoftObjectPath(TEXT("/Game/Test/WCA_B.WCA_B"));
     TestFalse(TEXT("Different WCA editor sessions do not share material color cache entries."), A == B);
@@ -77,12 +101,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCTransparencyMaterialColorConstantPayloadTest::RunTest(const FString& Parameters)
 {
     FDWCTransparencyMaterialColorBakeResult Result;
-    Result.Key.OwnerAssetPath = FSoftObjectPath(TEXT("/Game/Test/WCA_A.WCA_A"));
-    Result.Key.SourceMeshPath = FSoftObjectPath(TEXT("/Game/Test/SK_Source.SK_Source"));
+    InitializeValidKey(Result.Key, TEXT("Constant"));
     Result.Key.MaterialSlotIndex = 2;
     Result.Key.SourceUVChannel = 0;
     Result.Key.LogicalResolution = 4096;
-    Result.Key.MaterialBakeSignature = TEXT("Constant");
 
     TArray<FColor> Pixels{FColor(32, 64, 96, 255)};
     FString Error;
@@ -101,9 +123,13 @@ bool FDWCTransparencyMaterialColorConstantPayloadTest::RunTest(const FString& Pa
     const FLinearColor A = Result.Sample(FVector2D(0.0, 0.0));
     const FLinearColor B = Result.Sample(FVector2D(0.73, 0.41));
     TestTrue(TEXT("A constant payload ignores UV position."), A.Equals(B, KINDA_SMALL_NUMBER));
-    TestTrue(TEXT("The constant payload preserves red."), FMath::IsNearlyEqual(A.R, 32.0f / 255.0f));
-    TestTrue(TEXT("The constant payload preserves green."), FMath::IsNearlyEqual(A.G, 64.0f / 255.0f));
-    TestTrue(TEXT("The constant payload preserves blue."), FMath::IsNearlyEqual(A.B, 96.0f / 255.0f));
+    constexpr float ByteTolerance = 0.5f / 255.0f;
+    TestTrue(TEXT("The constant payload preserves red."),
+        FMath::IsNearlyEqual(A.R, 32.0f / 255.0f, ByteTolerance));
+    TestTrue(TEXT("The constant payload preserves green."),
+        FMath::IsNearlyEqual(A.G, 64.0f / 255.0f, ByteTolerance));
+    TestTrue(TEXT("The constant payload preserves blue."),
+        FMath::IsNearlyEqual(A.B, 96.0f / 255.0f, ByteTolerance));
     return true;
 }
 
@@ -135,12 +161,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FDWCTransparencyMaterialSurfacePayloadTest::RunTest(const FString& Parameters)
 {
     FDWCTransparencyMaterialColorBakeResult Result;
-    Result.Key.OwnerAssetPath = FSoftObjectPath(TEXT("/Game/Test/WCA_A.WCA_A"));
-    Result.Key.SourceMeshPath = FSoftObjectPath(TEXT("/Game/Test/SK_Source.SK_Source"));
+    InitializeValidKey(Result.Key, TEXT("Surface"));
     Result.Key.MaterialSlotIndex = 1;
     Result.Key.SourceUVChannel = 0;
     Result.Key.LogicalResolution = 1024;
-    Result.Key.MaterialBakeSignature = TEXT("Surface");
 
     TArray<FColor> BaseColor{FColor(64, 96, 128, 255)};
     FString Error;
@@ -161,7 +185,8 @@ bool FDWCTransparencyMaterialSurfacePayloadTest::RunTest(const FString& Paramete
     TestTrue(TEXT("Flat source normal decodes to tangent +Z."),
         Normal.Equals(FVector3f(0.0f, 0.0f, 1.0f), 0.02f));
     TestTrue(TEXT("Metallic scalar sampling preserves the linear G8 value."),
-        FMath::IsNearlyEqual(Result.SampleMetallic(FVector2D(0.3, 0.7)), 96.0f / 255.0f));
+        FMath::IsNearlyEqual(
+            Result.SampleMetallic(FVector2D(0.3, 0.7)), 96.0f / 255.0f, 0.5f / 255.0f));
     TestFalse(TEXT("The normal availability flag distinguishes an explicit flat fallback."),
         Result.bHasBakedNormalProperty);
     TestTrue(TEXT("The metallic availability flag records a material property result."),

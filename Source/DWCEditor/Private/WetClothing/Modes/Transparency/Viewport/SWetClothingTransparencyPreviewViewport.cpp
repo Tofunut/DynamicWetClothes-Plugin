@@ -28,6 +28,8 @@
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
 #include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyBrushRasterizer.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyLiveStrokeLayer.h"
 #include "WetClothing/Modes/Transparency/Authoring/DWCTransparencyAuthoringController.h"
@@ -1133,11 +1135,15 @@ void SWetClothingTransparencyPreviewViewport::ApplyTransparencyPreviewSettings(
     const float NewSuppressionStrength = FMath::Clamp(InSettings.WrinkleSuppressionStrength, 0.0f, 5.0f);
     const float NewMaskThreshold = FMath::Clamp(InSettings.WrinkleMaskThreshold, 0.0f, 1.0f);
     const float NewMaskSoftness = FMath::Clamp(InSettings.WrinkleMaskSoftness, 0.0f, 1.0f);
+    const float NewRevealNormalStrength = FMath::Clamp(InSettings.RevealNormalStrength, 0.0f, 4.0f);
     const bool bSettingsChanged =
         !FMath::IsNearlyEqual(TransparencyPreviewStrength, NewTransparencyStrength) ||
         !FMath::IsNearlyEqual(WrinkleSuppressionStrength, NewSuppressionStrength) ||
         !FMath::IsNearlyEqual(WrinkleMaskThreshold, NewMaskThreshold) ||
-        !FMath::IsNearlyEqual(WrinkleMaskSoftness, NewMaskSoftness);
+        !FMath::IsNearlyEqual(WrinkleMaskSoftness, NewMaskSoftness) ||
+        !FMath::IsNearlyEqual(RevealNormalStrength, NewRevealNormalStrength) ||
+        bShowRevealNormal != InSettings.bShowRevealNormal ||
+        RequestedRevealNormalSource != InSettings.RevealNormalSource;
     if (!bSettingsChanged)
     {
         return;
@@ -1147,7 +1153,30 @@ void SWetClothingTransparencyPreviewViewport::ApplyTransparencyPreviewSettings(
     WrinkleSuppressionStrength = NewSuppressionStrength;
     WrinkleMaskThreshold = NewMaskThreshold;
     WrinkleMaskSoftness = NewMaskSoftness;
+    RevealNormalStrength = NewRevealNormalStrength;
+    bShowRevealNormal = InSettings.bShowRevealNormal;
+    RequestedRevealNormalSource = InSettings.RevealNormalSource;
     SchedulePreviewSettingsApply();
+}
+
+FText SWetClothingTransparencyPreviewViewport::GetRevealNormalPreviewSourceStatusText() const
+{
+    if (!bWorkingRevealNormalAvailable && !bBakedRevealNormalAvailable)
+    {
+        return NSLOCTEXT("DWCTransparency", "RevealNormalPreviewUnavailable", "Preview Source: unavailable");
+    }
+
+    const bool bFellBack = RequestedRevealNormalSource != EffectiveRevealNormalSource;
+    const FText Source = EffectiveRevealNormalSource == EDWCTransparencyRevealNormalPreviewSource::Working
+        ? NSLOCTEXT("DWCTransparency", "RevealNormalPreviewWorking", "Working")
+        : NSLOCTEXT("DWCTransparency", "RevealNormalPreviewBaked", "Baked");
+    return bFellBack
+        ? FText::Format(
+            NSLOCTEXT("DWCTransparency", "RevealNormalPreviewFallback", "Preview Source: {0} (requested source unavailable)"),
+            Source)
+        : FText::Format(
+            NSLOCTEXT("DWCTransparency", "RevealNormalPreviewSource", "Preview Source: {0}"),
+            Source);
 }
 
 void SWetClothingTransparencyPreviewViewport::SchedulePreviewSettingsApply()
@@ -1212,6 +1241,20 @@ void SWetClothingTransparencyPreviewViewport::RefreshOuterEdgeFeatherPreview()
     }
 
     RefreshDeferredFinalPreviewBuffers();
+    RebuildTransparencyPreviewTexture();
+    ApplyTransparencyPreviewParameters();
+    UpdateMaterialHoverLayer();
+    InvalidatePreviewViewport();
+}
+
+void SWetClothingTransparencyPreviewViewport::RefreshRevealColorCorrectionPreview()
+{
+    if (!AutoBakePreviewResult.IsValid())
+    {
+        return;
+    }
+
+    InvalidatePreviewContent(true);
     RebuildTransparencyPreviewTexture();
     ApplyTransparencyPreviewParameters();
     UpdateMaterialHoverLayer();
@@ -1296,49 +1339,16 @@ void SWetClothingTransparencyPreviewViewport::SetAutoBakePreviewResult(
     bRevealColorRequiresWorkerRebuild = false;
     if (const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer())
     {
-        TArray<FColor> CorrectedRevealPixels;
-        FString RestoreError;
-        const EDWCTransparencyCorrectedRevealRestoreResult RestoreResult =
-            AutoBakePreviewResult.IsValid()
-                ? FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
-                    *Layer,
-                    *AutoBakePreviewResult,
-                    CorrectedRevealPixels,
-                    RestoreError)
-                : EDWCTransparencyCorrectedRevealRestoreResult::MissingOrStale;
-        if (RestoreResult == EDWCTransparencyCorrectedRevealRestoreResult::Restored)
-        {
-            // The reveal tile store owns RGB-only edits. Keep its comparison
-            // alpha aligned with the canonical color buffer so Stage 2's
-            // automatic alpha does not turn every tile into a color override.
-            for (int32 PixelIndex = 0; PixelIndex < CorrectedRevealPixels.Num(); ++PixelIndex)
+        // The sparse store owns authored (pre-correction) color only. Rebuild
+        // it from serialized strokes; the committed checkpoint already has
+        // metallic correction baked in and must not be fed back into Stage 3.
+        bRevealColorRequiresWorkerRebuild = Layer->RevealColorPaintStrokes.ContainsByPredicate(
+            [this](const FDWCTransparencyRevealColorStroke& Stroke)
             {
-                CorrectedRevealPixels[PixelIndex].A =
-                    AutoBakePreviewResult->InnerColorBuffer[PixelIndex].A;
-            }
-            RevealColorTileStore.BuildFromDense(
-                MakeArrayView(CorrectedRevealPixels),
-                MakeArrayView(AutoBakePreviewResult->InnerColorBuffer));
-        }
-        else
-        {
-            if (RestoreResult == EDWCTransparencyCorrectedRevealRestoreResult::Invalid)
-            {
-                UE_LOG(
-                    LogWetTransparencyPreviewViewport,
-                    Warning,
-                    TEXT("Ignoring invalid Corrected Reveal Color for slot %d: %s"),
-                    SelectedMaterialSlotIndex,
-                    *RestoreError);
-            }
-            bRevealColorRequiresWorkerRebuild = Layer->RevealColorPaintStrokes.ContainsByPredicate(
-                [this](const FDWCTransparencyRevealColorStroke& Stroke)
-                {
-                    return Stroke.bEnabled &&
-                        Stroke.MaterialSlotIndex == SelectedMaterialSlotIndex &&
-                        !Stroke.Samples.IsEmpty();
-                });
-        }
+                return Stroke.bEnabled &&
+                    Stroke.MaterialSlotIndex == SelectedMaterialSlotIndex &&
+                    !Stroke.Samples.IsEmpty();
+            });
     }
     if (bRevealColorRequiresWorkerRebuild)
     {
@@ -2106,15 +2116,19 @@ FDWCEditorPreviewLayer SWetClothingTransparencyPreviewViewport::BuildTransparenc
         ? GetTransparencyPreviewTexture()
         : nullptr;
     UTexture2D* PreviewRevealSurfaceMap = nullptr;
+    UTexture2D* SavedTransparencyMap = nullptr;
+    UTexture2D* SavedRevealNormalMap = nullptr;
     if (bResultMatchesSelection && LayerData != nullptr)
     {
         PreviewRevealSurfaceMap = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
             *LayerData,
             EDWCTransparencyTempArtifactKind::BaseRevealSurface,
-            AutoBakePreviewResult->BuildSignature,
+            FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+                EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+                AutoBakePreviewResult->BuildSignature),
             true);
     }
-    if ((PreviewTransparencyMap == nullptr || PreviewRevealSurfaceMap == nullptr) && LayerData != nullptr)
+    if (LayerData != nullptr)
     {
         if (const FWetClothingBakedTransparencyMap* BakedMap = LayerData->BakedMaps.FindByPredicate(
                 [this](const FWetClothingBakedTransparencyMap& Candidate)
@@ -2123,57 +2137,98 @@ FDWCEditorPreviewLayer SWetClothingTransparencyPreviewViewport::BuildTransparenc
                            Candidate.TransparencyMap != nullptr;
                 }))
         {
-            if (PreviewTransparencyMap == nullptr)
-            {
-                PreviewTransparencyMap = BakedMap->TransparencyMap;
-            }
-            if (PreviewRevealSurfaceMap == nullptr)
-            {
-                PreviewRevealSurfaceMap = BakedMap->RevealSurfaceMap;
-            }
+            SavedTransparencyMap = BakedMap->TransparencyMap;
+            SavedRevealNormalMap = BakedMap->HasRuntimeRevealNormalPayload()
+                ? BakedMap->RevealNormalMap.Get()
+                : nullptr;
         }
     }
-    const bool bUseMaterialDrivenPresentation = CanUseMaterialDrivenPreviewPresentation();
-    const bool bUsesMaterialDrivenAlpha = bUseMaterialDrivenPresentation &&
-        (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
-            VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
+    if (PreviewTransparencyMap == nullptr)
+    {
+        PreviewTransparencyMap = SavedTransparencyMap;
+    }
+    bWorkingRevealNormalAvailable = PreviewRevealSurfaceMap != nullptr;
+    bBakedRevealNormalAvailable = SavedTransparencyMap != nullptr && SavedRevealNormalMap != nullptr;
+    EffectiveRevealNormalSource = RequestedRevealNormalSource;
+    if (EffectiveRevealNormalSource == EDWCTransparencyRevealNormalPreviewSource::Working &&
+        !bWorkingRevealNormalAvailable && bBakedRevealNormalAvailable)
+    {
+        EffectiveRevealNormalSource = EDWCTransparencyRevealNormalPreviewSource::Baked;
+    }
+    else if (EffectiveRevealNormalSource == EDWCTransparencyRevealNormalPreviewSource::Baked &&
+        !bBakedRevealNormalAvailable && bWorkingRevealNormalAvailable)
+    {
+        EffectiveRevealNormalSource = EDWCTransparencyRevealNormalPreviewSource::Working;
+    }
+    const bool bSupportsRevealPresentation =
+        VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
+        VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha ||
+        VisualizationMode == EDWCTransparencyVisualizationMode::RevealNormalOnly ||
+        VisualizationMode == EDWCTransparencyVisualizationMode::RevealNormalTexture ||
+        VisualizationMode == EDWCTransparencyVisualizationMode::SourceCoverage;
+    const bool bCanUseWorkingPresentation =
+        CanUseMaterialDrivenPreviewPresentation() && bSupportsRevealPresentation;
+    const bool bLayerEnablesRevealNormal = LayerData != nullptr &&
+        LayerData->RequiresRuntimeRevealNormal() && bShowRevealNormal;
+    const bool bUseSavedRuntimeRevealNormal = bSupportsRevealPresentation && bLayerEnablesRevealNormal &&
+        EffectiveRevealNormalSource == EDWCTransparencyRevealNormalPreviewSource::Baked &&
+        bBakedRevealNormalAvailable;
+    const bool bUseWorkingRevealNormal = bCanUseWorkingPresentation && bLayerEnablesRevealNormal &&
+        EffectiveRevealNormalSource == EDWCTransparencyRevealNormalPreviewSource::Working &&
+        bWorkingRevealNormalAvailable;
+    UTexture2D* EditorTransparencyMap = bUseSavedRuntimeRevealNormal
+        ? nullptr
+        : PreviewTransparencyMap;
     UTexture2D* WrinkleCoverageTexture = GetWrinkleCoverageTexture();
     const bool bUseCoverage = bShowSavedWrinkle && WrinkleCoverageTexture != nullptr &&
-        (bUsesMaterialDrivenAlpha ||
+        (bCanUseWorkingPresentation || bUseSavedRuntimeRevealNormal ||
             VisualizationMode == EDWCTransparencyVisualizationMode::WrinkleSeparation);
 
     FDWCEditorPreviewLayer Layer;
     Layer.Kind = EDWCEditorPreviewLayerKind::LiveTransparency;
     Layer.MaterialSlotIndex = SelectedMaterialSlotIndex;
-    Layer.AddTexture(DWCWetMaterialParameters::TransparencyMap(), nullptr);
-    Layer.AddScalar(DWCWetMaterialParameters::UseTransparencyMap(), 0.0f);
+    Layer.AddTexture(
+        DWCWetMaterialParameters::TransparencyMap(),
+        bUseSavedRuntimeRevealNormal ? SavedTransparencyMap : nullptr);
+    Layer.AddScalar(
+        DWCWetMaterialParameters::UseTransparencyMap(),
+        bUseSavedRuntimeRevealNormal ? 1.0f : 0.0f);
+    Layer.AddTexture(
+        DWCWetMaterialParameters::RevealNormalMap(),
+        bUseSavedRuntimeRevealNormal ? SavedRevealNormalMap : nullptr);
+    Layer.AddScalar(
+        DWCWetMaterialParameters::UseRevealNormalMap(),
+        bUseSavedRuntimeRevealNormal ? 1.0f : 0.0f);
+    Layer.AddScalar(
+        DWCWetMaterialParameters::RevealNormalStrength(),
+        bUseSavedRuntimeRevealNormal ? RevealNormalStrength : 0.0f);
     Layer.AddTexture(
         DWCTransparencyPreviewMaterialParameters::TransparencyMap(),
-        PreviewTransparencyMap);
+        EditorTransparencyMap);
     Layer.AddScalar(
         DWCTransparencyPreviewMaterialParameters::UseTransparencyMap(),
-        PreviewTransparencyMap != nullptr ? 1.0f : 0.0f);
+        EditorTransparencyMap != nullptr ? 1.0f : 0.0f);
     Layer.AddScalar(
         DWCTransparencyPreviewMaterialParameters::ShowInnerColor(),
         VisualizationMode == EDWCTransparencyVisualizationMode::InnerColor &&
-                PreviewTransparencyMap != nullptr
+                EditorTransparencyMap != nullptr
             ? 1.0f
             : 0.0f);
     Layer.AddScalar(
         DWCTransparencyPreviewMaterialParameters::TransparencyStrength(),
-        bUsesMaterialDrivenAlpha ? TransparencyPreviewStrength : 1.0f);
+        bCanUseWorkingPresentation ? TransparencyPreviewStrength : 1.0f);
     Layer.AddTexture(
         DWCTransparencyPreviewMaterialParameters::RevealSurfaceMap(),
-        bUsesMaterialDrivenAlpha ? PreviewRevealSurfaceMap : nullptr);
+        bUseWorkingRevealNormal ? PreviewRevealSurfaceMap : nullptr);
     Layer.AddScalar(
         DWCTransparencyPreviewMaterialParameters::UseRevealSurfaceMap(),
-        bUsesMaterialDrivenAlpha && PreviewRevealSurfaceMap != nullptr ? 1.0f : 0.0f);
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+        bUseWorkingRevealNormal ? 1.0f : 0.0f);
     Layer.AddScalar(
-        DWCTransparencyPreviewMaterialParameters::RevealMetallicDarkeningStrength(),
-        bUsesMaterialDrivenAlpha && PreviewRevealSurfaceMap != nullptr && Asset != nullptr
-            ? Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength
-            : 0.0f);
+        DWCTransparencyPreviewMaterialParameters::RevealNormalStrength(),
+        bUseWorkingRevealNormal ? RevealNormalStrength : 0.0f);
+    Layer.AddScalar(
+        DWCTransparencyPreviewMaterialParameters::ShowRevealNormal(),
+        bUseWorkingRevealNormal ? 1.0f : 0.0f);
     Layer.AddTexture(
         DWCTransparencyPreviewMaterialParameters::WrinkleCoverageMap(),
         bUseCoverage ? WrinkleCoverageTexture : nullptr);
@@ -2693,6 +2748,11 @@ bool SWetClothingTransparencyPreviewViewport::BuildRevealColorCommitInput(
 
     OutInput.SourceResult = AutoBakePreviewResult;
     OutInput.BaseRevealColor = Layer->ManualColorSource.BaseRevealColor;
+    if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        OutInput.RevealMetallicDarkeningStrength =
+            Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength;
+    }
     const bool bSparseWorkingSetIsCurrent = RevealColorTileStore.IsValid() &&
         RevealColorTileStore.GetResolution() == AutoBakePreviewResult->Resolution &&
         !bRevealColorRequiresWorkerRebuild && !bAuthoringWorkerRebuildRequested &&
@@ -2926,6 +2986,11 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
             Input.MaterialSlotIndex = ExpectedSlot;
             Input.DirtyTileCoordinates = DirtyTiles;
             Input.VisualizationMode = Viewport->VisualizationMode;
+            if (const UWetClothingAsset* Asset = Viewport->WetClothingAsset.Get())
+            {
+                Input.RevealMetallicDarkeningStrength =
+                    Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength;
+            }
             Input.PreviewTarget.Key = MakeTransparencyTextureKey(
                 Viewport->WetClothingAsset.Get(),
                 EDWCEditorTexturePurpose::TransparencyVisualization,
@@ -3347,6 +3412,11 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
                 return false;
             }
             Input.VisualizationMode = Viewport->VisualizationMode;
+            if (const UWetClothingAsset* Asset = Viewport->WetClothingAsset.Get())
+            {
+                Input.RevealMetallicDarkeningStrength =
+                    Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength;
+            }
             Input.PreviewTarget.Key = MakeTransparencyTextureKey(
                 Viewport->WetClothingAsset.Get(),
                 EDWCEditorTexturePurpose::TransparencyVisualization,
@@ -3729,6 +3799,11 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
                 return false;
             }
             Input.VisualizationMode = Viewport->VisualizationMode;
+            if (const UWetClothingAsset* Asset = Viewport->WetClothingAsset.Get())
+            {
+                Input.RevealMetallicDarkeningStrength =
+                    Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength;
+            }
             Input.PreviewTarget.Key = MakeTransparencyTextureKey(
                 Viewport->WetClothingAsset.Get(),
                 EDWCEditorTexturePurpose::TransparencyVisualization,
@@ -4206,6 +4281,11 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
             }
             Input.OuterEdgeFeatherBuffer = Viewport->OuterEdgeFeatherBuffer;
             Input.VisualizationMode = ExpectedVisualizationMode;
+            if (const UWetClothingAsset* Asset = Viewport->WetClothingAsset.Get())
+            {
+                Input.RevealMetallicDarkeningStrength =
+                    Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength;
+            }
             Input.bRebuildRevealColorFromStrokes = bRebuildRevealColor;
             if (Layer != nullptr)
             {

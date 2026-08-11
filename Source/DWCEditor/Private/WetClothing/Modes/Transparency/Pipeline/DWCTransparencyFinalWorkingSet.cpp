@@ -15,6 +15,94 @@ namespace
         }
         return false;
     }
+
+    int32 WrapCoordinate(const int32 Value, const int32 Size)
+    {
+        return Size > 0 ? (Value % Size + Size) % Size : 0;
+    }
+}
+
+TSharedPtr<const FDWCTransparencyAlphaDomainSnapshot>
+FDWCTransparencyAlphaDomainSnapshot::Create(
+    const FDWCTransparencySourcePayload& SourcePayload,
+    FString* OutError)
+{
+    TSharedPtr<FDWCTransparencyAlphaDomainSnapshot> Result =
+        MakeShared<FDWCTransparencyAlphaDomainSnapshot>();
+    Result->LayerGuid = SourcePayload.LayerGuid;
+    Result->MaterialSlotIndex = SourcePayload.MaterialSlotIndex;
+    Result->Resolution = SourcePayload.Resolution;
+    Result->SourceSignature = SourcePayload.BuildSignature;
+    Result->BaseAlpha = SourcePayload.AutoAlphaBuffer;
+    Result->OuterCoverage = SourcePayload.OuterCoverageBuffer;
+    Result->OuterIslandIDs = SourcePayload.OuterIslandIDBuffer;
+    Result->ValidSource = SourcePayload.ValidHitBuffer;
+    if (!Result->IsValid(OutError))
+    {
+        return nullptr;
+    }
+    return Result;
+}
+
+bool FDWCTransparencyAlphaDomainSnapshot::IsValid(FString* OutError) const
+{
+    const int64 PixelCount = static_cast<int64>(Resolution.X) * Resolution.Y;
+    if (!LayerGuid.IsValid() || MaterialSlotIndex == INDEX_NONE ||
+        Resolution.X <= 0 || Resolution.Y <= 0 || SourceSignature.IsEmpty() ||
+        BaseAlpha.Num() != PixelCount || OuterCoverage.Num() != PixelCount ||
+        OuterIslandIDs.Num() != PixelCount || ValidSource.Num() != PixelCount)
+    {
+        return Fail(OutError, TEXT("The Stage 4 alpha domain is missing identity or alpha-domain buffers."));
+    }
+    return true;
+}
+
+uint64 FDWCTransparencyAlphaDomainSnapshot::GetAllocatedBytes() const
+{
+    return static_cast<uint64>(sizeof(FDWCTransparencyAlphaDomainSnapshot)) +
+        static_cast<uint64>(SourceSignature.GetAllocatedSize()) +
+        static_cast<uint64>(BaseAlpha.GetAllocatedSize()) +
+        static_cast<uint64>(OuterCoverage.GetAllocatedSize()) +
+        static_cast<uint64>(OuterIslandIDs.GetAllocatedSize()) +
+        static_cast<uint64>(ValidSource.GetAllocatedSize());
+}
+
+int32 FDWCTransparencyAlphaDomainSnapshot::ResolveOuterIslandIDAtUV(
+    const FVector2D& PositionUV,
+    const int32 FallbackUVIslandID,
+    const bool bWrap) const
+{
+    if (Resolution.X <= 0 || Resolution.Y <= 0)
+    {
+        return FallbackUVIslandID;
+    }
+    int32 X = FMath::FloorToInt(PositionUV.X * Resolution.X);
+    int32 Y = FMath::FloorToInt(PositionUV.Y * Resolution.Y);
+    if (bWrap)
+    {
+        X = WrapCoordinate(X, Resolution.X);
+        Y = WrapCoordinate(Y, Resolution.Y);
+    }
+    else
+    {
+        X = FMath::Clamp(X, 0, Resolution.X - 1);
+        Y = FMath::Clamp(Y, 0, Resolution.Y - 1);
+    }
+    const int32 PixelIndex = Y * Resolution.X + X;
+    return OuterIslandIDs.IsValidIndex(PixelIndex)
+        ? FDWCTransparencySourcePayload::DecodeOuterIslandID(OuterIslandIDs[PixelIndex])
+        : FallbackUVIslandID;
+}
+
+bool FDWCTransparencyAlphaDomainSnapshot::MatchesOuterIslandID(
+    const int32 PixelIndex,
+    const int32 UVIslandID) const
+{
+    return OuterCoverage.IsValidIndex(PixelIndex) && OuterCoverage[PixelIndex] != 0 &&
+        (UVIslandID == INDEX_NONE ||
+         (OuterIslandIDs.IsValidIndex(PixelIndex) &&
+          FDWCTransparencySourcePayload::MatchesOuterIslandID(
+              OuterIslandIDs[PixelIndex], UVIslandID)));
 }
 
 FDWCTransparencyFinalSettingsSnapshot FDWCTransparencyFinalSettingsSnapshot::FromAuthoredData(
@@ -98,9 +186,9 @@ uint64 FDWCTransparencyAlphaWorkingSnapshot::GetAllocatedBytes() const
 
 bool FDWCTransparencyFinalWorkingSet::IsValid(FString* OutError) const
 {
-    if (!Identity.IsValid() || !SourcePayload.IsValid() || SourceSignature.IsEmpty() ||
-        RevealSignature.IsEmpty() || RevealSurfaceSignature.IsEmpty() || AlphaAuthoringSignature.IsEmpty() ||
-        SuppressionSettingsSignature.IsEmpty() || FinalSignature.IsEmpty())
+    if (!Identity.IsValid() || !AlphaDomain.IsValid() || SourceSignature.IsEmpty() ||
+        RevealSignature.IsEmpty() || RevealNormalSignature.IsEmpty() || AlphaAuthoringSignature.IsEmpty() ||
+        SuppressionSettingsSignature.IsEmpty() || FinalAlphaSignature.IsEmpty() || FinalSignature.IsEmpty())
     {
         return Fail(OutError, TEXT("The Stage 4 working set is missing identity, payload, or signatures."));
     }
@@ -108,11 +196,10 @@ bool FDWCTransparencyFinalWorkingSet::IsValid(FString* OutError) const
     {
         return false;
     }
-    return Identity.LayerGuid == SourcePayload->LayerGuid &&
-        Identity.MaterialSlotIndex == SourcePayload->MaterialSlotIndex &&
-        Identity.DataUVChannelIndex == SourcePayload->UVChannelIndex &&
-        Identity.LODIndex == SourcePayload->LODIndex &&
-        Identity.Resolution == SourcePayload->Resolution &&
+    return Identity.LayerGuid == AlphaDomain->LayerGuid &&
+        Identity.MaterialSlotIndex == AlphaDomain->MaterialSlotIndex &&
+        Identity.LODIndex == 0 &&
+        Identity.Resolution == AlphaDomain->Resolution &&
         Alpha.Resolution == Identity.Resolution;
 }
 
@@ -149,17 +236,26 @@ bool FDWCTransparencyFinalWorkingSetBuilder::Build(
     OutWorkingSet.Identity.LODIndex = 0;
     OutWorkingSet.Identity.Resolution = SourcePayload->Resolution;
     OutWorkingSet.Identity.Revision = AuthoringRevision;
-    OutWorkingSet.SourcePayload = MoveTemp(SourcePayload);
+    OutWorkingSet.AlphaDomain = FDWCTransparencyAlphaDomainSnapshot::Create(
+        *SourcePayload,
+        &OutError);
+    if (!OutWorkingSet.AlphaDomain.IsValid())
+    {
+        return false;
+    }
     OutWorkingSet.Settings = Settings;
     OutWorkingSet.Alpha = MoveTemp(AlphaSnapshot);
     OutWorkingSet.WrinkleDependency = MoveTemp(WrinkleDependency);
     OutWorkingSet.AuthoringRevision = AuthoringRevision;
     OutWorkingSet.bRequiresRevealSurface = Layer.RequiresRevealSurface();
-    OutWorkingSet.SourceSignature = OutWorkingSet.SourcePayload->BuildSignature;
+    OutWorkingSet.bRequiresRuntimeRevealNormal = Layer.RequiresRuntimeRevealNormal();
+    OutWorkingSet.SourceSignature = OutWorkingSet.AlphaDomain->SourceSignature;
     OutWorkingSet.RevealSignature = FDWCTransparencySignatureService::BuildRevealSignature(
-        OutWorkingSet.SourceSignature, Layer);
-    OutWorkingSet.RevealSurfaceSignature =
-        FDWCTransparencySignatureService::BuildRevealSurfaceSignature(
+        OutWorkingSet.SourceSignature,
+        Layer,
+        Asset.Authored.TransparencyData.RevealMetallicDarkeningStrength);
+    OutWorkingSet.RevealNormalSignature =
+        FDWCTransparencySignatureService::BuildRevealNormalSignature(
             OutWorkingSet.SourceSignature);
     OutWorkingSet.AlphaAuthoringSignature =
         FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(Layer);
@@ -171,16 +267,19 @@ bool FDWCTransparencyFinalWorkingSetBuilder::Build(
             Settings.TransparencyStrength);
 
     FDWCTransparencyFinalSignatureInputs SignatureInputs;
+    SignatureInputs.SourceSignature = OutWorkingSet.SourceSignature;
     SignatureInputs.RevealSignature = OutWorkingSet.RevealSignature;
     SignatureInputs.AlphaAuthoringSignature = OutWorkingSet.AlphaAuthoringSignature;
     SignatureInputs.WrinkleMaskBuildSignature = OutWorkingSet.WrinkleDependency.BuildSignature;
     SignatureInputs.SuppressionSettingsSignature = OutWorkingSet.SuppressionSettingsSignature;
     SignatureInputs.PaddingPixels = Settings.PaddingPixels;
     SignatureInputs.EdgeFeatherPixels = Settings.EdgeFeatherPixels;
+    OutWorkingSet.FinalAlphaSignature =
+        FDWCTransparencySignatureService::BuildFinalAlphaSignature(SignatureInputs);
     OutWorkingSet.FinalSignature =
         FDWCTransparencySignatureService::BuildFinalSignature(SignatureInputs);
     OutWorkingSet.OwnedBytes = OutWorkingSet.Alpha.GetAllocatedBytes();
-    OutWorkingSet.RetainedBytes = OutWorkingSet.SourcePayload->GetAllocatedBytes();
+    OutWorkingSet.RetainedBytes = OutWorkingSet.AlphaDomain->GetAllocatedBytes();
     return OutWorkingSet.IsValid(&OutError);
 }
 
@@ -189,10 +288,11 @@ FDWCTransparencyFinalCurrentness FDWCTransparencyFinalWorkingSetBuilder::Evaluat
     const FDWCTransparencyFinalWorkingSet& WorkingSet)
 {
     FDWCTransparencyFinalCurrentness Result;
-    if (BakedMap == nullptr || !BakedMap->IsRuntimeUsableForLayer(WorkingSet.bRequiresRevealSurface))
+    if (BakedMap == nullptr ||
+        !BakedMap->IsRuntimeUsableForLayer(WorkingSet.bRequiresRuntimeRevealNormal))
     {
         Result.Reason = EDWCTransparencyStaleReason::MissingArtifact;
-        Result.Detail = WorkingSet.bRequiresRevealSurface
+        Result.Detail = WorkingSet.bRequiresRuntimeRevealNormal
             ? TEXT("The final Transparency Map or its required Reveal Surface payload has not been baked.")
             : TEXT("The final Transparency Map has not been baked.");
     }
@@ -214,29 +314,27 @@ FDWCTransparencyFinalCurrentness FDWCTransparencyFinalWorkingSetBuilder::Evaluat
         Result.Reason = EDWCTransparencyStaleReason::OutputSettingsChanged;
         Result.Detail = TEXT("The final transparency output settings changed.");
     }
-    else if (WorkingSet.bRequiresRevealSurface &&
-        BakedMap->RevealSurfaceBuildSignature != WorkingSet.RevealSurfaceSignature)
+    else if (WorkingSet.bRequiresRuntimeRevealNormal &&
+        BakedMap->RevealNormalBuildSignature != WorkingSet.RevealNormalSignature)
     {
         Result.Reason = EDWCTransparencyStaleReason::SourceInputsChanged;
-        Result.Detail = TEXT("The final Reveal Surface payload needs to be rebuilt from the current Stage 2 source.");
+        Result.Detail = TEXT("The runtime Reveal Normal needs to be rebuilt from the current Stage 2 source.");
     }
-    else if (WorkingSet.bRequiresRevealSurface && !BakedMap->HasCompleteRevealSurfacePayload())
+    else if (WorkingSet.bRequiresRuntimeRevealNormal &&
+        !BakedMap->HasRuntimeRevealNormalPayload())
     {
         Result.Reason = EDWCTransparencyStaleReason::MissingArtifact;
-        Result.Detail = TEXT("This raycast transparency layer requires a complete Reveal Surface runtime payload.");
+        Result.Detail = TEXT("This raycast transparency layer requires a coverage-weighted runtime Reveal Normal.");
     }
-    else if (BakedMap->bContainsRevealNormalRG != BakedMap->bContainsInnerMetallicB ||
-        BakedMap->bContainsRevealNormalRG != BakedMap->bContainsRevealSurfaceCoverageAlpha ||
-        (BakedMap->bContainsRevealNormalRG && BakedMap->RevealSurfaceMap == nullptr) ||
-        (!BakedMap->bContainsRevealNormalRG && BakedMap->RevealSurfaceMap != nullptr))
+    else if (BakedMap->FinalAlphaBuildSignature != WorkingSet.FinalAlphaSignature)
     {
-        Result.Reason = EDWCTransparencyStaleReason::MissingArtifact;
-        Result.Detail = TEXT("The final Reveal Surface metadata does not match its runtime texture.");
+        Result.Reason = EDWCTransparencyStaleReason::AlphaEditsChanged;
+        Result.Detail = TEXT("The Stage 4 alpha authoring, suppression dependency, or output settings changed.");
     }
     else if (BakedMap->BuildSignature != WorkingSet.FinalSignature)
     {
-        Result.Reason = EDWCTransparencyStaleReason::AlphaEditsChanged;
-        Result.Detail = TEXT("The Stage 4 alpha authoring or reveal input changed.");
+        Result.Reason = EDWCTransparencyStaleReason::RevealEditsChanged;
+        Result.Detail = TEXT("The Stage 3 corrected reveal color changed.");
     }
     return Result;
 }

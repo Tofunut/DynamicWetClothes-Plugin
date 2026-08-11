@@ -55,6 +55,7 @@ enum class EDWCTransparencyRevealColorBrushMode : uint8
 UENUM()
 enum class EDWCTransparencyTempArtifactKind : uint8
 {
+    /** Legacy enum value. Source material surfaces use MaterialColorCache entries. */
     SourceMaterialColor,
     BaseRevealColor,
     ValidHit,
@@ -82,6 +83,18 @@ struct DWC_API FDWCTransparencyTempArtifactReference
 
     UPROPERTY()
     FString BuildSignature;
+
+    /** Schema version of the artifact payload and its dependency signature. */
+    UPROPERTY()
+    int32 ContractVersion = 0;
+
+    /** Identifies the all-or-nothing Stage commit that published this reference. */
+    UPROPERTY()
+    FGuid CommitGeneration;
+
+    /** Texture source identity captured after the payload was written. */
+    UPROPERTY()
+    FGuid TextureSourceId;
 
     UPROPERTY()
     FIntPoint Resolution = FIntPoint::ZeroValue;
@@ -138,6 +151,23 @@ struct DWC_API FDWCTransparencyMaterialColorCacheReference
 
     UPROPERTY()
     FString MaterialBakeSignature;
+
+    /** Versioned digest of every input consumed by MaterialBaking. */
+    UPROPERTY()
+    FString CacheIdentity;
+
+    UPROPERTY()
+    int32 IdentityVersion = 0;
+
+    /** Diagnostic components retained so stale cache entries can explain why they missed. */
+    UPROPERTY()
+    FString SourceMeshContentSignature;
+
+    UPROPERTY()
+    FString EffectiveMaterialSignature;
+
+    UPROPERTY()
+    FString PlacementSignature;
 
     UPROPERTY()
     TSoftObjectPtr<UTexture2D> Texture;
@@ -525,24 +555,39 @@ struct DWC_API FWetClothingBakedTransparencyMap
     TObjectPtr<UTexture2D> TransparencyMap = nullptr;
 
     /**
-     * Final linear surface payload. RG stores the inner material normal in
-     * outer tangent space, B stores inner Metallic, and A stores source hit
-     * coverage. Runtime material consumption is added separately.
+     * Runtime-only reveal normal. RG stores the inner normal reoriented into
+     * the outer tangent frame with source coverage already folded into its XY
+     * magnitude. Editor Metallic and source coverage are not runtime channels.
      */
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    TObjectPtr<UTexture2D> RevealNormalMap = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    FString RevealNormalBuildSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    bool bSourceCoverageBakedIntoRevealNormal = false;
+
+#if WITH_EDITORONLY_DATA
+    /**
+     * Deprecated packed runtime payload retained only so existing WCA assets
+     * deserialize safely in the editor. It is stripped from cooked packages.
+     */
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Re-bake Transparency Textures to create RevealNormalMap."))
     TObjectPtr<UTexture2D> RevealSurfaceMap = nullptr;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Re-bake Transparency Textures to create RevealNormalBuildSignature."))
     FString RevealSurfaceBuildSignature;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Legacy packed Reveal Surface metadata."))
     bool bContainsRevealNormalRG = false;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Metallic darkening is now baked into corrected reveal color."))
     bool bContainsInnerMetallicB = false;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Source coverage is now baked into RevealNormalMap RG."))
     bool bContainsRevealSurfaceCoverageAlpha = false;
+#endif
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     int32 Resolution = 1024;
@@ -561,11 +606,20 @@ struct DWC_API FWetClothingBakedTransparencyMap
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     FString BuildSignature;
 
+    /** Stage 4 alpha-domain signature, independent from corrected reveal RGB. */
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    FString FinalAlphaBuildSignature;
+
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     bool bContainsColorRGB = true;
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     bool bContainsTransparencyAlpha = true;
+
+    // New final maps store the Stage 2 inner-metallic response directly in
+    // the Stage 3 corrected reveal RGB. Runtime materials must not apply it again.
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    bool bMetallicDarkeningBakedIntoColor = false;
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency|Wrinkle Suppression")
     bool bWrinkleSuppressionBakedIntoAlpha = false;
@@ -588,8 +642,19 @@ struct DWC_API FWetClothingBakedTransparencyMap
                bContainsTransparencyAlpha;
     }
 
-    /** True only when every packed Reveal Surface channel has a runtime texture. */
-    bool HasCompleteRevealSurfacePayload() const
+#if WITH_EDITORONLY_DATA
+    /** True when any deprecated packed Reveal Surface state remains serialized in an editor asset. */
+    bool HasAnyLegacyRevealSurfaceData() const
+    {
+        return RevealSurfaceMap != nullptr ||
+               !RevealSurfaceBuildSignature.IsEmpty() ||
+               bContainsRevealNormalRG ||
+               bContainsInnerMetallicB ||
+               bContainsRevealSurfaceCoverageAlpha;
+    }
+
+    /** True only when the complete deprecated packed payload is present. */
+    bool HasLegacyRevealSurfacePayload() const
     {
         return RevealSurfaceMap != nullptr &&
                !RevealSurfaceBuildSignature.IsEmpty() &&
@@ -597,11 +662,20 @@ struct DWC_API FWetClothingBakedTransparencyMap
                bContainsInnerMetallicB &&
                bContainsRevealSurfaceCoverageAlpha;
     }
+#endif
 
-    bool IsRuntimeUsableForLayer(const bool bRequiresRevealSurface) const
+    bool HasRuntimeRevealNormalPayload() const
+    {
+        return RevealNormalMap != nullptr &&
+               !RevealNormalBuildSignature.IsEmpty() &&
+               bSourceCoverageBakedIntoRevealNormal;
+    }
+
+    bool IsRuntimeUsableForLayer(const bool bRequiresRevealNormal) const
     {
         return IsRuntimeUsable() &&
-               (!bRequiresRevealSurface || HasCompleteRevealSurfacePayload());
+               (!bRequiresRevealNormal ||
+                   (HasRuntimeRevealNormalPayload() && bMetallicDarkeningBakedIntoColor));
     }
 };
 
@@ -651,6 +725,15 @@ struct DWC_API FWetClothingTransparencyLayerData
     UPROPERTY(VisibleAnywhere, Category = "Transparency Layer")
     TArray<FWetClothingBakedTransparencyMap> BakedMaps;
 
+    /** Runtime application policy. The raycast source remains bakeable even while presentation is disabled. */
+    UPROPERTY(EditAnywhere, Category = "Transparency Layer|Reveal Normal")
+    bool bEnableRevealNormal = true;
+
+    /** Scales coverage-weighted Reveal Normal detail in the material; it does not change the baked texture. */
+    UPROPERTY(EditAnywhere, Category = "Transparency Layer|Reveal Normal",
+        meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0"))
+    float RevealNormalStrength = 1.0f;
+
 #if WITH_EDITORONLY_DATA
     UPROPERTY()
     FDWCTransparencyEditorStageCacheMetadata EditorStageCache;
@@ -664,6 +747,11 @@ struct DWC_API FWetClothingTransparencyLayerData
     bool RequiresRevealSurface() const
     {
         return SourceType != EDWCTransparencySourceType::ManualColorOrTexture;
+    }
+
+    bool RequiresRuntimeRevealNormal() const
+    {
+        return RequiresRevealSurface() && bEnableRevealNormal;
     }
 };
 
@@ -709,9 +797,10 @@ struct DWC_API FWetClothingTransparencyData
     UPROPERTY(EditAnywhere, Category = "Transparency Bake", meta = (DisplayName = "Transparency Strength", ClampMin = "0.0", UIMin = "0.0", UIMax = "2.0"))
     float TransparencyPreviewStrength = 0.4f;
 
-    // Darkens the revealed inner color in proportion to the baked inner
-    // metallic value. The normal/coverage payload remains independent.
-    UPROPERTY(EditAnywhere, Category = "Transparency Bake", meta = (DisplayName = "Reveal Metallic Darkening", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+    // Stage 3 correction strength baked into Corrected Reveal Color RGB.
+    // Stage 2 source data remains immutable and runtime materials do not
+    // evaluate metallic darkening dynamically.
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Correction", meta = (DisplayName = "Metallic Darkening", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
     float RevealMetallicDarkeningStrength = 0.25f;
 
     // Legacy spatial expansion settings. Suppression now follows the baked

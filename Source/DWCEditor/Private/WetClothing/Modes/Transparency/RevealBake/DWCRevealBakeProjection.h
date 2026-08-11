@@ -72,6 +72,10 @@ class FDWCRevealBakeTexelSampler
         const FVector& Barycentric,
         const FVector  Values[3]);
 
+    static FVector InterpolateDirection(
+        const FVector&  Barycentric,
+        const FVector3f Values[3]);
+
     static FIntRect MakePixelBoundsFromUVTriangle(
         const FDWCRevealBakeSurfaceTriangle& Triangle,
         const FIntPoint&                     Resolution);
@@ -161,6 +165,10 @@ class FDWCRevealBakeRayProjector
     static FVector InterpolateVector(
         const FVector& Barycentric,
         const FVector  Values[3]);
+
+    static FVector InterpolateDirection(
+        const FVector&  Barycentric,
+        const FVector3f Values[3]);
 
     static FVector2D InterpolateVector2D(
         const FVector&  Barycentric,

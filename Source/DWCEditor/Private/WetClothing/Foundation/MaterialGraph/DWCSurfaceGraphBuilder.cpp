@@ -8,7 +8,6 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
-#include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionFunctionOutput.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
@@ -19,7 +18,6 @@
 #include "Materials/MaterialFunction.h"
 #include "Materials/MaterialFunctionInterface.h"
 #include "WetRendering/WetMaterialParameters.h"
-#include "WetClothing/Foundation/MaterialGraph/DWCRevealSurfaceMaterialGraph.h"
 
 namespace
 {
@@ -287,45 +285,6 @@ namespace
         return FunctionCall;
     }
 
-    UMaterialExpressionCustom* CreateTransparencyRevealVisibilityExpression(
-        UMaterial* Material,
-        const int32 NodeX,
-        const int32 NodeY)
-    {
-        UMaterialExpressionCustom* Visibility = Cast<UMaterialExpressionCustom>(
-            UMaterialEditingLibrary::CreateMaterialExpression(
-                Material, UMaterialExpressionCustom::StaticClass(), NodeX, NodeY));
-        if (Visibility == nullptr)
-        {
-            return nullptr;
-        }
-
-        static const FName InputNames[] = {
-            TEXT("TransparencyAlpha"),
-            TEXT("Wetness"),
-            TEXT("UseTransparencyMap"),
-            TEXT("TransparencyWetnessMin"),
-            TEXT("TransparencyWetnessMax"),
-        };
-        for (const FName InputName : InputNames)
-        {
-            FCustomInput& Input = Visibility->Inputs.AddDefaulted_GetRef();
-            Input.InputName = InputName;
-        }
-
-        Visibility->OutputType = CMOT_Float1;
-        Visibility->Description = TEXT("DWC Transparency Reveal Surface Visibility");
-        Visibility->Code = TEXT(R"(
-float SafeMin = saturate(TransparencyWetnessMin);
-float SafeMax = max(SafeMin, saturate(TransparencyWetnessMax));
-float WetnessRange = max(SafeMax - SafeMin, 0.00001);
-float WetnessWeight = saturate((Wetness - SafeMin) / WetnessRange);
-return saturate(TransparencyAlpha) * saturate(UseTransparencyMap) * WetnessWeight;
-)");
-        Visibility->RebuildOutputs();
-        return Visibility;
-    }
-
     FDWCMaterialGraphPin ResolvePropertyInputOrFallback(
         UMaterial*              Material,
         const EMaterialProperty Property,
@@ -522,7 +481,8 @@ bool FDWCSurfaceGraphBuilder::ValidateDependencies(
         TEXT("WrinkleNormal"), TEXT("UseWrinkleNormalMap"), TEXT("WrinkleStrength"),
         TEXT("WrinkleWetnessMin"), TEXT("WrinkleWetnessMax"),
         TEXT("TransparencyColor"), TEXT("TransparencyAlpha"), TEXT("UseTransparencyMap"),
-        TEXT("TransparencyWetnessMin"), TEXT("TransparencyWetnessMax")
+        TEXT("TransparencyWetnessMin"), TEXT("TransparencyWetnessMax"),
+        TEXT("RevealNormal"), TEXT("UseRevealNormalMap"), TEXT("RevealNormalStrength")
     };
     static const TArray<FName> EvaluateOutputs = {
         TEXT("BaseColor"), TEXT("Roughness"), TEXT("Specular"), TEXT("Normal"),
@@ -648,6 +608,14 @@ FDWCSurfaceGraphBuildResult FDWCSurfaceGraphBuilder::Build(const FDWCSurfaceGrap
     UMaterialExpressionScalarParameter* TransparencyWetnessMax = CreateScalarParameter(
         Request.Material, DWCWetMaterialParameters::TransparencyWetnessMax(),
         DWCWetMaterialParameters::DefaultTransparencyWetnessMax(), -1660, 1540);
+    UMaterialExpressionTextureSampleParameter2D* RevealNormalMap = CreateTextureParameter(
+        Request.Material, DWCWetMaterialParameters::RevealNormalMap(), SAMPLERTYPE_Normal,
+        LoadDefaultNormalTexture(),
+        TEXT("DWC coverage-weighted tangent-space reveal normal map."), -1900, 1720);
+    UMaterialExpressionScalarParameter* UseRevealNormalMap = CreateScalarParameter(
+        Request.Material, DWCWetMaterialParameters::UseRevealNormalMap(), 0.0f, -1660, 1720);
+    UMaterialExpressionScalarParameter* RevealNormalStrength = CreateScalarParameter(
+        Request.Material, DWCWetMaterialParameters::RevealNormalStrength(), 1.0f, -1660, 1810);
 
     if (!Result.BaseInputs.IsValid() || Result.EvaluateExpression == nullptr ||
         Result.DWCDataUVExpression == nullptr || Result.SurfaceWaterNormalUVExpression == nullptr ||
@@ -655,7 +623,8 @@ FDWCSurfaceGraphBuildResult FDWCSurfaceGraphBuilder::Build(const FDWCSurfaceGrap
         WrinkleNormalMap == nullptr ||
         UseWrinkleNormalMap == nullptr || WrinkleStrength == nullptr || WrinkleWetnessMin == nullptr ||
         WrinkleWetnessMax == nullptr || TransparencyMap == nullptr || UseTransparencyMap == nullptr ||
-        TransparencyWetnessMin == nullptr || TransparencyWetnessMax == nullptr)
+        TransparencyWetnessMin == nullptr || TransparencyWetnessMax == nullptr ||
+        RevealNormalMap == nullptr || UseRevealNormalMap == nullptr || RevealNormalStrength == nullptr)
     {
         Result.FailureReasons.Add(TEXT("Could not create one or more nodes for the common DWC surface graph."));
         DeleteExpressionsCreatedAfter(Request.Material, PreExistingExpressions);
@@ -665,6 +634,7 @@ FDWCSurfaceGraphBuildResult FDWCSurfaceGraphBuilder::Build(const FDWCSurfaceGrap
     bool bConnected = true;
     bConnected &= ConnectTextureCoordinate(Result.DWCDataUVExpression, WrinkleNormalMap, Result.FailureReasons);
     bConnected &= ConnectTextureCoordinate(Result.DWCDataUVExpression, TransparencyMap, Result.FailureReasons);
+    bConnected &= ConnectTextureCoordinate(Result.DWCDataUVExpression, RevealNormalMap, Result.FailureReasons);
     bConnected &= Connect(Result.BaseInputs.BaseColor, Result.EvaluateExpression, TEXT("BaseColor"), Result.FailureReasons);
     bConnected &= Connect(Result.BaseInputs.Roughness, Result.EvaluateExpression, TEXT("BaseRoughness"), Result.FailureReasons);
     bConnected &= Connect(Result.BaseInputs.Specular, Result.EvaluateExpression, TEXT("BaseSpecular"), Result.FailureReasons);
@@ -685,6 +655,9 @@ FDWCSurfaceGraphBuildResult FDWCSurfaceGraphBuilder::Build(const FDWCSurfaceGrap
     bConnected &= Connect({ UseTransparencyMap, FString() }, Result.EvaluateExpression, TEXT("UseTransparencyMap"), Result.FailureReasons);
     bConnected &= Connect({ TransparencyWetnessMin, FString() }, Result.EvaluateExpression, TEXT("TransparencyWetnessMin"), Result.FailureReasons);
     bConnected &= Connect({ TransparencyWetnessMax, FString() }, Result.EvaluateExpression, TEXT("TransparencyWetnessMax"), Result.FailureReasons);
+    bConnected &= Connect({ RevealNormalMap, TEXT("RGB") }, Result.EvaluateExpression, TEXT("RevealNormal"), Result.FailureReasons);
+    bConnected &= Connect({ UseRevealNormalMap, FString() }, Result.EvaluateExpression, TEXT("UseRevealNormalMap"), Result.FailureReasons);
+    bConnected &= Connect({ RevealNormalStrength, FString() }, Result.EvaluateExpression, TEXT("RevealNormalStrength"), Result.FailureReasons);
 
     bConnected &= ResolveOutputPin(Result.EvaluateExpression, TEXT("BaseColor"), Result.Outputs.BaseColor, Result.FailureReasons);
     bConnected &= ResolveOutputPin(Result.EvaluateExpression, TEXT("Roughness"), Result.Outputs.Roughness, Result.FailureReasons);
@@ -703,59 +676,6 @@ FDWCSurfaceGraphBuildResult FDWCSurfaceGraphBuilder::Build(const FDWCSurfaceGrap
         Result.SurfaceWaterNormalUVExpression = nullptr;
         return Result;
     }
-
-    UMaterialExpressionCustom* RevealVisibility = CreateTransparencyRevealVisibilityExpression(
-        Request.Material, 260, 700);
-    if (RevealVisibility == nullptr)
-    {
-        DeleteExpressionsCreatedAfter(Request.Material, PreExistingExpressions);
-        Result.FailureReasons.Add(TEXT("Could not create the transparency Reveal Surface visibility expression."));
-        return Result;
-    }
-
-    bConnected = true;
-    bConnected &= Connect({ TransparencyMap, TEXT("A") }, RevealVisibility, TEXT("TransparencyAlpha"), Result.FailureReasons);
-    bConnected &= Connect(Request.WetnessInput, RevealVisibility, TEXT("Wetness"), Result.FailureReasons);
-    bConnected &= Connect({ UseTransparencyMap, FString() }, RevealVisibility, TEXT("UseTransparencyMap"), Result.FailureReasons);
-    bConnected &= Connect({ TransparencyWetnessMin, FString() }, RevealVisibility, TEXT("TransparencyWetnessMin"), Result.FailureReasons);
-    bConnected &= Connect({ TransparencyWetnessMax, FString() }, RevealVisibility, TEXT("TransparencyWetnessMax"), Result.FailureReasons);
-    if (!bConnected)
-    {
-        DeleteExpressionsCreatedAfter(Request.Material, PreExistingExpressions);
-        Result.EvaluateExpression = nullptr;
-        Result.DWCDataUVExpression = nullptr;
-        Result.SurfaceWaterNormalUVExpression = nullptr;
-        return Result;
-    }
-
-    FDWCRevealSurfaceMaterialGraphRequest RevealSurfaceRequest;
-    RevealSurfaceRequest.Material = Request.Material;
-    RevealSurfaceRequest.BaseColor = Result.Outputs.BaseColor;
-    RevealSurfaceRequest.BaseNormal = Result.Outputs.Normal;
-    RevealSurfaceRequest.DataUV = { Result.DWCDataUVExpression, FString() };
-    RevealSurfaceRequest.Visibility = { RevealVisibility, FString() };
-    RevealSurfaceRequest.SurfaceTextureParameterName = DWCWetMaterialParameters::RevealSurfaceMap();
-    RevealSurfaceRequest.UseSurfaceParameterName = DWCWetMaterialParameters::UseRevealSurfaceMap();
-    RevealSurfaceRequest.MetallicDarkeningParameterName = DWCWetMaterialParameters::RevealMetallicDarkeningStrength();
-    RevealSurfaceRequest.NodePosX = 480;
-    RevealSurfaceRequest.NodePosY = 700;
-    RevealSurfaceRequest.Description = TEXT("DWC Runtime Reveal Surface Composite");
-    const FDWCRevealSurfaceMaterialGraphResult RevealSurfaceResult =
-        FDWCRevealSurfaceMaterialGraph::Build(RevealSurfaceRequest);
-    if (!RevealSurfaceResult.bSucceeded)
-    {
-        DeleteExpressionsCreatedAfter(Request.Material, PreExistingExpressions);
-        Result.EvaluateExpression = nullptr;
-        Result.DWCDataUVExpression = nullptr;
-        Result.SurfaceWaterNormalUVExpression = nullptr;
-        Result.FailureReasons.Add(RevealSurfaceResult.FailureReason.IsEmpty()
-            ? TEXT("Could not build the Reveal Surface material composite.")
-            : RevealSurfaceResult.FailureReason);
-        return Result;
-    }
-
-    Result.Outputs.BaseColor = RevealSurfaceResult.BaseColor;
-    Result.Outputs.Normal = RevealSurfaceResult.Normal;
 
     Result.bSucceeded = true;
     return Result;

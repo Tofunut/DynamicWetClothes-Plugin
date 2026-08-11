@@ -15,6 +15,7 @@ struct FDWCTransparencyRevealCommitJobInput
     TArray<FDWCTransparencyRevealColorTilePayload> ModifiedTiles;
     TArray<FDWCTransparencyRevealColorStroke> FallbackStrokes;
     FLinearColor BaseRevealColor = FLinearColor::White;
+    float RevealMetallicDarkeningStrength = 0.0f;
     bool bUseSparseTiles = false;
 };
 

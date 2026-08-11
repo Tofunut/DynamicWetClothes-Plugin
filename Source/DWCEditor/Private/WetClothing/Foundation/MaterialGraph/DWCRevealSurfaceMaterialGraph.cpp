@@ -96,9 +96,11 @@ namespace
             TEXT("BaseNormal"),
             TEXT("SelectedUV"),
             TEXT("Visibility"),
-            TEXT("RevealSurfaceMapTex"),
-            TEXT("UseRevealSurfaceMap"),
-            TEXT("MetallicDarkeningStrength"),
+            TEXT("RevealTexture"),
+            TEXT("UseRevealTexture"),
+            TEXT("RevealStrength"),
+            TEXT("ShowRevealNormal"),
+            TEXT("VisualizationMode"),
         };
         for (const FName InputName : InputNames)
         {
@@ -113,17 +115,39 @@ namespace
         Composite->OutputType = CMOT_Float3;
         Composite->Description = Description;
         Composite->Code = TEXT(R"(
-float4 RevealSurface = Texture2DSampleLevel(
-    RevealSurfaceMapTex,
-    RevealSurfaceMapTexSampler,
+float4 RevealSample = Texture2DSampleLevel(
+    RevealTexture,
+    RevealTextureSampler,
     SelectedUV,
     0);
-float RevealWeight = saturate(Visibility) * saturate(UseRevealSurfaceMap) * saturate(RevealSurface.a);
+float RevealWeight =
+    saturate(Visibility) * saturate(UseRevealTexture) * saturate(ShowRevealNormal) *
+    saturate(RevealSample.a);
 
-float2 RevealXY = RevealSurface.rg * 2.0 - 1.0;
+float2 RevealXY = (RevealSample.rg * 2.0 - 1.0) * max(RevealStrength, 0.0);
+float RevealXYLengthSquared = dot(RevealXY, RevealXY);
+if (RevealXYLengthSquared > 0.999)
+{
+    RevealXY *= sqrt(0.999 / RevealXYLengthSquared);
+}
 float RevealZ = sqrt(saturate(1.0 - dot(RevealXY, RevealXY)));
 float3 BaseTS = normalize(BaseNormal);
-float3 RevealTS = normalize(float3(RevealXY, RevealZ));
+float3 RevealTS = float3(RevealXY, RevealZ);
+int SelectedVisualizationMode = (int)floor(VisualizationMode + 0.5);
+Normal = BaseTS;
+
+if (SelectedVisualizationMode == 11)
+{
+    return float3(RevealSample.rg, 1.0);
+}
+if (SelectedVisualizationMode == 12)
+{
+    return RevealSample.aaa;
+}
+if (SelectedVisualizationMode == 10)
+{
+    BaseTS = float3(0.0, 0.0, 1.0);
+}
 
 // Same angle-corrected tangent-space composition convention used by the
 // wrinkle preview: reveal surface first, then outer wrinkle detail.
@@ -131,60 +155,119 @@ Normal = normalize(float3(
     BaseTS.xy + RevealTS.xy * RevealWeight,
     BaseTS.z * lerp(1.0, RevealTS.z, RevealWeight)));
 
-float MetallicDarkening = saturate(
-    RevealSurface.b * max(MetallicDarkeningStrength, 0.0) * RevealWeight);
-return max(BaseColor * (1.0 - MetallicDarkening), 0.0);
+return SelectedVisualizationMode == 10
+    ? float3(0.5, 0.5, 0.5)
+    : BaseColor;
 )");
         Composite->RebuildOutputs();
         return Composite;
     }
+
+    FDWCRevealSurfaceMaterialGraphResult BuildRevealNormalComposite(
+        const FDWCRevealSurfaceMaterialGraphRequest& Request)
+    {
+        FDWCRevealSurfaceMaterialGraphResult Result;
+        constexpr const TCHAR* ContractLabel = TEXT("editor Reveal Surface authoring");
+        if (Request.Material == nullptr || !Request.BaseColor.IsValid() ||
+            !Request.BaseNormal.IsValid() || !Request.DataUV.IsValid() ||
+            !Request.Visibility.IsValid() || !Request.VisualizationMode.IsValid() ||
+            Request.SurfaceTextureParameterName.IsNone() ||
+            Request.UseSurfaceParameterName.IsNone() || Request.StrengthParameterName.IsNone() ||
+            Request.ShowParameterName.IsNone())
+        {
+            Result.FailureReason = FString::Printf(
+                TEXT("The %s graph request is missing a material, graph input, or parameter name."),
+                ContractLabel);
+            return Result;
+        }
+
+        Result.SurfaceTextureParameter = CreateRevealSurfaceTextureParameter(
+            Request.Material,
+            Request.SurfaceTextureParameterName,
+            Request.NodePosX,
+            Request.NodePosY);
+        Result.UseSurfaceParameter = CreateRevealSurfaceScalarParameter(
+            Request.Material,
+            Request.UseSurfaceParameterName,
+            0.0f,
+            Request.NodePosX + 180,
+            Request.NodePosY);
+        Result.StrengthParameter = CreateRevealSurfaceScalarParameter(
+            Request.Material,
+            Request.StrengthParameterName,
+            1.0f,
+            Request.NodePosX + 180,
+            Request.NodePosY + 100);
+        Result.ShowParameter = CreateRevealSurfaceScalarParameter(
+            Request.Material,
+            Request.ShowParameterName,
+            1.0f,
+            Request.NodePosX + 180,
+            Request.NodePosY + 200);
+        const FString DefaultDescription = TEXT("DWC Editor Reveal Surface Authoring Composite");
+        UMaterialExpressionCustom* Composite = CreateRevealSurfaceCompositeExpression(
+            Request.Material,
+            Request.NodePosX + 380,
+            Request.NodePosY,
+            Request.Description.IsEmpty() ? DefaultDescription : Request.Description);
+
+        if (Result.SurfaceTextureParameter == nullptr ||
+            Result.UseSurfaceParameter == nullptr || Result.StrengthParameter == nullptr ||
+            Result.ShowParameter == nullptr || Composite == nullptr)
+        {
+            Result.FailureReason = FString::Printf(
+                TEXT("Could not create the %s material expressions."), ContractLabel);
+            return Result;
+        }
+
+        bool bConnected = true;
+        bConnected &= ConnectRevealSurfaceInput(
+            Request.BaseColor, Composite, TEXT("BaseColor"), Result.FailureReason);
+        bConnected &= ConnectRevealSurfaceInput(
+            Request.BaseNormal, Composite, TEXT("BaseNormal"), Result.FailureReason);
+        bConnected &= ConnectRevealSurfaceInput(
+            Request.DataUV, Composite, TEXT("SelectedUV"), Result.FailureReason);
+        bConnected &= ConnectRevealSurfaceInput(
+            Request.Visibility, Composite, TEXT("Visibility"), Result.FailureReason);
+        bConnected &= ConnectRevealSurfaceInput(
+            { Result.SurfaceTextureParameter, FString() },
+            Composite,
+            TEXT("RevealTexture"),
+            Result.FailureReason);
+        bConnected &= ConnectRevealSurfaceInput(
+            { Result.UseSurfaceParameter, FString() },
+            Composite,
+            TEXT("UseRevealTexture"),
+            Result.FailureReason);
+        bConnected &= ConnectRevealSurfaceInput(
+            { Result.StrengthParameter, FString() },
+            Composite,
+            TEXT("RevealStrength"),
+            Result.FailureReason);
+        bConnected &= ConnectRevealSurfaceInput(
+            { Result.ShowParameter, FString() },
+            Composite,
+            TEXT("ShowRevealNormal"),
+            Result.FailureReason);
+        bConnected &= ConnectRevealSurfaceInput(
+            Request.VisualizationMode,
+            Composite,
+            TEXT("VisualizationMode"),
+            Result.FailureReason);
+        if (!bConnected)
+        {
+            return Result;
+        }
+
+        Result.BaseColor = { Composite, TEXT("return") };
+        Result.Normal = { Composite, TEXT("Normal") };
+        Result.bSucceeded = true;
+        return Result;
+    }
 } // namespace
 
-FDWCRevealSurfaceMaterialGraphResult FDWCRevealSurfaceMaterialGraph::Build(
+FDWCRevealSurfaceMaterialGraphResult FDWCRevealSurfaceMaterialGraph::BuildAuthoringPreview(
     const FDWCRevealSurfaceMaterialGraphRequest& Request)
 {
-    FDWCRevealSurfaceMaterialGraphResult Result;
-    if (Request.Material == nullptr || !Request.BaseColor.IsValid() ||
-        !Request.BaseNormal.IsValid() || !Request.DataUV.IsValid() ||
-        !Request.Visibility.IsValid() || Request.SurfaceTextureParameterName.IsNone() ||
-        Request.UseSurfaceParameterName.IsNone() || Request.MetallicDarkeningParameterName.IsNone())
-    {
-        Result.FailureReason = TEXT("Reveal Surface graph request is missing a material, graph input, or parameter name.");
-        return Result;
-    }
-
-    Result.SurfaceTextureParameter = CreateRevealSurfaceTextureParameter(
-        Request.Material, Request.SurfaceTextureParameterName, Request.NodePosX, Request.NodePosY);
-    Result.UseSurfaceParameter = CreateRevealSurfaceScalarParameter(
-        Request.Material, Request.UseSurfaceParameterName, 0.0f, Request.NodePosX + 180, Request.NodePosY);
-    Result.MetallicDarkeningParameter = CreateRevealSurfaceScalarParameter(
-        Request.Material, Request.MetallicDarkeningParameterName, 0.25f, Request.NodePosX + 360, Request.NodePosY);
-    UMaterialExpressionCustom* Composite = CreateRevealSurfaceCompositeExpression(
-        Request.Material, Request.NodePosX + 560, Request.NodePosY,
-        Request.Description.IsEmpty() ? TEXT("DWC Reveal Surface Composite") : Request.Description);
-
-    if (Result.SurfaceTextureParameter == nullptr || Result.UseSurfaceParameter == nullptr ||
-        Result.MetallicDarkeningParameter == nullptr || Composite == nullptr)
-    {
-        Result.FailureReason = TEXT("Could not create the Reveal Surface material expressions.");
-        return Result;
-    }
-
-    bool bConnected = true;
-    bConnected &= ConnectRevealSurfaceInput(Request.BaseColor, Composite, TEXT("BaseColor"), Result.FailureReason);
-    bConnected &= ConnectRevealSurfaceInput(Request.BaseNormal, Composite, TEXT("BaseNormal"), Result.FailureReason);
-    bConnected &= ConnectRevealSurfaceInput(Request.DataUV, Composite, TEXT("SelectedUV"), Result.FailureReason);
-    bConnected &= ConnectRevealSurfaceInput(Request.Visibility, Composite, TEXT("Visibility"), Result.FailureReason);
-    bConnected &= ConnectRevealSurfaceInput({ Result.SurfaceTextureParameter, FString() }, Composite, TEXT("RevealSurfaceMapTex"), Result.FailureReason);
-    bConnected &= ConnectRevealSurfaceInput({ Result.UseSurfaceParameter, FString() }, Composite, TEXT("UseRevealSurfaceMap"), Result.FailureReason);
-    bConnected &= ConnectRevealSurfaceInput({ Result.MetallicDarkeningParameter, FString() }, Composite, TEXT("MetallicDarkeningStrength"), Result.FailureReason);
-    if (!bConnected)
-    {
-        return Result;
-    }
-
-    Result.BaseColor = { Composite, TEXT("return") };
-    Result.Normal = { Composite, TEXT("Normal") };
-    Result.bSucceeded = true;
-    return Result;
+    return BuildRevealNormalComposite(Request);
 }

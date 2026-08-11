@@ -4,6 +4,7 @@
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageContracts.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -56,10 +57,11 @@ bool FDWCTransparencyStageSignatureDependencyTest::RunTest(const FString& Parame
     Layer.TargetSurface.OuterMaterialSlotIndex = 3;
 
     const FString SourceSignature(TEXT("SourceA"));
+    constexpr float MetallicDarkeningA = 0.25f;
     const FString RevealA = FDWCTransparencySignatureService::BuildRevealSignature(
-        SourceSignature, Layer);
+        SourceSignature, Layer, MetallicDarkeningA);
     const FString RevealARepeat = FDWCTransparencySignatureService::BuildRevealSignature(
-        SourceSignature, Layer);
+        SourceSignature, Layer, MetallicDarkeningA);
     TestEqual(TEXT("Reveal signatures are deterministic."), RevealA, RevealARepeat);
 
     FDWCTransparencyRevealColorStroke& RevealStroke =
@@ -68,11 +70,34 @@ bool FDWCTransparencyStageSignatureDependencyTest::RunTest(const FString& Parame
     RevealStroke.MaterialSlotIndex = 3;
     RevealStroke.Samples.AddDefaulted();
     const FString RevealB = FDWCTransparencySignatureService::BuildRevealSignature(
-        SourceSignature, Layer);
+        SourceSignature, Layer, MetallicDarkeningA);
     TestNotEqual(TEXT("Reveal edits invalidate the reveal signature."), RevealA, RevealB);
+
+    const FString RevealWithDifferentMetallicDarkening =
+        FDWCTransparencySignatureService::BuildRevealSignature(
+            SourceSignature, Layer, 0.75f);
+    TestNotEqual(
+        TEXT("Metallic darkening invalidates the corrected reveal signature."),
+        RevealB,
+        RevealWithDifferentMetallicDarkening);
 
     const FString FinalA = FDWCTransparencySignatureService::BuildFinalSignature(
         RevealB, Layer, TEXT("WrinkleA"), TEXT("SuppressionA"), 8, 4.0f);
+    FDWCTransparencyFinalSignatureInputs AlphaInputs;
+    AlphaInputs.SourceSignature = SourceSignature;
+    AlphaInputs.RevealSignature = RevealB;
+    AlphaInputs.AlphaAuthoringSignature =
+        FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(Layer);
+    AlphaInputs.WrinkleMaskBuildSignature = TEXT("WrinkleA");
+    AlphaInputs.SuppressionSettingsSignature = TEXT("SuppressionA");
+    AlphaInputs.PaddingPixels = 8;
+    AlphaInputs.EdgeFeatherPixels = 4.0f;
+    const FString FinalAlphaA =
+        FDWCTransparencySignatureService::BuildFinalAlphaSignature(AlphaInputs);
+    AlphaInputs.RevealSignature = TEXT("ChangedRevealOnly");
+    TestEqual(TEXT("Stage 3 reveal changes do not invalidate Stage 4 alpha."),
+        FinalAlphaA,
+        FDWCTransparencySignatureService::BuildFinalAlphaSignature(AlphaInputs));
     FDWCTransparencyBrushStroke& AlphaStroke = Layer.EditableStrokes.AddDefaulted_GetRef();
     AlphaStroke.StrokeGuid = FGuid::NewGuid();
     AlphaStroke.MaterialSlotIndex = 3;
@@ -88,6 +113,56 @@ bool FDWCTransparencyStageSignatureDependencyTest::RunTest(const FString& Parame
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyStageArtifactSetContractTest,
+    "DWC.Transparency.Pipeline.StageArtifactSetContract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyStageArtifactSetContractTest::RunTest(const FString& Parameters)
+{
+    FWetClothingTransparencyLayerData Layer;
+    Layer.SourceType = EDWCTransparencySourceType::SameMeshMaterialSlots;
+    const FString SourceSignature(TEXT("CanonicalSource"));
+    const FIntPoint Resolution(256, 256);
+    const FGuid Generation = FGuid::NewGuid();
+
+    TArray<EDWCTransparencyTempArtifactKind> RequiredKinds;
+    FDWCTransparencyStageArtifactContract::GetRequiredSourceArtifacts(true, RequiredKinds);
+    for (const EDWCTransparencyTempArtifactKind Kind : RequiredKinds)
+    {
+        FDWCTransparencyTempArtifactReference& Reference =
+            Layer.EditorStageCache.Artifacts.AddDefaulted_GetRef();
+        Reference.Kind = Kind;
+        Reference.Texture = FSoftObjectPath(FString::Printf(
+            TEXT("/Game/Generated/T_%d.T_%d"),
+            static_cast<int32>(Kind), static_cast<int32>(Kind)));
+        Reference.BuildSignature =
+            FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+                Kind, SourceSignature);
+        Reference.ContractVersion = FDWCTransparencyStageArtifactContract::ContractVersion;
+        Reference.CommitGeneration = Generation;
+        Reference.TextureSourceId = FGuid::NewGuid();
+        Reference.Resolution = Resolution;
+    }
+
+    FString Error;
+    TestTrue(TEXT("A complete single-generation Stage 2 set is current."),
+        FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            Layer, SourceSignature, Resolution, false, Error));
+
+    Layer.EditorStageCache.Artifacts.Last().CommitGeneration = FGuid::NewGuid();
+    TestFalse(TEXT("Mixed Stage 2 generations are rejected atomically."),
+        FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            Layer, SourceSignature, Resolution, false, Error));
+    Layer.EditorStageCache.Artifacts.Last().CommitGeneration = Generation;
+
+    Layer.EditorStageCache.Artifacts.Last().TextureSourceId = FGuid();
+    TestFalse(TEXT("A texture rewritten outside its published artifact metadata is stale."),
+        FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            Layer, SourceSignature, Resolution, false, Error));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyStageCacheInvalidationTest,
     "DWC.Transparency.Pipeline.StageCacheInvalidation",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -99,13 +174,43 @@ bool FDWCTransparencyStageCacheInvalidationTest::RunTest(const FString& Paramete
     Metadata.RevealSignature = TEXT("Reveal");
     Metadata.bSourceGenerated = true;
     Metadata.bRevealReviewed = true;
-    Metadata.Artifacts.AddDefaulted_GetRef().Kind =
-        EDWCTransparencyTempArtifactKind::BaseRevealColor;
-    Metadata.Artifacts[0].Texture = TSoftObjectPtr<UTexture2D>(
-        FSoftObjectPath(TEXT("/Game/Generated/Temp/T_BaseReveal.T_BaseReveal")));
-    Metadata.Artifacts[0].BuildSignature = TEXT("Source");
-    Metadata.Artifacts.AddDefaulted_GetRef().Kind =
-        EDWCTransparencyTempArtifactKind::CorrectedRevealColor;
+    const FGuid SourceGeneration = FGuid::NewGuid();
+    const auto AddArtifact = [&Metadata](
+        const EDWCTransparencyTempArtifactKind Kind,
+        const FString& SourceSignature,
+        const FString& RevealSignature,
+        const FGuid& Generation)
+    {
+        FDWCTransparencyTempArtifactReference& Artifact =
+            Metadata.Artifacts.AddDefaulted_GetRef();
+        Artifact.Kind = Kind;
+        Artifact.Texture = TSoftObjectPtr<UTexture2D>(FSoftObjectPath(FString::Printf(
+            TEXT("/Game/Generated/Temp/T_%d.T_%d"),
+            static_cast<int32>(Kind), static_cast<int32>(Kind))));
+        Artifact.BuildSignature =
+            FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+                Kind, SourceSignature, RevealSignature);
+        Artifact.ContractVersion = FDWCTransparencyStageArtifactContract::ContractVersion;
+        Artifact.CommitGeneration = Generation;
+        Artifact.TextureSourceId = FGuid::NewGuid();
+        Artifact.Resolution = FIntPoint(128, 128);
+    };
+    constexpr EDWCTransparencyTempArtifactKind SourceKinds[] = {
+        EDWCTransparencyTempArtifactKind::BaseRevealColor,
+        EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+        EDWCTransparencyTempArtifactKind::ValidHit,
+        EDWCTransparencyTempArtifactKind::OuterCoverage,
+        EDWCTransparencyTempArtifactKind::OuterIslandID,
+        EDWCTransparencyTempArtifactKind::HitSource,
+        EDWCTransparencyTempArtifactKind::HitDistance
+    };
+    for (const EDWCTransparencyTempArtifactKind Kind : SourceKinds)
+    {
+        AddArtifact(Kind, TEXT("Source"), FString(), SourceGeneration);
+    }
+    AddArtifact(
+        EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
+        TEXT("Source"), TEXT("Reveal"), FGuid::NewGuid());
 
     FWetClothingTransparencyLayerData Layer;
     Layer.EditorStageCache = Metadata;
@@ -126,7 +231,7 @@ bool FDWCTransparencyStageCacheInvalidationTest::RunTest(const FString& Paramete
     TestTrue(TEXT("Reveal invalidation preserves the source checkpoint."), Metadata.bSourceGenerated);
     TestFalse(TEXT("Reveal invalidation clears review state."), Metadata.bRevealReviewed);
     TestFalse(TEXT("Reveal invalidation preserves source artifacts."), Metadata.Artifacts[0].bObsolete);
-    TestTrue(TEXT("Reveal invalidation obsoletes corrected reveal artifacts."), Metadata.Artifacts[1].bObsolete);
+    TestTrue(TEXT("Reveal invalidation obsoletes corrected reveal artifacts."), Metadata.Artifacts.Last().bObsolete);
 
     Metadata.MarkSourceStale();
     TestFalse(TEXT("Source invalidation clears the source checkpoint."), Metadata.bSourceGenerated);

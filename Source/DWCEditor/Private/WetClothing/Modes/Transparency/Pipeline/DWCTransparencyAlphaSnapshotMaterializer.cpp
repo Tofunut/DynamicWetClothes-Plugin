@@ -87,7 +87,7 @@ uint8 FDWCTransparencyAlphaSnapshotView::GetWeight(const int32 PixelIndex) const
 }
 
 bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
-    const FDWCTransparencySourcePayload& SourcePayload,
+    const FDWCTransparencyAlphaDomainSnapshot& AlphaDomain,
     const FDWCTransparencyAlphaWorkingSnapshot& Input,
     FDWCTransparencyAlphaWorkingSnapshot& OutSparseSnapshot,
     FString& OutError,
@@ -95,7 +95,8 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
 {
     OutSparseSnapshot = FDWCTransparencyAlphaWorkingSnapshot();
     OutError.Reset();
-    if (!Input.IsValid(&OutError) || Input.Resolution != SourcePayload.Resolution)
+    if (!AlphaDomain.IsValid(&OutError) || !Input.IsValid(&OutError) ||
+        Input.Resolution != AlphaDomain.Resolution)
     {
         if (OutError.IsEmpty())
         {
@@ -110,7 +111,7 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
     }
 
     FDWCTransparencyAlphaTileStore Store;
-    Store.Initialize(SourcePayload.Resolution);
+    Store.Initialize(AlphaDomain.Resolution);
     const int32 FirstStroke = FMath::Clamp(Input.BaselineStrokeCount, 0, Input.FallbackStrokes.Num());
     TArray<FIntRect> StrokeRegions;
     TArray<FIntRect> SampleRegions;
@@ -125,7 +126,7 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
             return false;
         }
         const FDWCTransparencyBrushStroke& Stroke = Input.FallbackStrokes[StrokeIndex];
-        if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != SourcePayload.MaterialSlotIndex || Stroke.Samples.IsEmpty())
+        if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != AlphaDomain.MaterialSlotIndex || Stroke.Samples.IsEmpty())
         {
             continue;
         }
@@ -133,7 +134,7 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
         for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
         {
             FDWCTransparencyBrushRasterizer::BuildSampleRegions(
-                Sample, SourcePayload.Resolution, Stroke.UVAddressMode, SampleRegions);
+                Sample, AlphaDomain.Resolution, Stroke.UVAddressMode, SampleRegions);
             StrokeRegions.Append(SampleRegions);
         }
         const bool bWrap = Stroke.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap;
@@ -149,7 +150,11 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
         }
         Store.SnapshotTiles(SnapshotTiles, Payloads);
         if (FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
-                SourcePayload, Stroke, Stroke.Samples, OutputTiles, Payloads) &&
+                FDWCTransparencyAlphaRasterContext::FromAlphaDomain(AlphaDomain),
+                Stroke,
+                Stroke.Samples,
+                OutputTiles,
+                Payloads) &&
             !Store.Commit(Store.GetRevision(), Payloads))
         {
             OutError = TEXT("The transparency alpha sparse tile replay could not commit its rasterized payload.");
@@ -168,7 +173,7 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
 }
 
 bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
-    const FDWCTransparencySourcePayload& SourcePayload,
+    const FDWCTransparencyAlphaDomainSnapshot& AlphaDomain,
     FDWCTransparencyAlphaWorkingSnapshot&& Input,
     FDWCTransparencyAlphaWorkingSnapshot& OutSparseSnapshot,
     FString& OutError,
@@ -177,7 +182,7 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
     if (Input.Mode != EDWCTransparencyAlphaSnapshotMode::SparseTiles)
     {
         return Materialize(
-            SourcePayload,
+            AlphaDomain,
             static_cast<const FDWCTransparencyAlphaWorkingSnapshot&>(Input),
             OutSparseSnapshot,
             OutError,
@@ -185,7 +190,8 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
     }
     OutSparseSnapshot = FDWCTransparencyAlphaWorkingSnapshot();
     OutError.Reset();
-    if (!Input.IsValid(&OutError) || Input.Resolution != SourcePayload.Resolution)
+    if (!AlphaDomain.IsValid(&OutError) || !Input.IsValid(&OutError) ||
+        Input.Resolution != AlphaDomain.Resolution)
     {
         if (OutError.IsEmpty())
         {
@@ -195,4 +201,30 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
     }
     OutSparseSnapshot = MoveTemp(Input);
     return true;
+}
+
+bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
+    const FDWCTransparencySourcePayload& SourcePayload,
+    const FDWCTransparencyAlphaWorkingSnapshot& Input,
+    FDWCTransparencyAlphaWorkingSnapshot& OutSparseSnapshot,
+    FString& OutError,
+    const FDWCEditorCancellationToken* CancellationToken)
+{
+    TSharedPtr<const FDWCTransparencyAlphaDomainSnapshot> AlphaDomain =
+        FDWCTransparencyAlphaDomainSnapshot::Create(SourcePayload, &OutError);
+    return AlphaDomain.IsValid() && Materialize(
+        *AlphaDomain, Input, OutSparseSnapshot, OutError, CancellationToken);
+}
+
+bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
+    const FDWCTransparencySourcePayload& SourcePayload,
+    FDWCTransparencyAlphaWorkingSnapshot&& Input,
+    FDWCTransparencyAlphaWorkingSnapshot& OutSparseSnapshot,
+    FString& OutError,
+    const FDWCEditorCancellationToken* CancellationToken)
+{
+    TSharedPtr<const FDWCTransparencyAlphaDomainSnapshot> AlphaDomain =
+        FDWCTransparencyAlphaDomainSnapshot::Create(SourcePayload, &OutError);
+    return AlphaDomain.IsValid() && Materialize(
+        *AlphaDomain, MoveTemp(Input), OutSparseSnapshot, OutError, CancellationToken);
 }

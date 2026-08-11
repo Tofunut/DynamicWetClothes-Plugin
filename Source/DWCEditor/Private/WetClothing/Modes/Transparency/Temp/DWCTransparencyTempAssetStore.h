@@ -9,6 +9,7 @@ class UTexture2D;
 class USkeletalMesh;
 class UWetClothingAsset;
 struct FDWCTransparencySourcePayload;
+struct FDWCTransparencyMaterialSurfaceBakeIdentity;
 
 enum class EDWCTransparencyCorrectedRevealRestoreResult : uint8
 {
@@ -28,7 +29,7 @@ class FDWCTransparencyTempAssetStore
         int32 MaterialSlotIndex,
         int32 SourceUVChannel,
         int32 LogicalResolution,
-        const FString& MaterialBakeSignature,
+        const FDWCTransparencyMaterialSurfaceBakeIdentity& Identity,
         bool bLoadIfNeeded,
         FDWCTransparencyMaterialColorCacheReference& OutReference,
         UTexture2D*& OutBaseColorTexture,
@@ -54,7 +55,7 @@ class FDWCTransparencyTempAssetStore
         EDWCTransparencyMaterialColorPayloadKind MetallicPayloadKind,
         TConstArrayView<uint8> MetallicPixels,
         bool bHasBakedMetallicProperty,
-        const FString& MaterialBakeSignature,
+        const FDWCTransparencyMaterialSurfaceBakeIdentity& Identity,
         UTexture2D*& OutBaseColorTexture,
         UTexture2D*& OutNormalTexture,
         UTexture2D*& OutMetallicTexture,
@@ -83,6 +84,7 @@ class FDWCTransparencyTempAssetStore
     static EDWCTransparencyCorrectedRevealRestoreResult RestoreCurrentCorrectedReveal(
         const FWetClothingTransparencyLayerData& Layer,
         const FDWCTransparencySourcePayload& SourcePayload,
+        float RevealMetallicDarkeningStrength,
         TArray<FColor>& OutPixels,
         FString& OutError);
 

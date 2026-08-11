@@ -47,7 +47,16 @@ enum class EDWCTransparencyVisualizationMode : uint8
     // Keep new values appended: preview materials consume the legacy values.
     BaseRevealColor,
     CorrectionDifference,
-    RaycastGaps
+    RaycastGaps,
+    RevealNormalOnly,
+    RevealNormalTexture,
+    SourceCoverage
+};
+
+enum class EDWCTransparencyRevealNormalPreviewSource : uint8
+{
+    Working,
+    Baked
 };
 
 enum class EDWCTransparencyEditorStage : uint8
@@ -172,6 +181,10 @@ struct FDWCTransparencyPreviewSettings
     float WrinkleSuppressionStrength = 0.6f;
     float WrinkleMaskThreshold = 0.15f;
     float WrinkleMaskSoftness = 0.05f;
+    float RevealNormalStrength = 1.0f;
+    bool bShowRevealNormal = true;
+    EDWCTransparencyRevealNormalPreviewSource RevealNormalSource =
+        EDWCTransparencyRevealNormalPreviewSource::Working;
 };
 
 struct FDWCEditorTransparencySessionState

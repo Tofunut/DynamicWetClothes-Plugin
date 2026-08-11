@@ -9,46 +9,33 @@
 #include "Misc/SecureHash.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeUtilities.h"
 
 namespace
 {
-    FString BuildCorrectedRevealArtifactSignature(const FString& RevealSignature)
-    {
-        return FMD5::HashAnsiString(*FString::Printf(
-            TEXT("DWC.Transparency.CorrectedReveal.v2|Reveal=%s"),
-            *RevealSignature));
-    }
-
     FString BuildSourceMaterialPropertyAssetName(
         const UWetClothingAsset& Asset,
-        const USkeletalMesh& SourceMesh,
-        const int32 MaterialSlotIndex,
-        const int32 SourceUVChannel,
+        const FDWCTransparencyMaterialSurfaceBakeIdentity& Identity,
         const TCHAR* PropertyToken)
     {
-        const FString MeshHash = FMD5::HashAnsiString(*SourceMesh.GetPathName()).Left(8);
         return FString::Printf(
-            TEXT("T_%s_Src%s_Slot%d_UV%d_%s"),
+            TEXT("T_%s_S%s_%s"),
             *FDWCRevealBakeUtilities::SanitizeAssetToken(Asset.GetName()),
-            *MeshHash,
-            MaterialSlotIndex,
-            SourceUVChannel,
+            *Identity.Digest.Left(16),
             PropertyToken);
     }
 
     UTexture2D* FindOrCreateSourceMaterialPropertyTexture(
         UWetClothingAsset& Asset,
-        const USkeletalMesh& SourceMesh,
-        const int32 MaterialSlotIndex,
-        const int32 SourceUVChannel,
+        const FDWCTransparencyMaterialSurfaceBakeIdentity& Identity,
         const TCHAR* PropertyToken,
         FString& OutError)
     {
         const FString PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(
             Asset, TEXT("Textures/Transparency/Temp"));
         const FString AssetName = BuildSourceMaterialPropertyAssetName(
-            Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, PropertyToken);
+            Asset, Identity, PropertyToken);
         const FString PackageName = PackagePath / AssetName;
         const FString ObjectPath = PackageName + TEXT(".") + AssetName;
         // A missing generated cache is the normal first-build case. Avoid
@@ -102,44 +89,30 @@ namespace
         return Texture;
     }
 
-    FString ArtifactToken(const EDWCTransparencyTempArtifactKind Kind)
-    {
-        switch (Kind)
-        {
-        case EDWCTransparencyTempArtifactKind::SourceMaterialColor: return TEXT("SourceMaterialColor");
-        case EDWCTransparencyTempArtifactKind::BaseRevealColor: return TEXT("BaseRevealColor");
-        case EDWCTransparencyTempArtifactKind::ValidHit: return TEXT("ValidHit");
-        case EDWCTransparencyTempArtifactKind::HitSource: return TEXT("HitSource");
-        case EDWCTransparencyTempArtifactKind::HitDistance: return TEXT("HitDistance");
-        case EDWCTransparencyTempArtifactKind::CorrectedRevealColor: return TEXT("CorrectedRevealColor");
-        case EDWCTransparencyTempArtifactKind::OuterCoverage: return TEXT("OuterCoverage");
-        case EDWCTransparencyTempArtifactKind::OuterIslandID: return TEXT("OuterIslandID");
-        default: return TEXT("Unknown");
-        }
-    }
-
     FString BuildAssetName(
         const UWetClothingAsset& Asset,
         const FWetClothingTransparencyLayerData& Layer,
-        const EDWCTransparencyTempArtifactKind Kind)
+        const EDWCTransparencyTempArtifactKind Kind,
+        const FGuid& CommitGeneration)
     {
         return FString::Printf(
-            TEXT("T_%s_L%s_Slot%d_%s"),
+            TEXT("T_%s_L%s_G%s_%s"),
             *FDWCRevealBakeUtilities::SanitizeAssetToken(Asset.GetName()),
             *Layer.LayerGuid.ToString(EGuidFormats::Digits).Left(8),
-            Layer.TargetSurface.OuterMaterialSlotIndex,
-            *ArtifactToken(Kind));
+            *CommitGeneration.ToString(EGuidFormats::Digits).Left(8),
+            *FDWCTransparencyStageArtifactContract::GetAssetToken(Kind));
     }
 
     UTexture2D* FindOrCreateTexture(
         UWetClothingAsset& Asset,
         const FWetClothingTransparencyLayerData& Layer,
         const EDWCTransparencyTempArtifactKind Kind,
+        const FGuid& CommitGeneration,
         FString& OutError)
     {
         const FString PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(
             Asset, TEXT("Textures/Transparency/Temp"));
-        const FString AssetName = BuildAssetName(Asset, Layer, Kind);
+        const FString AssetName = BuildAssetName(Asset, Layer, Kind, CommitGeneration);
         const FString PackageName = PackagePath / AssetName;
         const FString ObjectPath = PackageName + TEXT(".") + AssetName;
 
@@ -212,7 +185,8 @@ namespace
         const EDWCTransparencyTempArtifactKind Kind,
         UTexture2D* Texture,
         const FString& Signature,
-        const FIntPoint Resolution)
+        const FIntPoint Resolution,
+        const FGuid& CommitGeneration)
     {
 #if WITH_EDITORONLY_DATA
         FDWCTransparencyTempArtifactReference* Reference =
@@ -228,6 +202,9 @@ namespace
         }
         Reference->Texture = Texture;
         Reference->BuildSignature = Signature;
+        Reference->ContractVersion = FDWCTransparencyStageArtifactContract::ContractVersion;
+        Reference->CommitGeneration = CommitGeneration;
+        Reference->TextureSourceId = Texture != nullptr ? Texture->Source.GetId() : FGuid();
         Reference->Resolution = Resolution;
         Reference->bObsolete = false;
 #endif
@@ -240,7 +217,7 @@ bool FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialSurface(
     const int32 MaterialSlotIndex,
     const int32 SourceUVChannel,
     const int32 LogicalResolution,
-    const FString& MaterialBakeSignature,
+    const FDWCTransparencyMaterialSurfaceBakeIdentity& Identity,
     const bool bLoadIfNeeded,
     FDWCTransparencyMaterialColorCacheReference& OutReference,
     UTexture2D*& OutBaseColorTexture,
@@ -252,9 +229,13 @@ bool FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialSurface(
     OutNormalTexture = nullptr;
     OutMetallicTexture = nullptr;
 #if WITH_EDITORONLY_DATA
+    if (!Identity.IsValid())
+    {
+        return false;
+    }
     const FDWCTransparencyMaterialColorCacheReference* Reference =
         Asset.Authored.TransparencyData.MaterialColorCache.FindByPredicate(
-            [&SourceMesh, MaterialSlotIndex, SourceUVChannel, LogicalResolution, &MaterialBakeSignature](
+            [&SourceMesh, MaterialSlotIndex, SourceUVChannel, LogicalResolution, &Identity](
                 const FDWCTransparencyMaterialColorCacheReference& Candidate)
             {
                 return !Candidate.bObsolete &&
@@ -262,7 +243,11 @@ bool FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialSurface(
                     Candidate.MaterialSlotIndex == MaterialSlotIndex &&
                     Candidate.SourceUVChannel == SourceUVChannel &&
                     Candidate.Resolution == LogicalResolution &&
-                    Candidate.MaterialBakeSignature == MaterialBakeSignature;
+                    Candidate.IdentityVersion == FDWCTransparencyMaterialSurfaceBakeIdentity::Version &&
+                    Candidate.CacheIdentity == Identity.Digest &&
+                    Candidate.SourceMeshContentSignature == Identity.SourceMeshContentSignature &&
+                    Candidate.EffectiveMaterialSignature == Identity.EffectiveMaterialSignature &&
+                    Candidate.PlacementSignature == Identity.PlacementSignature;
             });
     if (Reference == nullptr || Reference->Texture.IsNull() || Reference->NormalTexture.IsNull() ||
         Reference->MetallicTexture.IsNull())
@@ -281,13 +266,6 @@ bool FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialSurface(
         return false;
     }
 
-    FString PolicyError;
-    FDWCTransparencyIntermediateAssetPolicy::EnsureEditorOnlyPackage(
-        *OutBaseColorTexture, nullptr, &PolicyError);
-    FDWCTransparencyIntermediateAssetPolicy::EnsureEditorOnlyPackage(
-        *OutNormalTexture, nullptr, &PolicyError);
-    FDWCTransparencyIntermediateAssetPolicy::EnsureEditorOnlyPackage(
-        *OutMetallicTexture, nullptr, &PolicyError);
     OutReference = *Reference;
     return true;
 #else
@@ -313,7 +291,7 @@ bool FDWCTransparencyTempAssetStore::CommitSourceMaterialSurface(
     const EDWCTransparencyMaterialColorPayloadKind MetallicPayloadKind,
     const TConstArrayView<uint8> MetallicPixels,
     const bool bHasBakedMetallicProperty,
-    const FString& MaterialBakeSignature,
+    const FDWCTransparencyMaterialSurfaceBakeIdentity& Identity,
     UTexture2D*& OutBaseColorTexture,
     UTexture2D*& OutNormalTexture,
     UTexture2D*& OutMetallicTexture,
@@ -336,7 +314,7 @@ bool FDWCTransparencyTempAssetStore::CommitSourceMaterialSurface(
         return PhysicalResolution.X > 0 && PhysicalResolution.Y > 0 &&
             NumPixels == PhysicalResolution.X * PhysicalResolution.Y && bShapeValid;
     };
-    if (LogicalResolution.X <= 0 || LogicalResolution.Y <= 0 || MaterialBakeSignature.IsEmpty() ||
+    if (LogicalResolution.X <= 0 || LogicalResolution.Y <= 0 || !Identity.IsValid() ||
         !IsValidPayload(BaseColorPayloadKind, BaseColorPhysicalResolution, BaseColorPixels.Num()) ||
         !IsValidPayload(NormalPayloadKind, NormalPhysicalResolution, NormalPixels.Num()) ||
         !IsValidPayload(MetallicPayloadKind, MetallicPhysicalResolution, MetallicPixels.Num()))
@@ -346,13 +324,13 @@ bool FDWCTransparencyTempAssetStore::CommitSourceMaterialSurface(
     }
 
     UTexture2D* BaseColorTexture = FindOrCreateSourceMaterialPropertyTexture(
-        Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, TEXT("SourceMaterialColor"), OutError);
+        Asset, Identity, TEXT("SourceMaterialColor"), OutError);
     if (BaseColorTexture == nullptr) return false;
     UTexture2D* NormalTexture = FindOrCreateSourceMaterialPropertyTexture(
-        Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, TEXT("SourceMaterialNormal"), OutError);
+        Asset, Identity, TEXT("SourceMaterialNormal"), OutError);
     if (NormalTexture == nullptr) return false;
     UTexture2D* MetallicTexture = FindOrCreateSourceMaterialPropertyTexture(
-        Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, TEXT("SourceMaterialMetallic"), OutError);
+        Asset, Identity, TEXT("SourceMaterialMetallic"), OutError);
     if (MetallicTexture == nullptr) return false;
 
     BaseColorTexture->Source.Init(
@@ -376,24 +354,15 @@ bool FDWCTransparencyTempAssetStore::CommitSourceMaterialSurface(
 #if WITH_EDITORONLY_DATA
     TArray<FDWCTransparencyMaterialColorCacheReference>& References =
         Asset.Authored.TransparencyData.MaterialColorCache;
-    const FSoftObjectPath SourceMeshPath(&SourceMesh);
-    for (FDWCTransparencyMaterialColorCacheReference& Candidate : References)
-    {
-        if (Candidate.SourceMesh.ToSoftObjectPath() == SourceMeshPath &&
-            Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-            Candidate.SourceUVChannel == SourceUVChannel)
-        {
-            Candidate.bObsolete = true;
-        }
-    }
+    // Type 2/3 can legitimately use the same mesh slot at multiple placements
+    // or with different effective material overrides in one source set. Keep
+    // those exact identities side by side; lookup never accepts a partial key.
     FDWCTransparencyMaterialColorCacheReference* Reference = References.FindByPredicate(
-        [&SourceMeshPath, MaterialSlotIndex, SourceUVChannel, &MaterialBakeSignature](
+        [&Identity](
             const FDWCTransparencyMaterialColorCacheReference& Candidate)
         {
-            return Candidate.SourceMesh.ToSoftObjectPath() == SourceMeshPath &&
-                Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                Candidate.SourceUVChannel == SourceUVChannel &&
-                Candidate.MaterialBakeSignature == MaterialBakeSignature;
+            return Candidate.IdentityVersion == FDWCTransparencyMaterialSurfaceBakeIdentity::Version &&
+                Candidate.CacheIdentity == Identity.Digest;
         });
     if (Reference == nullptr)
     {
@@ -414,7 +383,12 @@ bool FDWCTransparencyTempAssetStore::CommitSourceMaterialSurface(
     Reference->MetallicTexture = MetallicTexture;
     Reference->bHasBakedNormalProperty = bHasBakedNormalProperty;
     Reference->bHasBakedMetallicProperty = bHasBakedMetallicProperty;
-    Reference->MaterialBakeSignature = MaterialBakeSignature;
+    Reference->CacheIdentity = Identity.Digest;
+    Reference->IdentityVersion = FDWCTransparencyMaterialSurfaceBakeIdentity::Version;
+    Reference->SourceMeshContentSignature = Identity.SourceMeshContentSignature;
+    Reference->EffectiveMaterialSignature = Identity.EffectiveMaterialSignature;
+    Reference->PlacementSignature = Identity.PlacementSignature;
+    Reference->MaterialBakeSignature = Identity.Digest;
     Reference->bObsolete = false;
     Asset.MarkPackageDirty();
 #endif
@@ -435,7 +409,7 @@ bool FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
     OutError.Reset();
     const int32 PixelCount = Result.Resolution.X * Result.Resolution.Y;
     if (PixelCount <= 0 || Result.InnerColorBuffer.Num() != PixelCount ||
-        Result.RevealSurfaceBuffer.Num() != PixelCount ||
+        !Result.RevealSurfaceAuthoring.IsValidForResolution(Result.Resolution) ||
         Result.AutoAlphaBuffer.Num() != PixelCount ||
         Result.OuterCoverageBuffer.Num() != PixelCount ||
         Result.OuterIslandIDBuffer.Num() != PixelCount ||
@@ -453,25 +427,27 @@ bool FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
         PackedBaseReveal[Index].A = Result.AutoAlphaBuffer[Index];
     }
 
+    // Each Stage 2 commit writes a new immutable artifact set. References are
+    // published only after every texture has been created and configured.
+    const FGuid CommitGeneration = FGuid::NewGuid();
+
     UTexture2D* BaseReveal = FindOrCreateTexture(
-        Asset, Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor, OutError);
+        Asset, Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor,
+        CommitGeneration, OutError);
     if (BaseReveal == nullptr) return false;
     BaseReveal->Source.Init(Result.Resolution.X, Result.Resolution.Y, 1, 1, TSF_BGRA8,
         reinterpret_cast<const uint8*>(PackedBaseReveal.GetData()));
     BaseReveal->CompressionSettings = TC_Default;
     ConfigureCommon(*BaseReveal, true);
-    UpdateReference(Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor,
-        BaseReveal, Result.BuildSignature, Result.Resolution);
 
     UTexture2D* BaseRevealSurface = FindOrCreateTexture(
-        Asset, Layer, EDWCTransparencyTempArtifactKind::BaseRevealSurface, OutError);
+        Asset, Layer, EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+        CommitGeneration, OutError);
     if (BaseRevealSurface == nullptr) return false;
     BaseRevealSurface->Source.Init(Result.Resolution.X, Result.Resolution.Y, 1, 1, TSF_BGRA8,
-        reinterpret_cast<const uint8*>(Result.RevealSurfaceBuffer.GetData()));
+        reinterpret_cast<const uint8*>(Result.RevealSurfaceAuthoring.GetData()));
     BaseRevealSurface->CompressionSettings = TC_Default;
     ConfigureCommon(*BaseRevealSurface, false);
-    UpdateReference(Layer, EDWCTransparencyTempArtifactKind::BaseRevealSurface,
-        BaseRevealSurface, Result.BuildSignature, Result.Resolution);
 
     TArray<uint8> ValidHit;
     ValidHit.SetNumUninitialized(PixelCount);
@@ -489,16 +465,16 @@ bool FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
     }
 
     UTexture2D* ValidHitTexture = FindOrCreateTexture(
-        Asset, Layer, EDWCTransparencyTempArtifactKind::ValidHit, OutError);
+        Asset, Layer, EDWCTransparencyTempArtifactKind::ValidHit,
+        CommitGeneration, OutError);
     if (ValidHitTexture == nullptr) return false;
     ValidHitTexture->Source.Init(Result.Resolution.X, Result.Resolution.Y, 1, 1, TSF_G8, ValidHit.GetData());
     ValidHitTexture->CompressionSettings = TC_Grayscale;
     ConfigureCommon(*ValidHitTexture, false);
-    UpdateReference(Layer, EDWCTransparencyTempArtifactKind::ValidHit,
-        ValidHitTexture, Result.BuildSignature, Result.Resolution);
 
     UTexture2D* OuterCoverageTexture = FindOrCreateTexture(
-        Asset, Layer, EDWCTransparencyTempArtifactKind::OuterCoverage, OutError);
+        Asset, Layer, EDWCTransparencyTempArtifactKind::OuterCoverage,
+        CommitGeneration, OutError);
     if (OuterCoverageTexture == nullptr) return false;
     OuterCoverageTexture->Source.Init(
         Result.Resolution.X,
@@ -509,11 +485,10 @@ bool FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
         Result.OuterCoverageBuffer.GetData());
     OuterCoverageTexture->CompressionSettings = TC_Grayscale;
     ConfigureCommon(*OuterCoverageTexture, false);
-    UpdateReference(Layer, EDWCTransparencyTempArtifactKind::OuterCoverage,
-        OuterCoverageTexture, Result.BuildSignature, Result.Resolution);
 
     UTexture2D* OuterIslandIDTexture = FindOrCreateTexture(
-        Asset, Layer, EDWCTransparencyTempArtifactKind::OuterIslandID, OutError);
+        Asset, Layer, EDWCTransparencyTempArtifactKind::OuterIslandID,
+        CommitGeneration, OutError);
     if (OuterIslandIDTexture == nullptr) return false;
     OuterIslandIDTexture->Source.Init(
         Result.Resolution.X,
@@ -524,34 +499,59 @@ bool FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
         reinterpret_cast<const uint8*>(Result.OuterIslandIDBuffer.GetData()));
     OuterIslandIDTexture->CompressionSettings = TC_Grayscale;
     ConfigureCommon(*OuterIslandIDTexture, false);
-    UpdateReference(Layer, EDWCTransparencyTempArtifactKind::OuterIslandID,
-        OuterIslandIDTexture, Result.BuildSignature, Result.Resolution);
 
     UTexture2D* HitSourceTexture = FindOrCreateTexture(
-        Asset, Layer, EDWCTransparencyTempArtifactKind::HitSource, OutError);
+        Asset, Layer, EDWCTransparencyTempArtifactKind::HitSource,
+        CommitGeneration, OutError);
     if (HitSourceTexture == nullptr) return false;
     HitSourceTexture->Source.Init(Result.Resolution.X, Result.Resolution.Y, 1, 1, TSF_G16,
         reinterpret_cast<const uint8*>(HitSource.GetData()));
     HitSourceTexture->CompressionSettings = TC_Grayscale;
     ConfigureCommon(*HitSourceTexture, false);
-    UpdateReference(Layer, EDWCTransparencyTempArtifactKind::HitSource,
-        HitSourceTexture, Result.BuildSignature, Result.Resolution);
 
     UTexture2D* HitDistanceTexture = FindOrCreateTexture(
-        Asset, Layer, EDWCTransparencyTempArtifactKind::HitDistance, OutError);
+        Asset, Layer, EDWCTransparencyTempArtifactKind::HitDistance,
+        CommitGeneration, OutError);
     if (HitDistanceTexture == nullptr) return false;
     HitDistanceTexture->Source.Init(Result.Resolution.X, Result.Resolution.Y, 1, 1, TSF_R16F,
         reinterpret_cast<const uint8*>(HitDistance.GetData()));
     HitDistanceTexture->CompressionSettings = TC_HDR;
     ConfigureCommon(*HitDistanceTexture, false);
-    UpdateReference(Layer, EDWCTransparencyTempArtifactKind::HitDistance,
-        HitDistanceTexture, Result.BuildSignature, Result.Resolution);
+
+    struct FPendingArtifactReference
+    {
+        EDWCTransparencyTempArtifactKind Kind;
+        UTexture2D* Texture;
+    };
+    const FPendingArtifactReference PendingReferences[] = {
+        {EDWCTransparencyTempArtifactKind::BaseRevealColor, BaseReveal},
+        {EDWCTransparencyTempArtifactKind::BaseRevealSurface, BaseRevealSurface},
+        {EDWCTransparencyTempArtifactKind::ValidHit, ValidHitTexture},
+        {EDWCTransparencyTempArtifactKind::OuterCoverage, OuterCoverageTexture},
+        {EDWCTransparencyTempArtifactKind::OuterIslandID, OuterIslandIDTexture},
+        {EDWCTransparencyTempArtifactKind::HitSource, HitSourceTexture},
+        {EDWCTransparencyTempArtifactKind::HitDistance, HitDistanceTexture}
+    };
+    for (const FPendingArtifactReference& Pending : PendingReferences)
+    {
+        UpdateReference(
+            Layer,
+            Pending.Kind,
+            Pending.Texture,
+            FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+                Pending.Kind, Result.BuildSignature),
+            Result.Resolution,
+            CommitGeneration);
+    }
 
 #if WITH_EDITORONLY_DATA
     Layer.EditorStageCache.MaterialBakeSignature = MaterialBakeSignature;
     Layer.EditorStageCache.SourceSignature = Result.BuildSignature;
     Layer.EditorStageCache.RevealSignature =
-        FDWCTransparencySignatureService::BuildRevealSignature(Result.BuildSignature, Layer);
+        FDWCTransparencySignatureService::BuildRevealSignature(
+            Result.BuildSignature,
+            Layer,
+            Asset.Authored.TransparencyData.RevealMetallicDarkeningStrength);
     Layer.EditorStageCache.bSourceGenerated = true;
     Layer.EditorStageCache.bRevealReviewed = false;
 #endif
@@ -577,8 +577,12 @@ bool FDWCTransparencyTempAssetStore::CommitRevealArtifact(
         return false;
     }
 
+    const FGuid CommitGeneration = FGuid::NewGuid();
+    // Rename-free generated assets are immutable by generation, so create the
+    // texture with the same generation that is published in its reference.
     UTexture2D* Texture = FindOrCreateTexture(
-        Asset, Layer, EDWCTransparencyTempArtifactKind::CorrectedRevealColor, OutError);
+        Asset, Layer, EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
+        CommitGeneration, OutError);
     if (Texture == nullptr)
     {
         return false;
@@ -587,8 +591,16 @@ bool FDWCTransparencyTempAssetStore::CommitRevealArtifact(
         reinterpret_cast<const uint8*>(CorrectedRevealPixels.GetData()));
     Texture->CompressionSettings = TC_Default;
     ConfigureCommon(*Texture, true);
-    UpdateReference(Layer, EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
-        Texture, BuildCorrectedRevealArtifactSignature(RevealSignature), Resolution);
+    UpdateReference(
+        Layer,
+        EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
+        Texture,
+        FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+            EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
+            SourceSignature,
+            RevealSignature),
+        Resolution,
+        CommitGeneration);
 #if WITH_EDITORONLY_DATA
     Layer.EditorStageCache.SourceSignature = SourceSignature;
     Layer.EditorStageCache.RevealSignature = RevealSignature;
@@ -602,6 +614,7 @@ EDWCTransparencyCorrectedRevealRestoreResult
 FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
     const FWetClothingTransparencyLayerData& Layer,
     const FDWCTransparencySourcePayload& SourcePayload,
+    const float RevealMetallicDarkeningStrength,
     TArray<FColor>& OutPixels,
     FString& OutError)
 {
@@ -617,8 +630,16 @@ FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
         return EDWCTransparencyCorrectedRevealRestoreResult::Invalid;
     }
 
-    const FString ExpectedRevealSignature = BuildCorrectedRevealArtifactSignature(
-        FDWCTransparencySignatureService::BuildRevealSignature(SourcePayload.BuildSignature, Layer));
+    const FString RevealSignature =
+        FDWCTransparencySignatureService::BuildRevealSignature(
+            SourcePayload.BuildSignature,
+            Layer,
+            RevealMetallicDarkeningStrength);
+    const FString ExpectedRevealSignature =
+        FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+            EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
+            SourcePayload.BuildSignature,
+            RevealSignature);
     if (!HasCurrentArtifact(
             Layer,
             EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
@@ -672,27 +693,24 @@ UTexture2D* FDWCTransparencyTempAssetStore::FindCurrentArtifact(
     const bool bLoadIfNeeded)
 {
 #if WITH_EDITORONLY_DATA
+    const FDWCTransparencyStageArtifactSpec* Spec =
+        FDWCTransparencyStageArtifactContract::FindSpec(Kind);
     const FDWCTransparencyTempArtifactReference* Reference =
-        Layer.EditorStageCache.Artifacts.FindByPredicate(
-            [Kind](const FDWCTransparencyTempArtifactReference& Candidate)
-            {
-                return Candidate.Kind == Kind;
-            });
-    if (Reference == nullptr || Reference->bObsolete ||
-        Reference->BuildSignature != ExpectedSignature || Reference->Texture.IsNull())
+        FDWCTransparencyStageArtifactContract::FindReference(Layer, Kind);
+    FString ValidationError;
+    if (Spec == nullptr || Reference == nullptr ||
+        !FDWCTransparencyStageArtifactContract::ValidateReference(
+            *Reference,
+            *Spec,
+            ExpectedSignature,
+            Reference->Resolution,
+            nullptr,
+            bLoadIfNeeded,
+            ValidationError))
     {
         return nullptr;
     }
-    UTexture2D* Texture = bLoadIfNeeded ? Reference->Texture.LoadSynchronous() : Reference->Texture.Get();
-    FString PolicyError;
-    if (Texture != nullptr)
-    {
-        // Do not make legacy editor caches unreadable. They are kept out of
-        // runtime serialization and reported for rebuild by validation.
-        FDWCTransparencyIntermediateAssetPolicy::EnsureEditorOnlyPackage(
-            *Texture, nullptr, &PolicyError);
-    }
-    return Texture;
+    return bLoadIfNeeded ? Reference->Texture.LoadSynchronous() : Reference->Texture.Get();
 #else
     return nullptr;
 #endif
@@ -703,16 +721,20 @@ bool FDWCTransparencyTempAssetStore::HasCurrentArtifact(
     const FString& ExpectedSignature)
 {
 #if WITH_EDITORONLY_DATA
+    const FDWCTransparencyStageArtifactSpec* Spec =
+        FDWCTransparencyStageArtifactContract::FindSpec(Kind);
     const FDWCTransparencyTempArtifactReference* Reference =
-        Layer.EditorStageCache.Artifacts.FindByPredicate(
-            [Kind](const FDWCTransparencyTempArtifactReference& Candidate)
-            {
-                return Candidate.Kind == Kind;
-            });
-    return Reference != nullptr && !Reference->bObsolete &&
-        Reference->BuildSignature == ExpectedSignature &&
-        Reference->Resolution.X > 0 && Reference->Resolution.Y > 0 &&
-        !Reference->Texture.IsNull();
+        FDWCTransparencyStageArtifactContract::FindReference(Layer, Kind);
+    FString ValidationError;
+    return Spec != nullptr && Reference != nullptr &&
+        FDWCTransparencyStageArtifactContract::ValidateReference(
+            *Reference,
+            *Spec,
+            ExpectedSignature,
+            Reference->Resolution,
+            nullptr,
+            false,
+            ValidationError);
 #else
     return false;
 #endif

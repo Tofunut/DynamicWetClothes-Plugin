@@ -50,6 +50,31 @@ namespace
         return FName(*FString::Printf(TEXT("DWCTransparencyInner_%d"), PriorityIndex));
     }
 
+    int32 CountInvalidImportedBasisTriangles(const FDWCRevealBakeSurface& Surface)
+    {
+        int32 InvalidTriangleCount = 0;
+        for (const FDWCRevealBakeSurfaceTriangle& Triangle : Surface.Triangles)
+        {
+            InvalidTriangleCount += Triangle.bHasValidImportedTangentBasis ? 0 : 1;
+        }
+        return InvalidTriangleCount;
+    }
+
+    void AppendImportedBasisWarning(
+        const FDWCRevealBakeSurface& Surface,
+        const FString& SurfaceLabel,
+        TArray<FString>& InOutWarnings)
+    {
+        const int32 InvalidTriangleCount = CountInvalidImportedBasisTriangles(Surface);
+        if (InvalidTriangleCount > 0)
+        {
+            InOutWarnings.Add(FString::Printf(
+                TEXT("%s has %d triangle(s) with invalid imported tangent data; Reveal Normal falls back to flat on those hits."),
+                *SurfaceLabel,
+                InvalidTriangleCount));
+        }
+    }
+
     class FSameMeshSurfaceCache
     {
       public:
@@ -823,7 +848,7 @@ bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
     OutResult.OuterSampleCount = OuterSamples.Num();
     OutResult.OverlappedUVPixelCount = OverlappedPixelCount;
     OutResult.InnerColorBuffer.Init(FColor::Black, PixelCount);
-    OutResult.RevealSurfaceBuffer.Init(FColor(128, 128, 0, 0), PixelCount);
+    OutResult.RevealSurfaceAuthoring.Init(BakeResolution, FColor(128, 128, 0, 0));
     OutResult.AutoAlphaBuffer.Init(0, PixelCount);
     OutResult.OuterCoverageBuffer.Init(0, PixelCount);
     OutResult.ValidHitBuffer.Init(false, PixelCount);
@@ -1122,6 +1147,10 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
             *BuildError);
         return false;
     }
+    AppendImportedBasisWarning(
+        Snapshot.OuterSurface,
+        TEXT("Transparency target surface"),
+        Snapshot.Warnings);
 
     FDWCRevealBakeTexelSamplingSettings SamplingSettings;
     SamplingSettings.Resolution = BakeResolution;
@@ -1190,6 +1219,10 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
                     *InnerSlot.MaterialSlotName.ToString(), *BuildError));
                 continue;
             }
+            AppendImportedBasisWarning(
+                SourceSurface,
+                FString::Printf(TEXT("Inner Source Part '%s'"), *InnerSlot.MaterialSlotName.ToString()),
+                Snapshot.Warnings);
 
             FString BindingError;
             if (!FDWCTransparencyType1SourceProvider::AddValidatedBinding(
@@ -1236,6 +1269,13 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
                     *Source.MaterialSlotName.ToString(), *BuildError));
                 continue;
             }
+            AppendImportedBasisWarning(
+                SourceSurface,
+                FString::Printf(
+                    TEXT("Source '%s' slot '%s'"),
+                    *Source.Layer.ComponentDisplayName.ToString(),
+                    *Source.MaterialSlotName.ToString()),
+                Snapshot.Warnings);
             if (Source.Layer.bCanBeRevealSource)
             {
                 FString BakeError;
@@ -1293,7 +1333,9 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
     SeedResult.OuterSampleCount = Snapshot.OuterSamples.Num();
     SeedResult.OverlappedUVPixelCount = OverlappedPixelCount;
     SeedResult.InnerColorBuffer.Init(FColor::Black, PixelCount);
-    SeedResult.RevealSurfaceBuffer.Init(FColor(128, 128, 0, 0), PixelCount);
+    SeedResult.RevealSurfaceAuthoring.Init(
+        SeedResult.Resolution,
+        FColor(128, 128, 0, 0));
     SeedResult.AutoAlphaBuffer.Init(0, PixelCount);
     SeedResult.OuterCoverageBuffer.Init(0, PixelCount);
     SeedResult.ValidHitBuffer.Init(false, PixelCount);
@@ -1343,7 +1385,7 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
         Snapshot.OuterSurface.Triangles.GetAllocatedSize() +
         Snapshot.OuterSamples.GetAllocatedSize() +
         SeedResult.InnerColorBuffer.GetAllocatedSize() +
-        SeedResult.RevealSurfaceBuffer.GetAllocatedSize() +
+        SeedResult.RevealSurfaceAuthoring.GetAllocatedBytes() +
         SeedResult.AutoAlphaBuffer.GetAllocatedSize() +
         SeedResult.OuterCoverageBuffer.GetAllocatedSize() +
         SeedResult.OuterIslandIDBuffer.GetAllocatedSize() +
@@ -1437,7 +1479,7 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
                 OuterTrianglesByID.Find(Hit.OuterTriangleIndex);
             if (SourceTriangle != nullptr && OuterTriangle != nullptr)
             {
-                SourcePayload.RevealSurfaceBuffer[PixelIndex] = EncodeReorientedRevealSurface(
+                SourcePayload.RevealSurfaceAuthoring[PixelIndex] = EncodeReorientedRevealSurface(
                     **SourceSurface,
                     **SourceTriangle,
                     Hit.SourceBarycentric,
@@ -1476,7 +1518,7 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
         Result.SourcePayload.NoHitCount);
     Result.ResultBytes =
         Result.SourcePayload.InnerColorBuffer.GetAllocatedSize() +
-        Result.SourcePayload.RevealSurfaceBuffer.GetAllocatedSize() +
+        Result.SourcePayload.RevealSurfaceAuthoring.GetAllocatedBytes() +
         Result.SourcePayload.AutoAlphaBuffer.GetAllocatedSize() +
         Result.SourcePayload.OuterCoverageBuffer.GetAllocatedSize() +
         Result.SourcePayload.OuterIslandIDBuffer.GetAllocatedSize() +

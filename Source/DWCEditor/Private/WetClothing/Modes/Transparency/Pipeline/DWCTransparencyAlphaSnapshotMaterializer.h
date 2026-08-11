@@ -28,6 +28,21 @@ class FDWCTransparencyAlphaSnapshotMaterializer
 {
   public:
     static bool Materialize(
+        const FDWCTransparencyAlphaDomainSnapshot& AlphaDomain,
+        const FDWCTransparencyAlphaWorkingSnapshot& Input,
+        FDWCTransparencyAlphaWorkingSnapshot& OutSparseSnapshot,
+        FString& OutError,
+        const FDWCEditorCancellationToken* CancellationToken = nullptr);
+
+    static bool Materialize(
+        const FDWCTransparencyAlphaDomainSnapshot& AlphaDomain,
+        FDWCTransparencyAlphaWorkingSnapshot&& Input,
+        FDWCTransparencyAlphaWorkingSnapshot& OutSparseSnapshot,
+        FString& OutError,
+        const FDWCEditorCancellationToken* CancellationToken = nullptr);
+
+    /** Compatibility entry point for Stage 2/3 callers that have not extracted an alpha domain yet. */
+    static bool Materialize(
         const FDWCTransparencySourcePayload& SourcePayload,
         const FDWCTransparencyAlphaWorkingSnapshot& Input,
         FDWCTransparencyAlphaWorkingSnapshot& OutSparseSnapshot,

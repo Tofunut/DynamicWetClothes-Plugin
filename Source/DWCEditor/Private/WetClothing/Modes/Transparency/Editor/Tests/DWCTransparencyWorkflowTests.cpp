@@ -7,8 +7,10 @@
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionReducer.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 #include "WetClothing/Modes/Transparency/Editor/DWCTransparencyWorkflowPolicy.h"
 #include "WetClothing/Modes/Transparency/Editor/DWCTransparencyWorkflowStateResolver.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
 
 namespace
 {
@@ -22,13 +24,20 @@ namespace
     void AddCurrentArtifact(
         FWetClothingTransparencyLayerData& Layer,
         const EDWCTransparencyTempArtifactKind Kind,
-        const FString& Signature)
+        const FString& SourceSignature,
+        const FString& RevealSignature,
+        const FGuid& CommitGeneration)
     {
 #if WITH_EDITORONLY_DATA
         FDWCTransparencyTempArtifactReference& Reference =
             Layer.EditorStageCache.Artifacts.AddDefaulted_GetRef();
         Reference.Kind = Kind;
-        Reference.BuildSignature = Signature;
+        Reference.BuildSignature =
+            FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+                Kind, SourceSignature, RevealSignature);
+        Reference.ContractVersion = FDWCTransparencyStageArtifactContract::ContractVersion;
+        Reference.CommitGeneration = CommitGeneration;
+        Reference.TextureSourceId = FGuid::NewGuid();
         Reference.Resolution = FIntPoint(128, 128);
         Reference.Texture = FSoftObjectPath(TEXT("/Game/DWC_TestArtifact.DWC_TestArtifact"));
 #endif
@@ -65,12 +74,21 @@ bool FDWCTransparencyWorkflowStageResolutionTest::RunTest(const FString& Paramet
 #if WITH_EDITORONLY_DATA
     Layer.EditorStageCache.bSourceGenerated = true;
     Layer.EditorStageCache.SourceSignature = TEXT("SourceSignature");
-    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor, TEXT("SourceSignature"));
-    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::ValidHit, TEXT("SourceSignature"));
-    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::OuterCoverage, TEXT("SourceSignature"));
-    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::OuterIslandID, TEXT("SourceSignature"));
-    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::HitSource, TEXT("SourceSignature"));
-    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::HitDistance, TEXT("SourceSignature"));
+    const FGuid SourceGeneration = FGuid::NewGuid();
+    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor,
+        TEXT("SourceSignature"), FString(), SourceGeneration);
+    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+        TEXT("SourceSignature"), FString(), SourceGeneration);
+    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::ValidHit,
+        TEXT("SourceSignature"), FString(), SourceGeneration);
+    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::OuterCoverage,
+        TEXT("SourceSignature"), FString(), SourceGeneration);
+    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::OuterIslandID,
+        TEXT("SourceSignature"), FString(), SourceGeneration);
+    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::HitSource,
+        TEXT("SourceSignature"), FString(), SourceGeneration);
+    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::HitDistance,
+        TEXT("SourceSignature"), FString(), SourceGeneration);
 #endif
     const DWCTransparencyWorkflow::FDWCTransparencyLayerWorkflowState SourceReady =
         DWCTransparencyWorkflow::ResolveLayerWorkflowState(true, &Layer, false);
@@ -95,13 +113,15 @@ bool FDWCTransparencyWorkflowStageResolutionTest::RunTest(const FString& Paramet
         EDWCTransparencyEditorStage::MapGeneration);
 
 #if WITH_EDITORONLY_DATA
-    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::HitDistance, TEXT("SourceSignature"));
+    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::HitDistance,
+        TEXT("SourceSignature"), FString(), SourceGeneration);
 #endif
 
 #if WITH_EDITORONLY_DATA
     Layer.EditorStageCache.bRevealReviewed = true;
     Layer.EditorStageCache.RevealSignature = TEXT("RevealSignature");
-    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::CorrectedRevealColor, TEXT("RevealSignature"));
+    AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
+        TEXT("SourceSignature"), TEXT("RevealSignature"), FGuid::NewGuid());
 #endif
     const DWCTransparencyWorkflow::FDWCTransparencyLayerWorkflowState RevealReady =
         DWCTransparencyWorkflow::ResolveLayerWorkflowState(true, &Layer, false);
@@ -243,6 +263,24 @@ bool FDWCTransparencyWorkflowInputRoutingTest::RunTest(const FString& Parameters
             EDWCTransparencyEditorStage::FinalEditing,
             EDWCTransparencySourceType::SameMeshMaterialSlots,
             EDWCTransparencyVisualizationMode::WrinkleSeparation));
+    TestTrue(
+        TEXT("Raycast source types expose Reveal Normal inspection in Stage 4"),
+        DWCTransparencyWorkflow::IsVisualizationModeAllowed(
+            EDWCTransparencyEditorStage::FinalEditing,
+            EDWCTransparencySourceType::SameMeshMaterialSlots,
+            EDWCTransparencyVisualizationMode::RevealNormalOnly));
+    TestTrue(
+        TEXT("Raycast source types expose source coverage in Stage 4"),
+        DWCTransparencyWorkflow::IsVisualizationModeAllowed(
+            EDWCTransparencyEditorStage::FinalEditing,
+            EDWCTransparencySourceType::ExternalSkeletalMesh,
+            EDWCTransparencyVisualizationMode::SourceCoverage));
+    TestFalse(
+        TEXT("Manual color sources do not expose Reveal Normal inspection"),
+        DWCTransparencyWorkflow::IsVisualizationModeAllowed(
+            EDWCTransparencyEditorStage::FinalEditing,
+            EDWCTransparencySourceType::ManualColorOrTexture,
+            EDWCTransparencyVisualizationMode::RevealNormalOnly));
     TestFalse(
         TEXT("Stage 4 does not expose reveal correction visualization"),
         DWCTransparencyWorkflow::IsVisualizationModeAllowed(
@@ -589,6 +627,50 @@ bool FDWCTransparencyFinalBaselineBakeSourceTest::RunTest(const FString& Paramet
     TestFalse(TEXT("A final baked map is never accepted as a canonical bake source"), bBuilt);
     TestTrue(TEXT("The failure explains that canonical working data must be rebuilt"),
         Error.Contains(TEXT("canonical working map")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyRevealNormalSettingsContractTest,
+    "DWC.Editor.Transparency.RevealNormal.SettingsContract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyRevealNormalSettingsContractTest::RunTest(const FString&)
+{
+    FWetClothingTransparencyLayerData Layer;
+    Layer.SourceType = EDWCTransparencySourceType::SameMeshMaterialSlots;
+    TestTrue(TEXT("Reveal Normal is enabled by default for raycast layers"),
+        Layer.bEnableRevealNormal);
+    TestEqual(TEXT("Reveal Normal strength defaults to one"),
+        Layer.RevealNormalStrength, 1.0f);
+
+    const FString RevealBefore = FDWCTransparencySignatureService::BuildRevealSignature(
+        TEXT("Source"), Layer, 0.35f);
+    const FString AlphaBefore =
+        FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(Layer);
+    Layer.bEnableRevealNormal = false;
+    Layer.RevealNormalStrength = 3.5f;
+    TestEqual(TEXT("Runtime Reveal settings do not stale Stage 3 color data"),
+        FDWCTransparencySignatureService::BuildRevealSignature(TEXT("Source"), Layer, 0.35f),
+        RevealBefore);
+    TestEqual(TEXT("Runtime Reveal settings do not stale Stage 4 alpha data"),
+        FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(Layer),
+        AlphaBefore);
+
+    FDWCEditorSessionState State;
+    FDWCInitializeTransparencyPreviewSettingsAction Action;
+    Action.bForce = true;
+    Action.Settings.RevealNormalStrength = 8.0f;
+    Action.Settings.bShowRevealNormal = false;
+    Action.Settings.RevealNormalSource = EDWCTransparencyRevealNormalPreviewSource::Baked;
+    FDWCEditorSessionReducer::Reduce(State, Action);
+    TestEqual(TEXT("Session clamps Reveal Normal strength to the material range"),
+        State.Transparency.PreviewSettings.RevealNormalStrength, 4.0f);
+    TestFalse(TEXT("Session owns the preview-only Reveal Normal visibility"),
+        State.Transparency.PreviewSettings.bShowRevealNormal);
+    TestEqual(TEXT("Session owns the requested Reveal Normal preview source"),
+        State.Transparency.PreviewSettings.RevealNormalSource,
+        EDWCTransparencyRevealNormalPreviewSource::Baked);
     return true;
 }
 

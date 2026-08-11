@@ -3,6 +3,7 @@
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
+#include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 
 FDWCEditorWorkerMemoryEstimate FDWCTransparencyRevealCommitWorker::EstimateMemory(
     const FDWCTransparencyRevealCommitJobInput& Input)
@@ -84,6 +85,19 @@ FDWCTransparencyRevealCommitWorker::Build(
             Input.SourceResult->MaterialSlotIndex,
             Input.BaseRevealColor,
             Output->CorrectedRevealPixels);
+    }
+
+    if (!FDWCTransparencyComposite::ApplyRevealMetallicDarkening(
+            Output->CorrectedRevealPixels,
+            *Input.SourceResult,
+            Input.RevealMetallicDarkeningStrength,
+            &CancellationToken.Get()))
+    {
+        Output->CorrectedRevealPixels.Reset();
+        Output->Error = CancellationToken->IsCanceled()
+            ? TEXT("The reveal-color commit was canceled.")
+            : TEXT("The reveal-color metallic correction source is invalid.");
+        return Output;
     }
 
     // CorrectedRevealColor is the Stage 3 checkpoint consumed by Stage 4.

@@ -7,9 +7,82 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyPaintIslandBuilder.h"
 
+namespace
+{
+    bool IsUsableDirection(const FVector& Direction)
+    {
+        return !Direction.ContainsNaN() &&
+            FMath::IsFinite(Direction.X) &&
+            FMath::IsFinite(Direction.Y) &&
+            FMath::IsFinite(Direction.Z) &&
+            !Direction.IsNearlyZero();
+    }
+}
+
+bool FDWCRevealBakeSurfaceFrameBuilder::TransformImportedBasis(
+    const FTransform& BakeTransform,
+    const FVector3f& LocalTangent,
+    const FVector3f& LocalBitangent,
+    const FVector3f& LocalNormal,
+    FVector3f& OutTangent,
+    FVector3f& OutNormal,
+    int8& OutBitangentSign)
+{
+    OutTangent = FVector3f(1.0f, 0.0f, 0.0f);
+    OutNormal = FVector3f(0.0f, 0.0f, 1.0f);
+    OutBitangentSign = 1;
+
+    const FVector Scale = BakeTransform.GetScale3D();
+    if (BakeTransform.ContainsNaN() ||
+        FMath::Abs(Scale.X) <= UE_SMALL_NUMBER ||
+        FMath::Abs(Scale.Y) <= UE_SMALL_NUMBER ||
+        FMath::Abs(Scale.Z) <= UE_SMALL_NUMBER)
+    {
+        return false;
+    }
+
+    const FMatrix NormalTransform = BakeTransform.ToInverseMatrixWithScale().GetTransposed();
+    FVector TransformedNormal = NormalTransform.TransformVector(FVector(LocalNormal)).GetSafeNormal();
+    if (!IsUsableDirection(TransformedNormal))
+    {
+        return false;
+    }
+    OutNormal = FVector3f(TransformedNormal);
+
+    FVector TransformedTangent = BakeTransform.TransformVector(FVector(LocalTangent));
+    const FVector TransformedBitangent = BakeTransform.TransformVector(FVector(LocalBitangent));
+    if (!IsUsableDirection(TransformedTangent) ||
+        !IsUsableDirection(TransformedBitangent))
+    {
+        return false;
+    }
+
+    TransformedTangent = (
+        TransformedTangent -
+        TransformedNormal * FVector::DotProduct(TransformedTangent, TransformedNormal)).GetSafeNormal();
+    if (!IsUsableDirection(TransformedTangent))
+    {
+        return false;
+    }
+
+    const FVector ReconstructedBitangent =
+        FVector::CrossProduct(TransformedNormal, TransformedTangent).GetSafeNormal();
+    if (!IsUsableDirection(ReconstructedBitangent))
+    {
+        return false;
+    }
+
+    OutTangent = FVector3f(TransformedTangent);
+    OutBitangentSign =
+        FVector::DotProduct(ReconstructedBitangent, TransformedBitangent) < 0.0 ? -1 : 1;
+    return true;
+}
+
 bool FDWCRevealBakeSurfaceFrame::IsValid() const
 {
-    return !Tangent.IsNearlyZero() && !Bitangent.IsNearlyZero() && !Normal.IsNearlyZero();
+    return IsUsableDirection(Tangent) &&
+        IsUsableDirection(Bitangent) &&
+        IsUsableDirection(Normal);
 }
 
 bool FDWCRevealBakeSurfaceFrameBuilder::BuildInterpolatedFrame(
@@ -18,48 +91,49 @@ bool FDWCRevealBakeSurfaceFrameBuilder::BuildInterpolatedFrame(
     FDWCRevealBakeSurfaceFrame& OutFrame)
 {
     OutFrame = FDWCRevealBakeSurfaceFrame();
-    const FVector InterpolatedNormal = (
-        Triangle.Normals[0] * Barycentric.X +
-        Triangle.Normals[1] * Barycentric.Y +
-        Triangle.Normals[2] * Barycentric.Z).GetSafeNormal();
-    if (InterpolatedNormal.IsNearlyZero())
+    if (!Triangle.bHasValidImportedTangentBasis)
     {
         return false;
     }
 
-    const FVector EdgeU = Triangle.Positions[1] - Triangle.Positions[0];
-    const FVector EdgeV = Triangle.Positions[2] - Triangle.Positions[0];
-    const FVector2D UVU = Triangle.UVs[1] - Triangle.UVs[0];
-    const FVector2D UVV = Triangle.UVs[2] - Triangle.UVs[0];
-    const double Determinant = static_cast<double>(UVU.X) * UVV.Y -
-        static_cast<double>(UVU.Y) * UVV.X;
-
-    FVector RawTangent = FVector::ZeroVector;
-    FVector RawBitangent = FVector::ZeroVector;
-    if (!FMath::IsNearlyZero(Determinant, SMALL_NUMBER))
+    const FVector InterpolatedNormal = (
+        FVector(Triangle.Normals[0]) * Barycentric.X +
+        FVector(Triangle.Normals[1]) * Barycentric.Y +
+        FVector(Triangle.Normals[2]) * Barycentric.Z).GetSafeNormal();
+    if (!IsUsableDirection(InterpolatedNormal))
     {
-        const double InverseDeterminant = 1.0 / Determinant;
-        RawTangent = (EdgeU * UVV.Y - EdgeV * UVU.Y) * InverseDeterminant;
-        RawBitangent = (EdgeV * UVU.X - EdgeU * UVV.X) * InverseDeterminant;
+        return false;
     }
 
-    FVector Tangent = (RawTangent - InterpolatedNormal * FVector::DotProduct(RawTangent, InterpolatedNormal)).GetSafeNormal();
-    if (Tangent.IsNearlyZero())
+    FVector InterpolatedTangent = FVector::ZeroVector;
+    FVector InterpolatedBitangent = FVector::ZeroVector;
+    for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
     {
-        InterpolatedNormal.FindBestAxisVectors(Tangent, RawBitangent);
-        Tangent.Normalize();
+        const double Weight = Barycentric[CornerIndex];
+        const FVector CornerNormal(Triangle.Normals[CornerIndex]);
+        const FVector CornerTangent(Triangle.Tangents[CornerIndex]);
+        const FVector CornerBitangent =
+            FVector::CrossProduct(CornerNormal, CornerTangent) *
+            static_cast<double>(Triangle.BitangentSigns[CornerIndex]);
+        InterpolatedTangent += CornerTangent * Weight;
+        InterpolatedBitangent += CornerBitangent * Weight;
     }
-    if (Tangent.IsNearlyZero())
+
+    const FVector Tangent = (
+        InterpolatedTangent -
+        InterpolatedNormal * FVector::DotProduct(InterpolatedTangent, InterpolatedNormal)).GetSafeNormal();
+    if (!IsUsableDirection(Tangent))
     {
         return false;
     }
 
     FVector Bitangent = FVector::CrossProduct(InterpolatedNormal, Tangent).GetSafeNormal();
-    if (Bitangent.IsNearlyZero())
+    if (!IsUsableDirection(Bitangent))
     {
         return false;
     }
-    if (!RawBitangent.IsNearlyZero() && FVector::DotProduct(Bitangent, RawBitangent) < 0.0f)
+    if (IsUsableDirection(InterpolatedBitangent) &&
+        FVector::DotProduct(Bitangent, InterpolatedBitangent) < 0.0)
     {
         Bitangent *= -1.0f;
     }
@@ -75,11 +149,16 @@ FVector3f FDWCRevealBakeSurfaceFrameBuilder::ReorientTangentNormal(
     const FDWCRevealBakeSurfaceFrame& SourceFrame,
     const FDWCRevealBakeSurfaceFrame& TargetFrame)
 {
+    if (!SourceFrame.IsValid() || !TargetFrame.IsValid())
+    {
+        return FVector3f(0.0f, 0.0f, 1.0f);
+    }
+
     const FVector SourceWorldNormal = (
         SourceFrame.Tangent * SourceTangentNormal.X +
         SourceFrame.Bitangent * SourceTangentNormal.Y +
         SourceFrame.Normal * SourceTangentNormal.Z).GetSafeNormal();
-    if (SourceWorldNormal.IsNearlyZero() || !SourceFrame.IsValid() || !TargetFrame.IsValid())
+    if (!IsUsableDirection(SourceWorldNormal))
     {
         return FVector3f(0.0f, 0.0f, 1.0f);
     }
@@ -233,21 +312,43 @@ bool FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
             Triangle.TriangleIndex = Index / 3;
             Triangle.MaterialSlotIndex = Section.MaterialIndex;
             Triangle.Bounds = FBox(ForceInit);
+            bool bHasValidImportedTangentBasis = true;
 
             for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
             {
-                const uint32  VertexIndex = RawIndices[CornerIndex];
-                const FVector LocalPosition(LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex));
-                const FVector LocalNormal(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex));
+                const uint32 VertexIndex = RawIndices[CornerIndex];
+                const FVector LocalPosition(
+                    LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex));
+                const FVector4f ImportedTangentX =
+                    LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentX(VertexIndex);
+                const FVector4f ImportedTangentZ =
+                    LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex);
+                const FVector3f LocalTangent(
+                    ImportedTangentX.X,
+                    ImportedTangentX.Y,
+                    ImportedTangentX.Z);
+                const FVector3f LocalBitangent =
+                    LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentY(VertexIndex);
+                const FVector3f LocalNormal(
+                    ImportedTangentZ.X,
+                    ImportedTangentZ.Y,
+                    ImportedTangentZ.Z);
 
                 Triangle.VertexIndices[CornerIndex] = static_cast<int32>(VertexIndex);
                 Triangle.Positions[CornerIndex] = ResolvedLayer.BakeTransform.TransformPosition(LocalPosition);
-                Triangle.Normals[CornerIndex] =
-                    ResolvedLayer.BakeTransform.TransformVectorNoScale(LocalNormal).GetSafeNormal();
+                bHasValidImportedTangentBasis &= FDWCRevealBakeSurfaceFrameBuilder::TransformImportedBasis(
+                    ResolvedLayer.BakeTransform,
+                    LocalTangent,
+                    LocalBitangent,
+                    LocalNormal,
+                    Triangle.Tangents[CornerIndex],
+                    Triangle.Normals[CornerIndex],
+                    Triangle.BitangentSigns[CornerIndex]);
                 Triangle.UVs[CornerIndex] =
                     FVector2D(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(VertexIndex, UVChannelIndex));
                 Triangle.Bounds += Triangle.Positions[CornerIndex];
             }
+            Triangle.bHasValidImportedTangentBasis = bHasValidImportedTangentBasis;
 
             OutSurface.Bounds += Triangle.Bounds;
             OutSurface.Triangles.Add(Triangle);

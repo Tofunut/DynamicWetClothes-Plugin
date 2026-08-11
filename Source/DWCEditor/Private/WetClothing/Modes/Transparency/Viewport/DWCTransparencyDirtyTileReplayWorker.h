@@ -26,6 +26,7 @@ struct FDWCTransparencyDirtyTileReplayJobInput
     int32 BaselineStrokeCount = 0;
     int32 MaterialSlotIndex = INDEX_NONE;
     FLinearColor BaseRevealColor = FLinearColor::White;
+    float RevealMetallicDarkeningStrength = 0.0f;
     TArray<FIntPoint> DirtyTileCoordinates;
     TArray<FDWCTransparencyAlphaComposeTileSnapshot> AlphaComposeTiles;
     TArray<FDWCTransparencyRevealColorComposeTileSnapshot> RevealComposeTiles;

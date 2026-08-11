@@ -9,6 +9,7 @@ class FDWCEditorCancellationToken;
 class FDWCTransparencyAlphaTileStore;
 class FDWCTransparencyAlphaSnapshotView;
 class FDWCTransparencyRevealColorTileStore;
+struct FDWCTransparencyAlphaDomainSnapshot;
 
 struct FDWCTransparencyPixelComposeContext
 {
@@ -25,10 +26,16 @@ struct FDWCTransparencyPixelComposeContext
     // a compatibility input for bake/full-rebuild producers.
     const FDWCTransparencyAlphaTileStore* ManualAlphaTileStore = nullptr;
     const FDWCTransparencyAlphaSnapshotView* AlphaSnapshotView = nullptr;
+    // Stage 4 canonical baseline. When present, alpha composition does not
+    // retain or read the larger Stage 2/3 source payload.
+    const FDWCTransparencyAlphaDomainSnapshot* AlphaDomain = nullptr;
     TConstArrayView<uint8> WrinkleSuppressionBuffer;
     TConstArrayView<uint8> OuterEdgeFeatherBuffer;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
     float TransparencyStrength = 0.4f;
+    // Stage 3 owns metallic darkening. This value affects only reveal-color
+    // presentation and checkpoint generation, never the Stage 2 source data.
+    float RevealMetallicDarkeningStrength = 0.0f;
     float WrinkleSuppressionStrength = 0.6f;
     float MaximumHitDistance = KINDA_SMALL_NUMBER;
     // Preview textures retain authored alpha and defer strength, suppression,
@@ -41,6 +48,18 @@ struct FDWCTransparencyPixelComposeContext
 class FDWCTransparencyComposite
 {
   public:
+    static FColor ApplyRevealMetallicDarkening(
+        FColor RevealColor,
+        const FDWCTransparencySourcePayload& SourcePayload,
+        int32 PixelIndex,
+        float Strength);
+
+    static bool ApplyRevealMetallicDarkening(
+        TArray<FColor>& InOutRevealColors,
+        const FDWCTransparencySourcePayload& SourcePayload,
+        float Strength,
+        const FDWCEditorCancellationToken* CancellationToken = nullptr);
+
     static float ComputeMaximumHitDistance(const FDWCTransparencySourcePayload& SourcePayload);
 
     static float ResolveEditedAlpha(

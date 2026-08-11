@@ -77,6 +77,7 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
     Context.SourcePayload = Input.SourcePayload.Get();
     Context.ManualAlphaTileStore = &ComposedStore;
     Context.VisualizationMode = Input.VisualizationMode;
+    Context.RevealMetallicDarkeningStrength = Input.RevealMetallicDarkeningStrength;
     Context.bDeferPresentationToMaterial = true;
     Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
         ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.SourcePayload)

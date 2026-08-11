@@ -25,6 +25,7 @@ struct FDWCTransparencyVisualizationJobInput
     TArray<FDWCTransparencyRevealColorStroke> RevealColorPaintStrokes;
     int32 BaselineStrokeCount = 0;
     FLinearColor BaseRevealColor = FLinearColor::White;
+    float RevealMetallicDarkeningStrength = 0.0f;
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 UVChannelIndex = INDEX_NONE;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;

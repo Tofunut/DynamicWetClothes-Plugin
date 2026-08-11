@@ -92,6 +92,7 @@ class SWetClothingTransparencyPreviewViewport
     void SetShowSavedWrinkle(bool bInShowSavedWrinkle);
     void RefreshWrinkleSuppressionPreview();
     void RefreshOuterEdgeFeatherPreview();
+    void RefreshRevealColorCorrectionPreview();
     void SetPaintSettings(const FDWCTransparencyPaintSettings& InSettings);
     void SetAuthoringController(const TSharedPtr<FDWCTransparencyAuthoringController>& InController);
     void ApplyAuthoringBrushSample(
@@ -119,6 +120,7 @@ class SWetClothingTransparencyPreviewViewport
     bool CanShowBrushCursor() const;
     void HandleSurfaceHitFromClient(const FDWCTransparencySurfaceHit& SurfaceHit);
     void SetVisualizationMode(EDWCTransparencyVisualizationMode InMode);
+    FText GetRevealNormalPreviewSourceStatusText() const;
     // The Stage 3 panel displays this same workspace texture; it does not
     // allocate a second preview copy just for Slate.
     UTexture2D* GetVisualizationPreviewTexture() const;
@@ -311,6 +313,14 @@ class SWetClothingTransparencyPreviewViewport
     float WrinkleSuppressionStrength = 0.6f;
     float WrinkleMaskThreshold = 0.15f;
     float WrinkleMaskSoftness = 0.05f;
+    float RevealNormalStrength = 1.0f;
+    bool bShowRevealNormal = true;
+    EDWCTransparencyRevealNormalPreviewSource RequestedRevealNormalSource =
+        EDWCTransparencyRevealNormalPreviewSource::Working;
+    EDWCTransparencyRevealNormalPreviewSource EffectiveRevealNormalSource =
+        EDWCTransparencyRevealNormalPreviewSource::Working;
+    bool bWorkingRevealNormalAvailable = false;
+    bool bBakedRevealNormalAvailable = false;
     bool bPreviewSettingsApplyScheduled = false;
     bool bOuterEdgeFeatherPreviewDirty = false;
     bool bTransparencyPaintingEnabled = false;

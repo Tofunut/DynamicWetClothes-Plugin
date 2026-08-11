@@ -134,4 +134,40 @@ bool FDWCTransparencyRevealCommitFallbackParityTest::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyRevealCommitMetallicCorrectionTest,
+    "DWC.Editor.Transparency.Stage3Commit.MetallicCorrection",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyRevealCommitMetallicCorrectionTest::RunTest(const FString&)
+{
+    TSharedRef<FDWCTransparencySourcePayload> Source =
+        MakeShared<FDWCTransparencySourcePayload>();
+    Source->Resolution = FIntPoint(1, 1);
+    Source->MaterialSlotIndex = 2;
+    Source->BuildSignature = TEXT("MetallicCorrectionSource");
+    Source->InnerColorBuffer.Add(FColor(200, 120, 60, 255));
+    Source->AutoAlphaBuffer.Add(73);
+    Source->RevealSurfaceAuthoring.Init(Source->Resolution, FColor(128, 128, 255, 255));
+
+    FDWCTransparencyRevealCommitJobInput Input;
+    Input.SourceResult = Source;
+    Input.RevealMetallicDarkeningStrength = 1.0f;
+    const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> Token =
+        MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
+    const TSharedPtr<FDWCTransparencyRevealCommitJobResult, ESPMode::ThreadSafe> Result =
+        FDWCTransparencyRevealCommitWorker::Build(MoveTemp(Input), Token);
+
+    TestTrue(TEXT("Metallic-corrected reveal commit succeeds"), Result.IsValid() && Result->bSucceeded);
+    if (!Result.IsValid() || !Result->bSucceeded)
+    {
+        return false;
+    }
+    const FColor Corrected = Result->CorrectedRevealPixels[0];
+    TestTrue(TEXT("Inner metallic darkens corrected reveal RGB"),
+        Corrected.R < 200 && Corrected.G < 120 && Corrected.B < 60);
+    TestEqual(TEXT("Metallic correction preserves Stage 2 automatic alpha"), Corrected.A, uint8(73));
+    return true;
+}
+
 #endif

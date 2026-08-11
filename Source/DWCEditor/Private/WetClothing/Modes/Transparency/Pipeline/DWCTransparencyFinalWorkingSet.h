@@ -10,6 +10,37 @@
 class UWetClothingAsset;
 struct FDWCTransparencySourcePayload;
 
+/**
+ * Immutable Stage 4 domain extracted from the canonical Stage 2/3 payload.
+ *
+ * Stage 4 edits alpha only. Keeping color, reveal-surface, hit-distance, and
+ * source-priority buffers out of this contract prevents final-alpha jobs from
+ * retaining the much larger authoring payload merely to clip brush samples.
+ */
+struct FDWCTransparencyAlphaDomainSnapshot
+{
+    FGuid LayerGuid;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    FIntPoint Resolution = FIntPoint::ZeroValue;
+    FString SourceSignature;
+    TArray<uint8> BaseAlpha;
+    TArray<uint8> OuterCoverage;
+    TArray<uint16> OuterIslandIDs;
+    TBitArray<> ValidSource;
+
+    static TSharedPtr<const FDWCTransparencyAlphaDomainSnapshot> Create(
+        const FDWCTransparencySourcePayload& SourcePayload,
+        FString* OutError = nullptr);
+
+    bool IsValid(FString* OutError = nullptr) const;
+    uint64 GetAllocatedBytes() const;
+    int32 ResolveOuterIslandIDAtUV(
+        const FVector2D& PositionUV,
+        int32 FallbackUVIslandID,
+        bool bWrap) const;
+    bool MatchesOuterIslandID(int32 PixelIndex, int32 UVIslandID) const;
+};
+
 struct FDWCTransparencyFinalSettingsSnapshot
 {
     float TransparencyStrength = 0.4f;
@@ -46,25 +77,29 @@ struct FDWCTransparencyAlphaWorkingSnapshot
     uint64 GetAllocatedBytes() const;
 };
 
-/** Complete immutable input contract for Stage 4 preview/bake preparation. */
+/** Immutable alpha-only input contract for Stage 4 preview/bake preparation. */
 struct FDWCTransparencyFinalWorkingSet
 {
     FDWCTransparencyStageIdentity Identity;
-    TSharedPtr<const FDWCTransparencySourcePayload> SourcePayload;
+    TSharedPtr<const FDWCTransparencyAlphaDomainSnapshot> AlphaDomain;
     FDWCTransparencyAlphaWorkingSnapshot Alpha;
     FDWCTransparencyFinalSettingsSnapshot Settings;
     FDWCWrinkleSuppressionDependencySnapshot WrinkleDependency;
     FString SourceSignature;
     FString RevealSignature;
-    /** Stage 2 source-surface payload identity. It is independent of Stage 3 color and Stage 4 alpha edits. */
-    FString RevealSurfaceSignature;
+    /** Runtime Reveal Normal identity. It is independent of Stage 3 color and Stage 4 alpha edits. */
+    FString RevealNormalSignature;
     FString AlphaAuthoringSignature;
     FString SuppressionSettingsSignature;
+    FString FinalAlphaSignature;
     FString FinalSignature;
     uint64 AuthoringRevision = 0;
     uint64 OwnedBytes = 0;
     uint64 RetainedBytes = 0;
+    /** Stage 2/3 must author a Reveal Surface payload for this source type. */
     bool bRequiresRevealSurface = false;
+    /** Runtime material binding currently requires the baked Reveal Normal payload. */
+    bool bRequiresRuntimeRevealNormal = false;
 
     bool IsValid(FString* OutError = nullptr) const;
 };

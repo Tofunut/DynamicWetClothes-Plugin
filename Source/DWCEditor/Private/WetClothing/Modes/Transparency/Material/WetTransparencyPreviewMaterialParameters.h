@@ -36,9 +36,15 @@ namespace DWCTransparencyPreviewMaterialParameters
         return Name;
     }
 
-    inline const FName& RevealMetallicDarkeningStrength()
+    inline const FName& RevealNormalStrength()
     {
-        static const FName Name(TEXT("DWC_TransparencyPreviewRevealMetallicDarkeningStrength"));
+        static const FName Name(TEXT("DWC_TransparencyPreviewRevealNormalStrength"));
+        return Name;
+    }
+
+    inline const FName& ShowRevealNormal()
+    {
+        static const FName Name(TEXT("DWC_TransparencyPreviewShowRevealNormal"));
         return Name;
     }
 

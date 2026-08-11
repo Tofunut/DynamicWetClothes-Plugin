@@ -83,21 +83,21 @@ namespace DWCWetMaterialParameters
         return Name;
     }
 
-    const FName& RevealSurfaceMap()
+    const FName& RevealNormalMap()
     {
-        static const FName Name(TEXT("DWC_RevealSurfaceMap"));
+        static const FName Name(TEXT("DWC_RevealNormalMap"));
         return Name;
     }
 
-    const FName& UseRevealSurfaceMap()
+    const FName& UseRevealNormalMap()
     {
-        static const FName Name(TEXT("DWC_UseRevealSurfaceMap"));
+        static const FName Name(TEXT("DWC_UseRevealNormalMap"));
         return Name;
     }
 
-    const FName& RevealMetallicDarkeningStrength()
+    const FName& RevealNormalStrength()
     {
-        static const FName Name(TEXT("DWC_RevealMetallicDarkeningStrength"));
+        static const FName Name(TEXT("DWC_RevealNormalStrength"));
         return Name;
     }
 

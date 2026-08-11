@@ -111,6 +111,27 @@ bool FDWCTransparencyIntermediateReferenceSerializationTest::RunTest(const FStri
         TestFalse(TEXT("Final baked transparency maps remain available at runtime."),
             BakedMapsProperty->HasAnyPropertyFlags(CPF_EditorOnly));
     }
+
+    const FProperty* RevealNormalProperty = FindFProperty<FProperty>(
+        FWetClothingBakedTransparencyMap::StaticStruct(),
+        GET_MEMBER_NAME_CHECKED(FWetClothingBakedTransparencyMap, RevealNormalMap));
+    TestNotNull(TEXT("Runtime Reveal Normal is reflected."), RevealNormalProperty);
+    if (RevealNormalProperty != nullptr)
+    {
+        TestFalse(TEXT("Runtime Reveal Normal remains in cooked serialization."),
+            RevealNormalProperty->HasAnyPropertyFlags(CPF_EditorOnly));
+    }
+
+    const FProperty* LegacyRevealSurfaceProperty = FindFProperty<FProperty>(
+        FWetClothingBakedTransparencyMap::StaticStruct(),
+        GET_MEMBER_NAME_CHECKED(FWetClothingBakedTransparencyMap, RevealSurfaceMap));
+    TestNotNull(TEXT("Legacy Reveal Surface remains readable by the editor."),
+        LegacyRevealSurfaceProperty);
+    if (LegacyRevealSurfaceProperty != nullptr)
+    {
+        TestTrue(TEXT("Legacy Reveal Surface is stripped from cooked serialization."),
+            LegacyRevealSurfaceProperty->HasAnyPropertyFlags(CPF_EditorOnly));
+    }
 #endif
     return true;
 }
@@ -171,6 +192,7 @@ bool FDWCTransparencyLoadedReferenceCookBoundaryTest::RunTest(const FString& Par
     UTexture2D* MaterialMetallicTexture = MakeTexture(TEXT("T_MaterialMetallic"), true);
     UTexture2D* StageArtifactTexture = MakeTexture(TEXT("T_StageArtifact"), true);
     UTexture2D* FinalTexture = MakeTexture(TEXT("T_Final"), false);
+    UTexture2D* FinalRevealNormalTexture = MakeTexture(TEXT("T_FinalRevealNormal"), false);
     UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
 
     FDWCTransparencyMaterialColorCacheReference& MaterialColorReference =
@@ -188,6 +210,7 @@ bool FDWCTransparencyLoadedReferenceCookBoundaryTest::RunTest(const FString& Par
 
     FWetClothingBakedTransparencyMap& BakedMap = Layer.BakedMaps.AddDefaulted_GetRef();
     BakedMap.TransparencyMap = FinalTexture;
+    BakedMap.RevealNormalMap = FinalRevealNormalTexture;
 
     TArray<UPackage*> ChangedPackages;
     TArray<FString> Warnings;
@@ -211,6 +234,11 @@ bool FDWCTransparencyLoadedReferenceCookBoundaryTest::RunTest(const FString& Par
     TestFalse(TEXT("The final runtime map is not treated as cook-excluded intermediate data."),
         FDWCTransparencyIntermediateAssetPolicy::IsReferenceCookExcluded(
             FSoftObjectPath(FinalTexture)));
+    TestFalse(TEXT("The final Reveal Normal is not marked editor-only."),
+        FinalRevealNormalTexture->GetOutermost()->HasAnyPackageFlags(PKG_EditorOnly));
+    TestFalse(TEXT("The final Reveal Normal is not treated as an intermediate dependency."),
+        FDWCTransparencyIntermediateAssetPolicy::IsReferenceCookExcluded(
+            FSoftObjectPath(FinalRevealNormalTexture)));
 
     ChangedPackages.Reset();
     FDWCTransparencyIntermediateAssetPolicy::RepairLoadedReferences(
@@ -222,6 +250,7 @@ bool FDWCTransparencyLoadedReferenceCookBoundaryTest::RunTest(const FString& Par
     MaterialMetallicTexture->GetOutermost()->SetDirtyFlag(false);
     StageArtifactTexture->GetOutermost()->SetDirtyFlag(false);
     FinalTexture->GetOutermost()->SetDirtyFlag(false);
+    FinalRevealNormalTexture->GetOutermost()->SetDirtyFlag(false);
     return true;
 }
 

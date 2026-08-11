@@ -6,6 +6,7 @@
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyBrushRasterizer.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyAlphaSnapshotMaterializer.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyFinalWorkingSet.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyAlphaSnapshotMaterializerParityTest,
@@ -19,10 +20,13 @@ bool FDWCTransparencyAlphaSnapshotMaterializerParityTest::RunTest(const FString&
     const int32 PixelCount = Resolution.X * Resolution.Y;
 
     FDWCTransparencySourcePayload SourcePayload;
+    SourcePayload.LayerGuid = FGuid::NewGuid();
     SourcePayload.MaterialSlotIndex = MaterialSlotIndex;
     SourcePayload.Resolution = Resolution;
+    SourcePayload.BuildSignature = TEXT("AlphaDomainSource");
     SourcePayload.AutoAlphaBuffer.Init(51, PixelCount);
     SourcePayload.OuterCoverageBuffer.Init(255, PixelCount);
+    SourcePayload.ValidHitBuffer.Init(true, PixelCount);
     SourcePayload.OuterIslandIDBuffer.Init(
         FDWCTransparencySourcePayload::EncodeOuterIslandID(2),
         PixelCount);
@@ -59,10 +63,17 @@ bool FDWCTransparencyAlphaSnapshotMaterializerParityTest::RunTest(const FString&
 
     FDWCTransparencyAlphaWorkingSnapshot Sparse;
     FString Error;
+    const TSharedPtr<const FDWCTransparencyAlphaDomainSnapshot> AlphaDomain =
+        FDWCTransparencyAlphaDomainSnapshot::Create(SourcePayload, &Error);
+    TestTrue(TEXT("A valid alpha-only domain is extracted from the source payload."), AlphaDomain.IsValid());
+    if (!AlphaDomain.IsValid())
+    {
+        return false;
+    }
     TestTrue(
         TEXT("Stroke replay materializes into a sparse tile snapshot."),
         FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
-            SourcePayload,
+            *AlphaDomain,
             MoveTemp(Replay),
             Sparse,
             Error));
@@ -95,7 +106,7 @@ bool FDWCTransparencyAlphaSnapshotMaterializerParityTest::RunTest(const FString&
     TestTrue(
         TEXT("A sparse snapshot passes through without dense reconstruction."),
         FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
-            SourcePayload,
+            *AlphaDomain,
             MoveTemp(Sparse),
             PassThrough,
             Error));

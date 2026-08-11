@@ -483,17 +483,20 @@ return lerp(BaseColor, DisplayColor, BlendWeight);
     RevealSurfaceRequest.BaseNormal = SurfaceGraph.Outputs.Normal;
     RevealSurfaceRequest.DataUV = DataUVPin;
     RevealSurfaceRequest.Visibility = { Blend, TEXT("FinalRevealVisibility") };
+    RevealSurfaceRequest.VisualizationMode = { VisualizationMode, FString() };
     RevealSurfaceRequest.SurfaceTextureParameterName =
         DWCTransparencyPreviewMaterialParameters::RevealSurfaceMap();
     RevealSurfaceRequest.UseSurfaceParameterName =
         DWCTransparencyPreviewMaterialParameters::UseRevealSurfaceMap();
-    RevealSurfaceRequest.MetallicDarkeningParameterName =
-        DWCTransparencyPreviewMaterialParameters::RevealMetallicDarkeningStrength();
+    RevealSurfaceRequest.StrengthParameterName =
+        DWCTransparencyPreviewMaterialParameters::RevealNormalStrength();
+    RevealSurfaceRequest.ShowParameterName =
+        DWCTransparencyPreviewMaterialParameters::ShowRevealNormal();
     RevealSurfaceRequest.NodePosX = 520;
     RevealSurfaceRequest.NodePosY = 2950;
     RevealSurfaceRequest.Description = TEXT("DWC Transparency Preview Reveal Surface Composite");
     const FDWCRevealSurfaceMaterialGraphResult RevealSurfaceResult =
-        FDWCRevealSurfaceMaterialGraph::Build(RevealSurfaceRequest);
+        FDWCRevealSurfaceMaterialGraph::BuildAuthoringPreview(RevealSurfaceRequest);
     if (!bConnected || !RevealSurfaceResult.bSucceeded ||
         !UMaterialEditingLibrary::ConnectMaterialProperty(
             RevealSurfaceResult.BaseColor.Expression,
@@ -524,9 +527,8 @@ void FWetTransparencyPreviewGraphExtension::InitializeMID(
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::TransparencyStrength(), 1.0f);
     PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::RevealSurfaceMap(), nullptr);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseRevealSurfaceMap(), 0.0f);
-    PreviewMID.SetScalarParameterValue(
-        DWCTransparencyPreviewMaterialParameters::RevealMetallicDarkeningStrength(),
-        0.0f);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::RevealNormalStrength(), 1.0f);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::ShowRevealNormal(), 1.0f);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::ShowInnerColor(), 0.0f);
     PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::WrinkleCoverageMap(), nullptr);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseWrinkleCoverageMap(), 0.0f);

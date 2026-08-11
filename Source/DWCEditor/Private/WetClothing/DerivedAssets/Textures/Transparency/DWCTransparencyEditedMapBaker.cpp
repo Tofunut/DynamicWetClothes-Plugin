@@ -19,53 +19,69 @@
 
 namespace
 {
-    TSharedRef<const FDWCTransparencySourcePayload> ResolveStage4RevealCheckpoint(
-        const FWetClothingTransparencyLayerData& Layer,
-        const TSharedRef<const FDWCTransparencySourcePayload>& CanonicalSource)
+    struct FResolvedStage4Reveal
     {
+        EDWCTransparencyStage4RevealSource Source =
+            EDWCTransparencyStage4RevealSource::CanonicalReplay;
         TArray<FColor> CorrectedPixels;
+        FString Warning;
+
+        uint64 GetAllocatedBytes() const
+        {
+            return static_cast<uint64>(CorrectedPixels.GetAllocatedSize()) +
+                static_cast<uint64>(Warning.GetAllocatedSize());
+        }
+    };
+
+    FResolvedStage4Reveal ResolveStage4RevealCheckpoint(
+        const FWetClothingTransparencyLayerData& Layer,
+        const FDWCTransparencySourcePayload& CanonicalSource,
+        const float RevealMetallicDarkeningStrength)
+    {
+        FResolvedStage4Reveal Result;
         FString RestoreError;
         const EDWCTransparencyCorrectedRevealRestoreResult RestoreResult =
             FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
                 Layer,
-                *CanonicalSource,
-                CorrectedPixels,
+                CanonicalSource,
+                RevealMetallicDarkeningStrength,
+                Result.CorrectedPixels,
                 RestoreError);
         if (RestoreResult != EDWCTransparencyCorrectedRevealRestoreResult::Restored)
         {
             if (RestoreResult == EDWCTransparencyCorrectedRevealRestoreResult::Invalid)
             {
-                UE_LOG(
-                    LogTemp,
-                    Warning,
-                    TEXT("DWC transparency: ignoring invalid Corrected Reveal Color for slot %d: %s"),
+                Result.Warning = FString::Printf(
+                    TEXT("The Corrected Reveal Color checkpoint for slot %d was invalid and was rebuilt from canonical Stage 2/3 authoring: %s"),
                     Layer.TargetSurface.OuterMaterialSlotIndex,
                     *RestoreError);
             }
-            return CanonicalSource;
+            Result.CorrectedPixels.Reset();
+            return Result;
         }
 
-        const int32 PixelCount = CanonicalSource->Resolution.X * CanonicalSource->Resolution.Y;
-        if (CorrectedPixels.Num() != PixelCount)
+        const int32 PixelCount = CanonicalSource.Resolution.X * CanonicalSource.Resolution.Y;
+        if (Result.CorrectedPixels.Num() != PixelCount)
         {
-            UE_LOG(
-                LogTemp,
-                Warning,
-                TEXT("DWC transparency: Corrected Reveal Color pixel count did not match slot %d."),
+            Result.Warning = FString::Printf(
+                TEXT("The Corrected Reveal Color checkpoint for slot %d had an invalid pixel count and was rebuilt from canonical Stage 2/3 authoring."),
                 Layer.TargetSurface.OuterMaterialSlotIndex);
-            return CanonicalSource;
+            Result.CorrectedPixels.Reset();
+            return Result;
         }
 
-        TSharedRef<FDWCTransparencySourcePayload> ResolvedSource =
-            MakeShared<FDWCTransparencySourcePayload>(*CanonicalSource);
-        for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
-        {
-            ResolvedSource->InnerColorBuffer[PixelIndex] = CorrectedPixels[PixelIndex];
-            ResolvedSource->InnerColorBuffer[PixelIndex].A = 255;
-            ResolvedSource->AutoAlphaBuffer[PixelIndex] = CorrectedPixels[PixelIndex].A;
-        }
-        ResolvedSource->bUsesCorrectedRevealCheckpoint = true;
-        return ResolvedSource;
+        Result.Source = EDWCTransparencyStage4RevealSource::CorrectedCheckpoint;
+        return Result;
+    }
+
+    uint64 SaturatingAdd(const uint64 A, const uint64 B)
+    {
+        return B > MAX_uint64 - A ? MAX_uint64 : A + B;
+    }
+
+    uint64 SaturatingMultiply(const uint64 A, const uint64 B)
+    {
+        return A != 0 && B > MAX_uint64 / A ? MAX_uint64 : A * B;
     }
 
     FString BuildTransparencyGeneratedTextureAssetBaseName(const UWetClothingAsset& Asset)
@@ -85,13 +101,13 @@ namespace
             SourcePayload.MaterialSlotIndex);
     }
 
-    FString BuildRevealSurfaceMapAssetName(
+    FString BuildRevealNormalMapAssetName(
         const UWetClothingAsset& Asset,
         const FDWCTransparencySourcePayload& SourcePayload)
     {
         const FString BaseName = BuildTransparencyGeneratedTextureAssetBaseName(Asset);
         return FString::Printf(
-            TEXT("%s_Slot%d_RevealSurfaceMap"),
+            TEXT("%s_Slot%d_RevealNormalMap"),
             *BaseName,
             SourcePayload.MaterialSlotIndex);
     }
@@ -101,14 +117,14 @@ namespace
         const FWetClothingTransparencyLayerData& Layer,
         const FDWCTransparencySourcePayload& SourcePayload,
         const TArray<FColor>& Pixels,
-        const bool bRevealSurface,
+        const bool bRevealNormal,
         FString& OutErrorMessage)
     {
         const FString PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(Asset, TEXT("Textures/Transparency"));
-        const FString AssetName = bRevealSurface
-            ? BuildRevealSurfaceMapAssetName(Asset, SourcePayload)
+        const FString AssetName = bRevealNormal
+            ? BuildRevealNormalMapAssetName(Asset, SourcePayload)
             : BuildTransparencyMapAssetName(Asset, SourcePayload);
-        const TCHAR* OutputLabel = bRevealSurface ? TEXT("Reveal Surface") : TEXT("Transparency");
+        const TCHAR* OutputLabel = bRevealNormal ? TEXT("Reveal Normal") : TEXT("Transparency");
         if (PackagePath.IsEmpty())
         {
             OutErrorMessage = TEXT("Could not resolve the generated Transparency Textures package path.");
@@ -126,10 +142,10 @@ namespace
                 return Candidate.MaterialSlotIndex == SourcePayload.MaterialSlotIndex;
             });
         if (ExistingMap != nullptr &&
-            IsValid(bRevealSurface ? ExistingMap->RevealSurfaceMap.Get() : ExistingMap->TransparencyMap.Get()) &&
-            (bRevealSurface ? ExistingMap->RevealSurfaceMap->GetPathName() : ExistingMap->TransparencyMap->GetPathName()) == ObjectPath)
+            IsValid(bRevealNormal ? ExistingMap->RevealNormalMap.Get() : ExistingMap->TransparencyMap.Get()) &&
+            (bRevealNormal ? ExistingMap->RevealNormalMap->GetPathName() : ExistingMap->TransparencyMap->GetPathName()) == ObjectPath)
         {
-            Texture = bRevealSurface ? ExistingMap->RevealSurfaceMap.Get() : ExistingMap->TransparencyMap.Get();
+            Texture = bRevealNormal ? ExistingMap->RevealNormalMap.Get() : ExistingMap->TransparencyMap.Get();
             bFromSerializedReference = true;
         }
 
@@ -211,10 +227,10 @@ namespace
             1,
             TSF_BGRA8,
             reinterpret_cast<const uint8*>(Pixels.GetData()));
-        Texture->CompressionSettings = TC_Default;
+        Texture->CompressionSettings = bRevealNormal ? TC_Normalmap : TC_Default;
         Texture->MipGenSettings = TMGS_NoMipmaps;
-        Texture->SRGB = !bRevealSurface;
-        Texture->LODGroup = TEXTUREGROUP_Pixels2D;
+        Texture->SRGB = !bRevealNormal;
+        Texture->LODGroup = bRevealNormal ? TEXTUREGROUP_WorldNormalMap : TEXTUREGROUP_Pixels2D;
         const TextureAddress Address = Layer.TargetSurface.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap
             ? TA_Wrap
             : TA_Clamp;
@@ -341,7 +357,7 @@ namespace
         }
     }
 
-    void DilateRevealSurfaceOutsideCoverage(
+    void DilateRevealNormalOutsideCoverage(
         const FIntPoint Resolution,
         const TArray<uint8>& OuterCoverage,
         const int32 PaddingPixels,
@@ -354,8 +370,8 @@ namespace
             return;
         }
 
-        // A surface normal is directional data. Padding copies the nearest
-        // payload intact instead of averaging RG normal components or B/A.
+        // A normal is directional data. Padding copies a neighbor intact
+        // instead of averaging encoded RG components.
         TArray<uint8> Filled = OuterCoverage;
         TArray<uint8> NextFilled;
         TArray<FColor> NextPixels;
@@ -375,7 +391,6 @@ namespace
                     }
 
                     int32 BestNeighborIndex = INDEX_NONE;
-                    uint8 BestCoverage = 0;
                     for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
                     {
                         for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
@@ -396,11 +411,9 @@ namespace
                             {
                                 continue;
                             }
-                            const uint8 NeighborCoverage = InOutPixels[NeighborIndex].A;
-                            if (BestNeighborIndex == INDEX_NONE || NeighborCoverage > BestCoverage)
+                            if (BestNeighborIndex == INDEX_NONE)
                             {
                                 BestNeighborIndex = NeighborIndex;
-                                BestCoverage = NeighborCoverage;
                             }
                         }
                     }
@@ -422,9 +435,101 @@ namespace
     }
 }
 
+uint64 FDWCTransparencyStage4MemoryPlan::GetTotalBytes() const
+{
+    uint64 Total = 0;
+    Total = SaturatingAdd(Total, ResidentSharedBytes);
+    Total = SaturatingAdd(Total, SnapshotBytes);
+    Total = SaturatingAdd(Total, OutputBytes);
+    return SaturatingAdd(Total, ScratchBytes);
+}
+
+uint64 FDWCTransparencyEditedMapBaker::EstimateCanonicalSourcePayloadBytes(
+    const FIntPoint Resolution)
+{
+    if (Resolution.X <= 0 || Resolution.Y <= 0)
+    {
+        return MAX_uint64;
+    }
+    const uint64 PixelCount = SaturatingMultiply(
+        static_cast<uint64>(Resolution.X),
+        static_cast<uint64>(Resolution.Y));
+    if (PixelCount == MAX_uint64)
+    {
+        return MAX_uint64;
+    }
+
+    // Inner color, reveal surface, alpha, coverage, island, hit-distance,
+    // source-priority, and the packed valid-hit bitset.
+    uint64 Bytes = sizeof(FDWCTransparencySourcePayload) + 64ull * 1024ull;
+    Bytes = SaturatingAdd(Bytes, SaturatingMultiply(PixelCount, 18ull));
+    Bytes = SaturatingAdd(Bytes, (PixelCount + 7ull) / 8ull);
+    return Bytes;
+}
+
+bool FDWCTransparencyEditedMapBaker::BuildMemoryPlan(
+    const FIntPoint Resolution,
+    const uint64 SourcePayloadBytes,
+    const uint64 AuthoringInputBytes,
+    const bool bRestoresCanonicalArtifacts,
+    FDWCTransparencyStage4MemoryPlan& OutPlan,
+    FString& OutErrorMessage)
+{
+    OutPlan = FDWCTransparencyStage4MemoryPlan();
+    OutErrorMessage.Reset();
+    if (Resolution.X <= 0 || Resolution.Y <= 0 || SourcePayloadBytes == 0 ||
+        SourcePayloadBytes == MAX_uint64)
+    {
+        OutErrorMessage = TEXT("Stage 4 memory planning received an invalid source resolution or payload size.");
+        return false;
+    }
+
+    const uint64 PixelCount = SaturatingMultiply(
+        static_cast<uint64>(Resolution.X),
+        static_cast<uint64>(Resolution.Y));
+    if (PixelCount == MAX_uint64 || PixelCount > static_cast<uint64>(MAX_int32))
+    {
+        OutErrorMessage = TEXT("Stage 4 memory planning overflowed the supported pixel count.");
+        return false;
+    }
+
+    const uint64 FixedAllowance = 64ull * 1024ull;
+    const uint64 AlphaDomainBytes = SaturatingAdd(
+        SaturatingMultiply(PixelCount, 4ull),
+        SaturatingAdd((PixelCount + 7ull) / 8ull, FixedAllowance));
+    const uint64 CorrectedCheckpointBytes = SaturatingMultiply(PixelCount, sizeof(FColor));
+    const uint64 OutputBytes = SaturatingMultiply(
+        SaturatingMultiply(PixelCount, sizeof(FColor)),
+        3ull);
+    const uint64 WorkerScratchBytes = SaturatingMultiply(PixelCount, 10ull);
+    const uint64 RestoreScratchBytes = bRestoresCanonicalArtifacts
+        ? SaturatingMultiply(PixelCount, sizeof(FColor))
+        : 0ull;
+
+    OutPlan.ResidentSharedBytes = SaturatingAdd(SourcePayloadBytes, AuthoringInputBytes);
+    OutPlan.SnapshotBytes = SaturatingAdd(
+        SaturatingAdd(AlphaDomainBytes, CorrectedCheckpointBytes),
+        SaturatingAdd(AuthoringInputBytes, FixedAllowance));
+    OutPlan.OutputBytes = OutputBytes;
+    OutPlan.ScratchBytes = FMath::Max(WorkerScratchBytes, RestoreScratchBytes);
+    if (OutPlan.GetTotalBytes() == MAX_uint64)
+    {
+        OutErrorMessage = TEXT("Stage 4 memory planning overflowed the supported reservation size.");
+        OutPlan = FDWCTransparencyStage4MemoryPlan();
+        return false;
+    }
+    return true;
+}
+
 struct FDWCTransparencyEditedMapBakeSnapshot::FImpl
 {
+    // Read-only Stage 3/final packaging dependency. Stage 4 brush replay,
+    // validity, feathering, and padding use WorkingSet.AlphaDomain instead.
     TSharedPtr<const FDWCTransparencySourcePayload> SourcePayload;
+    EDWCTransparencyStage4RevealSource RevealSource =
+        EDWCTransparencyStage4RevealSource::CanonicalReplay;
+    TArray<FColor> CorrectedRevealPixels;
+    FString RevealFallbackWarning;
     FDWCTransparencyFinalWorkingSet WorkingSet;
     FGuid LayerGuid;
     FWetClothingTransparencyTargetSurface TargetSurface;
@@ -438,6 +543,7 @@ struct FDWCTransparencyEditedMapBakeSnapshot::FImpl
     FString FinalBuildSignature;
     FGuid SourceWrinkleMaskBakeGuid;
     float TransparencyStrength = 0.0f;
+    float RevealMetallicDarkeningStrength = 0.0f;
     float SuppressionStrength = 0.0f;
     float EdgeFeatherPixels = 0.0f;
     int32 PaddingPixels = 0;
@@ -479,6 +585,35 @@ FGuid FDWCTransparencyEditedMapBakeSnapshot::GetLayerGuid() const
     return Impl.IsValid() ? Impl->LayerGuid : FGuid();
 }
 
+FIntPoint FDWCTransparencyEditedMapBakeSnapshot::GetSourceResolution() const
+{
+    return Impl.IsValid() && Impl->SourcePayload.IsValid()
+        ? Impl->SourcePayload->Resolution
+        : FIntPoint::ZeroValue;
+}
+
+const FString& FDWCTransparencyEditedMapBakeSnapshot::GetSourceBuildSignature() const
+{
+    static const FString Empty;
+    return Impl.IsValid() && Impl->SourcePayload.IsValid()
+        ? Impl->SourcePayload->BuildSignature
+        : Empty;
+}
+
+int32 FDWCTransparencyEditedMapBakeSnapshot::GetSourceValidHitCount() const
+{
+    return Impl.IsValid() && Impl->SourcePayload.IsValid()
+        ? Impl->SourcePayload->ValidHitCount
+        : 0;
+}
+
+int32 FDWCTransparencyEditedMapBakeSnapshot::GetSourceNoHitCount() const
+{
+    return Impl.IsValid() && Impl->SourcePayload.IsValid()
+        ? Impl->SourcePayload->NoHitCount
+        : 0;
+}
+
 uint64 FDWCTransparencyEditedMapBakeSnapshot::GetEstimatedBytes() const
 {
     return Impl.IsValid() ? Impl->EstimatedBytes : 0;
@@ -515,7 +650,7 @@ bool FDWCTransparencyEditedMapBaker::IsAutoResultCompatible(
     const int32 PixelCount = SourcePayload.Resolution.X * SourcePayload.Resolution.Y;
     if (SourcePayload.Resolution.X <= 0 || SourcePayload.Resolution.Y <= 0 ||
         SourcePayload.InnerColorBuffer.Num() != PixelCount ||
-        SourcePayload.RevealSurfaceBuffer.Num() != PixelCount ||
+        !SourcePayload.RevealSurfaceAuthoring.IsValidForResolution(SourcePayload.Resolution) ||
         SourcePayload.AutoAlphaBuffer.Num() != PixelCount ||
         SourcePayload.OuterCoverageBuffer.Num() != PixelCount ||
         SourcePayload.ValidHitBuffer.Num() != PixelCount)
@@ -559,12 +694,12 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
         {
             return Candidate.MaterialSlotIndex == SourcePayload.MaterialSlotIndex;
         });
-    if (BakedMap == nullptr || !BakedMap->IsRuntimeUsableForLayer(Layer.RequiresRevealSurface()))
+    if (BakedMap == nullptr || !BakedMap->IsRuntimeUsableForLayer(Layer.RequiresRuntimeRevealNormal()))
     {
         if (OutReason != nullptr)
         {
-            *OutReason = Layer.RequiresRevealSurface()
-                ? TEXT("Transparency map or its required Reveal Surface payload is missing or not runtime-usable.")
+            *OutReason = Layer.RequiresRuntimeRevealNormal()
+                ? TEXT("Transparency map or its required Reveal Normal is missing or not runtime-usable.")
                 : TEXT("Transparency map is missing or not runtime-usable.");
         }
         return false;
@@ -588,9 +723,10 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
             TransparencyData.TransparencyPreviewStrength);
     const FString RevealSignature = FDWCTransparencySignatureService::BuildRevealSignature(
         SourcePayload.BuildSignature,
-        Layer);
-    const FString RevealSurfaceSignature =
-        FDWCTransparencySignatureService::BuildRevealSurfaceSignature(
+        Layer,
+        TransparencyData.RevealMetallicDarkeningStrength);
+    const FString RevealNormalSignature =
+        FDWCTransparencySignatureService::BuildRevealNormalSignature(
             SourcePayload.BuildSignature);
     const FString ExpectedSignature = FDWCTransparencySignatureService::BuildFinalSignature(
         RevealSignature,
@@ -598,7 +734,18 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
         SourceWrinkleMaskBuildSignature,
         SuppressionSettingsSignature,
         TransparencyData.TransparencyPaddingPixels,
-        TransparencyData.TransparencyEdgeFeatherPixels);
+        TransparencyData.TransparencyEdgeFeatherPixels,
+        SourcePayload.BuildSignature);
+    FDWCTransparencyFinalSignatureInputs AlphaSignatureInputs;
+    AlphaSignatureInputs.SourceSignature = SourcePayload.BuildSignature;
+    AlphaSignatureInputs.AlphaAuthoringSignature =
+        FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(Layer);
+    AlphaSignatureInputs.WrinkleMaskBuildSignature = SourceWrinkleMaskBuildSignature;
+    AlphaSignatureInputs.SuppressionSettingsSignature = SuppressionSettingsSignature;
+    AlphaSignatureInputs.PaddingPixels = TransparencyData.TransparencyPaddingPixels;
+    AlphaSignatureInputs.EdgeFeatherPixels = TransparencyData.TransparencyEdgeFeatherPixels;
+    const FString ExpectedFinalAlphaSignature =
+        FDWCTransparencySignatureService::BuildFinalAlphaSignature(AlphaSignatureInputs);
 
     TArray<FString> Mismatches;
     if (BakedMap->Resolution != SourcePayload.Resolution.X)
@@ -620,25 +767,22 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
     {
         Mismatches.Add(TEXT("the wrinkle-suppression or transparency settings changed"));
     }
+    if (BakedMap->FinalAlphaBuildSignature != ExpectedFinalAlphaSignature)
+    {
+        Mismatches.Add(TEXT("the Stage 4 alpha working set changed"));
+    }
     if (BakedMap->BuildSignature != ExpectedSignature)
     {
         Mismatches.Add(TEXT("the authored transparency data changed"));
     }
-    if (Layer.RequiresRevealSurface() &&
-        BakedMap->RevealSurfaceBuildSignature != RevealSurfaceSignature)
+    if (Layer.RequiresRuntimeRevealNormal() &&
+        BakedMap->RevealNormalBuildSignature != RevealNormalSignature)
     {
-        Mismatches.Add(TEXT("the source Reveal Surface data changed or was not baked"));
+        Mismatches.Add(TEXT("the source Reveal Normal data changed or was not baked"));
     }
-    if (Layer.RequiresRevealSurface() && !BakedMap->HasCompleteRevealSurfacePayload())
+    if (Layer.RequiresRuntimeRevealNormal() && !BakedMap->HasRuntimeRevealNormalPayload())
     {
-        Mismatches.Add(TEXT("the required Reveal Surface runtime artifact is missing"));
-    }
-    if (BakedMap->bContainsRevealNormalRG != BakedMap->bContainsInnerMetallicB ||
-        BakedMap->bContainsRevealNormalRG != BakedMap->bContainsRevealSurfaceCoverageAlpha ||
-        (BakedMap->bContainsRevealNormalRG && BakedMap->RevealSurfaceMap == nullptr) ||
-        (!BakedMap->bContainsRevealNormalRG && BakedMap->RevealSurfaceMap != nullptr))
-    {
-        Mismatches.Add(TEXT("the Reveal Surface runtime artifact is inconsistent"));
+        Mismatches.Add(TEXT("the required coverage-weighted Reveal Normal runtime artifact is missing"));
     }
     if (OutReason != nullptr && !Mismatches.IsEmpty())
     {
@@ -838,20 +982,30 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
         return false;
     }
 
-    // Stage 4 prefers the committed Stage 3 checkpoint. The canonical source
-    // remains the fallback and retains the surface/hit auxiliary buffers.
-    TSharedRef<const FDWCTransparencySourcePayload> Stage4Source =
-        ResolveStage4RevealCheckpoint(Layer, AutoResultRef);
-    const bool bOwnsStage4SourcePayload = &Stage4Source.Get() != &AutoResultRef.Get();
-    const FDWCTransparencySourcePayload& SourcePayload = *Stage4Source;
+    // Corrected reveal color is a compact Stage 3 checkpoint. Keep it separate
+    // from the immutable Stage 2 source so selecting the checkpoint never
+    // clones the full hit/surface payload.
+    FResolvedStage4Reveal Stage4Reveal = ResolveStage4RevealCheckpoint(
+        Layer,
+        CanonicalSourcePayload,
+        WetClothingAsset.Authored.TransparencyData.RevealMetallicDarkeningStrength);
+    const FDWCTransparencySourcePayload& SourcePayload = CanonicalSourcePayload;
 
     FDWCTransparencyEditedMapBakeSnapshot::FImpl& Snapshot = *OutSnapshot.Impl;
-    Snapshot.SourcePayload = MoveTemp(Stage4Source);
+    Snapshot.SourcePayload = MoveTemp(AutoResultRef);
+    Snapshot.RevealSource = Stage4Reveal.Source;
+    Snapshot.CorrectedRevealPixels = MoveTemp(Stage4Reveal.CorrectedPixels);
+    Snapshot.RevealFallbackWarning = MoveTemp(Stage4Reveal.Warning);
     Snapshot.LayerGuid = Layer.LayerGuid;
     Snapshot.TargetSurface = Layer.TargetSurface;
     Snapshot.bRequiresRevealSurface = Layer.RequiresRevealSurface();
     Snapshot.ManualColorSource = Layer.ManualColorSource;
-    Snapshot.RevealColorPaintStrokes = Layer.RevealColorPaintStrokes;
+    if (Snapshot.RevealSource == EDWCTransparencyStage4RevealSource::CanonicalReplay)
+    {
+        Snapshot.RevealColorPaintStrokes = Layer.RevealColorPaintStrokes;
+    }
+    Snapshot.RevealMetallicDarkeningStrength =
+        WetClothingAsset.Authored.TransparencyData.RevealMetallicDarkeningStrength;
     Snapshot.BakedStrokeCount = AlphaSnapshot.AuthoredStrokeCount;
     Snapshot.CoverageService = MoveTemp(CoverageService);
     if (!Snapshot.CoverageService.IsValid())
@@ -882,6 +1036,12 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
         }
         WrinkleDependency = FDWCWrinkleSuppressionDependencySnapshot();
     }
+    if (!Snapshot.RevealFallbackWarning.IsEmpty())
+    {
+        Snapshot.SuppressionWarning = Snapshot.SuppressionWarning.IsEmpty()
+            ? Snapshot.RevealFallbackWarning
+            : Snapshot.SuppressionWarning + TEXT("\n") + Snapshot.RevealFallbackWarning;
+    }
     if (!FDWCTransparencyFinalWorkingSetBuilder::Build(
             WetClothingAsset,
             Layer,
@@ -911,14 +1071,21 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
     Snapshot.FinalBuildSignature = Snapshot.WorkingSet.FinalSignature;
     const uint64 PixelCount = static_cast<uint64>(SourcePayload.Resolution.X) *
         static_cast<uint64>(SourcePayload.Resolution.Y);
-    // The canonical source is already accounted as resident shared memory by
-    // the scheduler. A corrected Stage 3 checkpoint creates one private copy;
-    // only that copy belongs to the worker snapshot.
     Snapshot.EstimatedPrivateBytes =
-        (bOwnsStage4SourcePayload ? SourcePayload.GetAllocatedBytes() : 0ull) +
-        Snapshot.WorkingSet.OwnedBytes;
+        Snapshot.WorkingSet.OwnedBytes +
+        Snapshot.WorkingSet.RetainedBytes +
+        static_cast<uint64>(Snapshot.RevealColorPaintStrokes.GetAllocatedSize()) +
+        static_cast<uint64>(Snapshot.CorrectedRevealPixels.GetAllocatedSize()) +
+        static_cast<uint64>(Snapshot.RevealFallbackWarning.GetAllocatedSize());
+    for (const FDWCTransparencyRevealColorStroke& Stroke : Snapshot.RevealColorPaintStrokes)
+    {
+        Snapshot.EstimatedPrivateBytes +=
+            static_cast<uint64>(Stroke.Samples.GetAllocatedSize());
+    }
     Snapshot.EstimatedOutputBytes = PixelCount * sizeof(FColor) *
-        (SourcePayload.bUsesCorrectedRevealCheckpoint ? 2ull : 3ull);
+        (Snapshot.RevealSource == EDWCTransparencyStage4RevealSource::CorrectedCheckpoint
+            ? 2ull
+            : 3ull);
     // Feathering and the two directional dilation passes use bounded scratch
     // arrays; count their peak rather than reserving them as persistent data.
     Snapshot.EstimatedScratchBytes = PixelCount *
@@ -942,7 +1109,8 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
     }
     const FDWCTransparencyEditedMapBakeSnapshot::FImpl& Snapshot = *SnapshotHandle.Impl;
     const FDWCTransparencySourcePayload& SourcePayload = *Snapshot.SourcePayload;
-    const int32 PixelCount = SourcePayload.Resolution.X * SourcePayload.Resolution.Y;
+    const FDWCTransparencyAlphaDomainSnapshot& AlphaDomain = *Snapshot.WorkingSet.AlphaDomain;
+    const int32 PixelCount = AlphaDomain.Resolution.X * AlphaDomain.Resolution.Y;
 
     FWetClothingTransparencyLayerData WorkerLayer;
     WorkerLayer.LayerGuid = Snapshot.LayerGuid;
@@ -954,7 +1122,7 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
     FString AlphaError;
     if (Snapshot.WorkingSet.Alpha.Mode == EDWCTransparencyAlphaSnapshotMode::StrokeReplay &&
         !FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
-            SourcePayload,
+            AlphaDomain,
             Snapshot.WorkingSet.Alpha,
             MaterializedAlphaSnapshot,
             AlphaError,
@@ -973,20 +1141,30 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
         return Result;
     }
     FDWCTransparencyPixelComposeContext AlphaContext;
-    AlphaContext.SourcePayload = &SourcePayload;
+    AlphaContext.AlphaDomain = &AlphaDomain;
     AlphaContext.AlphaSnapshotView = &AlphaView;
     const FDWCWrinkleCoverageCacheValue* WrinkleCoverage =
         Snapshot.WrinkleCoverageLease.GetAs<FDWCWrinkleCoverageCacheValue>();
 
     Result.bAppliedWrinkleSuppression = Snapshot.bHasWrinkleSuppression && WrinkleCoverage != nullptr;
     Result.WarningMessage = Snapshot.SuppressionWarning;
-    Result.FinalPixels = SourcePayload.InnerColorBuffer;
-    Result.FinalRevealSurfacePixels = SourcePayload.RevealSurfaceBuffer;
-    // A raycast source owns the packed Reveal Surface contract even when the
-    // current layer has no valid hits. In that case the alpha stays zero, but
-    // runtime, validation, and rebake currentness remain unambiguous.
-    Result.bContainsRevealSurface = Snapshot.bRequiresRevealSurface;
-    if (!SourcePayload.bUsesCorrectedRevealCheckpoint)
+    const bool bUsesCorrectedReveal =
+        Snapshot.RevealSource == EDWCTransparencyStage4RevealSource::CorrectedCheckpoint;
+    Result.FinalPixels = bUsesCorrectedReveal
+        ? Snapshot.CorrectedRevealPixels
+        : SourcePayload.InnerColorBuffer;
+    Result.bContainsRevealNormal = Snapshot.bRequiresRevealSurface;
+    if (Result.bContainsRevealNormal)
+    {
+        Result.FinalRevealNormalPixels.SetNumUninitialized(PixelCount);
+        for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
+        {
+            Result.FinalRevealNormalPixels[PixelIndex] =
+                FDWCTransparencyRevealSurfaceAuthoringPayload::EncodeRuntimeRevealNormal(
+                    SourcePayload.RevealSurfaceAuthoring[PixelIndex]);
+        }
+    }
+    if (!bUsesCorrectedReveal)
     {
         // Missing or stale Stage 3 checkpoints are reconstructed from the
         // canonical Stage 2 result and serialized Reveal Color strokes.
@@ -996,6 +1174,18 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
             SourcePayload.MaterialSlotIndex,
             WorkerLayer.ManualColorSource.BaseRevealColor,
             Result.FinalPixels);
+        if (!FDWCTransparencyComposite::ApplyRevealMetallicDarkening(
+                Result.FinalPixels,
+                SourcePayload,
+                Snapshot.RevealMetallicDarkeningStrength,
+                CancellationToken))
+        {
+            Result.bCanceled = CancellationToken != nullptr && CancellationToken->IsCanceled();
+            Result.Error = Result.bCanceled
+                ? TEXT("The transparency bake was canceled.")
+                : TEXT("Metallic reveal-color correction could not be applied.");
+            return Result;
+        }
         for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
         {
             Result.FinalPixels[PixelIndex].A = SourcePayload.AutoAlphaBuffer[PixelIndex];
@@ -1011,8 +1201,8 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
             Result.Error = TEXT("The transparency bake was canceled.");
             return Result;
         }
-        const bool bHasValidInnerColor = SourcePayload.ValidHitBuffer.IsValidIndex(PixelIndex) &&
-            SourcePayload.ValidHitBuffer[PixelIndex] != 0;
+        const bool bHasValidInnerColor = AlphaDomain.ValidSource.IsValidIndex(PixelIndex) &&
+            AlphaDomain.ValidSource[PixelIndex];
         const float EditedAlpha = FDWCTransparencyComposite::ResolveEditedAlpha(
             AlphaContext,
             PixelIndex);
@@ -1025,11 +1215,11 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
         uint8 WrinkleSuppression = 0;
         if (Result.bAppliedWrinkleSuppression)
         {
-            const int32 PixelX = PixelIndex % SourcePayload.Resolution.X;
-            const int32 PixelY = PixelIndex / SourcePayload.Resolution.X;
+            const int32 PixelX = PixelIndex % AlphaDomain.Resolution.X;
+            const int32 PixelY = PixelIndex / AlphaDomain.Resolution.X;
             const FVector2f UV(
-                (static_cast<float>(PixelX) + 0.5f) / SourcePayload.Resolution.X,
-                (static_cast<float>(PixelY) + 0.5f) / SourcePayload.Resolution.Y);
+                (static_cast<float>(PixelX) + 0.5f) / AlphaDomain.Resolution.X,
+                (static_cast<float>(PixelY) + 0.5f) / AlphaDomain.Resolution.Y);
             const float Coverage = WrinkleCoverage->SampleCoverage(UV);
             const float Suppression =
                 FDWCWrinkleSuppressionCoverageService::EvaluateSuppression(
@@ -1047,8 +1237,8 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
     }
 
     ApplyCoverageEdgeFeather(
-        SourcePayload.Resolution,
-        SourcePayload.OuterCoverageBuffer,
+        AlphaDomain.Resolution,
+        AlphaDomain.OuterCoverage,
         Snapshot.EdgeFeatherPixels,
         Result.FinalPixels);
     if (CancellationToken != nullptr && CancellationToken->IsCanceled())
@@ -1058,17 +1248,17 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
         return Result;
     }
     DilateOutsideCoverage(
-        SourcePayload.Resolution,
-        SourcePayload.OuterCoverageBuffer,
+        AlphaDomain.Resolution,
+        AlphaDomain.OuterCoverage,
         Snapshot.PaddingPixels,
         Result.FinalPixels);
-    if (Result.bContainsRevealSurface)
+    if (Result.bContainsRevealNormal)
     {
-        DilateRevealSurfaceOutsideCoverage(
-            SourcePayload.Resolution,
-            SourcePayload.OuterCoverageBuffer,
+        DilateRevealNormalOutsideCoverage(
+            AlphaDomain.Resolution,
+            AlphaDomain.OuterCoverage,
             Snapshot.PaddingPixels,
-            Result.FinalRevealSurfacePixels);
+            Result.FinalRevealNormalPixels);
     }
 
     Result.AppliedStrokeCount = FMath::Max(
@@ -1077,7 +1267,7 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
         0);
     Result.AppliedSampleCount = Snapshot.WorkingSet.Alpha.AppliedSampleCount;
     Result.ResultBytes = Result.FinalPixels.GetAllocatedSize() +
-        Result.FinalRevealSurfacePixels.GetAllocatedSize() +
+        Result.FinalRevealNormalPixels.GetAllocatedSize() +
         Result.RebuiltCorrectedRevealPixels.GetAllocatedSize();
     Result.bSucceeded = true;
     return Result;
@@ -1116,7 +1306,8 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
     }
     const int32 ExpectedPixelCount = Snapshot.SourcePayload->Resolution.X * Snapshot.SourcePayload->Resolution.Y;
     if (ComputedResult.FinalPixels.Num() != ExpectedPixelCount ||
-        ComputedResult.FinalRevealSurfacePixels.Num() != ExpectedPixelCount)
+        (ComputedResult.bContainsRevealNormal &&
+         ComputedResult.FinalRevealNormalPixels.Num() != ExpectedPixelCount))
     {
         OutErrorMessage = TEXT("The transparency bake result has an unexpected pixel count.");
         return false;
@@ -1141,9 +1332,10 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
         FDWCTransparencyFinalSettingsSnapshot::FromAuthoredData(CurrentData);
     const FString CurrentRevealSignature = FDWCTransparencySignatureService::BuildRevealSignature(
         CurrentSourceSignature.BuildSignature,
-        *Layer);
-    const FString CurrentRevealSurfaceSignature =
-        FDWCTransparencySignatureService::BuildRevealSurfaceSignature(
+        *Layer,
+        CurrentData.RevealMetallicDarkeningStrength);
+    const FString CurrentRevealNormalSignature =
+        FDWCTransparencySignatureService::BuildRevealNormalSignature(
             CurrentSourceSignature.BuildSignature);
     const FString CurrentAlphaSignature =
         FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(*Layer);
@@ -1155,7 +1347,7 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
             CurrentSettings.TransparencyStrength);
     if (CurrentSourceSignature.BuildSignature != Snapshot.WorkingSet.SourceSignature ||
         CurrentRevealSignature != Snapshot.WorkingSet.RevealSignature ||
-        CurrentRevealSurfaceSignature != Snapshot.WorkingSet.RevealSurfaceSignature ||
+        CurrentRevealNormalSignature != Snapshot.WorkingSet.RevealNormalSignature ||
         CurrentAlphaSignature != Snapshot.WorkingSet.AlphaAuthoringSignature ||
         CurrentSuppressionSettingsSignature != Snapshot.WorkingSet.SuppressionSettingsSignature ||
         CurrentSettings.PaddingPixels != Snapshot.WorkingSet.Settings.PaddingPixels ||
@@ -1219,17 +1411,17 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
         return false;
     }
 
-    UTexture2D* RevealSurfaceTexture = nullptr;
-    if (ComputedResult.bContainsRevealSurface)
+    UTexture2D* RevealNormalTexture = nullptr;
+    if (ComputedResult.bContainsRevealNormal)
     {
-        RevealSurfaceTexture = CreateOrUpdateFinalTransparencyTextureAsset(
+        RevealNormalTexture = CreateOrUpdateFinalTransparencyTextureAsset(
             WetClothingAsset,
             *Layer,
             *Snapshot.SourcePayload,
-            ComputedResult.FinalRevealSurfacePixels,
+            ComputedResult.FinalRevealNormalPixels,
             true,
             OutErrorMessage);
-        if (RevealSurfaceTexture == nullptr)
+        if (RevealNormalTexture == nullptr)
         {
             return false;
         }
@@ -1248,11 +1440,17 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
 
     BakedMap->MaterialSlotIndex = Snapshot.SourcePayload->MaterialSlotIndex;
     BakedMap->TransparencyMap = Texture;
-    BakedMap->RevealSurfaceMap = RevealSurfaceTexture;
-    BakedMap->RevealSurfaceBuildSignature = Snapshot.WorkingSet.RevealSurfaceSignature;
-    BakedMap->bContainsRevealNormalRG = ComputedResult.bContainsRevealSurface;
-    BakedMap->bContainsInnerMetallicB = ComputedResult.bContainsRevealSurface;
-    BakedMap->bContainsRevealSurfaceCoverageAlpha = ComputedResult.bContainsRevealSurface;
+    BakedMap->RevealNormalMap = RevealNormalTexture;
+    BakedMap->RevealNormalBuildSignature = ComputedResult.bContainsRevealNormal
+        ? Snapshot.WorkingSet.RevealNormalSignature
+        : FString();
+    BakedMap->bSourceCoverageBakedIntoRevealNormal = ComputedResult.bContainsRevealNormal;
+    BakedMap->RevealSurfaceMap = nullptr;
+    BakedMap->RevealSurfaceBuildSignature.Reset();
+    BakedMap->bContainsRevealNormalRG = false;
+    BakedMap->bContainsInnerMetallicB = false;
+    BakedMap->bContainsRevealSurfaceCoverageAlpha = false;
+    BakedMap->bMetallicDarkeningBakedIntoColor = true;
     BakedMap->Resolution = Snapshot.SourcePayload->Resolution.X;
     BakedMap->PaddingPixels = Snapshot.PaddingPixels;
     BakedMap->BakedStrokeCount = Snapshot.BakedStrokeCount;
@@ -1262,11 +1460,12 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
     BakedMap->WrinkleSuppressionSettingsSignature = Snapshot.SuppressionSettingsSignature;
     BakedMap->bWrinkleSuppressionBakedIntoAlpha = Snapshot.bHasWrinkleSuppression;
     BakedMap->BuildSignature = Snapshot.FinalBuildSignature;
+    BakedMap->FinalAlphaBuildSignature = Snapshot.WorkingSet.FinalAlphaSignature;
     BakedMap->bContainsColorRGB = true;
     BakedMap->bContainsTransparencyAlpha = true;
 
     OutResult.TransparencyMap = Texture;
-    OutResult.RevealSurfaceMap = RevealSurfaceTexture;
+    OutResult.RevealNormalMap = RevealNormalTexture;
     OutResult.AppliedStrokeCount = ComputedResult.AppliedStrokeCount;
     OutResult.AppliedSampleCount = ComputedResult.AppliedSampleCount;
     OutResult.IgnoredNoHitOverridePixelCount = ComputedResult.IgnoredNoHitOverridePixelCount;

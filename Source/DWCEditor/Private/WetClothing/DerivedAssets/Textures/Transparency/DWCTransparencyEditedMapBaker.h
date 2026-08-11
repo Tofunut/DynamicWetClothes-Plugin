@@ -12,11 +12,28 @@ struct FDWCTransparencyAlphaWorkingSnapshot;
 struct FDWCTransparencyFinalSettingsSnapshot;
 struct FWetClothingTransparencyLayerData;
 
+enum class EDWCTransparencyStage4RevealSource : uint8
+{
+    CorrectedCheckpoint,
+    CanonicalReplay
+};
+
+/** Conservative reservation made before Stage 4 snapshot preparation starts. */
+struct FDWCTransparencyStage4MemoryPlan
+{
+    uint64 ResidentSharedBytes = 0;
+    uint64 SnapshotBytes = 0;
+    uint64 OutputBytes = 0;
+    uint64 ScratchBytes = 0;
+
+    uint64 GetTotalBytes() const;
+};
+
 struct FDWCTransparencyEditedMapBakeResult
 {
     TObjectPtr<UTexture2D> TransparencyMap = nullptr;
-    /** Optional linear runtime payload: RG outer-tangent normal, B metallic, A source coverage. */
-    TObjectPtr<UTexture2D> RevealSurfaceMap = nullptr;
+    /** Optional runtime payload: coverage-weighted outer-tangent normal in RG. */
+    TObjectPtr<UTexture2D> RevealNormalMap = nullptr;
     int32 AppliedStrokeCount = 0;
     int32 AppliedSampleCount = 0;
     int32 IgnoredNoHitOverridePixelCount = 0;
@@ -40,9 +57,13 @@ class FDWCTransparencyEditedMapBakeSnapshot
     bool IsValid() const;
     int32 GetMaterialSlotIndex() const;
     FGuid GetLayerGuid() const;
+    FIntPoint GetSourceResolution() const;
+    const FString& GetSourceBuildSignature() const;
+    int32 GetSourceValidHitCount() const;
+    int32 GetSourceNoHitCount() const;
     /** Bytes uniquely owned by this immutable bake snapshot. */
     uint64 GetEstimatedPrivateBytes() const;
-    /** Bytes returned as final/rebuilt color and Reveal Surface payloads. */
+    /** Bytes returned as final/rebuilt color and Reveal Normal payloads. */
     uint64 GetEstimatedOutputBytes() const;
     /** Peak scratch used by alpha feathering and dilation. */
     uint64 GetEstimatedScratchBytes() const;
@@ -60,8 +81,8 @@ struct FDWCTransparencyEditedMapComputedResult
     bool bCanceled = false;
     FString Error;
     TArray<FColor> FinalPixels;
-    TArray<FColor> FinalRevealSurfacePixels;
-    bool bContainsRevealSurface = false;
+    TArray<FColor> FinalRevealNormalPixels;
+    bool bContainsRevealNormal = false;
     int32 AppliedStrokeCount = 0;
     int32 AppliedSampleCount = 0;
     int32 IgnoredNoHitOverridePixelCount = 0;
@@ -76,6 +97,18 @@ struct FDWCTransparencyEditedMapComputedResult
 class FDWCTransparencyEditedMapBaker
 {
   public:
+    /** Estimates a worst-case prepare/worker peak before any full-resolution allocation. */
+    static bool BuildMemoryPlan(
+        FIntPoint Resolution,
+        uint64 SourcePayloadBytes,
+        uint64 AuthoringInputBytes,
+        bool bRestoresCanonicalArtifacts,
+        FDWCTransparencyStage4MemoryPlan& OutPlan,
+        FString& OutErrorMessage);
+
+    /** Estimates the canonical Stage 2 payload without restoring its Temp artifacts. */
+    static uint64 EstimateCanonicalSourcePayloadBytes(FIntPoint Resolution);
+
     static bool BuildSnapshot(
         const UWetClothingAsset& WetClothingAsset,
         const FWetClothingTransparencyLayerData& Layer,

@@ -28,6 +28,7 @@ struct FDWCTransparencyAlphaIncrementalJobInput
     TArray<FDWCTransparencyAlphaTilePayload> SnapshotTiles;
     TArray<FDWCTransparencyAlphaComposeTileSnapshot> ComposeTiles;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
+    float RevealMetallicDarkeningStrength = 0.0f;
     uint64 ExpectedAlphaRevision = 0;
     FDWCEditorPreviewRegionTarget PreviewTarget;
 };

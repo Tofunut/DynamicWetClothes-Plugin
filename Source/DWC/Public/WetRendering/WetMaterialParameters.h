@@ -41,9 +41,9 @@ namespace DWCWetMaterialParameters
 
     DWC_API const FName& TransparencyMap();
     DWC_API const FName& UseTransparencyMap();
-    DWC_API const FName& RevealSurfaceMap();
-    DWC_API const FName& UseRevealSurfaceMap();
-    DWC_API const FName& RevealMetallicDarkeningStrength();
+    DWC_API const FName& RevealNormalMap();
+    DWC_API const FName& UseRevealNormalMap();
+    DWC_API const FName& RevealNormalStrength();
     DWC_API const FName& TransparencyWetnessMin();
     DWC_API const FName& TransparencyWetnessMax();
     DWC_API const FName& TransparencyUVChannel();

@@ -344,6 +344,10 @@ struct DWC_API FWetClothingGeneratedWetMaterialOverride
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
     FString GenerationSignature;
 
+    /** Effective source graph and material-instance state copied into the generated set. */
+    UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
+    FString SourceMaterialSignature;
+
     /** Material-generator contract version used to create this set. */
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
     int32 GeneratorVersion = 0;

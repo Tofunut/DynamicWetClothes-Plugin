@@ -1,6 +1,7 @@
 // Copyright 2026 Team Tofunut. All Rights Reserved.
 
 #include "WetRendering/WetRenderStage.h"
+#include "WetRendering/DWCTransparencyRuntimeContract.h"
 #include "Engine/SkeletalMesh.h"
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
@@ -9,6 +10,7 @@
 #include "Core/WetClothingSettings.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "WetRendering/WetVertexColorBuffer.h"
+#include "WetRendering/DWCWetVertexColorContract.h"
 #include "WetRendering/DWCGPUResourceSubsystem.h"
 #include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
@@ -374,9 +376,9 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
 
     if (DWCWetMaterialParameters::TransparencyMap().IsNone() &&
         DWCWetMaterialParameters::UseTransparencyMap().IsNone() &&
-        DWCWetMaterialParameters::RevealSurfaceMap().IsNone() &&
-        DWCWetMaterialParameters::UseRevealSurfaceMap().IsNone() &&
-        DWCWetMaterialParameters::RevealMetallicDarkeningStrength().IsNone() &&
+        DWCWetMaterialParameters::RevealNormalMap().IsNone() &&
+        DWCWetMaterialParameters::UseRevealNormalMap().IsNone() &&
+        DWCWetMaterialParameters::RevealNormalStrength().IsNone() &&
         DWCWetMaterialParameters::TransparencyWetnessMin().IsNone() &&
         DWCWetMaterialParameters::TransparencyWetnessMax().IsNone() &&
         DWCWetMaterialParameters::TransparencyUVChannel().IsNone())
@@ -402,17 +404,17 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
             {
                 MID->SetScalarParameterValue(DWCWetMaterialParameters::UseTransparencyMap(), 0.0f);
             }
-            if (!DWCWetMaterialParameters::RevealSurfaceMap().IsNone())
+            if (!DWCWetMaterialParameters::RevealNormalMap().IsNone())
             {
-                MID->SetTextureParameterValue(DWCWetMaterialParameters::RevealSurfaceMap(), nullptr);
+                MID->SetTextureParameterValue(DWCWetMaterialParameters::RevealNormalMap(), nullptr);
             }
-            if (!DWCWetMaterialParameters::UseRevealSurfaceMap().IsNone())
+            if (!DWCWetMaterialParameters::UseRevealNormalMap().IsNone())
             {
-                MID->SetScalarParameterValue(DWCWetMaterialParameters::UseRevealSurfaceMap(), 0.0f);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::UseRevealNormalMap(), 0.0f);
             }
-            if (!DWCWetMaterialParameters::RevealMetallicDarkeningStrength().IsNone())
+            if (!DWCWetMaterialParameters::RevealNormalStrength().IsNone())
             {
-                MID->SetScalarParameterValue(DWCWetMaterialParameters::RevealMetallicDarkeningStrength(), 0.0f);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::RevealNormalStrength(), 0.0f);
             }
             if (!DWCWetMaterialParameters::TransparencyUVChannel().IsNone())
             {
@@ -424,12 +426,6 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
 
     const float  SafeWetnessMin = FMath::Clamp(Receiver.TransparencyWetnessMin, 0.0f, 1.0f);
     const float  SafeWetnessMax = FMath::Max(SafeWetnessMin, FMath::Clamp(Receiver.TransparencyWetnessMax, 0.0f, 1.0f));
-    const float SafeRevealMetallicDarkening = Receiver.WetClothingAsset != nullptr
-        ? FMath::Clamp(
-            Receiver.WetClothingAsset->Authored.TransparencyData.RevealMetallicDarkeningStrength,
-            0.0f,
-            1.0f)
-        : 0.0f;
     TArray<bool> bTransparencyMapAssigned;
     bTransparencyMapAssigned.Init(false, Receiver.WetMaterialInstances->Num());
 
@@ -456,7 +452,9 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
             const FWetClothingBakedTransparencyMap* BakedMap =
                 Receiver.WetClothingAsset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(
                     MaterialSlotIndex);
-            if (BakedMap == nullptr || BakedMap->TransparencyMap == nullptr)
+            const FDWCTransparencyRuntimeBinding TransparencyBinding =
+                FDWCTransparencyRuntimeContract::Resolve(BakedMap, Layer);
+            if (!TransparencyBinding.UsesTransparencyMap())
             {
                 continue;
             }
@@ -469,33 +467,31 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
 
             if (!DWCWetMaterialParameters::TransparencyMap().IsNone())
             {
-                MID->SetTextureParameterValue(DWCWetMaterialParameters::TransparencyMap(), BakedMap->TransparencyMap);
+                MID->SetTextureParameterValue(
+                    DWCWetMaterialParameters::TransparencyMap(),
+                    TransparencyBinding.TransparencyMap);
             }
             if (!DWCWetMaterialParameters::UseTransparencyMap().IsNone())
             {
                 MID->SetScalarParameterValue(DWCWetMaterialParameters::UseTransparencyMap(), 1.0f);
             }
-            const bool bHasRevealSurface = BakedMap->RevealSurfaceMap != nullptr &&
-                BakedMap->bContainsRevealNormalRG &&
-                BakedMap->bContainsInnerMetallicB &&
-                BakedMap->bContainsRevealSurfaceCoverageAlpha;
-            if (!DWCWetMaterialParameters::RevealSurfaceMap().IsNone())
+            if (!DWCWetMaterialParameters::RevealNormalMap().IsNone())
             {
                 MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::RevealSurfaceMap(),
-                    bHasRevealSurface ? BakedMap->RevealSurfaceMap.Get() : nullptr);
+                    DWCWetMaterialParameters::RevealNormalMap(),
+                    TransparencyBinding.RevealNormalMap);
             }
-            if (!DWCWetMaterialParameters::UseRevealSurfaceMap().IsNone())
+            if (!DWCWetMaterialParameters::UseRevealNormalMap().IsNone())
             {
                 MID->SetScalarParameterValue(
-                    DWCWetMaterialParameters::UseRevealSurfaceMap(),
-                    bHasRevealSurface ? 1.0f : 0.0f);
+                    DWCWetMaterialParameters::UseRevealNormalMap(),
+                    TransparencyBinding.UsesRevealNormalMap() ? 1.0f : 0.0f);
             }
-            if (!DWCWetMaterialParameters::RevealMetallicDarkeningStrength().IsNone())
+            if (!DWCWetMaterialParameters::RevealNormalStrength().IsNone())
             {
                 MID->SetScalarParameterValue(
-                    DWCWetMaterialParameters::RevealMetallicDarkeningStrength(),
-                    bHasRevealSurface ? SafeRevealMetallicDarkening : 0.0f);
+                    DWCWetMaterialParameters::RevealNormalStrength(),
+                    TransparencyBinding.RevealNormalStrength);
             }
             if (!DWCWetMaterialParameters::TransparencyWetnessMin().IsNone())
             {
@@ -532,17 +528,17 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
         {
             MID->SetScalarParameterValue(DWCWetMaterialParameters::UseTransparencyMap(), 0.0f);
         }
-        if (!DWCWetMaterialParameters::RevealSurfaceMap().IsNone())
+        if (!DWCWetMaterialParameters::RevealNormalMap().IsNone())
         {
-            MID->SetTextureParameterValue(DWCWetMaterialParameters::RevealSurfaceMap(), nullptr);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::RevealNormalMap(), nullptr);
         }
-        if (!DWCWetMaterialParameters::UseRevealSurfaceMap().IsNone())
+        if (!DWCWetMaterialParameters::UseRevealNormalMap().IsNone())
         {
-            MID->SetScalarParameterValue(DWCWetMaterialParameters::UseRevealSurfaceMap(), 0.0f);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::UseRevealNormalMap(), 0.0f);
         }
-        if (!DWCWetMaterialParameters::RevealMetallicDarkeningStrength().IsNone())
+        if (!DWCWetMaterialParameters::RevealNormalStrength().IsNone())
         {
-            MID->SetScalarParameterValue(DWCWetMaterialParameters::RevealMetallicDarkeningStrength(), 0.0f);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::RevealNormalStrength(), 0.0f);
         }
         if (!DWCWetMaterialParameters::TransparencyWetnessMin().IsNone())
         {
@@ -578,13 +574,7 @@ FLinearColor FWetRenderStage::MakeWetVertexColor(
         WetPartColor = *FoundColor;
     }
 
-    // VertexColor.R is reserved for CPU wetness. GBA stores the RGB Wet Part debug color.
-    // GPU rendering reads wetness from the existing wetness texture and uses the same GBA color.
-    return FLinearColor(
-        Wetness,
-        FMath::Clamp(WetPartColor.R, 0.0f, 1.0f),
-        FMath::Clamp(WetPartColor.G, 0.0f, 1.0f),
-        FMath::Clamp(WetPartColor.B, 0.0f, 1.0f));
+    return DWCWetVertexColorContract::Encode(Wetness, WetPartColor);
 }
 
 void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)

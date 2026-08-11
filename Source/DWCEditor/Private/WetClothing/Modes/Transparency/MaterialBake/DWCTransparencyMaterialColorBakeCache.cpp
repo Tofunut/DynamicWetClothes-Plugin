@@ -476,7 +476,10 @@ void FDWCTransparencyMaterialColorBakeCache::ConfigureResourceGovernor(
 bool FDWCTransparencyMaterialColorBakeKey::IsValid() const
 {
     return SourceMeshPath.IsValid() && MaterialSlotIndex != INDEX_NONE &&
-        SourceUVChannel >= 0 && LogicalResolution > 0 && !MaterialBakeSignature.IsEmpty();
+        SourceUVChannel >= 0 && LogicalResolution > 0 &&
+        IdentityVersion == FDWCTransparencyMaterialSurfaceBakeIdentity::Version &&
+        !CacheIdentity.IsEmpty() && !SourceMeshContentSignature.IsEmpty() &&
+        !EffectiveMaterialSignature.IsEmpty() && !PlacementSignature.IsEmpty();
 }
 
 bool FDWCTransparencyMaterialColorBakeKey::operator==(
@@ -486,7 +489,10 @@ bool FDWCTransparencyMaterialColorBakeKey::operator==(
         OwnerAssetPath == Other.OwnerAssetPath &&
         MaterialSlotIndex == Other.MaterialSlotIndex &&
         SourceUVChannel == Other.SourceUVChannel && LogicalResolution == Other.LogicalResolution &&
-        MaterialBakeSignature == Other.MaterialBakeSignature;
+        IdentityVersion == Other.IdentityVersion && CacheIdentity == Other.CacheIdentity &&
+        SourceMeshContentSignature == Other.SourceMeshContentSignature &&
+        EffectiveMaterialSignature == Other.EffectiveMaterialSignature &&
+        PlacementSignature == Other.PlacementSignature;
 }
 
 uint32 GetTypeHash(const FDWCTransparencyMaterialColorBakeKey& Key)
@@ -496,7 +502,11 @@ uint32 GetTypeHash(const FDWCTransparencyMaterialColorBakeKey& Key)
     Hash = HashCombineFast(Hash, GetTypeHash(Key.MaterialSlotIndex));
     Hash = HashCombineFast(Hash, GetTypeHash(Key.SourceUVChannel));
     Hash = HashCombineFast(Hash, GetTypeHash(Key.LogicalResolution));
-    return HashCombineFast(Hash, GetTypeHash(Key.MaterialBakeSignature));
+    Hash = HashCombineFast(Hash, GetTypeHash(Key.IdentityVersion));
+    Hash = HashCombineFast(Hash, GetTypeHash(Key.CacheIdentity));
+    Hash = HashCombineFast(Hash, GetTypeHash(Key.SourceMeshContentSignature));
+    Hash = HashCombineFast(Hash, GetTypeHash(Key.EffectiveMaterialSignature));
+    return HashCombineFast(Hash, GetTypeHash(Key.PlacementSignature));
 }
 
 bool FDWCTransparencyMaterialColorBakeResult::InitializePayload(
@@ -714,9 +724,15 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
     Key.MaterialSlotIndex = MaterialSlotIndex;
     Key.SourceUVChannel = SourceUVChannel;
     Key.LogicalResolution = Resolution;
-    Key.MaterialBakeSignature = FDWCTransparencySignatureService::BuildMaterialBakeSignature(
-        &EffectiveMaterial, SourceUVChannel, Resolution) + FString::Printf(
-            TEXT("|Placement=%s"), *BakeTransform.ToHumanReadableString());
+    const FDWCTransparencyMaterialSurfaceBakeIdentity Identity =
+        FDWCTransparencySignatureService::BuildMaterialSurfaceBakeIdentity(
+            &SourceMesh, &EffectiveMaterial, BakeTransform, MaterialSlotIndex,
+            SourceUVChannel, Resolution);
+    Key.IdentityVersion = FDWCTransparencyMaterialSurfaceBakeIdentity::Version;
+    Key.CacheIdentity = Identity.Digest;
+    Key.SourceMeshContentSignature = Identity.SourceMeshContentSignature;
+    Key.EffectiveMaterialSignature = Identity.EffectiveMaterialSignature;
+    Key.PlacementSignature = Identity.PlacementSignature;
     if (!Key.IsValid())
     {
         OutError = TEXT("Could not build a valid source material color cache key.");
@@ -742,7 +758,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
     UTexture2D* PersistentMetallicTexture = nullptr;
     if (FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialSurface(
             Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, Resolution,
-            Key.MaterialBakeSignature, true, PersistentReference,
+            Identity, true, PersistentReference,
             PersistentBaseColorTexture, PersistentNormalTexture, PersistentMetallicTexture))
     {
         FWetClothingTextureReadback PersistentBaseColorReadback;
@@ -818,7 +834,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
                 Payload.TangentNormal.Pixels, Payload.bHasBakedNormalProperty,
                 Payload.Metallic.PhysicalResolution, Payload.Metallic.Kind,
                 Payload.Metallic.Values, Payload.bHasBakedMetallicProperty,
-                Key.MaterialBakeSignature, CommittedBaseColorTexture, CommittedNormalTexture,
+                Identity, CommittedBaseColorTexture, CommittedNormalTexture,
                 CommittedMetallicTexture, OutError))
         {
             return nullptr;
@@ -863,48 +879,63 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
     }
 
     const FSessionBudgetContext* SessionContext = GSessionBudgetContexts.Find(FObjectKey(&Asset));
-    if (const TSharedPtr<FDWCEditorResourceGovernor> Governor =
-            SessionContext != nullptr ? SessionContext->ResourceGovernor.Pin() : nullptr)
+    bool bRetainInCache =
+        SessionContext == nullptr || Result->AllocatedBytes <= SessionContext->CacheBudgetBytes;
+    const TSharedPtr<FDWCEditorResourceGovernor> Governor =
+        SessionContext != nullptr ? SessionContext->ResourceGovernor.Pin() : nullptr;
+    if (SessionContext != nullptr && !Governor.IsValid())
     {
-        FDWCEditorResourceReservationRequest Request;
-        Request.Pool = EDWCEditorResourcePool::SharedCacheCPU;
-        Request.Bytes = FMath::Max<uint64>(Result->AllocatedBytes, 1);
-        Request.Owner = SessionContext->MemoryOwner;
-        Request.DebugName = TEXT("Transparency material color cache");
-        FDWCEditorMemoryLease Lease = Governor->TryAcquire(Request);
-        while (!Lease.IsValid() && !GMaterialColorCache.IsEmpty())
+        bRetainInCache = false;
+    }
+    else if (Governor.IsValid())
+    {
+        if (bRetainInCache)
         {
-            const FDWCTransparencyMaterialColorBakeKey* OldestKey = nullptr;
-            uint64 OldestSerial = MAX_uint64;
-            for (const TPair<FDWCTransparencyMaterialColorBakeKey, FCacheEntry>& Pair : GMaterialColorCache)
+            FDWCEditorResourceReservationRequest Request;
+            Request.Pool = EDWCEditorResourcePool::SharedCacheCPU;
+            Request.Bytes = FMath::Max<uint64>(Result->AllocatedBytes, 1);
+            Request.Owner = SessionContext->MemoryOwner;
+            Request.DebugName = TEXT("Transparency material color cache");
+            FDWCEditorMemoryLease Lease = Governor->TryAcquire(Request);
+            while (!Lease.IsValid() && !GMaterialColorCache.IsEmpty())
             {
-                if (Pair.Key.OwnerAssetPath == Key.OwnerAssetPath &&
-                    Pair.Value.LastUsedSerial < OldestSerial)
+                const FDWCTransparencyMaterialColorBakeKey* OldestKey = nullptr;
+                uint64 OldestSerial = MAX_uint64;
+                for (const TPair<FDWCTransparencyMaterialColorBakeKey, FCacheEntry>& Pair : GMaterialColorCache)
                 {
-                    OldestKey = &Pair.Key;
-                    OldestSerial = Pair.Value.LastUsedSerial;
+                    if (Pair.Key.OwnerAssetPath == Key.OwnerAssetPath &&
+                        Pair.Value.LastUsedSerial < OldestSerial)
+                    {
+                        OldestKey = &Pair.Key;
+                        OldestSerial = Pair.Value.LastUsedSerial;
+                    }
                 }
+                if (OldestKey == nullptr)
+                {
+                    break;
+                }
+                const FDWCTransparencyMaterialColorBakeKey KeyToRemove = *OldestKey;
+                GMaterialColorCache.Remove(KeyToRemove);
+                Lease = Governor->TryAcquire(Request);
             }
-            if (OldestKey == nullptr)
+            if (Lease.IsValid())
             {
-                break;
+                Result->MemoryLease = MakeShared<FDWCEditorMemoryLease, ESPMode::ThreadSafe>(MoveTemp(Lease));
             }
-            const FDWCTransparencyMaterialColorBakeKey KeyToRemove = *OldestKey;
-            GMaterialColorCache.Remove(KeyToRemove);
-            Lease = Governor->TryAcquire(Request);
+            else
+            {
+                bRetainInCache = false;
+            }
         }
-        if (!Lease.IsValid())
-        {
-            OutError = TEXT("The shared editor cache budget cannot retain the material color result.");
-            return nullptr;
-        }
-        Result->MemoryLease = MakeShared<FDWCEditorMemoryLease, ESPMode::ThreadSafe>(MoveTemp(Lease));
     }
 
-    FCacheEntry& Entry = GMaterialColorCache.Add(Key);
-    Entry.Result = Result;
-    Entry.LastUsedSerial = ++GUseSerial;
-    TrimCache(Key, SessionContext != nullptr ? SessionContext->CacheBudgetBytes : DefaultCacheBudgetBytes);
+    if (bRetainInCache)
+    {
+        FCacheEntry& Entry = GMaterialColorCache.Add(Key);
+        Entry.Result = Result;
+        Entry.LastUsedSerial = ++GUseSerial;
+        TrimCache(Key, SessionContext != nullptr ? SessionContext->CacheBudgetBytes : DefaultCacheBudgetBytes);
+    }
     OutError.Reset();
     return Result;
 }

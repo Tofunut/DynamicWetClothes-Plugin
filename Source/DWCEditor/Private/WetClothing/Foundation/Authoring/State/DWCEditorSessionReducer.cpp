@@ -88,6 +88,7 @@ namespace
             FMath::Clamp(Settings.WrinkleSuppressionStrength, 0.0f, 5.0f);
         Settings.WrinkleMaskThreshold = FMath::Clamp(Settings.WrinkleMaskThreshold, 0.0f, 1.0f);
         Settings.WrinkleMaskSoftness = FMath::Clamp(Settings.WrinkleMaskSoftness, 0.0f, 1.0f);
+        Settings.RevealNormalStrength = FMath::Clamp(Settings.RevealNormalStrength, 0.0f, 4.0f);
     }
 
     bool AreTransparencyPreviewSettingsEquivalent(
@@ -97,7 +98,10 @@ namespace
         return FMath::IsNearlyEqual(A.TransparencyStrength, B.TransparencyStrength) &&
             FMath::IsNearlyEqual(A.WrinkleSuppressionStrength, B.WrinkleSuppressionStrength) &&
             FMath::IsNearlyEqual(A.WrinkleMaskThreshold, B.WrinkleMaskThreshold) &&
-            FMath::IsNearlyEqual(A.WrinkleMaskSoftness, B.WrinkleMaskSoftness);
+            FMath::IsNearlyEqual(A.WrinkleMaskSoftness, B.WrinkleMaskSoftness) &&
+            FMath::IsNearlyEqual(A.RevealNormalStrength, B.RevealNormalStrength) &&
+            A.bShowRevealNormal == B.bShowRevealNormal &&
+            A.RevealNormalSource == B.RevealNormalSource;
     }
 
     EDWCEditorSessionEffect EffectsForAuthoringImpact(const EDWCEditorAuthoringImpact Impact)

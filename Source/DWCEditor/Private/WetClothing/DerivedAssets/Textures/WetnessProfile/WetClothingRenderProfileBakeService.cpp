@@ -407,20 +407,20 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
             continue;
         }
 
-        FWetClothingGeneratedWetMaterialOverride* Override =
-            WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
-                [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
-                {
-                    return Candidate.MaterialSlotIndex == MaterialSlotIndex;
-                });
-        if (Override == nullptr)
+        FString MetadataError;
+        if (!FWCAMaterialGenerator::CommitGeneratedMaterialOverride(
+                WetClothingAsset,
+                MaterialSlotIndex,
+                SourceMaterial,
+                MaterialSet,
+                &MetadataError))
         {
-            Override = &WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
-            Override->MaterialSlotIndex = MaterialSlotIndex;
+            Warnings.Add(FString::Printf(
+                TEXT("Slot %d material metadata commit failed: %s"),
+                MaterialSlotIndex,
+                *MetadataError));
+            continue;
         }
-        Override->SourceMaterial = SourceMaterial;
-        Override->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-        Override->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
 
         if (USkeletalMesh* RuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh())
         {

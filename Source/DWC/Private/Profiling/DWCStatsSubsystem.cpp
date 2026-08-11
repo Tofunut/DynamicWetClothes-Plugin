@@ -11,6 +11,7 @@
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "WetRendering/DWCGPUResourceSubsystem.h"
+#include "WetRendering/DWCTransparencyRuntimeContract.h"
 
 namespace
 {
@@ -455,15 +456,16 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                     const FWetClothingBakedTransparencyMap* TransparencyMap =
                         WetClothingAsset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(
                             MaterialSlotIndex);
-                    if (TransparencyMap == nullptr ||
-                        TransparencyMap->TransparencyMap == nullptr)
+                    const FDWCTransparencyRuntimeBinding TransparencyBinding =
+                        FDWCTransparencyRuntimeContract::Resolve(TransparencyMap, TransparencyLayer);
+                    if (!TransparencyBinding.UsesTransparencyMap())
                     {
                         continue;
                     }
 
                     ++OutSnapshot.TransparencyMaterialBindingCount;
-                    AddUniqueResidentTexture(
-                        TransparencyMap->TransparencyMap,
+                    FDWCTransparencyRuntimeContract::AccumulateResidentTextureUsage(
+                        TransparencyBinding,
                         SeenTransparencyTextures,
                         OutSnapshot.TransparencyTextureCount,
                         OutSnapshot.TransparencyTextureGPUBytes);

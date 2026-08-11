@@ -177,21 +177,27 @@ namespace
                 };
 
                 CheckFinalTexture(BakedMap.TransparencyMap.Get(), TEXT("Transparency Map"));
-                CheckFinalTexture(BakedMap.RevealSurfaceMap.Get(), TEXT("Reveal Surface Map"));
-                if (Layer.RequiresRevealSurface() && !BakedMap.HasCompleteRevealSurfacePayload())
+                CheckFinalTexture(BakedMap.RevealNormalMap.Get(), TEXT("Reveal Normal Map"));
+                if (BakedMap.HasAnyLegacyRevealSurfaceData())
                 {
                     OutFinalIssues.AddUnique(FString::Printf(
-                        TEXT("Slot %d uses a raycast Transparency source but has no complete runtime Reveal Surface Map."),
+                        TEXT("Slot %d contains deprecated packed Reveal Surface runtime data. Re-bake Transparency Textures; legacy data is not used by preview or runtime materials."),
+                        BakedMap.MaterialSlotIndex));
+                }
+                if (Layer.RequiresRuntimeRevealNormal() && !BakedMap.HasRuntimeRevealNormalPayload())
+                {
+                    OutFinalIssues.AddUnique(FString::Printf(
+                        TEXT("Slot %d uses a raycast Transparency source but has no coverage-weighted runtime Reveal Normal Map."),
                         BakedMap.MaterialSlotIndex));
                 }
                 else if (!Layer.RequiresRevealSurface() &&
-                    (BakedMap.bContainsRevealNormalRG != BakedMap.bContainsInnerMetallicB ||
-                     BakedMap.bContainsRevealNormalRG != BakedMap.bContainsRevealSurfaceCoverageAlpha ||
-                     (BakedMap.bContainsRevealNormalRG && BakedMap.RevealSurfaceMap == nullptr) ||
-                     (!BakedMap.bContainsRevealNormalRG && BakedMap.RevealSurfaceMap != nullptr)))
+                    (BakedMap.RevealNormalMap != nullptr ||
+                     !BakedMap.RevealNormalBuildSignature.IsEmpty() ||
+                     BakedMap.bSourceCoverageBakedIntoRevealNormal) &&
+                    !BakedMap.HasRuntimeRevealNormalPayload())
                 {
                     OutFinalIssues.AddUnique(FString::Printf(
-                        TEXT("Slot %d has an inconsistent optional Reveal Surface payload."),
+                        TEXT("Slot %d has inconsistent optional Reveal Normal metadata."),
                         BakedMap.MaterialSlotIndex));
                 }
             }

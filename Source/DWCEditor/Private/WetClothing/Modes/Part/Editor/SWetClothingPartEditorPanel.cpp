@@ -3220,102 +3220,105 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
         }
     }
 
-    UMaterialInterface* SourceMaterial = SelectedMaterial;
     UWetClothingAsset*  WetClothingAssetPtr = WetClothingAsset.Get();
-
-    const FWCAMaterialGenerator::FOptions MaterialSetupOptions =
-        FWCAMaterialGenerator::MakeOptionsForAsset(
-            WetClothingAssetPtr,
-            EDWCSimulationMode::VertexCPU,
-            SelectedMaterialSlotIndex);
-    const FWetClothingUnifiedMaterialSetupResult MaterialSet =
-        FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
-
-    FString    ResultMessage = MaterialSet.Message;
-    const bool bSucceeded =
-        MaterialSet.bSucceeded && MaterialSet.GeneratedMaterial != nullptr &&
-        MaterialSet.GeneratedMaterialInstance != nullptr;
-
-    if (bSucceeded && SourceMaterial != nullptr)
+    USkeletalMesh*       RuntimeMesh =
+        WetClothingAssetPtr != nullptr ? WetClothingAssetPtr->GetRuntimeSkeletalMesh() : nullptr;
+    UMaterialInterface* SourceMaterial = FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
+        WetClothingAssetPtr,
+        SelectedMaterialSlotIndex,
+        SelectedMaterial);
+    if (WetClothingAssetPtr == nullptr || RuntimeMesh == nullptr || SourceMaterial == nullptr)
     {
-        if (WetClothingAssetPtr != nullptr)
+        FMessageDialog::Open(
+            EAppMsgCategory::Error,
+            EAppMsgType::Ok,
+            LOCTEXT("ApplyMaterialSetupMissingInput", "A WCA, runtime mesh, and original source material are required."));
+        return FReply::Handled();
+    }
+
+    const TArray<FSkeletalMaterial>& Materials = RuntimeMesh->GetMaterials();
+    TArray<int32> AssignedSlotIndices;
+    for (int32 MaterialIndex = 0; MaterialIndex < Materials.Num(); ++MaterialIndex)
+    {
+        UMaterialInterface* CandidateSource = FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
+            WetClothingAssetPtr,
+            MaterialIndex,
+            Materials[MaterialIndex].MaterialInterface);
+        if (CandidateSource == SourceMaterial ||
+            SWetClothingPartEditorPanelLocal::IsSameMaterialFamily(CandidateSource, SourceMaterial))
         {
-            if (USkeletalMesh* GeneratedDataUV = WetClothingAssetPtr->GetRuntimeSkeletalMesh())
-            {
-                const TArray<FSkeletalMaterial>& Materials = GeneratedDataUV->GetMaterials();
-                TArray<int32>                    AssignedSlotIndices;
-                for (int32 MaterialIndex = 0; MaterialIndex < Materials.Num(); ++MaterialIndex)
-                {
-                    if (SWetClothingPartEditorPanelLocal::IsSameMaterialFamily(
-                            Materials[MaterialIndex].MaterialInterface,
-                            SourceMaterial))
-                    {
-                        AssignedSlotIndices.Add(MaterialIndex);
-                    }
-                }
-
-                if (AssignedSlotIndices.Num() > 0)
-                {
-                    WetClothingAssetPtr->Modify();
-                    GeneratedDataUV->Modify();
-                    for (const int32 MaterialIndex : AssignedSlotIndices)
-                    {
-                        FWetClothingGeneratedWetMaterialOverride* ExistingOverride = WetClothingAssetPtr->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
-                            [MaterialIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
-                            {
-                                return MaterialOverride.MaterialSlotIndex == MaterialIndex;
-                            });
-
-                        if (ExistingOverride == nullptr)
-                        {
-                            ExistingOverride = &WetClothingAssetPtr->Derived.Inline.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
-                            ExistingOverride->MaterialSlotIndex = MaterialIndex;
-                        }
-
-                        ExistingOverride->SourceMaterial = SourceMaterial;
-                        ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-                        ExistingOverride->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
-                        GeneratedDataUV->GetMaterials()[MaterialIndex].MaterialInterface =
-                            MaterialSet.GeneratedMaterialInstance;
-                        FWCAEditorWidgets::MarkMaterialSlotWettable(WetClothingAssetPtr, MaterialIndex);
-                    }
-                    GeneratedDataUV->MarkPackageDirty();
-                    WetClothingAssetPtr->MarkPackageDirty();
-                    RefreshMaterialSlotItems();
-
-                    FString AssignedSlotText;
-                    for (int32 Index = 0; Index < AssignedSlotIndices.Num(); ++Index)
-                    {
-                        if (Index > 0)
-                        {
-                            AssignedSlotText += TEXT(", ");
-                        }
-                        AssignedSlotText += FString::FromInt(AssignedSlotIndices[Index]);
-                    }
-
-                    ResultMessage += FString::Printf(
-                        TEXT("\nStored shared '%s', CPU '%s', and GPU '%s' as runtime wet material overrides for %d material slot(s) on '%s': %s."),
-                        *MaterialSet.GeneratedMaterial->GetName(),
-                        *MaterialSet.GeneratedMaterialInstance->GetName(),
-                        *MaterialSet.GeneratedMaterialInstance->GetName(),
-                        AssignedSlotIndices.Num(),
-                        *GeneratedDataUV->GetName(),
-                        *AssignedSlotText);
-
-                    if (PreviewViewport.IsValid())
-                    {
-                        PreviewViewport->SetHighlightedMaterialSlot(SelectedMaterialSlotIndex);
-                    }
-                    if (DetailsView.IsValid())
-                    {
-                        DetailsView->ForceRefresh();
-                    }
-                }
-            }
+            AssignedSlotIndices.Add(MaterialIndex);
         }
     }
 
-    const EAppMsgCategory MessageCategory = bSucceeded ? EAppMsgCategory::Success : EAppMsgCategory::Error;
+    TArray<FString> UpdatedSlots;
+    TArray<FString> Failures;
+    WetClothingAssetPtr->Modify();
+    RuntimeMesh->Modify();
+    for (const int32 MaterialIndex : AssignedSlotIndices)
+    {
+        UMaterialInterface* SlotSource = FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
+            WetClothingAssetPtr,
+            MaterialIndex,
+            Materials[MaterialIndex].MaterialInterface);
+        const FWCAMaterialGenerator::FOptions Options =
+            FWCAMaterialGenerator::MakeOptionsForAsset(
+                WetClothingAssetPtr,
+                EDWCSimulationMode::VertexCPU,
+                MaterialIndex);
+        const FWetClothingUnifiedMaterialSetupResult MaterialSet =
+            FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SlotSource, Options);
+        if (!MaterialSet.bSucceeded || MaterialSet.GeneratedMaterial == nullptr ||
+            MaterialSet.GeneratedMaterialInstance == nullptr)
+        {
+            Failures.Add(FString::Printf(TEXT("Slot %d: %s"), MaterialIndex, *MaterialSet.Message));
+            continue;
+        }
+
+        FString MetadataError;
+        if (!FWCAMaterialGenerator::CommitGeneratedMaterialOverride(
+                WetClothingAssetPtr,
+                MaterialIndex,
+                SlotSource,
+                MaterialSet,
+                &MetadataError))
+        {
+            Failures.Add(FString::Printf(TEXT("Slot %d: %s"), MaterialIndex, *MetadataError));
+            continue;
+        }
+
+        RuntimeMesh->GetMaterials()[MaterialIndex].MaterialInterface = MaterialSet.GeneratedMaterialInstance;
+        FWCAEditorWidgets::MarkMaterialSlotWettable(WetClothingAssetPtr, MaterialIndex);
+        UpdatedSlots.Add(FString::Printf(TEXT("Slot %d -> %s"), MaterialIndex, *GetNameSafe(MaterialSet.GeneratedMaterialInstance)));
+    }
+
+    if (!UpdatedSlots.IsEmpty())
+    {
+        RuntimeMesh->MarkPackageDirty();
+        WetClothingAssetPtr->MarkPackageDirty();
+        RefreshMaterialSlotItems();
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->SetHighlightedMaterialSlot(SelectedMaterialSlotIndex);
+        }
+        if (DetailsView.IsValid())
+        {
+            DetailsView->ForceRefresh();
+        }
+    }
+
+    FString ResultMessage = UpdatedSlots.IsEmpty()
+        ? TEXT("No DWC material overrides were generated.")
+        : FString::Printf(TEXT("Generated unified DWC materials:\n%s"), *FString::Join(UpdatedSlots, TEXT("\n")));
+    if (!Failures.IsEmpty())
+    {
+        ResultMessage += FString::Printf(TEXT("\n\nFailed:\n%s"), *FString::Join(Failures, TEXT("\n")));
+    }
+
+    const bool bSucceeded = !UpdatedSlots.IsEmpty() && Failures.IsEmpty();
+    const EAppMsgCategory MessageCategory = bSucceeded
+        ? EAppMsgCategory::Success
+        : (UpdatedSlots.IsEmpty() ? EAppMsgCategory::Error : EAppMsgCategory::Warning);
     FMessageDialog::Open(MessageCategory, EAppMsgType::Ok, FText::FromString(ResultMessage));
 
     return FReply::Handled();

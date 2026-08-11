@@ -6,6 +6,7 @@
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyFinalWorkingSet.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCWrinkleSuppressionCoverageService.h"
 #include "WetClothing/Modes/Transparency/Temp/DWCTransparencyTempAssetStore.h"
 
@@ -63,24 +64,17 @@ namespace
         const FWetClothingTransparencyLayerData& Layer,
         const FString& SourceSignature)
     {
-        constexpr EDWCTransparencyTempArtifactKind RequiredKinds[] = {
-            EDWCTransparencyTempArtifactKind::BaseRevealColor,
-            EDWCTransparencyTempArtifactKind::BaseRevealSurface,
-            EDWCTransparencyTempArtifactKind::ValidHit,
-            EDWCTransparencyTempArtifactKind::OuterCoverage,
-            EDWCTransparencyTempArtifactKind::OuterIslandID,
-            EDWCTransparencyTempArtifactKind::HitSource,
-            EDWCTransparencyTempArtifactKind::HitDistance
-        };
-        for (const EDWCTransparencyTempArtifactKind Kind : RequiredKinds)
-        {
-            if (!FDWCTransparencyTempAssetStore::HasCurrentArtifact(
-                    Layer, Kind, SourceSignature))
-            {
-                return false;
-            }
-        }
-        return true;
+        const FDWCTransparencyTempArtifactReference* BaseReveal =
+            FDWCTransparencyStageArtifactContract::FindReference(
+                Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor);
+        FString ArtifactError;
+        return BaseReveal != nullptr &&
+            FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+                Layer,
+                SourceSignature,
+                BaseReveal->Resolution,
+                false,
+                ArtifactError);
     }
 
     FDWCTransparencyAffectedRebakeCandidate EvaluateLayer(
@@ -93,7 +87,7 @@ namespace
 
         const FWetClothingBakedTransparencyMap* BakedMap =
             Asset.Authored.TransparencyData.FindBakedTransparencyMap(Candidate.MaterialSlotIndex);
-        if (BakedMap == nullptr || !BakedMap->IsRuntimeUsableForLayer(Layer.RequiresRevealSurface()))
+        if (BakedMap == nullptr || !BakedMap->IsRuntimeUsableForLayer(Layer.RequiresRuntimeRevealNormal()))
         {
             Candidate.Status = EDWCTransparencyAffectedRebakeStatus::MissingBakedMap;
             Candidate.Detail = TEXT("No previous Stage 4 Transparency Map is available.");
@@ -113,9 +107,11 @@ namespace
         const FDWCTransparencyFinalSettingsSnapshot Settings =
             FDWCTransparencyFinalSettingsSnapshot::FromAuthoredData(Asset.Authored.TransparencyData);
         const FString RevealSignature = FDWCTransparencySignatureService::BuildRevealSignature(
-            SignatureOnly.BuildSignature, Layer);
-        const FString RevealSurfaceSignature =
-            FDWCTransparencySignatureService::BuildRevealSurfaceSignature(
+            SignatureOnly.BuildSignature,
+            Layer,
+            Asset.Authored.TransparencyData.RevealMetallicDarkeningStrength);
+        const FString RevealNormalSignature =
+            FDWCTransparencySignatureService::BuildRevealNormalSignature(
                 SignatureOnly.BuildSignature);
         const FString SuppressionSignature =
             FDWCTransparencySignatureService::BuildSuppressionSettingsSignature(
@@ -130,14 +126,15 @@ namespace
                 BakedMap->SourceWrinkleMaskBuildSignature,
                 SuppressionSignature,
                 Settings.PaddingPixels,
-                Settings.EdgeFeatherPixels);
+                Settings.EdgeFeatherPixels,
+                SignatureOnly.BuildSignature);
 
         if (BakedMap->Resolution != SignatureOnly.Resolution.X ||
             BakedMap->PaddingPixels != Settings.PaddingPixels ||
             BakedMap->WrinkleSuppressionSettingsSignature != SuppressionSignature ||
             BakedMap->BuildSignature != ExpectedUsingPreviousWrinkle ||
             (Layer.RequiresRevealSurface() &&
-             BakedMap->RevealSurfaceBuildSignature != RevealSurfaceSignature))
+             BakedMap->RevealNormalBuildSignature != RevealNormalSignature))
         {
             Candidate.Status = EDWCTransparencyAffectedRebakeStatus::NonWrinkleInputsChanged;
             Candidate.Detail =
@@ -280,98 +277,173 @@ bool FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
         return false;
     }
 
-    UTexture2D* BaseReveal = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
-        Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor, OutResult.BuildSignature, true);
-    UTexture2D* BaseRevealSurface = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
-        Layer, EDWCTransparencyTempArtifactKind::BaseRevealSurface, OutResult.BuildSignature, true);
-    UTexture2D* ValidHit = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
-        Layer, EDWCTransparencyTempArtifactKind::ValidHit, OutResult.BuildSignature, true);
-    UTexture2D* OuterCoverage = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
-        Layer, EDWCTransparencyTempArtifactKind::OuterCoverage, OutResult.BuildSignature, true);
-    UTexture2D* OuterIslandID = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
-        Layer, EDWCTransparencyTempArtifactKind::OuterIslandID, OutResult.BuildSignature, true);
-    UTexture2D* HitSource = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
-        Layer, EDWCTransparencyTempArtifactKind::HitSource, OutResult.BuildSignature, true);
-    UTexture2D* HitDistance = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
-        Layer, EDWCTransparencyTempArtifactKind::HitDistance, OutResult.BuildSignature, true);
-
-    TArray64<uint8> BaseBytes;
-    TArray64<uint8> SurfaceBytes;
-    TArray64<uint8> ValidBytes;
-    TArray64<uint8> CoverageBytes;
-    TArray64<uint8> IslandBytes;
-    TArray64<uint8> SourceBytes;
-    TArray64<uint8> DistanceBytes;
-    if (!ReadArtifact(BaseReveal, TSF_BGRA8, OutResult.Resolution, BaseBytes, OutError) ||
-        !ReadArtifact(BaseRevealSurface, TSF_BGRA8, OutResult.Resolution, SurfaceBytes, OutError) ||
-        !ReadArtifact(ValidHit, TSF_G8, OutResult.Resolution, ValidBytes, OutError) ||
-        !ReadArtifact(OuterCoverage, TSF_G8, OutResult.Resolution, CoverageBytes, OutError) ||
-        !ReadArtifact(OuterIslandID, TSF_G16, OutResult.Resolution, IslandBytes, OutError) ||
-        !ReadArtifact(HitSource, TSF_G16, OutResult.Resolution, SourceBytes, OutError) ||
-        !ReadArtifact(HitDistance, TSF_R16F, OutResult.Resolution, DistanceBytes, OutError))
+    const auto FindSourceArtifact = [&Layer, &OutResult](
+        const EDWCTransparencyTempArtifactKind Kind)
     {
+        return FDWCTransparencyTempAssetStore::FindCurrentArtifact(
+            Layer,
+            Kind,
+            FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+                Kind, OutResult.BuildSignature),
+            true);
+    };
+    FString ArtifactError;
+    if (!FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            Layer,
+            OutResult.BuildSignature,
+            OutResult.Resolution,
+            true,
+            ArtifactError))
+    {
+        OutError = ArtifactError;
         OutResult = FDWCTransparencySourcePayload();
         return false;
     }
 
+    UTexture2D* BaseReveal = FindSourceArtifact(
+        EDWCTransparencyTempArtifactKind::BaseRevealColor);
+    UTexture2D* BaseRevealSurface = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
+        Layer,
+        EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+        FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+            EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+            OutResult.BuildSignature),
+        true);
+    UTexture2D* ValidHit = FindSourceArtifact(EDWCTransparencyTempArtifactKind::ValidHit);
+    UTexture2D* OuterCoverage = FindSourceArtifact(EDWCTransparencyTempArtifactKind::OuterCoverage);
+    UTexture2D* OuterIslandID = FindSourceArtifact(EDWCTransparencyTempArtifactKind::OuterIslandID);
+    UTexture2D* HitSource = FindSourceArtifact(EDWCTransparencyTempArtifactKind::HitSource);
+    UTexture2D* HitDistance = FindSourceArtifact(EDWCTransparencyTempArtifactKind::HitDistance);
+
     const int32 PixelCount = OutResult.Resolution.X * OutResult.Resolution.Y;
-    if (BaseBytes.Num() != static_cast<int64>(PixelCount) * sizeof(FColor) ||
-        SurfaceBytes.Num() != static_cast<int64>(PixelCount) * sizeof(FColor) ||
-        ValidBytes.Num() != PixelCount ||
-        CoverageBytes.Num() != PixelCount ||
-        IslandBytes.Num() != static_cast<int64>(PixelCount) * sizeof(uint16) ||
-        SourceBytes.Num() != static_cast<int64>(PixelCount) * sizeof(uint16) ||
-        DistanceBytes.Num() != static_cast<int64>(PixelCount) * sizeof(FFloat16))
+    if (PixelCount <= 0)
     {
-        OutError = TEXT("A canonical Stage 2 Temp artifact has an invalid payload size.");
+        OutError = TEXT("The canonical Stage 2 Temp artifacts have an invalid pixel count.");
         OutResult = FDWCTransparencySourcePayload();
         return false;
     }
 
     OutResult.InnerColorBuffer.SetNumUninitialized(PixelCount);
-    OutResult.RevealSurfaceBuffer.SetNumUninitialized(PixelCount);
+    OutResult.RevealSurfaceAuthoring.SetNumUninitialized(OutResult.Resolution);
     OutResult.AutoAlphaBuffer.SetNumUninitialized(PixelCount);
     OutResult.OuterCoverageBuffer.SetNumUninitialized(PixelCount);
     OutResult.OuterIslandIDBuffer.SetNumUninitialized(PixelCount);
     OutResult.ValidHitBuffer.Init(false, PixelCount);
     OutResult.HitDistanceBuffer.SetNumUninitialized(PixelCount);
     OutResult.SourcePriorityBuffer.SetNumUninitialized(PixelCount);
+    OutResult.ValidHitCount = 0;
+    OutResult.OuterSampleCount = 0;
+    OutResult.NoHitCount = 0;
+
+    TArray64<uint8> ArtifactBytes;
+    const auto ReadExpected = [&ArtifactBytes, &OutResult, &OutError](
+        UTexture2D* Texture,
+        const ETextureSourceFormat Format,
+        const int64 ExpectedBytes)
+    {
+        ArtifactBytes.Reset();
+        if (!ReadArtifact(Texture, Format, OutResult.Resolution, ArtifactBytes, OutError))
+        {
+            return false;
+        }
+        if (ArtifactBytes.Num() != ExpectedBytes)
+        {
+            OutError = TEXT("A canonical Stage 2 Temp artifact has an invalid payload size.");
+            return false;
+        }
+        return true;
+    };
+
+    const int64 ColorBytes = static_cast<int64>(PixelCount) * sizeof(FColor);
+    const int64 UInt16Bytes = static_cast<int64>(PixelCount) * sizeof(uint16);
+    const int64 Float16Bytes = static_cast<int64>(PixelCount) * sizeof(FFloat16);
+    if (!ReadExpected(BaseReveal, TSF_BGRA8, ColorBytes))
+    {
+        OutResult = FDWCTransparencySourcePayload();
+        return false;
+    }
     FMemory::Memcpy(
         OutResult.InnerColorBuffer.GetData(),
-        BaseBytes.GetData(),
+        ArtifactBytes.GetData(),
         static_cast<SIZE_T>(PixelCount) * sizeof(FColor));
-    FMemory::Memcpy(
-        OutResult.RevealSurfaceBuffer.GetData(),
-        SurfaceBytes.GetData(),
-        static_cast<SIZE_T>(PixelCount) * sizeof(FColor));
-    FMemory::Memcpy(
-        OutResult.OuterCoverageBuffer.GetData(),
-        CoverageBytes.GetData(),
-        static_cast<SIZE_T>(PixelCount));
-    FMemory::Memcpy(
-        OutResult.OuterIslandIDBuffer.GetData(),
-        IslandBytes.GetData(),
-        static_cast<SIZE_T>(PixelCount) * sizeof(uint16));
-
-    const uint16* EncodedSourcePriorities = reinterpret_cast<const uint16*>(SourceBytes.GetData());
-    const FFloat16* EncodedHitDistances = reinterpret_cast<const FFloat16*>(DistanceBytes.GetData());
-
     for (int32 Index = 0; Index < PixelCount; ++Index)
     {
         const FColor Packed = OutResult.InnerColorBuffer[Index];
         OutResult.AutoAlphaBuffer[Index] = Packed.A;
         OutResult.InnerColorBuffer[Index].A = 255;
-        const bool bValidHit = ValidBytes[Index] != 0;
+    }
+
+    if (!ReadExpected(BaseRevealSurface, TSF_BGRA8, ColorBytes))
+    {
+        OutResult = FDWCTransparencySourcePayload();
+        return false;
+    }
+    FMemory::Memcpy(
+        OutResult.RevealSurfaceAuthoring.GetData(),
+        ArtifactBytes.GetData(),
+        static_cast<SIZE_T>(PixelCount) * sizeof(FColor));
+
+    if (!ReadExpected(ValidHit, TSF_G8, PixelCount))
+    {
+        OutResult = FDWCTransparencySourcePayload();
+        return false;
+    }
+    for (int32 Index = 0; Index < PixelCount; ++Index)
+    {
+        const bool bValidHit = ArtifactBytes[Index] != 0;
         OutResult.ValidHitBuffer[Index] = bValidHit;
         OutResult.ValidHitCount += bValidHit ? 1 : 0;
+    }
+
+    if (!ReadExpected(OuterCoverage, TSF_G8, PixelCount))
+    {
+        OutResult = FDWCTransparencySourcePayload();
+        return false;
+    }
+    FMemory::Memcpy(
+        OutResult.OuterCoverageBuffer.GetData(),
+        ArtifactBytes.GetData(),
+        static_cast<SIZE_T>(PixelCount));
+    for (int32 Index = 0; Index < PixelCount; ++Index)
+    {
         const bool bCovered = OutResult.OuterCoverageBuffer[Index] != 0;
+        const bool bValidHit = OutResult.ValidHitBuffer[Index];
         OutResult.OuterSampleCount += bCovered ? 1 : 0;
         OutResult.NoHitCount += bCovered && !bValidHit ? 1 : 0;
+    }
 
+    if (!ReadExpected(OuterIslandID, TSF_G16, UInt16Bytes))
+    {
+        OutResult = FDWCTransparencySourcePayload();
+        return false;
+    }
+    FMemory::Memcpy(
+        OutResult.OuterIslandIDBuffer.GetData(),
+        ArtifactBytes.GetData(),
+        static_cast<SIZE_T>(PixelCount) * sizeof(uint16));
+
+    if (!ReadExpected(HitSource, TSF_G16, UInt16Bytes))
+    {
+        OutResult = FDWCTransparencySourcePayload();
+        return false;
+    }
+    const uint16* EncodedSourcePriorities = reinterpret_cast<const uint16*>(ArtifactBytes.GetData());
+    for (int32 Index = 0; Index < PixelCount; ++Index)
+    {
         const uint16 EncodedPriority = EncodedSourcePriorities[Index];
         OutResult.SourcePriorityBuffer[Index] = EncodedPriority > 0
             ? static_cast<int16>(FMath::Min<int32>(static_cast<int32>(EncodedPriority) - 1, MAX_int16))
             : INDEX_NONE;
+    }
+
+    if (!ReadExpected(HitDistance, TSF_R16F, Float16Bytes))
+    {
+        OutResult = FDWCTransparencySourcePayload();
+        return false;
+    }
+    const FFloat16* EncodedHitDistances = reinterpret_cast<const FFloat16*>(ArtifactBytes.GetData());
+    for (int32 Index = 0; Index < PixelCount; ++Index)
+    {
         OutResult.HitDistanceBuffer[Index] = static_cast<float>(EncodedHitDistances[Index]);
     }
     return true;

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Core/DWCSimulationMode.h"
+#include "WetRendering/DWCGeneratedMaterialContract.h"
 
 class UMaterial;
 class UMaterialInstanceConstant;
@@ -24,7 +25,9 @@ struct FWetClothingUnifiedMaterialSetupResult
 class FWCAMaterialGenerator
 {
   public:
-    static constexpr int32 GeneratedMaterialGeneratorVersion = 3;
+    // v7 aligns unified CPU wetness sampling with the runtime VertexColor.R contract.
+    static constexpr int32 GeneratedMaterialGeneratorVersion =
+        DWCGeneratedMaterialContract::CurrentGeneratorVersion;
 
     struct FOptions
     {
@@ -71,6 +74,17 @@ class FWCAMaterialGenerator
         const UWetClothingAsset* WetClothingAsset,
         int32                    MaterialSlotIndex,
         UMaterialInterface*      SourceMaterial);
+
+    /** Captures source graph and effective instance state even when the asset path is unchanged. */
+    static FString BuildSourceMaterialSignature(UMaterialInterface* SourceMaterial);
+
+    /** Records a complete generated-material override. Partial metadata is never committed. */
+    static bool CommitGeneratedMaterialOverride(
+        UWetClothingAsset*                              WetClothingAsset,
+        int32                                           MaterialSlotIndex,
+        UMaterialInterface*                             SourceMaterial,
+        const FWetClothingUnifiedMaterialSetupResult&  MaterialSet,
+        FString*                                        OutError = nullptr);
 
     /** Fast source/reference/signature check. Does not inspect the full generated graph. */
     static bool IsGeneratedMaterialOverrideCurrent(

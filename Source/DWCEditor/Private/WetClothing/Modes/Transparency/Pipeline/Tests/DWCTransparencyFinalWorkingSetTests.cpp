@@ -4,10 +4,12 @@
 
 #include "Engine/Texture2D.h"
 #include "UObject/Package.h"
+#include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyFinalWorkingSet.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyAffectedStage4Rebake.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 #include "WetClothing/Modes/Transparency/Temp/DWCTransparencyTempAssetStore.h"
 
@@ -41,15 +43,27 @@ namespace
         FWetClothingTransparencyLayerData& Layer,
         const EDWCTransparencyTempArtifactKind Kind,
         UTexture2D* Texture,
-        const FString& Signature,
-        const FIntPoint Resolution)
+        const FString& SourceSignature,
+        const FIntPoint Resolution,
+        const FGuid& CommitGeneration,
+        const FString& RevealSignature = FString())
     {
         FDWCTransparencyTempArtifactReference& Reference =
             Layer.EditorStageCache.Artifacts.AddDefaulted_GetRef();
         Reference.Kind = Kind;
         Reference.Texture = Texture;
-        Reference.BuildSignature = Signature;
+        Reference.BuildSignature =
+            FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+                Kind, SourceSignature, RevealSignature);
+        Reference.ContractVersion = FDWCTransparencyStageArtifactContract::ContractVersion;
+        Reference.CommitGeneration = CommitGeneration;
+        Reference.TextureSourceId = Texture->Source.GetId();
         Reference.Resolution = Resolution;
+        if (const FDWCTransparencyStageArtifactSpec* Spec =
+                FDWCTransparencyStageArtifactContract::FindSpec(Kind))
+        {
+            Texture->SRGB = Spec->bSRGB;
+        }
     }
 
     void AddCanonicalArtifacts(
@@ -102,49 +116,57 @@ namespace
                 0,
                 ValidHit[Index] != 0 ? 255 : 0);
         }
+        const FGuid CommitGeneration = FGuid::NewGuid();
 
         AddArtifactReference(
             Layer,
             EDWCTransparencyTempArtifactKind::BaseRevealColor,
             MakeArtifactTexture(Resolution, TSF_BGRA8, PackedReveal.GetData()),
             Signature,
-            Resolution);
+            Resolution,
+            CommitGeneration);
         AddArtifactReference(
             Layer,
             EDWCTransparencyTempArtifactKind::BaseRevealSurface,
             MakeArtifactTexture(Resolution, TSF_BGRA8, PackedRevealSurface.GetData()),
             Signature,
-            Resolution);
+            Resolution,
+            CommitGeneration);
         AddArtifactReference(
             Layer,
             EDWCTransparencyTempArtifactKind::ValidHit,
             MakeArtifactTexture(Resolution, TSF_G8, ValidHit.GetData()),
             Signature,
-            Resolution);
+            Resolution,
+            CommitGeneration);
         AddArtifactReference(
             Layer,
             EDWCTransparencyTempArtifactKind::OuterCoverage,
             MakeArtifactTexture(Resolution, TSF_G8, Coverage.GetData()),
             Signature,
-            Resolution);
+            Resolution,
+            CommitGeneration);
         AddArtifactReference(
             Layer,
             EDWCTransparencyTempArtifactKind::OuterIslandID,
             MakeArtifactTexture(Resolution, TSF_G16, IslandIDs.GetData()),
             Signature,
-            Resolution);
+            Resolution,
+            CommitGeneration);
         AddArtifactReference(
             Layer,
             EDWCTransparencyTempArtifactKind::HitSource,
             MakeArtifactTexture(Resolution, TSF_G16, EncodedSourcePriorities->GetData()),
             Signature,
-            Resolution);
+            Resolution,
+            CommitGeneration);
         AddArtifactReference(
             Layer,
             EDWCTransparencyTempArtifactKind::HitDistance,
             MakeArtifactTexture(Resolution, TSF_R16F, HitDistances->GetData()),
             Signature,
-            Resolution);
+            Resolution,
+            CommitGeneration);
     }
 
     FDWCTransparencySourcePayload MakeCanonicalIdentity(
@@ -179,6 +201,7 @@ bool FDWCTransparencyFinalSignatureContractTest::RunTest(const FString& Paramete
     Stroke.Samples.AddDefaulted();
 
     FDWCTransparencyFinalSignatureInputs Inputs;
+    Inputs.SourceSignature = TEXT("Source");
     Inputs.RevealSignature = TEXT("Reveal");
     Inputs.AlphaAuthoringSignature =
         FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(Layer);
@@ -189,13 +212,23 @@ bool FDWCTransparencyFinalSignatureContractTest::RunTest(const FString& Paramete
     Inputs.EdgeFeatherPixels = 4.0f;
 
     const FString Signature = FDWCTransparencySignatureService::BuildFinalSignature(Inputs);
+    const FString AlphaSignature =
+        FDWCTransparencySignatureService::BuildFinalAlphaSignature(Inputs);
     TestEqual(TEXT("Explicit final signature inputs are deterministic."),
         Signature, FDWCTransparencySignatureService::BuildFinalSignature(Inputs));
     Inputs.EdgeFeatherPixels = 5.0f;
     TestNotEqual(TEXT("Output setting changes invalidate the final signature."),
         Signature, FDWCTransparencySignatureService::BuildFinalSignature(Inputs));
     Inputs.EdgeFeatherPixels = 4.0f;
+    Inputs.RevealSignature = TEXT("ChangedReveal");
+    TestEqual(TEXT("Reveal RGB changes do not invalidate the Stage 4 alpha signature."),
+        AlphaSignature, FDWCTransparencySignatureService::BuildFinalAlphaSignature(Inputs));
+    TestNotEqual(TEXT("Reveal RGB changes still invalidate the packed final texture signature."),
+        Signature, FDWCTransparencySignatureService::BuildFinalSignature(Inputs));
+    Inputs.RevealSignature = TEXT("Reveal");
     Inputs.AlphaAuthoringSignature = TEXT("ChangedAlpha");
+    TestNotEqual(TEXT("Alpha authoring changes invalidate the Stage 4 alpha signature."),
+        AlphaSignature, FDWCTransparencySignatureService::BuildFinalAlphaSignature(Inputs));
     TestNotEqual(TEXT("Alpha authoring changes invalidate the final signature."),
         Signature, FDWCTransparencySignatureService::BuildFinalSignature(Inputs));
     return true;
@@ -218,10 +251,7 @@ bool FDWCTransparencyCorrectedRevealArtifactContractTest::RunTest(const FString&
         Resolution);
 
     const FString RevealSignature =
-        FDWCTransparencySignatureService::BuildRevealSignature(Source.BuildSignature, Layer);
-    const FString CorrectedArtifactSignature = FMD5::HashAnsiString(*FString::Printf(
-        TEXT("DWC.Transparency.CorrectedReveal.v2|Reveal=%s"),
-        *RevealSignature));
+        FDWCTransparencySignatureService::BuildRevealSignature(Source.BuildSignature, Layer, 0.25f);
     const TArray<FColor> CorrectedPixels = {
         FColor(10, 20, 30, 40),
         FColor(50, 60, 70, 80),
@@ -232,8 +262,10 @@ bool FDWCTransparencyCorrectedRevealArtifactContractTest::RunTest(const FString&
         Layer,
         EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
         MakeArtifactTexture(Resolution, TSF_BGRA8, CorrectedPixels.GetData()),
-        CorrectedArtifactSignature,
-        Resolution);
+        Source.BuildSignature,
+        Resolution,
+        FGuid::NewGuid(),
+        RevealSignature);
 
     TArray<FColor> RestoredPixels;
     FString Error;
@@ -242,6 +274,7 @@ bool FDWCTransparencyCorrectedRevealArtifactContractTest::RunTest(const FString&
         FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
             Layer,
             Source,
+            0.25f,
             RestoredPixels,
             Error),
         EDWCTransparencyCorrectedRevealRestoreResult::Restored);
@@ -249,15 +282,35 @@ bool FDWCTransparencyCorrectedRevealArtifactContractTest::RunTest(const FString&
         RestoredPixels,
         CorrectedPixels);
 
+    const FString CurrentArtifactSignature =
+        Layer.EditorStageCache.Artifacts[0].BuildSignature;
     Layer.EditorStageCache.Artifacts[0].BuildSignature = RevealSignature;
     TestEqual(
         TEXT("The pre-alpha-contract checkpoint is treated as stale."),
         FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
             Layer,
             Source,
+            0.25f,
             RestoredPixels,
             Error),
         EDWCTransparencyCorrectedRevealRestoreResult::MissingOrStale);
+
+    TArray<uint8> InvalidPixels;
+    InvalidPixels.Init(255, Resolution.X * Resolution.Y);
+    Layer.EditorStageCache.Artifacts[0].BuildSignature = CurrentArtifactSignature;
+    UTexture2D* InvalidTexture =
+        MakeArtifactTexture(Resolution, TSF_G8, InvalidPixels.GetData());
+    Layer.EditorStageCache.Artifacts[0].Texture = InvalidTexture;
+    Layer.EditorStageCache.Artifacts[0].TextureSourceId = InvalidTexture->Source.GetId();
+    TestEqual(
+        TEXT("A current but corrupt corrected reveal checkpoint is distinguished from a stale one."),
+        FDWCTransparencyTempAssetStore::RestoreCurrentCorrectedReveal(
+            Layer,
+            Source,
+            0.25f,
+            RestoredPixels,
+            Error),
+        EDWCTransparencyCorrectedRevealRestoreResult::Invalid);
     return true;
 }
 
@@ -304,6 +357,7 @@ bool FDWCTransparencyFinalCurrentnessContractTest::RunTest(const FString& Parame
     WorkingSet.Identity.Resolution = FIntPoint(1024, 1024);
     WorkingSet.Settings.PaddingPixels = 8;
     WorkingSet.SuppressionSettingsSignature = TEXT("Settings");
+    WorkingSet.FinalAlphaSignature = TEXT("FinalAlpha");
     WorkingSet.FinalSignature = TEXT("Final");
     WorkingSet.WrinkleDependency.BuildSignature = TEXT("Wrinkle");
     WorkingSet.WrinkleDependency.BakeGuid = FGuid::NewGuid();
@@ -315,42 +369,48 @@ bool FDWCTransparencyFinalCurrentnessContractTest::RunTest(const FString& Parame
     Baked.PaddingPixels = 8;
     Baked.BakeGuid = FGuid::NewGuid();
     Baked.BuildSignature = TEXT("Final");
+    Baked.FinalAlphaBuildSignature = TEXT("FinalAlpha");
     Baked.SourceWrinkleMaskBuildSignature = TEXT("Wrinkle");
     Baked.SourceWrinkleMaskBakeGuid = WorkingSet.WrinkleDependency.BakeGuid;
     Baked.WrinkleSuppressionSettingsSignature = TEXT("Settings");
 
     TestTrue(TEXT("Manual Color accepts a baked map without a Reveal Surface payload."),
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).IsCurrent());
-    WorkingSet.RevealSurfaceSignature = TEXT("ManualRevealSurfaceIsOptional");
-    Baked.RevealSurfaceBuildSignature = TEXT("LegacyOptionalRevealSurface");
-    TestTrue(TEXT("Manual Color ignores an optional Reveal Surface signature mismatch."),
+    WorkingSet.RevealNormalSignature = TEXT("ManualRevealNormalIsOptional");
+    Baked.RevealNormalBuildSignature = TEXT("OptionalRevealNormal");
+    TestTrue(TEXT("Manual Color ignores an optional Reveal Normal signature mismatch."),
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).IsCurrent());
-    WorkingSet.RevealSurfaceSignature.Reset();
-    Baked.RevealSurfaceBuildSignature.Reset();
+    WorkingSet.RevealNormalSignature.Reset();
+    Baked.RevealNormalBuildSignature.Reset();
     Baked.SourceWrinkleMaskBuildSignature = TEXT("ChangedWrinkle");
     TestEqual(TEXT("Wrinkle changes have a precise stale reason."),
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).Reason,
         EDWCTransparencyStaleReason::WrinkleDependencyChanged);
     Baked.SourceWrinkleMaskBuildSignature = TEXT("Wrinkle");
-    Baked.RevealSurfaceMap = NewObject<UTexture2D>();
-    Baked.bContainsRevealNormalRG = true;
-    Baked.bContainsInnerMetallicB = true;
-    Baked.bContainsRevealSurfaceCoverageAlpha = true;
+    Baked.RevealNormalMap = NewObject<UTexture2D>();
+    Baked.bSourceCoverageBakedIntoRevealNormal = true;
+    Baked.bMetallicDarkeningBakedIntoColor = true;
     WorkingSet.bRequiresRevealSurface = true;
-    WorkingSet.RevealSurfaceSignature = TEXT("RevealSurface");
-    Baked.RevealSurfaceBuildSignature = TEXT("PreviousRevealSurface");
-    TestEqual(TEXT("Raycast Reveal Surface identity has its own stale reason."),
+    WorkingSet.bRequiresRuntimeRevealNormal = true;
+    WorkingSet.RevealNormalSignature = TEXT("RevealNormal");
+    Baked.RevealNormalBuildSignature = TEXT("PreviousRevealNormal");
+    TestEqual(TEXT("Raycast Reveal Normal identity has its own stale reason."),
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).Reason,
         EDWCTransparencyStaleReason::SourceInputsChanged);
 
-    Baked.RevealSurfaceBuildSignature = TEXT("RevealSurface");
-    TestTrue(TEXT("Raycast layers accept a complete Reveal Surface payload."),
+    Baked.RevealNormalBuildSignature = TEXT("RevealNormal");
+    TestTrue(TEXT("Raycast layers accept a coverage-weighted Reveal Normal payload."),
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).IsCurrent());
 
-    Baked.RevealSurfaceMap = nullptr;
-    TestEqual(TEXT("Raycast layers require their Reveal Surface runtime payload."),
+    Baked.RevealNormalMap = nullptr;
+    TestEqual(TEXT("Raycast layers require their Reveal Normal runtime payload."),
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).Reason,
         EDWCTransparencyStaleReason::MissingArtifact);
+
+    WorkingSet.bRequiresRuntimeRevealNormal = false;
+    WorkingSet.RevealNormalSignature.Reset();
+    TestTrue(TEXT("Disabling runtime Reveal Normal preserves Transparency Map currentness."),
+        FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).IsCurrent());
     return true;
 }
 
@@ -367,8 +427,9 @@ bool FDWCTransparencyAffectedStage4ArtifactRestoreTest::RunTest(const FString& P
     FWetClothingTransparencyLayerData Layer;
     Layer.LayerGuid = FGuid::NewGuid();
     Layer.TargetSurface.OuterMaterialSlotIndex = 3;
+    const FGuid CommitGeneration = FGuid::NewGuid();
 
-    auto AddArtifact = [&Layer, &Signature, Resolution](
+    auto AddArtifact = [&Layer, &Signature, Resolution, &CommitGeneration](
         const EDWCTransparencyTempArtifactKind Kind,
         UTexture2D* Texture)
     {
@@ -376,8 +437,18 @@ bool FDWCTransparencyAffectedStage4ArtifactRestoreTest::RunTest(const FString& P
             Layer.EditorStageCache.Artifacts.AddDefaulted_GetRef();
         Reference.Kind = Kind;
         Reference.Texture = Texture;
-        Reference.BuildSignature = Signature;
+        Reference.BuildSignature =
+            FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+                Kind, Signature);
+        Reference.ContractVersion = FDWCTransparencyStageArtifactContract::ContractVersion;
+        Reference.CommitGeneration = CommitGeneration;
+        Reference.TextureSourceId = Texture->Source.GetId();
         Reference.Resolution = Resolution;
+        if (const FDWCTransparencyStageArtifactSpec* Spec =
+                FDWCTransparencyStageArtifactContract::FindSpec(Kind))
+        {
+            Texture->SRGB = Spec->bSRGB;
+        }
     };
 
     const FColor BasePixels[PixelCount] = {
@@ -436,7 +507,7 @@ bool FDWCTransparencyAffectedStage4ArtifactRestoreTest::RunTest(const FString& P
     TestTrue(TEXT("Restore error remains empty."), Error.IsEmpty());
     TestEqual(TEXT("Reveal RGB is preserved."), Restored.InnerColorBuffer[1], FColor(50, 60, 70, 255));
     TestEqual(TEXT("Packed alpha is restored."), Restored.AutoAlphaBuffer[1], static_cast<uint8>(80));
-    TestEqual(TEXT("Reveal Surface payload is restored."), Restored.RevealSurfaceBuffer[2], SurfacePixels[2]);
+    TestEqual(TEXT("Reveal Surface payload is restored."), Restored.RevealSurfaceAuthoring[2], SurfacePixels[2]);
     TestTrue(TEXT("Valid-hit bit is restored."), Restored.ValidHitBuffer[2]);
     TestEqual(TEXT("Coverage is restored."), Restored.OuterCoverageBuffer[0], static_cast<uint8>(255));
     TestEqual(TEXT("Island identity is restored exactly."), Restored.OuterIslandIDBuffer[0], static_cast<uint16>(4));
@@ -567,15 +638,19 @@ bool FDWCTransparencyAffectedStage4ArtifactValidationTest::RunTest(const FString
     WrongFormatPixels.Init(1, PixelCount);
     CoverageReference->Texture = MakeArtifactTexture(
         Resolution, TSF_G16, WrongFormatPixels.GetData());
+    CoverageReference->TextureSourceId = CoverageReference->Texture->Source.GetId();
+    CoverageReference->Texture->SRGB = false;
     TestFalse(
         TEXT("A canonical artifact with the wrong source format is rejected."),
         FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
             Layer, Identity, Restored, Error));
     TestTrue(TEXT("Artifact format failures identify the invalid contract."),
-        Error.Contains(TEXT("unexpected format or resolution")));
+        Error.Contains(TEXT("payload contract")));
 
     CoverageReference->Texture = MakeArtifactTexture(
         Resolution, TSF_G8, Coverage.GetData());
+    CoverageReference->TextureSourceId = CoverageReference->Texture->Source.GetId();
+    CoverageReference->Texture->SRGB = false;
     FDWCTransparencySourcePayload WrongIdentity = Identity;
     WrongIdentity.BuildSignature = TEXT("DifferentStage2");
     TestFalse(
@@ -610,7 +685,7 @@ bool FDWCTransparencyAffectedStage4FinalParityTest::RunTest(const FString& Param
     FDWCTransparencySourcePayload Original =
         MakeCanonicalIdentity(Layer, Signature, Resolution);
     Original.InnerColorBuffer.SetNumUninitialized(PixelCount);
-    Original.RevealSurfaceBuffer.SetNumUninitialized(PixelCount);
+    Original.RevealSurfaceAuthoring.SetNumUninitialized(Original.Resolution);
     Original.AutoAlphaBuffer.SetNumUninitialized(PixelCount);
     Original.OuterCoverageBuffer.SetNumUninitialized(PixelCount);
     Original.OuterIslandIDBuffer.SetNumUninitialized(PixelCount);
@@ -634,7 +709,7 @@ bool FDWCTransparencyAffectedStage4FinalParityTest::RunTest(const FString& Param
         Coverage[Index] = Index < PixelCount - 4 ? 255 : 0;
         Islands[Index] = Coverage[Index] != 0 ? static_cast<uint16>(Index % 4) : MAX_uint16;
         Original.InnerColorBuffer[Index] = Reveal;
-        Original.RevealSurfaceBuffer[Index] = FColor(
+        Original.RevealSurfaceAuthoring[Index] = FColor(
             128,
             128,
             0,
@@ -667,7 +742,8 @@ bool FDWCTransparencyAffectedStage4FinalParityTest::RunTest(const FString& Param
     TestEqual(TEXT("Alpha payload is byte-identical after restore."),
         Restored.AutoAlphaBuffer, Original.AutoAlphaBuffer);
     TestEqual(TEXT("Reveal Surface payload is byte-identical after restore."),
-        Restored.RevealSurfaceBuffer, Original.RevealSurfaceBuffer);
+        Restored.RevealSurfaceAuthoring.GetPackedPixels(),
+        Original.RevealSurfaceAuthoring.GetPackedPixels());
     TestEqual(TEXT("Coverage payload is byte-identical after restore."),
         Restored.OuterCoverageBuffer, Original.OuterCoverageBuffer);
     TestEqual(TEXT("Island payload is byte-identical after restore."),
@@ -834,6 +910,255 @@ bool FDWCTransparencyAffectedStage4SequentialLifetimeTest::RunTest(const FString
         Sequence.IsComplete());
     TestEqual(TEXT("Cancellation leaves no retained payload bytes."),
         Sequence.GetActivePayloadBytes(), 0ull);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyStage4AdmissionPlanTest,
+    "DWC.Transparency.Pipeline.Stage4AdmissionPlan",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyStage4AdmissionPlanTest::RunTest(const FString& Parameters)
+{
+    constexpr uint64 MiB = 1024ull * 1024ull;
+    FDWCTransparencyStage4MemoryPlan Plan2K;
+    FString Error;
+    const uint64 Source2K =
+        FDWCTransparencyEditedMapBaker::EstimateCanonicalSourcePayloadBytes(
+            FIntPoint(2048, 2048));
+    TestTrue(
+        TEXT("A 2K affected Stage 4 request can be planned before artifact restore."),
+        FDWCTransparencyEditedMapBaker::BuildMemoryPlan(
+            FIntPoint(2048, 2048),
+            Source2K,
+            2ull * MiB,
+            true,
+            Plan2K,
+            Error));
+    TestTrue(TEXT("The reservation retains the canonical source estimate."),
+        Plan2K.ResidentSharedBytes >= Source2K);
+    TestTrue(TEXT("The reservation includes immutable snapshot storage."),
+        Plan2K.SnapshotBytes > 2ull * MiB);
+    TestTrue(TEXT("The reservation includes all worst-case Stage 4 outputs."),
+        Plan2K.OutputBytes >= 2048ull * 2048ull * sizeof(FColor) * 3ull);
+    TestTrue(TEXT("The complete 2K plan remains inside the default per-job budget."),
+        Plan2K.GetTotalBytes() < 512ull * MiB);
+
+    FDWCTransparencyStage4MemoryPlan Plan4K;
+    const uint64 Source4K =
+        FDWCTransparencyEditedMapBaker::EstimateCanonicalSourcePayloadBytes(
+            FIntPoint(4096, 4096));
+    TestTrue(
+        TEXT("A 4K request produces a valid conservative plan."),
+        FDWCTransparencyEditedMapBaker::BuildMemoryPlan(
+            FIntPoint(4096, 4096),
+            Source4K,
+            0,
+            true,
+            Plan4K,
+            Error));
+    TestTrue(
+        TEXT("An over-budget 4K request is visible to scheduler admission before restore."),
+        Plan4K.GetTotalBytes() > 512ull * MiB);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyLegacyRevealSurfaceCompatibilityTest,
+    "DWC.Transparency.Pipeline.LegacyRevealSurfaceCompatibility",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyLegacyRevealSurfaceCompatibilityTest::RunTest(const FString&)
+{
+    FWetClothingBakedTransparencyMap Baked;
+    Baked.TransparencyMap = NewObject<UTexture2D>();
+    Baked.BakeGuid = FGuid::NewGuid();
+    Baked.BuildSignature = TEXT("Final");
+    Baked.bContainsColorRGB = true;
+    Baked.bContainsTransparencyAlpha = true;
+    Baked.RevealSurfaceMap = NewObject<UTexture2D>();
+    Baked.RevealSurfaceBuildSignature = TEXT("LegacyRevealSurface");
+    Baked.bContainsRevealNormalRG = true;
+    Baked.bContainsInnerMetallicB = true;
+    Baked.bContainsRevealSurfaceCoverageAlpha = true;
+
+    TestTrue(TEXT("Deprecated packed data remains detectable after deserialization."),
+        Baked.HasAnyLegacyRevealSurfaceData());
+    TestTrue(TEXT("A complete deprecated packed payload is identified precisely."),
+        Baked.HasLegacyRevealSurfacePayload());
+    TestFalse(TEXT("Deprecated packed data is never accepted as a runtime Reveal Normal."),
+        Baked.HasRuntimeRevealNormalPayload());
+    TestTrue(TEXT("Manual Color remains usable without a Reveal Normal."),
+        Baked.IsRuntimeUsableForLayer(false));
+    TestFalse(TEXT("Raycast layers reject a legacy-only Reveal Surface payload."),
+        Baked.IsRuntimeUsableForLayer(true));
+
+    Baked.RevealNormalMap = NewObject<UTexture2D>();
+    Baked.RevealNormalBuildSignature = TEXT("RevealNormal");
+    Baked.bSourceCoverageBakedIntoRevealNormal = true;
+    Baked.bMetallicDarkeningBakedIntoColor = true;
+    TestTrue(TEXT("Raycast layers accept the canonical runtime payload independently of legacy fields."),
+        Baked.IsRuntimeUsableForLayer(true));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyRevealSurfaceAuthoringContractTest,
+    "DWC.Transparency.Pipeline.RevealSurfaceAuthoring.Contract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyRevealSurfaceAuthoringContractTest::RunTest(const FString& Parameters)
+{
+    FDWCTransparencyRevealSurfaceAuthoringPayload Payload;
+    const FIntPoint Resolution(2, 1);
+    Payload.Init(Resolution, FColor(128, 128, 0, 0));
+    Payload[0] = FColor(128, 128, 64, 128);
+    Payload[1] = FColor(255, 128, 255, 255);
+
+    TestTrue(TEXT("The packed authoring surface validates its own resolution."), Payload.IsValid());
+    TestFalse(
+        TEXT("The packed authoring surface rejects a mismatched resolution."),
+        Payload.IsValidForResolution(FIntPoint(1, 2)));
+    TestEqual(TEXT("Authoring storage remains one FColor per texel."),
+        Payload.GetAllocatedBytes(), static_cast<uint64>(2 * sizeof(FColor)));
+    TestTrue(TEXT("Coverage identifies a valid source texel."), Payload.HasValidSource(0));
+    TestTrue(TEXT("Metallic is decoded from B only."),
+        FMath::IsNearlyEqual(Payload.GetInnerMetallic(0), 64.0f / 255.0f));
+    TestTrue(TEXT("Coverage is decoded from A only."),
+        FMath::IsNearlyEqual(Payload.GetSourceCoverage(0), 128.0f / 255.0f));
+
+    const FVector3f FlatNormal = Payload.DecodeRevealNormal(0);
+    TestTrue(TEXT("Flat packed RG decodes near +Z."), FlatNormal.Z > 0.99f);
+    const FVector3f TangentNormal = Payload.DecodeRevealNormal(1);
+    TestTrue(TEXT("Packed positive X decodes as a tangent-space direction."),
+        TangentNormal.X > 0.99f && TangentNormal.Z < 0.02f);
+
+    const FString SourceSignature(TEXT("Stage2Source"));
+    const FString AuthoringSignature =
+        FDWCTransparencySignatureService::BuildRevealSurfaceAuthoringSignature(SourceSignature);
+    TestFalse(TEXT("The authoring and runtime normal identities are distinct."),
+        AuthoringSignature ==
+            FDWCTransparencySignatureService::BuildRevealNormalSignature(SourceSignature));
+    TestEqual(TEXT("The authoring identity is deterministic."),
+        AuthoringSignature,
+        FDWCTransparencySignatureService::BuildRevealSurfaceAuthoringSignature(SourceSignature));
+
+    const FString RuntimeNormalSignature =
+        FDWCTransparencySignatureService::BuildRevealNormalSignature(SourceSignature);
+    TestEqual(TEXT("The runtime Reveal Normal encoding version is explicit."),
+        FDWCTransparencySignatureService::RevealNormalEncodingVersion,
+        1);
+    TestEqual(TEXT("The imported tangent basis producer version is explicit."),
+        FDWCTransparencySignatureService::RevealSurfaceBasisVersion,
+        2);
+    TestEqual(TEXT("The runtime Reveal Normal identity is deterministic."),
+        RuntimeNormalSignature,
+        FDWCTransparencySignatureService::BuildRevealNormalSignature(SourceSignature));
+    TestNotEqual(TEXT("Changing the canonical Stage 2 source invalidates Reveal Normal."),
+        RuntimeNormalSignature,
+        FDWCTransparencySignatureService::BuildRevealNormalSignature(TEXT("ChangedStage2Source")));
+
+    FWetClothingTransparencyLayerData Layer;
+    const FString RevealColorBefore =
+        FDWCTransparencySignatureService::BuildRevealSignature(SourceSignature, Layer, 0.0f);
+    Layer.RevealColorPaintStrokes.AddDefaulted();
+    const FString RevealColorAfterStroke =
+        FDWCTransparencySignatureService::BuildRevealSignature(SourceSignature, Layer, 0.0f);
+    TestNotEqual(TEXT("Stage 3 color strokes invalidate corrected reveal color."),
+        RevealColorBefore, RevealColorAfterStroke);
+    TestEqual(TEXT("Stage 3 color strokes do not invalidate runtime Reveal Normal."),
+        RuntimeNormalSignature,
+        FDWCTransparencySignatureService::BuildRevealNormalSignature(SourceSignature));
+    TestNotEqual(TEXT("Metallic darkening invalidates corrected reveal color."),
+        RevealColorAfterStroke,
+        FDWCTransparencySignatureService::BuildRevealSignature(SourceSignature, Layer, 1.0f));
+    TestEqual(TEXT("Metallic darkening does not invalidate runtime Reveal Normal."),
+        RuntimeNormalSignature,
+        FDWCTransparencySignatureService::BuildRevealNormalSignature(SourceSignature));
+
+    const FColor NoCoverage =
+        FDWCTransparencyRevealSurfaceAuthoringPayload::EncodeRuntimeRevealNormal(
+            FColor(255, 128, 32, 0));
+    TestTrue(TEXT("Zero source coverage encodes a flat runtime normal."),
+        FMath::Abs(static_cast<int32>(NoCoverage.R) - 128) <= 1 &&
+        FMath::Abs(static_cast<int32>(NoCoverage.G) - 128) <= 1);
+    const FColor FullCoverage =
+        FDWCTransparencyRevealSurfaceAuthoringPayload::EncodeRuntimeRevealNormal(
+            FColor(255, 128, 32, 255));
+    TestTrue(TEXT("Full source coverage preserves the authored XY direction."),
+        FullCoverage.R == 255 && FMath::Abs(static_cast<int32>(FullCoverage.G) - 128) <= 1);
+    const FColor HalfCoverage =
+        FDWCTransparencyRevealSurfaceAuthoringPayload::EncodeRuntimeRevealNormal(
+            FColor(255, 128, 32, 128));
+    TestTrue(TEXT("Partial source coverage attenuates normal XY toward flat."),
+        HalfCoverage.R > 128 && HalfCoverage.R < 255);
+    const FColor DifferentMetallic =
+        FDWCTransparencyRevealSurfaceAuthoringPayload::EncodeRuntimeRevealNormal(
+            FColor(255, 128, 240, 128));
+    TestEqual(TEXT("Editor-only metallic does not affect runtime Reveal Normal."),
+        DifferentMetallic, HalfCoverage);
+    TestEqual(TEXT("Runtime Reveal Normal writes a neutral unused B channel."),
+        HalfCoverage.B, static_cast<uint8>(255));
+    TestEqual(TEXT("Runtime Reveal Normal writes an opaque unused A channel."),
+        HalfCoverage.A, static_cast<uint8>(255));
+
+    const float RuntimeX = static_cast<float>(HalfCoverage.R) / 127.5f - 1.0f;
+    const float RuntimeY = static_cast<float>(HalfCoverage.G) / 127.5f - 1.0f;
+    const float RuntimeZ = FMath::Sqrt(FMath::Max(1.0f - RuntimeX * RuntimeX - RuntimeY * RuntimeY, 0.0f));
+    const FVector3f RuntimeNormal(RuntimeX, RuntimeY, RuntimeZ);
+    TestTrue(TEXT("Runtime RG reconstructs a finite unit tangent-space normal."),
+        !RuntimeNormal.ContainsNaN() && FMath::IsNearlyEqual(RuntimeNormal.Size(), 1.0f, 0.001f));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyRevealColorAlphaIsolationTest,
+    "DWC.Transparency.Pipeline.RevealColor.AlphaIsolation",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyRevealColorAlphaIsolationTest::RunTest(const FString&)
+{
+    FDWCTransparencySourcePayload Source;
+    Source.Resolution = FIntPoint(3, 1);
+    Source.InnerColorBuffer.Init(FColor(200, 120, 80, 77), 3);
+    Source.AutoAlphaBuffer = { 64, 128, 192 };
+    Source.RevealSurfaceAuthoring.Init(Source.Resolution, FColor(128, 128, 0, 0));
+    Source.RevealSurfaceAuthoring[0] = FColor(128, 128, 255, 255);
+    Source.RevealSurfaceAuthoring[1] = FColor(128, 128, 255, 0);
+    Source.RevealSurfaceAuthoring[2] = FColor(128, 128, 0, 255);
+
+    const FColor BaseColor(200, 120, 80, 77);
+    const FColor Darkened = FDWCTransparencyComposite::ApplyRevealMetallicDarkening(
+        BaseColor, Source, 0, 1.0f);
+    TestTrue(TEXT("Valid covered metallic darkens corrected reveal RGB."),
+        Darkened.R < BaseColor.R && Darkened.G < BaseColor.G && Darkened.B < BaseColor.B);
+    TestEqual(TEXT("Metallic darkening preserves authored alpha."),
+        Darkened.A, BaseColor.A);
+    TestEqual(TEXT("No source coverage prevents metallic darkening."),
+        FDWCTransparencyComposite::ApplyRevealMetallicDarkening(BaseColor, Source, 1, 1.0f),
+        BaseColor);
+    TestEqual(TEXT("Zero metallic prevents reveal-color darkening."),
+        FDWCTransparencyComposite::ApplyRevealMetallicDarkening(BaseColor, Source, 2, 1.0f),
+        BaseColor);
+
+    TArray<FColor> CorrectedColors = { Darkened, BaseColor, BaseColor };
+    FDWCTransparencyPixelComposeContext Context;
+    Context.SourcePayload = &Source;
+    Context.RevealColorBuffer = MakeArrayView(CorrectedColors);
+    Context.VisualizationMode = EDWCTransparencyVisualizationMode::Final;
+
+    const FColor LowAlpha = FDWCTransparencyComposite::ComposeVisualizationPixel(
+        Context, 0, 0.2f);
+    const FColor HighAlpha = FDWCTransparencyComposite::ComposeVisualizationPixel(
+        Context, 0, 0.8f);
+    TestEqual(TEXT("Stage 4 alpha edits preserve corrected reveal R."),
+        LowAlpha.R, HighAlpha.R);
+    TestEqual(TEXT("Stage 4 alpha edits preserve corrected reveal G."),
+        LowAlpha.G, HighAlpha.G);
+    TestEqual(TEXT("Stage 4 alpha edits preserve corrected reveal B."),
+        LowAlpha.B, HighAlpha.B);
+    TestNotEqual(TEXT("Stage 4 alpha edits change only final alpha."),
+        LowAlpha.A, HighAlpha.A);
     return true;
 }
 

@@ -5,6 +5,7 @@
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyAlphaTileStore.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyRevealColorTileStore.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyAlphaSnapshotMaterializer.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyFinalWorkingSet.h"
 
 namespace
 {
@@ -25,6 +26,68 @@ bool FDWCTransparencyPixelComposeContext::IsValid() const
     return SourcePayload->InnerColorBuffer.Num() == PixelCount &&
         SourcePayload->AutoAlphaBuffer.Num() == PixelCount &&
         (RevealColorBuffer.IsEmpty() || RevealColorBuffer.Num() == PixelCount);
+}
+
+FColor FDWCTransparencyComposite::ApplyRevealMetallicDarkening(
+    FColor RevealColor,
+    const FDWCTransparencySourcePayload& SourcePayload,
+    const int32 PixelIndex,
+    const float Strength)
+{
+    const float SafeStrength = FMath::Clamp(Strength, 0.0f, 1.0f);
+    if (SafeStrength <= KINDA_SMALL_NUMBER ||
+        !SourcePayload.RevealSurfaceAuthoring.IsValidForResolution(SourcePayload.Resolution) ||
+        !SourcePayload.RevealSurfaceAuthoring.HasValidSource(PixelIndex))
+    {
+        return RevealColor;
+    }
+
+    const float Darkening = FMath::Clamp(
+        SourcePayload.RevealSurfaceAuthoring.GetInnerMetallic(PixelIndex) *
+        SourcePayload.RevealSurfaceAuthoring.GetSourceCoverage(PixelIndex) *
+        SafeStrength,
+        0.0f,
+        1.0f);
+    if (Darkening <= KINDA_SMALL_NUMBER)
+    {
+        return RevealColor;
+    }
+
+    const uint8 PreservedAlpha = RevealColor.A;
+    FLinearColor LinearColor = FLinearColor::FromSRGBColor(RevealColor);
+    LinearColor.R *= 1.0f - Darkening;
+    LinearColor.G *= 1.0f - Darkening;
+    LinearColor.B *= 1.0f - Darkening;
+    RevealColor = LinearColor.ToFColorSRGB();
+    RevealColor.A = PreservedAlpha;
+    return RevealColor;
+}
+
+bool FDWCTransparencyComposite::ApplyRevealMetallicDarkening(
+    TArray<FColor>& InOutRevealColors,
+    const FDWCTransparencySourcePayload& SourcePayload,
+    const float Strength,
+    const FDWCEditorCancellationToken* CancellationToken)
+{
+    const int32 PixelCount = SourcePayload.Resolution.X * SourcePayload.Resolution.Y;
+    if (PixelCount <= 0 || InOutRevealColors.Num() != PixelCount)
+    {
+        return false;
+    }
+
+    for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
+    {
+        if ((PixelIndex & 4095) == 0 && CancellationToken != nullptr && CancellationToken->IsCanceled())
+        {
+            return false;
+        }
+        InOutRevealColors[PixelIndex] = ApplyRevealMetallicDarkening(
+            InOutRevealColors[PixelIndex],
+            SourcePayload,
+            PixelIndex,
+            Strength);
+    }
+    return true;
 }
 
 float FDWCTransparencyComposite::ComputeMaximumHitDistance(
@@ -50,11 +113,21 @@ float FDWCTransparencyComposite::ResolveEditedAlpha(
     const FDWCTransparencyPixelComposeContext& Context,
     const int32 PixelIndex)
 {
-    if (!Context.IsValid() || !Context.SourcePayload->AutoAlphaBuffer.IsValidIndex(PixelIndex))
+    const uint8* BaseAlpha = nullptr;
+    if (Context.AlphaDomain != nullptr && Context.AlphaDomain->BaseAlpha.IsValidIndex(PixelIndex))
+    {
+        BaseAlpha = &Context.AlphaDomain->BaseAlpha[PixelIndex];
+    }
+    else if (Context.SourcePayload != nullptr &&
+             Context.SourcePayload->AutoAlphaBuffer.IsValidIndex(PixelIndex))
+    {
+        BaseAlpha = &Context.SourcePayload->AutoAlphaBuffer[PixelIndex];
+    }
+    if (BaseAlpha == nullptr)
     {
         return 0.0f;
     }
-    const float AutoAlpha = Context.SourcePayload->AutoAlphaBuffer[PixelIndex] / 255.0f;
+    const float AutoAlpha = *BaseAlpha / 255.0f;
     const float ManualPremultiplied = Context.AlphaSnapshotView != nullptr
         ? Context.AlphaSnapshotView->GetPremultiplied(PixelIndex) / 255.0f
         : Context.ManualAlphaTileStore != nullptr
@@ -120,6 +193,11 @@ FColor FDWCTransparencyComposite::ComposeVisualizationPixel(
         : Context.RevealColorBuffer.IsValidIndex(PixelIndex)
         ? Context.RevealColorBuffer[PixelIndex]
         : Result.InnerColorBuffer[PixelIndex];
+    Pixel = ApplyRevealMetallicDarkening(
+        Pixel,
+        Result,
+        PixelIndex,
+        Context.RevealMetallicDarkeningStrength);
     Pixel.A = FeatheredAlpha;
     switch (Context.VisualizationMode)
     {

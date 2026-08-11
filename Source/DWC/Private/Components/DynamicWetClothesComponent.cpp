@@ -15,6 +15,7 @@
 #include "WetRendering/WetRenderStage.h"
 #include "WetRendering/WetMaterialParameters.h"
 #include "WetRendering/DWCGPUResourceSubsystem.h"
+#include "WetRendering/DWCGeneratedMaterialContract.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
@@ -79,6 +80,50 @@ namespace
         return CurrentMaterial == MaterialOverride.SourceMaterial ||
                CurrentMaterial == MaterialOverride.GeneratedMaterial ||
                CurrentMaterial == MaterialOverride.GeneratedMaterialInstance;
+    }
+
+    bool IsRecordedGeneratedMaterial(
+        const UMaterialInterface*                       CurrentMaterial,
+        const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
+    {
+        if (CurrentMaterial == nullptr)
+        {
+            return false;
+        }
+
+        const UMaterial* GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
+        return CurrentMaterial == GeneratedMaterial ||
+               CurrentMaterial == MaterialOverride.GeneratedMaterialInstance ||
+               (GeneratedMaterial != nullptr && CurrentMaterial->GetMaterial() == GeneratedMaterial);
+    }
+
+    bool IsGeneratedMaterialOverrideRuntimeCompatible(
+        const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
+    {
+        return MaterialOverride.GeneratedMaterial != nullptr &&
+               MaterialOverride.GeneratedMaterialInstance != nullptr &&
+               DWCGeneratedMaterialContract::IsRuntimeCompatible(
+                   MaterialOverride.GeneratorVersion,
+                   MaterialOverride.GenerationSignature,
+                   MaterialOverride.SourceMaterialSignature);
+    }
+
+    void RestoreSourceMaterialForIncompatibleOverride(
+        USkeletalMeshComponent&                         MeshComponent,
+        const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
+    {
+        const int32 MaterialSlotIndex = MaterialOverride.MaterialSlotIndex;
+        if (MaterialSlotIndex < 0 || MaterialSlotIndex >= MeshComponent.GetNumMaterials())
+        {
+            return;
+        }
+
+        UMaterialInterface* CurrentMaterial = MeshComponent.GetMaterial(MaterialSlotIndex);
+        UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
+        if (SourceMaterial != nullptr && IsRecordedGeneratedMaterial(CurrentMaterial, MaterialOverride))
+        {
+            MeshComponent.SetMaterial(MaterialSlotIndex, SourceMaterial);
+        }
     }
 
     int32 MakeDWCReceiverGPUId(const FName ReceiverId)
@@ -602,7 +647,6 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
             UMaterialInterface* WetMaterial = MaterialOverride.GeneratedMaterialInstance.Get();
 
             if (MaterialOverride.MaterialSlotIndex == INDEX_NONE ||
-                WetMaterial == nullptr ||
                 !IsMaterialSlotWettableForRuntime(ReceiverWetClothingAsset, MaterialOverride.MaterialSlotIndex))
             {
                 continue;
@@ -616,6 +660,20 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
                     TEXT("DynamicWetClothesComponent: Wet material override slot %d is out of range on %s."),
                     MaterialOverride.MaterialSlotIndex,
                     *GetNameSafe(OverrideTargetMesh));
+                continue;
+            }
+
+            if (!IsGeneratedMaterialOverrideRuntimeCompatible(MaterialOverride))
+            {
+                RestoreSourceMaterialForIncompatibleOverride(*OverrideTargetMesh, MaterialOverride);
+                UE_LOG(
+                    LogDWC,
+                    Warning,
+                    TEXT("DynamicWetClothesComponent: skipped incompatible generated material override on '%s' slot %d (version=%d, expected=%d). Regenerate DWC materials in the WCA Editor."),
+                    *GetNameSafe(OverrideTargetMesh),
+                    MaterialOverride.MaterialSlotIndex,
+                    MaterialOverride.GeneratorVersion,
+                    DWCGeneratedMaterialContract::CurrentGeneratorVersion);
                 continue;
             }
 
@@ -1317,10 +1375,15 @@ void UDynamicWetClothesComponent::RebindMaterialsAfterExternalChange(USkeletalMe
     {
         UMaterialInterface* WetMaterial = MaterialOverride.GeneratedMaterialInstance.Get();
         if (MaterialOverride.MaterialSlotIndex == INDEX_NONE ||
-            WetMaterial == nullptr ||
             !IsMaterialSlotWettableForRuntime(WetClothingAsset.Get(), MaterialOverride.MaterialSlotIndex) ||
             MaterialOverride.MaterialSlotIndex >= MeshComponent->GetNumMaterials())
         {
+            continue;
+        }
+
+        if (!IsGeneratedMaterialOverrideRuntimeCompatible(MaterialOverride))
+        {
+            RestoreSourceMaterialForIncompatibleOverride(*MeshComponent, MaterialOverride);
             continue;
         }
 

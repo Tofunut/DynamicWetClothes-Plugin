@@ -217,6 +217,18 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TOptional<float> GetTransparencyPreviewStrength() const;
     void HandleTransparencyPreviewStrengthChanged(float InValue);
     void HandleTransparencyPreviewStrengthCommitted(float InValue, ETextCommit::Type CommitType);
+    ECheckBoxState GetRevealNormalEnabledState() const;
+    void HandleRevealNormalEnabledChanged(ECheckBoxState NewState);
+    TOptional<float> GetRevealNormalStrength() const;
+    void HandleRevealNormalStrengthChanged(float InValue);
+    void HandleRevealNormalStrengthCommitted(float InValue, ETextCommit::Type CommitType);
+    ECheckBoxState GetShowRevealNormalState() const;
+    void HandleShowRevealNormalChanged(ECheckBoxState NewState);
+    ECheckBoxState GetRevealNormalSourceState(EDWCTransparencyRevealNormalPreviewSource Source) const;
+    void HandleRevealNormalSourceChanged(
+        ECheckBoxState NewState,
+        EDWCTransparencyRevealNormalPreviewSource Source);
+    FText GetRevealNormalPreviewSourceStatusText() const;
     ECheckBoxState GetShowSavedWrinkleState() const;
     void HandleShowSavedWrinkleChanged(ECheckBoxState NewState);
     TOptional<float> GetWrinkleSuppressionStrength() const;
@@ -298,6 +310,10 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void CommitTransparencyPreviewSettings(
         const FText& TransactionText,
         const FDWCTransparencyPreviewSettings& Settings);
+    void CommitRevealNormalRuntimeSettings(
+        const FText& TransactionText,
+        bool bEnable,
+        float Strength);
     FDWCTransparencyPreviewSettings GetTransparencyPreviewSettings() const;
     void DispatchTransparencyPreviewSettings(FDWCTransparencyPreviewSettings Settings);
 
@@ -330,6 +346,8 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TOptional<float> GetRevealPaintFalloff() const;
     void HandleRevealPaintStrengthCommitted(float Value, ETextCommit::Type CommitType);
     void HandleRevealPaintFalloffCommitted(float Value, ETextCommit::Type CommitType);
+    TOptional<float> GetRevealMetallicDarkeningStrength() const;
+    void HandleRevealMetallicDarkeningStrengthCommitted(float Value, ETextCommit::Type CommitType);
     FReply HandleClearRevealColorPaintClicked();
     bool EditRevealColorStrokeHistory(
         const FText& TransactionText,
@@ -381,12 +399,13 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedRef<SWidget> BuildBrushSizeMenu(EDWCTransparencyBrushSizeTarget Target);
     TSharedRef<SWidget> BuildTransparencyStrokeList();
     TSharedRef<SWidget> BuildGeneratedOutputsSection();
-    TSharedRef<SWidget> BuildRevealSurfaceStatusSection();
+    TSharedRef<SWidget> BuildRevealNormalStatusSection();
     TSharedRef<SWidget> BuildPackedTransparencyMapSection();
     TSharedRef<SWidget> BuildTransparencyPreviewSection();
     TSharedRef<SWidget> BuildVisualizationModeControl(EDWCTransparencyEditorStage Stage);
     TSharedRef<SWidget> BuildRevealVisualizationSection();
     TSharedRef<SWidget> BuildPreviewSettingsSection();
+    TSharedRef<SWidget> BuildRevealNormalPreviewSettingsSection();
     TSharedRef<SWidget> BuildPreviewModeButton(EWetClothingTransparencyPreviewMode Mode, const FText& Label);
     TSharedRef<SWidget> BuildAssetSummaryRow(
         UObject* Asset,

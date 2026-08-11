@@ -11,6 +11,15 @@ FVector FDWCRevealBakeTexelSampler::InterpolateVector(const FVector& Barycentric
     return Values[0] * Barycentric.X + Values[1] * Barycentric.Y + Values[2] * Barycentric.Z;
 }
 
+FVector FDWCRevealBakeTexelSampler::InterpolateDirection(
+    const FVector& Barycentric,
+    const FVector3f Values[3])
+{
+    return FVector(Values[0]) * Barycentric.X +
+        FVector(Values[1]) * Barycentric.Y +
+        FVector(Values[2]) * Barycentric.Z;
+}
+
 FIntRect FDWCRevealBakeTexelSampler::MakePixelBoundsFromUVTriangle(
     const FDWCRevealBakeSurfaceTriangle& Triangle,
     const FIntPoint&                     Resolution)
@@ -36,6 +45,15 @@ int32 FDWCRevealBakeTexelSampler::MakePixelKey(const int32 X, const int32 Y, con
 FVector FDWCRevealBakeRayProjector::InterpolateVector(const FVector& Barycentric, const FVector Values[3])
 {
     return Values[0] * Barycentric.X + Values[1] * Barycentric.Y + Values[2] * Barycentric.Z;
+}
+
+FVector FDWCRevealBakeRayProjector::InterpolateDirection(
+    const FVector& Barycentric,
+    const FVector3f Values[3])
+{
+    return FVector(Values[0]) * Barycentric.X +
+        FVector(Values[1]) * Barycentric.Y +
+        FVector(Values[2]) * Barycentric.Z;
 }
 
 FVector2D FDWCRevealBakeRayProjector::InterpolateVector2D(const FVector& Barycentric, const FVector2D Values[3])
@@ -365,7 +383,7 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
                 Sample.Pixel = FIntPoint(X, Y);
                 Sample.UV = UV;
                 Sample.Position = InterpolateVector(Barycentric, Triangle.Positions);
-                Sample.Normal = InterpolateVector(Barycentric, Triangle.Normals).GetSafeNormal();
+                Sample.Normal = InterpolateDirection(Barycentric, Triangle.Normals).GetSafeNormal();
                 Sample.TriangleIndex = Triangle.TriangleIndex;
                 Sample.MaterialSlotIndex = Triangle.MaterialSlotIndex;
                 Sample.UVIslandID = Triangle.UVIslandID;
@@ -646,7 +664,9 @@ FDWCRevealBakeRayHit FDWCRevealBakeRayProjector::MakeRayHit(
     if (Candidate.Triangle != nullptr)
     {
         Hit.Position = InterpolateVector(Candidate.Barycentric, Candidate.Triangle->Positions);
-        Hit.Normal = InterpolateVector(Candidate.Barycentric, Candidate.Triangle->Normals).GetSafeNormal();
+        Hit.Normal = InterpolateDirection(
+            Candidate.Barycentric,
+            Candidate.Triangle->Normals).GetSafeNormal();
         Hit.SourceUV = InterpolateVector2D(Candidate.Barycentric, Candidate.Triangle->UVs);
         Hit.SourceBarycentric = Candidate.Barycentric;
     }

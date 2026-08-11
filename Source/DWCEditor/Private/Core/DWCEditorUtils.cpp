@@ -176,7 +176,7 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
             for (const FWetClothingBakedTransparencyMap& TransparencyMap : TransparencyLayer.BakedMaps)
             {
                 AddDirtyGeneratedPackage(TransparencyMap.TransparencyMap.Get());
-                AddDirtyGeneratedPackage(TransparencyMap.RevealSurfaceMap.Get());
+                AddDirtyGeneratedPackage(TransparencyMap.RevealNormalMap.Get());
             }
         }
 

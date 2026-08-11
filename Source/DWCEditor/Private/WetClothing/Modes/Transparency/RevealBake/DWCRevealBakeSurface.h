@@ -14,7 +14,18 @@ struct FDWCRevealBakeSurfaceTriangle
     int32     UVIslandID = INDEX_NONE;
     int32     VertexIndices[3] = { INDEX_NONE, INDEX_NONE, INDEX_NONE };
     FVector   Positions[3];
-    FVector   Normals[3];
+    FVector3f Normals[3] = {
+        FVector3f(0.0f, 0.0f, 1.0f),
+        FVector3f(0.0f, 0.0f, 1.0f),
+        FVector3f(0.0f, 0.0f, 1.0f)
+    };
+    FVector3f Tangents[3] = {
+        FVector3f(1.0f, 0.0f, 0.0f),
+        FVector3f(1.0f, 0.0f, 0.0f),
+        FVector3f(1.0f, 0.0f, 0.0f)
+    };
+    int8      BitangentSigns[3] = { 1, 1, 1 };
+    bool      bHasValidImportedTangentBasis = false;
     FVector2D UVs[3];
     FBox      Bounds = FBox(ForceInit);
 };
@@ -30,12 +41,22 @@ struct FDWCRevealBakeSurfaceFrame
 };
 
 /**
- * Shared tangent-frame rules for reveal surface baking. They deliberately use
- * the copied Stage 2 geometry, so source normal reorientation remains worker-safe.
+ * Shared tangent-frame rules for reveal surface baking. Imported render-vertex
+ * tangent data is copied into the Stage 2 snapshot so normal reorientation is
+ * independent of the DWC Data UV and remains worker-safe.
  */
 class FDWCRevealBakeSurfaceFrameBuilder
 {
   public:
+    static bool TransformImportedBasis(
+        const FTransform& BakeTransform,
+        const FVector3f& LocalTangent,
+        const FVector3f& LocalBitangent,
+        const FVector3f& LocalNormal,
+        FVector3f& OutTangent,
+        FVector3f& OutNormal,
+        int8& OutBitangentSign);
+
     static bool BuildInterpolatedFrame(
         const FDWCRevealBakeSurfaceTriangle& Triangle,
         const FVector& Barycentric,

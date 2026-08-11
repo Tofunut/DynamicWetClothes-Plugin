@@ -2,6 +2,7 @@
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyBrushRasterizer.h"
 
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyFinalWorkingSet.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
 
 namespace
@@ -12,13 +13,13 @@ namespace
     }
 
     float ResolveEditedAlphaInternal(
-        const FDWCTransparencySourcePayload& SourcePayload,
+        const FDWCTransparencyAlphaRasterContext& AlphaContext,
         const TArray<uint8>& ManualPremultipliedBuffer,
         const TArray<uint8>& ManualWeightBuffer,
         const int32 PixelIndex)
     {
-        const float AutoAlpha = SourcePayload.AutoAlphaBuffer.IsValidIndex(PixelIndex)
-            ? SourcePayload.AutoAlphaBuffer[PixelIndex] / 255.0f
+        const float AutoAlpha = AlphaContext.BaseAlpha.IsValidIndex(PixelIndex)
+            ? AlphaContext.BaseAlpha[PixelIndex] / 255.0f
             : 0.0f;
         const float ManualPremultiplied = ManualPremultipliedBuffer.IsValidIndex(PixelIndex)
             ? ManualPremultipliedBuffer[PixelIndex] / 255.0f
@@ -29,35 +30,15 @@ namespace
         return FMath::Clamp(AutoAlpha * (1.0f - ManualWeight) + ManualPremultiplied, 0.0f, 1.0f);
     }
 
-    bool PassesIslandClip(
-        const FDWCTransparencySourcePayload& SourcePayload,
-        const int32 PixelIndex,
-        const int32 UVIslandID)
-    {
-        if (!SourcePayload.OuterCoverageBuffer.IsValidIndex(PixelIndex) ||
-            SourcePayload.OuterCoverageBuffer[PixelIndex] == 0)
-        {
-            return false;
-        }
-        if (UVIslandID == INDEX_NONE)
-        {
-            return true;
-        }
-        return SourcePayload.OuterIslandIDBuffer.IsValidIndex(PixelIndex) &&
-            FDWCTransparencySourcePayload::MatchesOuterIslandID(
-                SourcePayload.OuterIslandIDBuffer[PixelIndex],
-                UVIslandID);
-    }
-
     void ApplySample(
-        const FDWCTransparencySourcePayload& SourcePayload,
+        const FDWCTransparencyAlphaRasterContext& AlphaContext,
         const FDWCTransparencyBrushStroke& Stroke,
         const FDWCTransparencyBrushSample& Sample,
         TArray<uint8>& ManualPremultipliedBuffer,
         TArray<uint8>& ManualWeightBuffer)
     {
-        const int32 Width = SourcePayload.Resolution.X;
-        const int32 Height = SourcePayload.Resolution.Y;
+        const int32 Width = AlphaContext.Resolution.X;
+        const int32 Height = AlphaContext.Resolution.Y;
         if (Width <= 0 || Height <= 0)
         {
             return;
@@ -71,7 +52,7 @@ namespace
         const int32 MaxX = FMath::CeilToInt(CenterPixels.X + RadiusPixelsX + 1.0f);
         const int32 MinY = FMath::FloorToInt(CenterPixels.Y - RadiusPixelsY - 1.0f);
         const int32 MaxY = FMath::CeilToInt(CenterPixels.Y + RadiusPixelsY + 1.0f);
-        const int32 ClipUVIslandID = SourcePayload.ResolveOuterIslandIDAtUV(
+        const int32 ClipUVIslandID = AlphaContext.ResolveOuterIslandIDAtUV(
             Sample.PositionUV,
             Sample.UVIslandID,
             bWrap);
@@ -113,7 +94,7 @@ namespace
                 const int32 X = bWrap ? WrapIndex(UnwrappedX, Width) : UnwrappedX;
                 const int32 Y = bWrap ? WrapIndex(UnwrappedY, Height) : UnwrappedY;
                 const int32 PixelIndex = Y * Width + X;
-                if (!PassesIslandClip(SourcePayload, PixelIndex, ClipUVIslandID))
+                if (!AlphaContext.PassesIslandClip(PixelIndex, ClipUVIslandID))
                 {
                     continue;
                 }
@@ -160,10 +141,10 @@ namespace
                                     SampleY = FMath::Clamp(SampleY, 0, Height - 1);
                                 }
                                 const int32 NeighborIndex = SampleY * Width + SampleX;
-                                if (PassesIslandClip(SourcePayload, NeighborIndex, ClipUVIslandID))
+                                if (AlphaContext.PassesIslandClip(NeighborIndex, ClipUVIslandID))
                                 {
                                     Target += ResolveEditedAlphaInternal(
-                                        SourcePayload,
+                                        AlphaContext,
                                         SmoothPremultipliedSnapshot,
                                         SmoothWeightSnapshot,
                                         NeighborIndex);
@@ -174,7 +155,7 @@ namespace
                         Target = SmoothSampleCount > 0
                             ? Target / static_cast<float>(SmoothSampleCount)
                             : ResolveEditedAlphaInternal(
-                                SourcePayload,
+                                AlphaContext,
                                 SmoothPremultipliedSnapshot,
                                 SmoothWeightSnapshot,
                                 PixelIndex);
@@ -191,6 +172,76 @@ namespace
             }
         }
     }
+}
+
+FDWCTransparencyAlphaRasterContext FDWCTransparencyAlphaRasterContext::FromSourcePayload(
+    const FDWCTransparencySourcePayload& SourcePayload)
+{
+    FDWCTransparencyAlphaRasterContext Result;
+    Result.Resolution = SourcePayload.Resolution;
+    Result.MaterialSlotIndex = SourcePayload.MaterialSlotIndex;
+    Result.BaseAlpha = MakeArrayView(SourcePayload.AutoAlphaBuffer);
+    Result.OuterCoverage = MakeArrayView(SourcePayload.OuterCoverageBuffer);
+    Result.OuterIslandIDs = MakeArrayView(SourcePayload.OuterIslandIDBuffer);
+    return Result;
+}
+
+FDWCTransparencyAlphaRasterContext FDWCTransparencyAlphaRasterContext::FromAlphaDomain(
+    const FDWCTransparencyAlphaDomainSnapshot& AlphaDomain)
+{
+    FDWCTransparencyAlphaRasterContext Result;
+    Result.Resolution = AlphaDomain.Resolution;
+    Result.MaterialSlotIndex = AlphaDomain.MaterialSlotIndex;
+    Result.BaseAlpha = MakeArrayView(AlphaDomain.BaseAlpha);
+    Result.OuterCoverage = MakeArrayView(AlphaDomain.OuterCoverage);
+    Result.OuterIslandIDs = MakeArrayView(AlphaDomain.OuterIslandIDs);
+    return Result;
+}
+
+bool FDWCTransparencyAlphaRasterContext::IsValid() const
+{
+    const int64 PixelCount = static_cast<int64>(Resolution.X) * Resolution.Y;
+    return Resolution.X > 0 && Resolution.Y > 0 && MaterialSlotIndex != INDEX_NONE &&
+        BaseAlpha.Num() == PixelCount && OuterCoverage.Num() == PixelCount &&
+        OuterIslandIDs.Num() == PixelCount;
+}
+
+int32 FDWCTransparencyAlphaRasterContext::ResolveOuterIslandIDAtUV(
+    const FVector2D& PositionUV,
+    const int32 FallbackUVIslandID,
+    const bool bWrap) const
+{
+    if (!IsValid())
+    {
+        return FallbackUVIslandID;
+    }
+    int32 X = FMath::FloorToInt(PositionUV.X * Resolution.X);
+    int32 Y = FMath::FloorToInt(PositionUV.Y * Resolution.Y);
+    if (bWrap)
+    {
+        X = WrapIndex(X, Resolution.X);
+        Y = WrapIndex(Y, Resolution.Y);
+    }
+    else
+    {
+        X = FMath::Clamp(X, 0, Resolution.X - 1);
+        Y = FMath::Clamp(Y, 0, Resolution.Y - 1);
+    }
+    const int32 PixelIndex = Y * Resolution.X + X;
+    return OuterIslandIDs.IsValidIndex(PixelIndex)
+        ? FDWCTransparencySourcePayload::DecodeOuterIslandID(OuterIslandIDs[PixelIndex])
+        : FallbackUVIslandID;
+}
+
+bool FDWCTransparencyAlphaRasterContext::PassesIslandClip(
+    const int32 PixelIndex,
+    const int32 UVIslandID) const
+{
+    return OuterCoverage.IsValidIndex(PixelIndex) && OuterCoverage[PixelIndex] != 0 &&
+        (UVIslandID == INDEX_NONE ||
+         (OuterIslandIDs.IsValidIndex(PixelIndex) &&
+          FDWCTransparencySourcePayload::MatchesOuterIslandID(
+              OuterIslandIDs[PixelIndex], UVIslandID)));
 }
 
 void FDWCTransparencyBrushRasterizer::BuildSampleRegions(
@@ -226,15 +277,31 @@ bool FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
     const TArray<FIntPoint>& OutputTileCoordinates,
     TArray<FDWCTransparencyAlphaTilePayload>& InOutTilePayloads)
 {
-    const int32 Width = SourcePayload.Resolution.X;
-    const int32 Height = SourcePayload.Resolution.Y;
-    if (Width <= 0 || Height <= 0 || Samples.IsEmpty() || OutputTileCoordinates.IsEmpty())
+    return RasterizeSamplesToTiles(
+        FDWCTransparencyAlphaRasterContext::FromSourcePayload(SourcePayload),
+        Stroke,
+        Samples,
+        OutputTileCoordinates,
+        InOutTilePayloads);
+}
+
+bool FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
+    const FDWCTransparencyAlphaRasterContext& AlphaContext,
+    const FDWCTransparencyBrushStroke& Stroke,
+    const TArray<FDWCTransparencyBrushSample>& Samples,
+    const TArray<FIntPoint>& OutputTileCoordinates,
+    TArray<FDWCTransparencyAlphaTilePayload>& InOutTilePayloads)
+{
+    const int32 Width = AlphaContext.Resolution.X;
+    const int32 Height = AlphaContext.Resolution.Y;
+    if (!AlphaContext.IsValid() || Width <= 0 || Height <= 0 ||
+        Samples.IsEmpty() || OutputTileCoordinates.IsEmpty())
     {
         return false;
     }
 
     FDWCTransparencyAlphaTileStore WorkingStore;
-    WorkingStore.Initialize(SourcePayload.Resolution);
+    WorkingStore.Initialize(AlphaContext.Resolution);
     if (!WorkingStore.Commit(WorkingStore.GetRevision(), InOutTilePayloads))
     {
         return false;
@@ -258,7 +325,7 @@ bool FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
         const int32 MaxX = FMath::CeilToInt(Center.X + RadiusX + 1.0f);
         const int32 MinY = FMath::FloorToInt(Center.Y - RadiusY - 1.0f);
         const int32 MaxY = FMath::CeilToInt(Center.Y + RadiusY + 1.0f);
-        const int32 IslandID = SourcePayload.ResolveOuterIslandIDAtUV(
+        const int32 IslandID = AlphaContext.ResolveOuterIslandIDAtUV(
             Sample.PositionUV,
             Sample.UVIslandID,
             bWrap);
@@ -288,7 +355,7 @@ bool FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
                     continue;
                 }
                 const int32 PixelIndex = Y * Width + X;
-                if (!PassesIslandClip(SourcePayload, PixelIndex, IslandID))
+                if (!AlphaContext.PassesIslandClip(PixelIndex, IslandID))
                 {
                     continue;
                 }
@@ -342,16 +409,16 @@ bool FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
                                     NeighborY = FMath::Clamp(NeighborY, 0, Height - 1);
                                 }
                                 const int32 NeighborIndex = NeighborY * Width + NeighborX;
-                                if (PassesIslandClip(SourcePayload, NeighborIndex, IslandID))
+                                if (AlphaContext.PassesIslandClip(NeighborIndex, IslandID))
                                 {
-                                    Target += ResolveEditedAlpha(SourcePayload, SmoothSource.GetValue(), NeighborIndex);
+                                    Target += ResolveEditedAlpha(AlphaContext, SmoothSource.GetValue(), NeighborIndex);
                                     ++Count;
                                 }
                             }
                         }
                         Target = Count > 0
                             ? Target / static_cast<float>(Count)
-                            : ResolveEditedAlpha(SourcePayload, SmoothSource.GetValue(), PixelIndex);
+                            : ResolveEditedAlpha(AlphaContext, SmoothSource.GetValue(), PixelIndex);
                     }
                     NewPremultiplied = Target * BrushWeight + OldPremultiplied * (1.0f - BrushWeight);
                     NewWeight = BrushWeight + OldWeight * (1.0f - BrushWeight);
@@ -380,6 +447,8 @@ bool FDWCTransparencyBrushRasterizer::RasterizeRevealColorSamplesToTiles(
     const TArray<FIntPoint>& OutputTileCoordinates,
     TArray<FDWCTransparencyRevealColorTilePayload>& InOutTilePayloads)
 {
+    const FDWCTransparencyAlphaRasterContext SurfaceContext =
+        FDWCTransparencyAlphaRasterContext::FromSourcePayload(SourcePayload);
     const int32 Width = SourcePayload.Resolution.X;
     const int32 Height = SourcePayload.Resolution.Y;
     if (Width <= 0 || Height <= 0 || SourcePayload.InnerColorBuffer.Num() != Width * Height ||
@@ -450,7 +519,7 @@ bool FDWCTransparencyBrushRasterizer::RasterizeRevealColorSamplesToTiles(
                 const int32 PixelIndex = Y * Width + X;
                 if (!SourcePayload.OuterCoverageBuffer.IsValidIndex(PixelIndex) ||
                     SourcePayload.OuterCoverageBuffer[PixelIndex] == 0 ||
-                    !PassesIslandClip(SourcePayload, PixelIndex, IslandID))
+                    !SurfaceContext.PassesIslandClip(PixelIndex, IslandID))
                 {
                     continue;
                 }
@@ -488,7 +557,7 @@ bool FDWCTransparencyBrushRasterizer::RasterizeRevealColorSamplesToTiles(
                                 NeighborY = FMath::Clamp(NeighborY, 0, Height - 1);
                             }
                             const int32 NeighborIndex = NeighborY * Width + NeighborX;
-                            TargetColor += PassesIslandClip(SourcePayload, NeighborIndex, IslandID)
+                            TargetColor += SurfaceContext.PassesIslandClip(NeighborIndex, IslandID)
                                 ? FLinearColor(SmoothSource->GetColor(
                                     NeighborIndex,
                                     MakeArrayView(SourcePayload.InnerColorBuffer)))
@@ -535,8 +604,27 @@ void FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
     TArray<uint8>& OutManualPremultipliedBuffer,
     TArray<uint8>& OutManualWeightBuffer)
 {
-    const int32 PixelCount = SourcePayload.Resolution.X * SourcePayload.Resolution.Y;
-    if (PixelCount <= 0)
+    RebuildFromStrokes(
+        FDWCTransparencyAlphaRasterContext::FromSourcePayload(SourcePayload),
+        Strokes,
+        BaselineStrokeCount,
+        MaterialSlotIndex,
+        INDEX_NONE,
+        OutManualPremultipliedBuffer,
+        OutManualWeightBuffer);
+}
+
+void FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
+    const FDWCTransparencyAlphaRasterContext& AlphaContext,
+    const TArray<FDWCTransparencyBrushStroke>& Strokes,
+    const int32 BaselineStrokeCount,
+    const int32 MaterialSlotIndex,
+    const int32 /*UVChannelIndex*/,
+    TArray<uint8>& OutManualPremultipliedBuffer,
+    TArray<uint8>& OutManualWeightBuffer)
+{
+    const int32 PixelCount = AlphaContext.Resolution.X * AlphaContext.Resolution.Y;
+    if (!AlphaContext.IsValid() || PixelCount <= 0)
     {
         return;
     }
@@ -576,7 +664,7 @@ void FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
 
         for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
         {
-            ApplySample(SourcePayload, Stroke, Sample, OutManualPremultipliedBuffer, OutManualWeightBuffer);
+            ApplySample(AlphaContext, Stroke, Sample, OutManualPremultipliedBuffer, OutManualWeightBuffer);
         }
     }
 }
@@ -587,7 +675,11 @@ float FDWCTransparencyBrushRasterizer::ResolveEditedAlpha(
     const TArray<uint8>& ManualWeightBuffer,
     const int32 PixelIndex)
 {
-    return ResolveEditedAlphaInternal(SourcePayload, ManualPremultipliedBuffer, ManualWeightBuffer, PixelIndex);
+    return ResolveEditedAlphaInternal(
+        FDWCTransparencyAlphaRasterContext::FromSourcePayload(SourcePayload),
+        ManualPremultipliedBuffer,
+        ManualWeightBuffer,
+        PixelIndex);
 }
 
 float FDWCTransparencyBrushRasterizer::ResolveEditedAlpha(
@@ -595,8 +687,19 @@ float FDWCTransparencyBrushRasterizer::ResolveEditedAlpha(
     const FDWCTransparencyAlphaTileStore& TileStore,
     const int32 PixelIndex)
 {
-    const float AutoAlpha = SourcePayload.AutoAlphaBuffer.IsValidIndex(PixelIndex)
-        ? SourcePayload.AutoAlphaBuffer[PixelIndex] / 255.0f
+    return ResolveEditedAlpha(
+        FDWCTransparencyAlphaRasterContext::FromSourcePayload(SourcePayload),
+        TileStore,
+        PixelIndex);
+}
+
+float FDWCTransparencyBrushRasterizer::ResolveEditedAlpha(
+    const FDWCTransparencyAlphaRasterContext& AlphaContext,
+    const FDWCTransparencyAlphaTileStore& TileStore,
+    const int32 PixelIndex)
+{
+    const float AutoAlpha = AlphaContext.BaseAlpha.IsValidIndex(PixelIndex)
+        ? AlphaContext.BaseAlpha[PixelIndex] / 255.0f
         : 0.0f;
     return FMath::Clamp(
         AutoAlpha * (1.0f - TileStore.GetWeight(PixelIndex) / 255.0f) +

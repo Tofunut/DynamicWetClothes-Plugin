@@ -722,6 +722,9 @@ void SWetClothingTransparencyBakePanel::Construct(const FArguments& InArgs)
     FinalVisualizationModeItems.Add(MakeShared<EDWCTransparencyVisualizationMode>(EDWCTransparencyVisualizationMode::Final));
     FinalVisualizationModeItems.Add(MakeShared<EDWCTransparencyVisualizationMode>(EDWCTransparencyVisualizationMode::AutoAlpha));
     FinalVisualizationModeItems.Add(MakeShared<EDWCTransparencyVisualizationMode>(EDWCTransparencyVisualizationMode::WrinkleSeparation));
+    FinalVisualizationModeItems.Add(MakeShared<EDWCTransparencyVisualizationMode>(EDWCTransparencyVisualizationMode::RevealNormalOnly));
+    FinalVisualizationModeItems.Add(MakeShared<EDWCTransparencyVisualizationMode>(EDWCTransparencyVisualizationMode::RevealNormalTexture));
+    FinalVisualizationModeItems.Add(MakeShared<EDWCTransparencyVisualizationMode>(EDWCTransparencyVisualizationMode::SourceCoverage));
     BlueprintSourceRoleItems.Add(MakeShared<EDWCTransparencyBlueprintSourceRole>(EDWCTransparencyBlueprintSourceRole::RevealSource));
     BlueprintSourceRoleItems.Add(MakeShared<EDWCTransparencyBlueprintSourceRole>(EDWCTransparencyBlueprintSourceRole::BlockerOnly));
     SelectedVisualizationMode = EDWCTransparencyVisualizationMode::Final;
@@ -3093,9 +3096,12 @@ FReply SWetClothingTransparencyBakePanel::HandleContinueToFinalEditingClicked()
     const FGuid ExpectedLayerGuid = Layer->LayerGuid;
     const int32 ExpectedSlot = Layer->TargetSurface.OuterMaterialSlotIndex;
     const FString ExpectedSourceSignature = (*StoredResult)->BuildSignature;
+    const float ExpectedMetallicDarkeningStrength =
+        Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength;
     const FString ExpectedRevealSignature = FDWCTransparencySignatureService::BuildRevealSignature(
         (*StoredResult)->BuildSignature,
-        *Layer);
+        *Layer,
+        ExpectedMetallicDarkeningStrength);
     const uint64 ExpectedEpoch = ++RevealCommitEpoch;
 
     FDWCEditorWorkerJobDescriptor Descriptor;
@@ -3175,7 +3181,11 @@ FReply SWetClothingTransparencyBakePanel::HandleContinueToFinalEditingClicked()
             FWetClothingTransparencyLayerData* CurrentLayer = Panel->GetSelectedLayer();
             const FString CurrentRevealSignature = CurrentLayer != nullptr
                 ? FDWCTransparencySignatureService::BuildRevealSignature(
-                    ExpectedSourceSignature, *CurrentLayer)
+                    ExpectedSourceSignature,
+                    *CurrentLayer,
+                    CurrentAsset != nullptr
+                        ? CurrentAsset->Authored.TransparencyData.RevealMetallicDarkeningStrength
+                        : 0.0f)
                 : FString();
             if (!Result.IsValid() || !Result->bSucceeded || CurrentAsset == nullptr ||
                 CurrentLayer == nullptr || CurrentLayer->LayerGuid != ExpectedLayerGuid ||
@@ -3448,6 +3458,105 @@ void SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthCommitt
     CommitTransparencyPreviewSettings(
         LOCTEXT("SetTransparencyPreviewStrength", "Set Transparency Preview Strength"),
         GetTransparencyPreviewSettings());
+}
+
+ECheckBoxState SWetClothingTransparencyBakePanel::GetRevealNormalEnabledState() const
+{
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    return Layer != nullptr && Layer->bEnableRevealNormal
+        ? ECheckBoxState::Checked
+        : ECheckBoxState::Unchecked;
+}
+
+void SWetClothingTransparencyBakePanel::HandleRevealNormalEnabledChanged(
+    const ECheckBoxState NewState)
+{
+    const bool bEnable = NewState == ECheckBoxState::Checked;
+    CommitRevealNormalRuntimeSettings(
+        LOCTEXT("SetRevealNormalEnabled", "Set Reveal Normal Enabled"),
+        bEnable,
+        GetTransparencyPreviewSettings().RevealNormalStrength);
+
+    FDWCTransparencyPreviewSettings Settings = GetTransparencyPreviewSettings();
+    Settings.bShowRevealNormal = bEnable;
+    DispatchTransparencyPreviewSettings(MoveTemp(Settings));
+    RequestRefresh(EDWCTransparencyPanelRefreshFlags::StageContent);
+}
+
+TOptional<float> SWetClothingTransparencyBakePanel::GetRevealNormalStrength() const
+{
+    return GetTransparencyPreviewSettings().RevealNormalStrength;
+}
+
+void SWetClothingTransparencyBakePanel::HandleRevealNormalStrengthChanged(const float InValue)
+{
+    FDWCTransparencyPreviewSettings Settings = GetTransparencyPreviewSettings();
+    Settings.RevealNormalStrength = FMath::Clamp(InValue, 0.0f, 4.0f);
+    DispatchTransparencyPreviewSettings(MoveTemp(Settings));
+}
+
+void SWetClothingTransparencyBakePanel::HandleRevealNormalStrengthCommitted(
+    const float InValue,
+    ETextCommit::Type)
+{
+    HandleRevealNormalStrengthChanged(InValue);
+    CommitRevealNormalRuntimeSettings(
+        LOCTEXT("SetRevealNormalStrength", "Set Reveal Normal Strength"),
+        GetRevealNormalEnabledState() == ECheckBoxState::Checked,
+        GetTransparencyPreviewSettings().RevealNormalStrength);
+}
+
+ECheckBoxState SWetClothingTransparencyBakePanel::GetShowRevealNormalState() const
+{
+    return GetTransparencyPreviewSettings().bShowRevealNormal
+        ? ECheckBoxState::Checked
+        : ECheckBoxState::Unchecked;
+}
+
+void SWetClothingTransparencyBakePanel::HandleShowRevealNormalChanged(
+    const ECheckBoxState NewState)
+{
+    FDWCTransparencyPreviewSettings Settings = GetTransparencyPreviewSettings();
+    Settings.bShowRevealNormal = NewState == ECheckBoxState::Checked;
+    DispatchTransparencyPreviewSettings(MoveTemp(Settings));
+}
+
+ECheckBoxState SWetClothingTransparencyBakePanel::GetRevealNormalSourceState(
+    const EDWCTransparencyRevealNormalPreviewSource Source) const
+{
+    return GetTransparencyPreviewSettings().RevealNormalSource == Source
+        ? ECheckBoxState::Checked
+        : ECheckBoxState::Unchecked;
+}
+
+void SWetClothingTransparencyBakePanel::HandleRevealNormalSourceChanged(
+    const ECheckBoxState NewState,
+    const EDWCTransparencyRevealNormalPreviewSource Source)
+{
+    if (NewState != ECheckBoxState::Checked)
+    {
+        return;
+    }
+    FDWCTransparencyPreviewSettings Settings = GetTransparencyPreviewSettings();
+    Settings.RevealNormalSource = Source;
+    DispatchTransparencyPreviewSettings(MoveTemp(Settings));
+
+    if (Source == EDWCTransparencyRevealNormalPreviewSource::Baked &&
+        (SelectedVisualizationMode == EDWCTransparencyVisualizationMode::RevealNormalOnly ||
+         SelectedVisualizationMode == EDWCTransparencyVisualizationMode::RevealNormalTexture ||
+         SelectedVisualizationMode == EDWCTransparencyVisualizationMode::SourceCoverage))
+    {
+        SetVisualizationModeForStage(
+            EDWCTransparencyVisualizationMode::Final,
+            EDWCTransparencyEditorStage::FinalEditing);
+    }
+}
+
+FText SWetClothingTransparencyBakePanel::GetRevealNormalPreviewSourceStatusText() const
+{
+    return PreviewViewport.IsValid()
+        ? PreviewViewport->GetRevealNormalPreviewSourceStatusText()
+        : LOCTEXT("RevealNormalPreviewSourceUnavailable", "Preview Source: unavailable");
 }
 
 ECheckBoxState SWetClothingTransparencyBakePanel::GetShowSavedWrinkleState() const
@@ -3860,6 +3969,9 @@ FText SWetClothingTransparencyBakePanel::GetVisualizationModeLabel(
     case EDWCTransparencyVisualizationMode::ValidHit: return LOCTEXT("TransparencyViewValidHit", "Valid Hit");
     case EDWCTransparencyVisualizationMode::HitDistance: return LOCTEXT("TransparencyViewHitDistance", "Hit Distance");
     case EDWCTransparencyVisualizationMode::SourcePriority: return LOCTEXT("TransparencyViewSourcePriority", "Source Priority");
+    case EDWCTransparencyVisualizationMode::RevealNormalOnly: return LOCTEXT("TransparencyViewRevealNormalOnly", "Reveal Normal Only");
+    case EDWCTransparencyVisualizationMode::RevealNormalTexture: return LOCTEXT("TransparencyViewRevealNormalTexture", "Reveal Normal Texture");
+    case EDWCTransparencyVisualizationMode::SourceCoverage: return LOCTEXT("TransparencyViewSourceCoverage", "Source Coverage");
     default: return LOCTEXT("TransparencyViewFinal", "Final");
     }
 }
@@ -4256,6 +4368,46 @@ void SWetClothingTransparencyBakePanel::CommitTransparencyPreviewSettings(
         });
 }
 
+void SWetClothingTransparencyBakePanel::CommitRevealNormalRuntimeSettings(
+    const FText& TransactionText,
+    const bool bEnable,
+    const float Strength)
+{
+    if (!AuthoringDocument.IsValid() || !SelectedLayerGuid.IsValid())
+    {
+        return;
+    }
+
+    FDWCEditorAuthoringChange Change;
+    Change.Domain = EDWCEditorAuthoringDomain::Transparency;
+    Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::RuntimeBinding;
+    Change.LayerGuid = SelectedLayerGuid;
+    AuthoringDocument->Edit(
+        TransactionText,
+        Change,
+        [LayerGuid = SelectedLayerGuid, bEnable, SafeStrength = FMath::Clamp(Strength, 0.0f, 4.0f)](
+            UWetClothingAsset& Asset)
+        {
+            FWetClothingTransparencyLayerData* Layer =
+                Asset.Authored.TransparencyData.TransparencyLayers.FindByPredicate(
+                    [LayerGuid](const FWetClothingTransparencyLayerData& Candidate)
+                    {
+                        return Candidate.LayerGuid == LayerGuid;
+                    });
+            if (Layer == nullptr ||
+                (Layer->bEnableRevealNormal == bEnable &&
+                 FMath::IsNearlyEqual(Layer->RevealNormalStrength, SafeStrength)))
+            {
+                return false;
+            }
+            Layer->bEnableRevealNormal = bEnable;
+            Layer->RevealNormalStrength = SafeStrength;
+            return true;
+        });
+}
+
 TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateLayerRow(FLayerItemPtr Item, const TSharedRef<STableViewBase>& Owner)
 {
     UMaterialInterface* Material = nullptr;
@@ -4438,6 +4590,12 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
             return WorkflowState.DefaultStage;
         }();
     SelectTransparencyLayerWithResolvedStage(Item->LayerGuid, Stage);
+    if (NewLayer != nullptr)
+    {
+        FDWCTransparencyPreviewSettings Settings = GetTransparencyPreviewSettings();
+        Settings.RevealNormalStrength = NewLayer->RevealNormalStrength;
+        DispatchTransparencyPreviewSettings(MoveTemp(Settings));
+    }
     if (LayerListView.IsValid())
     {
         LayerListView->RequestListRefresh();
@@ -4500,6 +4658,14 @@ bool SWetClothingTransparencyBakePanel::IsVisualizationModeAvailable(
             Stage,
             Layer->SourceType,
             Mode))
+    {
+        return false;
+    }
+    if ((Mode == EDWCTransparencyVisualizationMode::RevealNormalOnly ||
+         Mode == EDWCTransparencyVisualizationMode::SourceCoverage ||
+         Mode == EDWCTransparencyVisualizationMode::RevealNormalTexture) &&
+        GetTransparencyPreviewSettings().RevealNormalSource ==
+            EDWCTransparencyRevealNormalPreviewSource::Baked)
     {
         return false;
     }
@@ -5587,6 +5753,16 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealColorEditingSe
           [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("RevealColorPaint", "Reveal Color Paint"))]
         + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
           [BuildRevealVisualizationSection()]
+        + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
+          [BuildLabeledControl(
+              LOCTEXT("RevealMetallicDarkening", "Metallic Darkening"),
+              SNew(SNumericEntryBox<float>)
+              .MinValue(0.0f)
+              .MaxValue(1.0f)
+              .Value(this, &SWetClothingTransparencyBakePanel::GetRevealMetallicDarkeningStrength)
+              .OnValueCommitted(
+                  this,
+                  &SWetClothingTransparencyBakePanel::HandleRevealMetallicDarkeningStrengthCommitted))]
         + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
             [SNew(STextBlock)
              .AutoWrapText(true)
@@ -6097,6 +6273,64 @@ void SWetClothingTransparencyBakePanel::PushRevealColorPaintSettingsToViewport()
     PreviewViewport->SetPaintSettings(GetRevealPaintSettingsFromSession());
 }
 
+TOptional<float> SWetClothingTransparencyBakePanel::GetRevealMetallicDarkeningStrength() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    return Asset != nullptr
+        ? TOptional<float>(Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength)
+        : TOptional<float>();
+}
+
+void SWetClothingTransparencyBakePanel::HandleRevealMetallicDarkeningStrengthCommitted(
+    const float Value,
+    ETextCommit::Type)
+{
+    const float ClampedValue = FMath::Clamp(Value, 0.0f, 1.0f);
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (!AuthoringDocument.IsValid() || Asset == nullptr || FMath::IsNearlyEqual(
+            Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength,
+            ClampedValue))
+    {
+        return;
+    }
+
+    FDWCEditorAuthoringChange Change;
+    Change.Domain = EDWCEditorAuthoringDomain::Transparency;
+    Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::TransparencyFinalBake;
+    const FDWCEditorAuthoringResult Result = AuthoringDocument->Edit(
+        LOCTEXT("SetRevealMetallicDarkening", "Set Reveal Metallic Darkening"),
+        Change,
+        [ClampedValue](UWetClothingAsset& MutableAsset)
+        {
+            FWetClothingTransparencyData& Data = MutableAsset.Authored.TransparencyData;
+            if (FMath::IsNearlyEqual(Data.RevealMetallicDarkeningStrength, ClampedValue))
+            {
+                return false;
+            }
+            Data.RevealMetallicDarkeningStrength = ClampedValue;
+            for (FWetClothingTransparencyLayerData& Layer : Data.TransparencyLayers)
+            {
+#if WITH_EDITORONLY_DATA
+                Layer.EditorStageCache.MarkRevealStale();
+#endif
+                Layer.MarkFinalBakeStale();
+            }
+            return true;
+        });
+    if (!Result.bChanged)
+    {
+        return;
+    }
+
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->RefreshRevealColorCorrectionPreview();
+    }
+    RequestRefresh(EDWCTransparencyPanelRefreshFlags::Details);
+}
+
 TOptional<float> SWetClothingTransparencyBakePanel::GetManualInitialTransparencyAlpha() const
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
@@ -6406,15 +6640,15 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildGeneratedOutputsSect
     return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("GeneratedOutputs", "Generated Output"))]
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)[SNew(SBorder).Padding(FMargin(8,6)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
             [SNew(STextBlock).AutoWrapText(true).Text(this, &SWetClothingTransparencyBakePanel::GetStatusText).ColorAndOpacity(this, &SWetClothingTransparencyBakePanel::GetStatusColor)]]
-        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)[BuildRevealSurfaceStatusSection()]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)[BuildRevealNormalStatusSection()]
         + SVerticalBox::Slot().AutoHeight()[BuildPackedTransparencyMapSection()];
 }
 
-TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealSurfaceStatusSection()
+TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealNormalStatusSection()
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    FText StatusText = LOCTEXT("RevealSurfaceNoTarget", "Reveal Surface: Select a Transparency Target Part.");
+    FText StatusText = LOCTEXT("RevealNormalNoTarget", "Reveal Normal: Select a Transparency Target Part.");
     FLinearColor StatusColor(0.70f, 0.70f, 0.70f);
 
     if (Layer != nullptr)
@@ -6422,16 +6656,30 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealSurfaceStatusS
         const FWetClothingBakedTransparencyMap* BakedMap = FindExactBakedTransparencyMap(Asset, Layer);
         if (!Layer->RequiresRevealSurface())
         {
-            StatusText = BakedMap != nullptr && BakedMap->HasCompleteRevealSurfacePayload()
-                ? LOCTEXT("RevealSurfaceOptionalAvailable", "Reveal Surface: Available (optional for Manual Color).")
-                : LOCTEXT("RevealSurfaceNotRequired", "Reveal Surface: Not required for Manual Color.");
+            StatusText = BakedMap != nullptr && BakedMap->HasRuntimeRevealNormalPayload()
+                ? LOCTEXT("RevealNormalOptionalAvailable", "Reveal Normal: Available (optional for Manual Color).")
+                : LOCTEXT("RevealNormalNotRequired", "Reveal Normal: Not required for Manual Color.");
             StatusColor = FLinearColor(0.34f, 0.82f, 0.42f);
         }
-        else if (BakedMap == nullptr || !BakedMap->HasCompleteRevealSurfacePayload())
+        else if (!Layer->bEnableRevealNormal)
+        {
+            StatusText = LOCTEXT(
+                "RevealNormalRuntimeDisabled",
+                "Reveal Normal: Runtime Disabled (the baked artifact is preserved)." );
+            StatusColor = FLinearColor(0.70f, 0.70f, 0.70f);
+        }
+        else if (BakedMap == nullptr)
+        {
+            StatusText = LOCTEXT(
+                "RevealNormalNotBaked",
+                "Reveal Normal: Not Baked. Bake the Transparency Map to create it.");
+            StatusColor = FLinearColor(1.00f, 0.72f, 0.24f);
+        }
+        else if (!BakedMap->HasRuntimeRevealNormalPayload())
         {
             StatusText = LOCTEXT(
                 "RevealSurfaceRequiredMissing",
-                "Reveal Surface: Missing. Raycast source types require a packed inner normal, metallic, and coverage payload.");
+                "Reveal Normal: Incomplete. The baked output is missing its coverage-weighted runtime normal.");
             StatusColor = FLinearColor(0.94f, 0.30f, 0.30f);
         }
         else
@@ -6440,9 +6688,9 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealSurfaceStatusS
             const bool bCurrent = Asset != nullptr &&
                 FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(*Asset, *Layer, &CurrentnessReason);
             StatusText = bCurrent
-                ? LOCTEXT("RevealSurfaceReady", "Reveal Surface: Ready")
+                ? LOCTEXT("RevealNormalReady", "Reveal Normal: Ready")
                 : FText::FromString(FString::Printf(
-                    TEXT("Reveal Surface: Out of Date. %s"),
+                    TEXT("Reveal Normal: Out of Date. %s"),
                     *CurrentnessReason));
             StatusColor = bCurrent
                 ? FLinearColor(0.34f, 0.82f, 0.42f)
@@ -6466,14 +6714,16 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPackedTransparencyMa
     if (Layer == nullptr || Layer->BakedMaps.Num() == 0) { Box->AddSlot().AutoHeight()[BuildEmptyAssetRow(LOCTEXT("NoPackedMap", "No packed Transparency Map."))]; return Box; }
     for (const auto& Map : Layer->BakedMaps)
     {
-        const FText BakeState = Map.IsRuntimeUsableForLayer(Layer->RequiresRevealSurface())
+        const FText BakeState = Map.IsRuntimeUsableForLayer(Layer->RequiresRuntimeRevealNormal())
             ? LOCTEXT("PackedMapReady", "Ready")
             : LOCTEXT("PackedMapStale", "Missing or Stale");
         const FText RevealState = !Layer->RequiresRevealSurface()
-            ? LOCTEXT("PackedRevealNotRequired", "Reveal Surface: Not Required")
-            : Map.HasCompleteRevealSurfacePayload()
-                ? LOCTEXT("PackedRevealAvailable", "Reveal Surface: Available")
-                : LOCTEXT("PackedRevealMissing", "Reveal Surface: Missing");
+            ? LOCTEXT("PackedRevealNotRequired", "Reveal Normal: Not Required")
+            : !Layer->bEnableRevealNormal
+                ? LOCTEXT("PackedRevealDisabled", "Reveal Normal: Runtime Disabled")
+            : Map.HasRuntimeRevealNormalPayload()
+                ? LOCTEXT("PackedRevealAvailable", "Reveal Normal: Available")
+                : LOCTEXT("PackedRevealMissing", "Reveal Normal: Missing");
         Box->AddSlot().AutoHeight().Padding(0,0,0,6)
             [BuildAssetSummaryRow(
                 Map.TransparencyMap,
@@ -6560,6 +6810,67 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealVisualizationS
               [SNew(SImage).Image(this, &SWetClothingTransparencyBakePanel::GetRevealVisualizationBrush)]]]]];
 }
 
+TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealNormalPreviewSettingsSection()
+{
+    return SNew(SBorder)
+        .Visibility_Lambda([this]()
+        {
+            const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+            return Layer != nullptr && Layer->RequiresRevealSurface()
+                ? EVisibility::Visible
+                : EVisibility::Collapsed;
+        })
+        .Padding(8.0f)
+        .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+        [SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("RevealNormalPreviewSettings", "Reveal Normal"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [SNew(SCheckBox)
+              .IsChecked(this, &SWetClothingTransparencyBakePanel::GetRevealNormalEnabledState)
+              .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealNormalEnabledChanged)
+              [SNew(STextBlock).Text(LOCTEXT("EnableRevealNormal", "Enable Reveal Normal"))]]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [BuildLabeledControl(
+              LOCTEXT("RevealNormalStrengthLabel", "Strength"),
+              SNew(SNumericEntryBox<float>)
+                  .IsEnabled_Lambda([this]() { return GetRevealNormalEnabledState() == ECheckBoxState::Checked; })
+                  .MinValue(0.0f).MaxValue(4.0f)
+                  .Value(this, &SWetClothingTransparencyBakePanel::GetRevealNormalStrength)
+                  .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealNormalStrengthChanged)
+                  .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleRevealNormalStrengthCommitted))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [SNew(SCheckBox)
+              .IsEnabled_Lambda([this]() { return GetRevealNormalEnabledState() == ECheckBoxState::Checked; })
+              .IsChecked(this, &SWetClothingTransparencyBakePanel::GetShowRevealNormalState)
+              .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleShowRevealNormalChanged)
+              [SNew(STextBlock).Text(LOCTEXT("ShowRevealNormal", "Show Reveal Normal"))]]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)
+          [BuildLabeledControl(
+              LOCTEXT("RevealNormalPreviewSourceLabel", "Preview Source"),
+              SNew(SHorizontalBox)
+              + SHorizontalBox::Slot().AutoWidth().Padding(0,0,4,0)
+                [SNew(SCheckBox)
+                    .Style(FAppStyle::Get(), TEXT("ToggleButtonCheckbox"))
+                    .IsChecked(this, &SWetClothingTransparencyBakePanel::GetRevealNormalSourceState,
+                        EDWCTransparencyRevealNormalPreviewSource::Working)
+                    .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealNormalSourceChanged,
+                        EDWCTransparencyRevealNormalPreviewSource::Working)
+                    [SNew(STextBlock).Text(LOCTEXT("RevealNormalSourceWorking", "Working"))]]
+              + SHorizontalBox::Slot().AutoWidth()
+                [SNew(SCheckBox)
+                    .Style(FAppStyle::Get(), TEXT("ToggleButtonCheckbox"))
+                    .IsChecked(this, &SWetClothingTransparencyBakePanel::GetRevealNormalSourceState,
+                        EDWCTransparencyRevealNormalPreviewSource::Baked)
+                    .OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealNormalSourceChanged,
+                        EDWCTransparencyRevealNormalPreviewSource::Baked)
+                    [SNew(STextBlock).Text(LOCTEXT("RevealNormalSourceBaked", "Baked"))]])]
+        + SVerticalBox::Slot().AutoHeight()
+          [SNew(STextBlock)
+              .Text(this, &SWetClothingTransparencyBakePanel::GetRevealNormalPreviewSourceStatusText)
+              .ColorAndOpacity(FSlateColor::UseSubduedForeground())]];
+}
+
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPreviewSettingsSection()
 {
     const TSharedPtr<FDWCTransparencySourcePayload>* WorkingResult = AutoBakeResults.Find(SelectedLayerGuid);
@@ -6572,6 +6883,8 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPreviewSettingsSecti
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[SNew(SSlider).MinValue(0).MaxValue(100).Value(this, &SWetClothingTransparencyBakePanel::GetWetnessPreviewPercent).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWetnessPreviewChanged)]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("TransparencyPreviewStrengthLabel", "Transparency Strength"),
           SNew(SNumericEntryBox<float>).IsEnabled(bCanRecomputeFinalSettings).MinValue(0.0f).MaxValue(8.0f).Value(this, &SWetClothingTransparencyBakePanel::GetTransparencyPreviewStrength).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthChanged).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthCommitted))]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
+        [BuildRevealNormalPreviewSettingsSection()]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
         [SNew(SCheckBox)
             .IsChecked(this, &SWetClothingTransparencyBakePanel::GetShowSavedWrinkleState)

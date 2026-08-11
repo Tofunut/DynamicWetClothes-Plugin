@@ -46,7 +46,7 @@ bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingA
         for (const FWetClothingBakedTransparencyMap& BakedMap : Layer.BakedMaps)
         {
             AddPackageForObject(BakedMap.TransparencyMap.Get(), PackagesToSave);
-            AddPackageForObject(BakedMap.RevealSurfaceMap.Get(), PackagesToSave);
+            AddPackageForObject(BakedMap.RevealNormalMap.Get(), PackagesToSave);
         }
 #if WITH_EDITORONLY_DATA
         for (const FDWCTransparencyTempArtifactReference& Artifact :

@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
 
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/DWCBakeLayer.h"
@@ -10,13 +11,62 @@
 #include "Engine/Texture2D.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/Crc.h"
 #include "Misc/SecureHash.h"
+#include "Rendering/SkeletalMeshLODRenderData.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 
 namespace
 {
     FString HashCanonical(const FString& Canonical)
     {
         return FMD5::HashAnsiString(*Canonical);
+    }
+
+    FString BuildImportedTangentBasisSignature(
+        const USkeletalMesh* Mesh,
+        const int32 LODIndex)
+    {
+        const FSkeletalMeshRenderData* RenderData =
+            Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
+        if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(LODIndex))
+        {
+            return TEXT("Missing");
+        }
+
+#if WITH_EDITORONLY_DATA
+        if (!RenderData->DerivedDataKey.IsEmpty())
+        {
+            return FString::Printf(
+                TEXT("%s:LOD%d:DDC:%s"),
+                *GetPathNameSafe(Mesh),
+                LODIndex,
+                *HashCanonical(RenderData->DerivedDataKey));
+        }
+#endif
+
+        // Generated or transient meshes may not have an editor DDC key. Hash
+        // their imported render basis directly as a deterministic fallback.
+        const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
+        const FStaticMeshVertexBuffer& VertexBuffer =
+            LODData.StaticVertexBuffers.StaticMeshVertexBuffer;
+        uint32 BasisHash = 0;
+        const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
+        for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+        {
+            const FVector4f TangentX = VertexBuffer.VertexTangentX(VertexIndex);
+            const FVector3f TangentY = VertexBuffer.VertexTangentY(VertexIndex);
+            const FVector4f TangentZ = VertexBuffer.VertexTangentZ(VertexIndex);
+            BasisHash = FCrc::MemCrc32(&TangentX, sizeof(TangentX), BasisHash);
+            BasisHash = FCrc::MemCrc32(&TangentY, sizeof(TangentY), BasisHash);
+            BasisHash = FCrc::MemCrc32(&TangentZ, sizeof(TangentZ), BasisHash);
+        }
+        return FString::Printf(
+            TEXT("%s:LOD%d:V%d:%08X"),
+            *GetPathNameSafe(Mesh),
+            LODIndex,
+            VertexCount,
+            BasisHash);
     }
 
     FString ParameterKey(const FMaterialParameterInfo& Info)
@@ -113,6 +163,71 @@ namespace
                     TEXT(",%s"), *Texture2D->Source.GetId().ToString(EGuidFormats::Digits));
             }
         }
+
+        Infos.Reset();
+        Ids.Reset();
+        Material->GetAllStaticSwitchParameterInfo(Infos, Ids);
+        Infos.Sort([](const FMaterialParameterInfo& A, const FMaterialParameterInfo& B)
+        {
+            return ParameterKey(A) < ParameterKey(B);
+        });
+        for (const FMaterialParameterInfo& Info : Infos)
+        {
+            bool Value = false;
+            FGuid ExpressionGuid;
+            if (Material->GetStaticSwitchParameterValue(
+                    FHashedMaterialParameterInfo(Info), Value, ExpressionGuid))
+            {
+                InOutCanonical += FString::Printf(
+                    TEXT("|SS=%s,%d,%s"), *ParameterKey(Info), Value ? 1 : 0,
+                    *ExpressionGuid.ToString(EGuidFormats::Digits));
+            }
+        }
+
+        Infos.Reset();
+        Ids.Reset();
+        Material->GetAllStaticComponentMaskParameterInfo(Infos, Ids);
+        Infos.Sort([](const FMaterialParameterInfo& A, const FMaterialParameterInfo& B)
+        {
+            return ParameterKey(A) < ParameterKey(B);
+        });
+        for (const FMaterialParameterInfo& Info : Infos)
+        {
+            bool R = false;
+            bool G = false;
+            bool B = false;
+            bool A = false;
+            FGuid ExpressionGuid;
+            if (Material->GetStaticComponentMaskParameterValue(
+                    FHashedMaterialParameterInfo(Info), R, G, B, A, ExpressionGuid))
+            {
+                InOutCanonical += FString::Printf(
+                    TEXT("|SM=%s,%d,%d,%d,%d,%s"), *ParameterKey(Info),
+                    R ? 1 : 0, G ? 1 : 0, B ? 1 : 0, A ? 1 : 0,
+                    *ExpressionGuid.ToString(EGuidFormats::Digits));
+            }
+        }
+    }
+
+    FString BuildPlacementSignature(const FTransform& Transform)
+    {
+        const FVector Translation = Transform.GetTranslation();
+        FQuat Rotation = Transform.GetRotation().GetNormalized();
+        // q and -q encode the same rotation. Pick one representation so an
+        // equivalent placement cannot create a redundant persistent cache.
+        if (Rotation.W < 0.0)
+        {
+            Rotation.X = -Rotation.X;
+            Rotation.Y = -Rotation.Y;
+            Rotation.Z = -Rotation.Z;
+            Rotation.W = -Rotation.W;
+        }
+        const FVector Scale = Transform.GetScale3D();
+        return HashCanonical(FString::Printf(
+            TEXT("T=%.17g,%.17g,%.17g|R=%.17g,%.17g,%.17g,%.17g|S=%.17g,%.17g,%.17g"),
+            Translation.X, Translation.Y, Translation.Z,
+            Rotation.X, Rotation.Y, Rotation.Z, Rotation.W,
+            Scale.X, Scale.Y, Scale.Z));
     }
 
     void AppendRevealStrokes(
@@ -201,16 +316,48 @@ namespace
     }
 }
 
-FString FDWCTransparencySignatureService::BuildMaterialBakeSignature(
-    const UMaterialInterface* Material,
+FDWCTransparencyMaterialSurfaceBakeIdentity
+FDWCTransparencySignatureService::BuildMaterialSurfaceBakeIdentity(
+    const USkeletalMesh* SourceMesh,
+    const UMaterialInterface* EffectiveMaterial,
+    const FTransform& BakeTransform,
+    const int32 MaterialSlotIndex,
     const int32 SourceUVChannel,
     const int32 Resolution)
 {
-    FString Canonical = FString::Printf(
-        TEXT("DWC.Transparency.MaterialBake.v2|Properties=BaseColor,Normal,Metallic|Material=%s|UV=%d|Resolution=%d"),
-        *GetPathNameSafe(Material), SourceUVChannel, Resolution);
-    AppendMaterialParameters(Material, Canonical);
-    return HashCanonical(Canonical);
+    FDWCTransparencyMaterialSurfaceBakeIdentity Identity;
+    Identity.SourceMeshContentSignature =
+        UWetClothingAsset::BuildMeshContentSignature(SourceMesh, 0, SourceUVChannel);
+
+    FString MaterialCanonical = FString::Printf(
+        TEXT("DWC.Transparency.MaterialSurfaceState.v3|Material=%s"),
+        *GetPathNameSafe(EffectiveMaterial));
+    AppendMaterialParameters(EffectiveMaterial, MaterialCanonical);
+    Identity.EffectiveMaterialSignature = HashCanonical(MaterialCanonical);
+    Identity.PlacementSignature = BuildPlacementSignature(BakeTransform);
+
+    const FString Canonical = FString::Printf(
+        TEXT("DWC.Transparency.MaterialSurfaceBake.v%d|Properties=BaseColor,Normal,Metallic|Mesh=%s|MeshContent=%s|Slot=%d|UV=%d|Resolution=%d|Material=%s|Placement=%s"),
+        FDWCTransparencyMaterialSurfaceBakeIdentity::Version,
+        *GetPathNameSafe(SourceMesh), *Identity.SourceMeshContentSignature,
+        MaterialSlotIndex, SourceUVChannel, Resolution,
+        *Identity.EffectiveMaterialSignature, *Identity.PlacementSignature);
+    Identity.Digest = HashCanonical(Canonical);
+    return Identity;
+}
+
+FString FDWCTransparencySignatureService::BuildStageArtifactSignature(
+    const EDWCTransparencyTempArtifactKind Kind,
+    const int32 ContractVersion,
+    const FString& DependencySignature)
+{
+    if (DependencySignature.IsEmpty() || ContractVersion <= 0)
+    {
+        return FString();
+    }
+    return HashCanonical(FString::Printf(
+        TEXT("DWC.Transparency.StageArtifact.v%d|Kind=%d|Dependency=%s"),
+        ContractVersion, static_cast<int32>(Kind), *DependencySignature));
 }
 
 bool FDWCTransparencySignatureService::BuildSourceSignature(
@@ -243,12 +390,25 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
 
     const int32 Resolution = FMath::Clamp(
         Asset.Authored.TransparencyData.TransparencyBakeResolution, 16, 4096);
+    TMap<const USkeletalMesh*, FString> TangentBasisSignatures;
+    const auto ResolveTangentBasisSignature = [&TangentBasisSignatures, LODIndex](
+        const USkeletalMesh* SignatureMesh) -> const FString&
+    {
+        if (const FString* Existing = TangentBasisSignatures.Find(SignatureMesh))
+        {
+            return *Existing;
+        }
+        return TangentBasisSignatures.Add(
+            SignatureMesh,
+            BuildImportedTangentBasisSignature(SignatureMesh, LODIndex));
+    };
     FString Canonical = FString::Printf(
-        TEXT("DWC.Transparency.Source.v2|Mesh=%s|Layer=%s|Type=%d|Slot=%d|UV=%d|LOD=0|Resolution=%d|Address=%d|DataUV=%s"),
+        TEXT("DWC.Transparency.Source.v4|Mesh=%s|Layer=%s|Type=%d|Slot=%d|UV=%d|LOD=0|Resolution=%d|Address=%d|DataUV=%s|OuterBasis=%s"),
         *GetPathNameSafe(Mesh), *Layer.LayerGuid.ToString(EGuidFormats::DigitsWithHyphens),
         static_cast<int32>(Layer.SourceType), Layer.TargetSurface.OuterMaterialSlotIndex,
         DataUV, Resolution, static_cast<int32>(Layer.TargetSurface.UVAddressMode),
-        *DataUVMetadata->DataUVOutputSignature);
+        *DataUVMetadata->DataUVOutputSignature,
+        *ResolveTangentBasisSignature(Mesh));
     AppendTargetWetPartEligibility(Asset, Layer.TargetSurface.OuterMaterialSlotIndex, Canonical);
 
     if (Layer.SourceType == EDWCTransparencySourceType::ManualColorOrTexture)
@@ -278,6 +438,9 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
     else if (Layer.SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
         Canonical += FString::Printf(
+            TEXT("|SourceBasis=%s"),
+            *ResolveTangentBasisSignature(SourceMesh));
+        Canonical += FString::Printf(
             TEXT("|Ray=%.9g,%.9g,%.9g,%.9g,%.9g"), Layer.RaySettings.RayStartOffset,
             Layer.RaySettings.MinHitDistance, Layer.RaySettings.FullTransparencyDistance,
             Layer.RaySettings.NoTransparencyDistance, Layer.RaySettings.MaxRayDistance);
@@ -288,13 +451,21 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
             UMaterialInterface* Material = SourceMesh->GetMaterials().IsValidIndex(Inner.MaterialSlotIndex)
                 ? SourceMesh->GetMaterials()[Inner.MaterialSlotIndex].MaterialInterface
                 : nullptr;
-            const FString MaterialSignature = BuildMaterialBakeSignature(
-                Material, Inner.SourceUVChannel, Resolution);
-            OutMaterialBakeSignature += MaterialSignature;
+            const FDWCTransparencyMaterialSurfaceBakeIdentity MaterialIdentity =
+                BuildMaterialSurfaceBakeIdentity(
+                    SourceMesh, Material, FTransform::Identity,
+                    Inner.MaterialSlotIndex, Inner.SourceUVChannel, Resolution);
+            if (!MaterialIdentity.IsValid())
+            {
+                OutError = TEXT("Could not identify a Same Mesh source material surface.");
+                return false;
+            }
+            OutMaterialBakeSignature += FString::Printf(
+                TEXT("|%d:%s"), Priority, *MaterialIdentity.Digest);
             Canonical += FString::Printf(
                 TEXT("|Inner=%d,%d,%d,%s,%s,%s"), Priority, Inner.MaterialSlotIndex,
                 Inner.SourceUVChannel, *Inner.MaterialSlotName.ToString(),
-                *GetPathNameSafe(SourceMesh), *MaterialSignature);
+                *GetPathNameSafe(SourceMesh), *MaterialIdentity.Digest);
         }
         OutMaterialBakeSignature = HashCanonical(OutMaterialBakeSignature);
     }
@@ -323,12 +494,27 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
         FString MaterialCanonical;
         for (const FDWCTransparencyProjectionSource& Source : BlueprintSources.Sources)
         {
-            MaterialCanonical += BuildMaterialBakeSignature(
-                Source.EffectiveMaterial,
-                Source.Layer.SourceUVChannel,
-                Resolution);
+            Canonical += FString::Printf(
+                TEXT("|SourceBasis=%s"),
+                *ResolveTangentBasisSignature(Source.Layer.SkeletalMesh));
+            const FDWCTransparencyMaterialSurfaceBakeIdentity MaterialIdentity =
+                BuildMaterialSurfaceBakeIdentity(
+                    Source.Layer.SkeletalMesh, Source.EffectiveMaterial,
+                    Source.Layer.BakeTransform, Source.MaterialSlotIndex,
+                    Source.Layer.SourceUVChannel, Resolution);
+            if (!MaterialIdentity.IsValid())
+            {
+                OutError = TEXT("Could not identify a Blueprint source material surface.");
+                return false;
+            }
+            MaterialCanonical += FString::Printf(
+                TEXT("|P%d:%s:%d:%s"), Source.PriorityIndex,
+                *Source.Layer.LayerId.ToString(), Source.MaterialSlotIndex,
+                *MaterialIdentity.Digest);
         }
         OutMaterialBakeSignature = HashCanonical(MaterialCanonical);
+        Canonical += FString::Printf(
+            TEXT("|MaterialSurfaces=%s"), *OutMaterialBakeSignature);
     }
     else if (Layer.SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh)
     {
@@ -349,12 +535,27 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
         FString MaterialCanonical;
         for (const FDWCTransparencyProjectionSource& Source : ExternalSources.Sources)
         {
-            MaterialCanonical += BuildMaterialBakeSignature(
-                Source.EffectiveMaterial,
-                Source.Layer.SourceUVChannel,
-                Resolution);
+            Canonical += FString::Printf(
+                TEXT("|SourceBasis=%s"),
+                *ResolveTangentBasisSignature(Source.Layer.SkeletalMesh));
+            const FDWCTransparencyMaterialSurfaceBakeIdentity MaterialIdentity =
+                BuildMaterialSurfaceBakeIdentity(
+                    Source.Layer.SkeletalMesh, Source.EffectiveMaterial,
+                    Source.Layer.BakeTransform, Source.MaterialSlotIndex,
+                    Source.Layer.SourceUVChannel, Resolution);
+            if (!MaterialIdentity.IsValid())
+            {
+                OutError = TEXT("Could not identify an External Mesh source material surface.");
+                return false;
+            }
+            MaterialCanonical += FString::Printf(
+                TEXT("|P%d:%s:%d:%s"), Source.PriorityIndex,
+                *Source.Layer.LayerId.ToString(), Source.MaterialSlotIndex,
+                *MaterialIdentity.Digest);
         }
         OutMaterialBakeSignature = HashCanonical(MaterialCanonical);
+        Canonical += FString::Printf(
+            TEXT("|MaterialSurfaces=%s"), *OutMaterialBakeSignature);
     }
     else
     {
@@ -368,19 +569,34 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
 
 FString FDWCTransparencySignatureService::BuildRevealSignature(
     const FString& SourceSignature,
-    const FWetClothingTransparencyLayerData& Layer)
+    const FWetClothingTransparencyLayerData& Layer,
+    const float RevealMetallicDarkeningStrength)
 {
     FString Canonical = FString::Printf(
-        TEXT("DWC.Transparency.Reveal.v1|Source=%s"), *SourceSignature);
+        TEXT("DWC.Transparency.Reveal.v2|Source=%s|MetallicDarkening=%.9g"),
+        *SourceSignature,
+        static_cast<double>(FMath::Clamp(RevealMetallicDarkeningStrength, 0.0f, 1.0f)));
     AppendRevealStrokes(Layer, Canonical);
     return HashCanonical(Canonical);
 }
 
-FString FDWCTransparencySignatureService::BuildRevealSurfaceSignature(
+FString FDWCTransparencySignatureService::BuildRevealNormalSignature(
     const FString& SourceSignature)
 {
     const FString Canonical = FString::Printf(
-        TEXT("DWC.Transparency.RevealSurface.v1|Encoding=OuterTangentNormalRG,InnerMetallicB,SourceCoverageA|Source=%s"),
+        TEXT("DWC.Transparency.RevealNormal.v%d|Basis=%d|Encoding=CoverageWeightedOuterTangentNormalRG|Source=%s"),
+        RevealNormalEncodingVersion,
+        RevealSurfaceBasisVersion,
+        *SourceSignature);
+    return HashCanonical(Canonical);
+}
+
+FString FDWCTransparencySignatureService::BuildRevealSurfaceAuthoringSignature(
+    const FString& SourceSignature)
+{
+    const FString Canonical = FString::Printf(
+        TEXT("DWC.Transparency.RevealSurfaceAuthoring.v2|Basis=%d|Encoding=OuterTangentNormalRG,InnerMetallicB,SourceCoverageA|Source=%s"),
+        RevealSurfaceBasisVersion,
         *SourceSignature);
     return HashCanonical(Canonical);
 }
@@ -411,9 +627,20 @@ FString FDWCTransparencySignatureService::BuildSuppressionSettingsSignature(
 FString FDWCTransparencySignatureService::BuildFinalSignature(
     const FDWCTransparencyFinalSignatureInputs& Inputs)
 {
+    const FString AlphaSignature = BuildFinalAlphaSignature(Inputs);
     const FString Canonical = FString::Printf(
-        TEXT("DWC.Transparency.Final.v2|Reveal=%s|Alpha=%s|WrinkleMask=%s|Suppression=%s|Padding=%d|EdgeFeather=%.9g"),
+        TEXT("DWC.Transparency.Final.v3|Reveal=%s|FinalAlpha=%s"),
         *Inputs.RevealSignature,
+        *AlphaSignature);
+    return HashCanonical(Canonical);
+}
+
+FString FDWCTransparencySignatureService::BuildFinalAlphaSignature(
+    const FDWCTransparencyFinalSignatureInputs& Inputs)
+{
+    const FString Canonical = FString::Printf(
+        TEXT("DWC.Transparency.FinalAlpha.v2|Source=%s|Alpha=%s|WrinkleMask=%s|Suppression=%s|Padding=%d|EdgeFeather=%.9g"),
+        *Inputs.SourceSignature,
         *Inputs.AlphaAuthoringSignature,
         *Inputs.WrinkleMaskBuildSignature,
         *Inputs.SuppressionSettingsSignature,
@@ -428,9 +655,13 @@ FString FDWCTransparencySignatureService::BuildFinalSignature(
     const FString& WrinkleMaskBuildSignature,
     const FString& SuppressionSettingsSignature,
     const int32 PaddingPixels,
-    const float EdgeFeatherPixels)
+    const float EdgeFeatherPixels,
+    const FString& SourceSignature)
 {
     FDWCTransparencyFinalSignatureInputs Inputs;
+    // Callers should pass the canonical Stage 2 source identity. Falling back
+    // to RevealSignature preserves deterministic legacy/test call sites.
+    Inputs.SourceSignature = SourceSignature.IsEmpty() ? RevealSignature : SourceSignature;
     Inputs.RevealSignature = RevealSignature;
     Inputs.AlphaAuthoringSignature = BuildAlphaAuthoringSignature(Layer);
     Inputs.WrinkleMaskBuildSignature = WrinkleMaskBuildSignature;
@@ -461,17 +692,22 @@ FDWCTransparencyStageStatus FDWCTransparencySignatureService::EvaluateEditorStag
         Status.Detail = TEXT("The Stage 2 source inputs changed.");
         return Status;
     }
-    const bool bHasCurrentBaseReveal = Cache.Artifacts.ContainsByPredicate(
-        [&ExpectedSourceSignature](const FDWCTransparencyTempArtifactReference& Artifact)
-        {
-            return Artifact.Kind == EDWCTransparencyTempArtifactKind::BaseRevealColor &&
-                !Artifact.bObsolete && Artifact.BuildSignature == ExpectedSourceSignature &&
-                !Artifact.Texture.IsNull();
-        });
-    if (!bHasCurrentBaseReveal)
+    const FDWCTransparencyTempArtifactReference* BaseRevealReference =
+        FDWCTransparencyStageArtifactContract::FindReference(
+            Layer, EDWCTransparencyTempArtifactKind::BaseRevealColor);
+    const FIntPoint ArtifactResolution = BaseRevealReference != nullptr
+        ? BaseRevealReference->Resolution
+        : FIntPoint::ZeroValue;
+    FString ArtifactError;
+    if (!FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            Layer,
+            ExpectedSourceSignature,
+            ArtifactResolution,
+            false,
+            ArtifactError))
     {
         Status.Reason = EDWCTransparencyStaleReason::MissingArtifact;
-        Status.Detail = TEXT("The Stage 2 Base Reveal Color Temp artifact is missing.");
+        Status.Detail = ArtifactError;
         return Status;
     }
     Status.Stage = EDWCTransparencyStage::Reveal;
@@ -479,6 +715,19 @@ FDWCTransparencyStageStatus FDWCTransparencySignatureService::EvaluateEditorStag
     {
         Status.Reason = EDWCTransparencyStaleReason::RevealEditsChanged;
         Status.Detail = TEXT("The Stage 3 reveal-color edits changed.");
+        return Status;
+    }
+    if (Cache.bRevealReviewed &&
+        !FDWCTransparencyStageArtifactContract::InspectRevealArtifact(
+            Layer,
+            ExpectedSourceSignature,
+            ExpectedRevealSignature,
+            ArtifactResolution,
+            false,
+            ArtifactError))
+    {
+        Status.Reason = EDWCTransparencyStaleReason::MissingArtifact;
+        Status.Detail = ArtifactError;
         return Status;
     }
 #else

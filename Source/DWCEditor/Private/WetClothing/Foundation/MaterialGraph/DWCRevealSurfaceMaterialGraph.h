@@ -8,7 +8,7 @@ class UMaterial;
 class UMaterialExpressionScalarParameter;
 class UMaterialExpressionTextureObjectParameter;
 
-/** Inputs used to add the shared Reveal Surface color/normal composite to an editor material graph. */
+/** Inputs for the editor-only packed Reveal Surface authoring preview. */
 struct FDWCRevealSurfaceMaterialGraphRequest
 {
     UMaterial* Material = nullptr;
@@ -16,9 +16,11 @@ struct FDWCRevealSurfaceMaterialGraphRequest
     FDWCMaterialGraphPin BaseNormal;
     FDWCMaterialGraphPin DataUV;
     FDWCMaterialGraphPin Visibility;
+    FDWCMaterialGraphPin VisualizationMode;
     FName SurfaceTextureParameterName;
     FName UseSurfaceParameterName;
-    FName MetallicDarkeningParameterName;
+    FName StrengthParameterName;
+    FName ShowParameterName;
     int32 NodePosX = 0;
     int32 NodePosY = 0;
     FString Description;
@@ -32,19 +34,15 @@ struct FDWCRevealSurfaceMaterialGraphResult
     FDWCMaterialGraphPin Normal;
     UMaterialExpressionTextureObjectParameter* SurfaceTextureParameter = nullptr;
     UMaterialExpressionScalarParameter* UseSurfaceParameter = nullptr;
-    UMaterialExpressionScalarParameter* MetallicDarkeningParameter = nullptr;
+    UMaterialExpressionScalarParameter* StrengthParameter = nullptr;
+    UMaterialExpressionScalarParameter* ShowParameter = nullptr;
 };
 
-/**
- * Builds the common Reveal Surface composite.
- *
- * The source texture is intentionally sampled as color data: RG are a
- * reoriented tangent-space normal, B is inner metallic, and A is coverage.
- * Visibility is supplied by the caller so runtime and editor preview can use
- * their own transparency working map while sharing the exact surface math.
- */
+/** Builds the editor-only packed Reveal Surface authoring composite. */
 class FDWCRevealSurfaceMaterialGraph
 {
   public:
-    static FDWCRevealSurfaceMaterialGraphResult Build(const FDWCRevealSurfaceMaterialGraphRequest& Request);
+    /** Editor-only packed input: RG=normal, B=metallic, A=source coverage. */
+    static FDWCRevealSurfaceMaterialGraphResult BuildAuthoringPreview(
+        const FDWCRevealSurfaceMaterialGraphRequest& Request);
 };

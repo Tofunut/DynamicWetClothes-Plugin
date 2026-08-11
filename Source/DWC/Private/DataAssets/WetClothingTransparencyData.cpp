@@ -116,12 +116,12 @@ const FWetClothingBakedTransparencyMap* FWetClothingTransparencyData::FindRuntim
         return nullptr;
     }
 
-    const bool bRequiresRevealSurface = Layer->RequiresRevealSurface();
+    const bool bRequiresRevealNormal = Layer->RequiresRuntimeRevealNormal();
     return Layer->BakedMaps.FindByPredicate(
-        [MaterialSlotIndex, bRequiresRevealSurface](const FWetClothingBakedTransparencyMap& Candidate)
+        [MaterialSlotIndex, bRequiresRevealNormal](const FWetClothingBakedTransparencyMap& Candidate)
         {
             return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                   Candidate.IsRuntimeUsableForLayer(bRequiresRevealSurface);
+                   Candidate.IsRuntimeUsableForLayer(bRequiresRevealNormal);
         });
 }
 

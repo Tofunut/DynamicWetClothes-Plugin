@@ -125,7 +125,11 @@ namespace DWCTransparencyWorkflow
         return Stage == EDWCTransparencyEditorStage::FinalEditing &&
             (Mode == EDWCTransparencyVisualizationMode::Final ||
              Mode == EDWCTransparencyVisualizationMode::AutoAlpha ||
-             Mode == EDWCTransparencyVisualizationMode::WrinkleSeparation);
+             Mode == EDWCTransparencyVisualizationMode::WrinkleSeparation ||
+             (SourceType != EDWCTransparencySourceType::ManualColorOrTexture &&
+              (Mode == EDWCTransparencyVisualizationMode::RevealNormalOnly ||
+               Mode == EDWCTransparencyVisualizationMode::RevealNormalTexture ||
+               Mode == EDWCTransparencyVisualizationMode::SourceCoverage)));
     }
 
     inline EDWCTransparencyVisualizationMode ResolveVisualizationMode(

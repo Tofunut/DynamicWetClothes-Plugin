@@ -23,15 +23,33 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
     TArray<FString> Messages;
     WetClothingAsset->Modify();
 
-    for (FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
+    TArray<int32> MaterialSlotIndices;
+    for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
          WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
     {
-        UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
+        if (MaterialOverride.MaterialSlotIndex != INDEX_NONE)
+        {
+            MaterialSlotIndices.AddUnique(MaterialOverride.MaterialSlotIndex);
+        }
+    }
+    MaterialSlotIndices.Sort();
+
+    for (const int32 MaterialSlotIndex : MaterialSlotIndices)
+    {
+        const FWetClothingGeneratedWetMaterialOverride* ExistingOverride =
+            WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
+                [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
+                {
+                    return Candidate.MaterialSlotIndex == MaterialSlotIndex;
+                });
+        UMaterialInterface* SourceMaterial = ExistingOverride != nullptr
+            ? ExistingOverride->SourceMaterial.Get()
+            : nullptr;
         if (!SourceMaterial)
         {
             Messages.Add(FString::Printf(
                 TEXT("Slot %d skipped: no source material."),
-                MaterialOverride.MaterialSlotIndex));
+                MaterialSlotIndex));
             continue;
         }
 
@@ -39,7 +57,7 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
             FWCAMaterialGenerator::MakeOptionsForAsset(
                 WetClothingAsset,
                 EDWCSimulationMode::VertexCPU,
-                MaterialOverride.MaterialSlotIndex);
+                MaterialSlotIndex);
         const FWetClothingUnifiedMaterialSetupResult Result =
             FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, Options);
         if (!Result.bSucceeded || !Result.GeneratedMaterial ||
@@ -47,17 +65,30 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
         {
             Messages.Add(FString::Printf(
                 TEXT("Slot %d failed: %s"),
-                MaterialOverride.MaterialSlotIndex,
+                MaterialSlotIndex,
                 *Result.Message));
             continue;
         }
 
-        MaterialOverride.GeneratedMaterial = Result.GeneratedMaterial;
-        MaterialOverride.GeneratedMaterialInstance = Result.GeneratedMaterialInstance;
+        FString MetadataError;
+        if (!FWCAMaterialGenerator::CommitGeneratedMaterialOverride(
+                WetClothingAsset,
+                MaterialSlotIndex,
+                SourceMaterial,
+                Result,
+                &MetadataError))
+        {
+            Messages.Add(FString::Printf(
+                TEXT("Slot %d metadata commit failed: %s"),
+                MaterialSlotIndex,
+                *MetadataError));
+            continue;
+        }
+
         ++RepairedCount;
         Messages.Add(FString::Printf(
             TEXT("Slot %d repaired: shared=%s runtime=%s (%s)"),
-            MaterialOverride.MaterialSlotIndex,
+            MaterialSlotIndex,
             *GetNameSafe(Result.GeneratedMaterial),
             *GetNameSafe(Result.GeneratedMaterialInstance),
             *Result.Message));

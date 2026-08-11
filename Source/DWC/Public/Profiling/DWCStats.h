@@ -27,6 +27,7 @@ struct DWC_API FDWCStatsSnapshot
     uint32 WrinkleMaterialBindingCount = 0;
     uint32 WrinkleTextureCount = 0;
     uint32 TransparencyMaterialBindingCount = 0;
+    /** Unique runtime Transparency Map and Reveal Normal textures combined. */
     uint32 TransparencyTextureCount = 0;
 
     uint32 LODTotalReceiverCount = 0;
@@ -56,6 +57,7 @@ struct DWC_API FDWCStatsSnapshot
     uint64 SharedGPUSurfaceNormalArrayGPUBytes = 0;
     uint64 SharedGPUResourceGPUBytes = 0;
     uint64 WrinkleTextureGPUBytes = 0;
+    /** Resident bytes for unique runtime Transparency Map and Reveal Normal textures. */
     uint64 TransparencyTextureGPUBytes = 0;
 
     uint64 GetTrackedCPUBytes() const

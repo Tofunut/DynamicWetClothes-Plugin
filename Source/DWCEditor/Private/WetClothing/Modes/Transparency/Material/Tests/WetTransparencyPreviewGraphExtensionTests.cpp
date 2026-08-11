@@ -4,13 +4,22 @@
 
 #include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionFunctionInput.h"
+#include "Materials/MaterialExpressionIf.h"
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialExpressionVertexColor.h"
 #include "Misc/AutomationTest.h"
+#include "WetRendering/WetMaterialParameters.h"
+#include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
+#include "WetClothing/Foundation/MaterialGraph/DWCRevealSurfaceMaterialGraph.h"
 #include "WetClothing/Foundation/MaterialGraph/DWCSurfaceGraphBuilder.h"
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialParameters.h"
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialCache.h"
@@ -69,6 +78,105 @@ namespace
             }
         }
         return false;
+    }
+
+    UMaterialExpressionScalarParameter* FindScalarParameter(
+        const UMaterial& Material,
+        const FName      ParameterName)
+    {
+        for (UMaterialExpression* Expression : Material.GetExpressions())
+        {
+            UMaterialExpressionScalarParameter* Parameter =
+                Cast<UMaterialExpressionScalarParameter>(Expression);
+            if (Parameter != nullptr && Parameter->ParameterName == ParameterName)
+            {
+                return Parameter;
+            }
+        }
+        return nullptr;
+    }
+
+    UMaterialExpressionTextureSampleParameter2D* FindTextureSampleParameter(
+        const UMaterial& Material,
+        const FName      ParameterName)
+    {
+        for (UMaterialExpression* Expression : Material.GetExpressions())
+        {
+            UMaterialExpressionTextureSampleParameter2D* Parameter =
+                Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
+            if (Parameter != nullptr && Parameter->ParameterName == ParameterName)
+            {
+                return Parameter;
+            }
+        }
+        return nullptr;
+    }
+
+    bool IsFunctionInputConnected(
+        const UMaterialExpressionMaterialFunctionCall* FunctionCall,
+        const FName                                    InputName)
+    {
+        if (FunctionCall == nullptr)
+        {
+            return false;
+        }
+
+        for (const FFunctionExpressionInput& FunctionInput : FunctionCall->FunctionInputs)
+        {
+            if (FunctionInput.ExpressionInput != nullptr &&
+                FunctionInput.ExpressionInput->InputName == InputName)
+            {
+                return FunctionInput.Input.Expression != nullptr;
+            }
+        }
+        return false;
+    }
+
+    UMaterialExpression* FindFunctionInputExpression(
+        const UMaterialExpressionMaterialFunctionCall* FunctionCall,
+        const FName                                    InputName)
+    {
+        if (FunctionCall == nullptr)
+        {
+            return nullptr;
+        }
+
+        for (const FFunctionExpressionInput& FunctionInput : FunctionCall->FunctionInputs)
+        {
+            if (FunctionInput.ExpressionInput != nullptr &&
+                FunctionInput.ExpressionInput->InputName == InputName)
+            {
+                return FunctionInput.Input.Expression;
+            }
+        }
+        return nullptr;
+    }
+
+    int32 FindExpressionOutputIndex(
+        UMaterialExpression* Expression,
+        const FName          OutputName)
+    {
+        if (Expression == nullptr)
+        {
+            return INDEX_NONE;
+        }
+
+        const TArray<FExpressionOutput>& Outputs = Expression->GetOutputs();
+        for (int32 OutputIndex = 0; OutputIndex < Outputs.Num(); ++OutputIndex)
+        {
+            const FExpressionOutput& Output = Outputs[OutputIndex];
+            const bool bNamedMatch = Output.OutputName == OutputName;
+            const bool bMaskMatch = Output.OutputName.IsNone() &&
+                ((OutputName == TEXT("R") && Output.MaskR && !Output.MaskG && !Output.MaskB && !Output.MaskA) ||
+                 (OutputName == TEXT("G") && !Output.MaskR && Output.MaskG && !Output.MaskB && !Output.MaskA) ||
+                 (OutputName == TEXT("B") && !Output.MaskR && !Output.MaskG && Output.MaskB && !Output.MaskA) ||
+                 (OutputName == TEXT("A") && !Output.MaskR && !Output.MaskG && !Output.MaskB && Output.MaskA));
+            if (bNamedMatch || bMaskMatch)
+            {
+                return OutputIndex;
+            }
+        }
+        return INDEX_NONE;
     }
 
     FDWCEditorPreviewMaterialRequest MakeTransparencyHoverMaterialRequest(
@@ -218,9 +326,6 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
              HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::RevealSurfaceMap()));
     TestTrue(TEXT("Reveal Surface enable is exposed as a scalar parameter"),
              HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseRevealSurfaceMap()));
-    TestTrue(TEXT("Reveal metallic darkening is exposed as a scalar parameter"),
-             HasScalarParameter(*Material,
-                 DWCTransparencyPreviewMaterialParameters::RevealMetallicDarkeningStrength()));
 
     const UMaterialExpressionCustom* HoverBlend = nullptr;
     for (UMaterialExpression* Expression : Material->GetExpressions())
@@ -270,18 +375,236 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
     {
         TestTrue(TEXT("Reveal Surface decodes its packed normal channels"),
                  RevealSurfaceComposite->Code.Contains(TEXT("float2 RevealXY")));
+        TestTrue(TEXT("Editor Reveal Surface consumes packed source coverage"),
+                 RevealSurfaceComposite->Code.Contains(TEXT("RevealSample.a")));
         TestTrue(TEXT("Reveal Surface exposes the composed normal output"),
                  RevealSurfaceComposite->Code.Contains(TEXT("Normal = normalize")));
-        TestTrue(TEXT("Reveal Surface applies metallic darkening to Base Color"),
-                 RevealSurfaceComposite->Code.Contains(TEXT("MetallicDarkening")));
+        TestFalse(TEXT("Reveal Surface does not apply runtime metallic darkening"),
+                  RevealSurfaceComposite->Code.Contains(TEXT("MetallicDarkening")));
+        TestTrue(TEXT("Reveal Surface preserves the Stage 3 corrected Base Color"),
+                 RevealSurfaceComposite->Code.Contains(TEXT("return BaseColor")));
     }
 
     TestEqual(TEXT("The material hover target enum has a stable disabled value"),
               static_cast<uint8>(EDWCTransparencyMaterialHoverTarget::None), static_cast<uint8>(0));
     TestEqual(TEXT("The material hover operation enum has a stable smooth value"),
               static_cast<uint8>(EDWCTransparencyMaterialHoverOperation::Smooth), static_cast<uint8>(3));
-    TestTrue(TEXT("The feature schema invalidates graphs from before Reveal Surface composition"),
-             FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 6);
+    TestTrue(TEXT("The feature schema invalidates graphs built before Reveal Normal preview controls"),
+             FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 9);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCRuntimeRevealNormalGraphContractTest,
+    "DWC.Editor.Transparency.MaterialPreview.RuntimeRevealNormalGraphContract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCRuntimeRevealNormalGraphContractTest::RunTest(const FString&)
+{
+    UMaterial* Material = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
+    TestNotNull(TEXT("A transient material is available for the runtime Reveal Normal fixture"), Material);
+    if (Material == nullptr)
+    {
+        return false;
+    }
+
+    UMaterialExpressionScalarParameter* Wetness =
+        CreateExpression<UMaterialExpressionScalarParameter>(Material, -2800, -600);
+    if (Wetness == nullptr)
+    {
+        AddError(TEXT("Could not create the runtime Reveal Normal wetness fixture input."));
+        return false;
+    }
+    Wetness->ParameterName = DWCEditorPreviewMaterialParameters::PreviewWetness();
+    Wetness->DefaultValue = 1.0f;
+
+    FDWCSurfaceGraphBuildRequest Request;
+    Request.Material = Material;
+    Request.DWCDataUVChannelIndex = 0;
+    Request.SurfaceWaterNormalUVChannelIndex = 0;
+    Request.WetnessInput = { Wetness, FString() };
+
+    const FDWCSurfaceGraphBuildResult Result = FDWCSurfaceGraphBuilder::Build(Request);
+    TestTrue(TEXT("The common DWC surface graph builds successfully"), Result.bSucceeded);
+    TestTrue(TEXT("The common DWC surface graph reports no failure"), Result.FailureReasons.IsEmpty());
+    TestNotNull(TEXT("The common graph owns MF_DWC_EvaluateSurfaceAppearance"), Result.EvaluateExpression);
+    if (!Result.bSucceeded || Result.EvaluateExpression == nullptr)
+    {
+        return false;
+    }
+
+    UMaterialExpressionTextureSampleParameter2D* RevealNormal = FindTextureSampleParameter(
+        *Material,
+        DWCWetMaterialParameters::RevealNormalMap());
+    TestNotNull(TEXT("The common graph owns the Reveal Normal texture sample"), RevealNormal);
+    if (RevealNormal != nullptr)
+    {
+        TestEqual(
+            TEXT("Runtime Reveal Normal uses a normal sampler"),
+            RevealNormal->SamplerType,
+            SAMPLERTYPE_Normal);
+    }
+
+    TestTrue(
+        TEXT("Reveal Normal is connected to MF_DWC_EvaluateSurfaceAppearance"),
+        IsFunctionInputConnected(Result.EvaluateExpression, TEXT("RevealNormal")));
+    TestTrue(
+        TEXT("Reveal Normal enable is connected to MF_DWC_EvaluateSurfaceAppearance"),
+        IsFunctionInputConnected(Result.EvaluateExpression, TEXT("UseRevealNormalMap")));
+    TestTrue(
+        TEXT("Reveal Normal strength is connected to MF_DWC_EvaluateSurfaceAppearance"),
+        IsFunctionInputConnected(Result.EvaluateExpression, TEXT("RevealNormalStrength")));
+    TestNotNull(
+        TEXT("The common graph owns the Reveal Normal strength parameter"),
+        FindScalarParameter(*Material, DWCWetMaterialParameters::RevealNormalStrength()));
+    TestTrue(
+        TEXT("The final runtime Normal comes directly from MF_DWC_EvaluateSurfaceAppearance"),
+        Result.Outputs.Normal.Expression == Result.EvaluateExpression &&
+            Result.Outputs.Normal.OutputName == TEXT("Normal"));
+
+    for (UMaterialExpression* Expression : Material->GetExpressions())
+    {
+        const UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expression);
+        TestFalse(
+            TEXT("The runtime graph no longer owns an external Reveal Normal composite"),
+            Custom != nullptr &&
+                Custom->Description.Contains(TEXT("Runtime Coverage-Weighted Normal")));
+    }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCUnifiedMaterialRevealGraphContractTest,
+    "DWC.Editor.Transparency.MaterialPreview.UnifiedMaterialRevealGraphContract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCUnifiedMaterialRevealGraphContractTest::RunTest(const FString&)
+{
+    UMaterialInterface* SourceMaterial = LoadObject<UMaterialInterface>(
+        nullptr,
+        TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"));
+    TestNotNull(TEXT("The default material is available for the unified graph fixture"), SourceMaterial);
+    if (SourceMaterial == nullptr)
+    {
+        return false;
+    }
+
+    FWCAMaterialGenerator::FOptions Options;
+    Options.DWCDataUVChannelIndex = 0;
+    Options.OriginalUVChannelIndex = 0;
+    Options.SurfaceWaterNormalUVChannelIndex = 0;
+
+    const FWetClothingUnifiedMaterialSetupResult Result =
+        FWCAMaterialGenerator::CreateTransientUnifiedPreviewMaterial(SourceMaterial, Options);
+    TestTrue(TEXT("The unified DWC preview graph is generated successfully"), Result.bSucceeded);
+    TestTrue(TEXT("The unified DWC preview graph reports no failure"), Result.Message.IsEmpty() || Result.bSucceeded);
+    TestNotNull(TEXT("The unified graph owns a transient material"), Result.GeneratedMaterial);
+    if (!Result.bSucceeded || Result.GeneratedMaterial == nullptr)
+    {
+        AddError(Result.Message);
+        return false;
+    }
+
+    const UMaterialExpressionCustom* PreviewDebug = nullptr;
+    for (UMaterialExpression* Expression : Result.GeneratedMaterial->GetExpressions())
+    {
+        const UMaterialExpressionCustom* Candidate = Cast<UMaterialExpressionCustom>(Expression);
+        if (Candidate != nullptr &&
+            Candidate->Description == TEXT("DWC Wetness Profile Preview Debug BaseColor"))
+        {
+            PreviewDebug = Candidate;
+            break;
+        }
+    }
+    TestNotNull(TEXT("The unified graph owns its preview debug expression"), PreviewDebug);
+    if (PreviewDebug != nullptr)
+    {
+        for (const FCustomInput& Input : PreviewDebug->Inputs)
+        {
+            TestNotNull(
+                *FString::Printf(TEXT("Preview debug input '%s' is connected"), *Input.InputName.ToString()),
+                Input.Input.Expression);
+        }
+    }
+
+    const UMaterialExpressionMaterialFunctionCall* FinalNormal =
+        Cast<UMaterialExpressionMaterialFunctionCall>(
+            UMaterialEditingLibrary::GetMaterialPropertyInputNode(
+                Result.GeneratedMaterial,
+                MP_Normal));
+    TestNotNull(TEXT("The unified graph takes its final Normal from a material function"), FinalNormal);
+    TestEqual(
+        TEXT("The unified graph takes the named Normal output from MF_DWC_EvaluateSurfaceAppearance"),
+        UMaterialEditingLibrary::GetMaterialPropertyInputNodeOutputName(
+            Result.GeneratedMaterial,
+            MP_Normal),
+        FString(TEXT("Normal")));
+
+    UMaterialExpressionScalarParameter* UseGPUBackend = FindScalarParameter(
+        *Result.GeneratedMaterial,
+        DWCWetMaterialParameters::UseGPUBackend());
+    UMaterialExpressionTextureSampleParameter2D* WetnessMap = FindTextureSampleParameter(
+        *Result.GeneratedMaterial,
+        DWCWetMaterialParameters::WetnessMap());
+    UMaterialExpressionVertexColor* VertexColor = nullptr;
+    UMaterialExpressionIf* WetnessSelector = nullptr;
+    for (UMaterialExpression* Expression : Result.GeneratedMaterial->GetExpressions())
+    {
+        if (VertexColor == nullptr)
+        {
+            VertexColor = Cast<UMaterialExpressionVertexColor>(Expression);
+        }
+        if (UMaterialExpressionIf* Candidate = Cast<UMaterialExpressionIf>(Expression))
+        {
+            if (Candidate->A.Expression == UseGPUBackend)
+            {
+                WetnessSelector = Candidate;
+            }
+        }
+    }
+
+    TestNotNull(TEXT("The unified graph owns the GPU backend selector parameter"), UseGPUBackend);
+    TestNotNull(TEXT("The unified graph owns the GPU wetness map"), WetnessMap);
+    TestNotNull(TEXT("The unified graph owns a runtime Vertex Color expression"), VertexColor);
+    TestNotNull(TEXT("The unified graph owns a CPU/GPU wetness selector"), WetnessSelector);
+    if (WetnessSelector != nullptr && WetnessMap != nullptr && VertexColor != nullptr)
+    {
+        const int32 WetnessMapR = FindExpressionOutputIndex(WetnessMap, TEXT("R"));
+        const int32 VertexColorR = FindExpressionOutputIndex(VertexColor, TEXT("R"));
+        TestTrue(TEXT("The GPU wetness map exposes an R output"), WetnessMapR != INDEX_NONE);
+        TestTrue(TEXT("Vertex Color exposes an R output"), VertexColorR != INDEX_NONE);
+        TestTrue(
+            TEXT("The GPU selector branch reads DWC_WetnessMap.R"),
+            WetnessSelector->AGreaterThanB.Expression == WetnessMap &&
+                WetnessSelector->AGreaterThanB.OutputIndex == WetnessMapR);
+        TestTrue(
+            TEXT("The CPU selector branch reads VertexColor.R"),
+            WetnessSelector->ALessThanB.Expression == VertexColor &&
+                WetnessSelector->ALessThanB.OutputIndex == VertexColorR);
+        TestTrue(
+            TEXT("The selector equality branch also reads VertexColor.R"),
+            WetnessSelector->AEqualsB.Expression == VertexColor &&
+                WetnessSelector->AEqualsB.OutputIndex == VertexColorR);
+    }
+
+    TestTrue(
+        TEXT("The selected CPU/GPU wetness drives MF_DWC_EvaluateSurfaceAppearance"),
+        FindFunctionInputExpression(FinalNormal, TEXT("Wetness")) == WetnessSelector);
+    TestTrue(
+        TEXT("Reveal Normal remains inside MF_DWC_EvaluateSurfaceAppearance"),
+        IsFunctionInputConnected(FinalNormal, TEXT("RevealNormal")) &&
+            IsFunctionInputConnected(FinalNormal, TEXT("UseRevealNormalMap")));
+    TestTrue(
+        TEXT("Transparency remains inside MF_DWC_EvaluateSurfaceAppearance"),
+        IsFunctionInputConnected(FinalNormal, TEXT("TransparencyColor")) &&
+            IsFunctionInputConnected(FinalNormal, TEXT("TransparencyAlpha")) &&
+            IsFunctionInputConnected(FinalNormal, TEXT("UseTransparencyMap")));
+
+    if (Result.GeneratedMaterialInstance != nullptr)
+    {
+        Result.GeneratedMaterialInstance->MarkAsGarbage();
+    }
+    Result.GeneratedMaterial->MarkAsGarbage();
     return true;
 }
 

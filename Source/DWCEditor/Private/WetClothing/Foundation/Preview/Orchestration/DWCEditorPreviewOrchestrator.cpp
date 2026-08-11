@@ -217,17 +217,14 @@ FDWCEditorPreviewLayer FDWCEditorPreviewOrchestrator::BuildSavedCrossLayer(
     {
         Layer.Kind = EDWCEditorPreviewLayerKind::SavedTransparency;
         UTexture2D* Texture = bShowSavedCrossLayer ? Saved.TransparencyMap.Get() : nullptr;
-        UTexture2D* RevealSurface = bShowSavedCrossLayer ? Saved.RevealSurfaceMap.Get() : nullptr;
+        UTexture2D* RevealNormal = bShowSavedCrossLayer ? Saved.RevealNormalMap.Get() : nullptr;
         Layer.AddTexture(DWCWetMaterialParameters::TransparencyMap(), Texture);
         Layer.AddScalar(DWCWetMaterialParameters::UseTransparencyMap(), Texture != nullptr ? 1.0f : 0.0f);
-        Layer.AddTexture(DWCWetMaterialParameters::RevealSurfaceMap(), RevealSurface);
-        Layer.AddScalar(DWCWetMaterialParameters::UseRevealSurfaceMap(), RevealSurface != nullptr ? 1.0f : 0.0f);
-        const UWetClothingAsset* Asset = WetClothingAsset.Get();
+        Layer.AddTexture(DWCWetMaterialParameters::RevealNormalMap(), RevealNormal);
+        Layer.AddScalar(DWCWetMaterialParameters::UseRevealNormalMap(), RevealNormal != nullptr ? 1.0f : 0.0f);
         Layer.AddScalar(
-            DWCWetMaterialParameters::RevealMetallicDarkeningStrength(),
-            RevealSurface != nullptr && Asset != nullptr
-                ? Asset->Authored.TransparencyData.RevealMetallicDarkeningStrength
-                : 0.0f);
+            DWCWetMaterialParameters::RevealNormalStrength(),
+            RevealNormal != nullptr ? Saved.RevealNormalStrength : 0.0f);
     }
     else
     {

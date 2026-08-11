@@ -13,7 +13,7 @@ class UMaterialInstanceDynamic;
 class FDWCEditorPreviewMaterialFactory
 {
   public:
-    static constexpr uint32 CommonGraphSchemaVersion = 1;
+    static constexpr uint32 CommonGraphSchemaVersion = 2;
 
     static UMaterial* BuildTransientBaseMaterialGraph(
         const FDWCEditorPreviewMaterialRequest& Request,

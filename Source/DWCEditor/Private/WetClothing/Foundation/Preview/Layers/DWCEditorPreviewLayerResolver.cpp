@@ -25,18 +25,19 @@ FDWCEditorPreviewSavedLayers FDWCEditorPreviewLayerResolver::Resolve(
             WetClothingAsset->Authored.TransparencyData.FindBakedTransparencyMap(MaterialSlotIndex))
     {
         Result.TransparencyMap = Transparency->TransparencyMap;
-        // Keep legacy transparency maps usable in editor preview, but only
-        // bind the new packed surface payload when its channel contract is
-        // complete. A partially authored/old map must not be decoded as RGBA
-        // Reveal Surface data.
+        // Keep the last transparency color visible for stale diagnostics, but
+        // only bind a Reveal Normal that satisfies the runtime RG contract.
         const FWetClothingTransparencyLayerData* Layer =
             WetClothingAsset->Authored.TransparencyData.FindTransparencyLayer(MaterialSlotIndex);
-        const bool bRequiresRevealSurface = Layer != nullptr && Layer->RequiresRevealSurface();
-        const bool bHasCompleteRevealSurface = Transparency->HasCompleteRevealSurfacePayload();
-        Result.RevealSurfaceMap = bHasCompleteRevealSurface
-            ? Transparency->RevealSurfaceMap.Get()
+        const bool bRequiresRevealNormal = Layer != nullptr && Layer->RequiresRuntimeRevealNormal();
+        const bool bHasRevealNormal = bRequiresRevealNormal && Transparency->HasRuntimeRevealNormalPayload();
+        Result.RevealNormalMap = bHasRevealNormal
+            ? Transparency->RevealNormalMap.Get()
             : nullptr;
-        Result.TransparencyState = Transparency->IsRuntimeUsableForLayer(bRequiresRevealSurface)
+        Result.RevealNormalStrength = bHasRevealNormal
+            ? FMath::Clamp(Layer->RevealNormalStrength, 0.0f, 4.0f)
+            : 0.0f;
+        Result.TransparencyState = Transparency->IsRuntimeUsableForLayer(bRequiresRevealNormal)
             ? EDWCEditorSavedLayerState::Current
             : EDWCEditorSavedLayerState::Stale;
     }

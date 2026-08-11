@@ -57,6 +57,9 @@ def build() -> None:
         ("UseTransparencyMap", "scalar", (0.0,), "Transparency map enable weight."),
         ("TransparencyWetnessMin", "scalar", (0.25,), "Transparency response start wetness."),
         ("TransparencyWetnessMax", "scalar", (1.0,), "Transparency response full wetness."),
+        ("RevealNormal", "vector3", (0.0, 0.0, 1.0), "Coverage-weighted reveal tangent normal."),
+        ("UseRevealNormalMap", "scalar", (0.0,), "Reveal normal enable weight."),
+        ("RevealNormalStrength", "scalar", (1.0,), "Reveal normal intensity."),
     ]
     for i, (name, kind, preview, desc) in enumerate(specs):
         column = i // 10
@@ -138,12 +141,51 @@ return BaseColor * (1.0 - Darken);
     )
     absorbed_rough_decl = c.named_declaration(mf, "ABSORBED_Roughness", absorbed_roughness, ("", "Result"), -6400, -1350)
 
+    reveal_inputs = []
+    for i, name in enumerate((
+        "BaseNormal", "RevealNormal", "UseRevealNormalMap", "RevealNormalStrength",
+        "TransparencyAlpha", "UseTransparencyMap", "Wetness",
+        "TransparencyWetnessMin", "TransparencyWetnessMax",
+    )):
+        reveal_inputs.append((name, c.named_usage(mf, declarations[name], -6500, -5750 + i * 520), ("", "Result")))
+    reveal_normal = c.custom_expression(
+        mf,
+        """
+float SafeMin = saturate(TransparencyWetnessMin);
+float SafeMax = max(SafeMin, saturate(TransparencyWetnessMax));
+float WetnessWeight = saturate((Wetness - SafeMin) / max(SafeMax - SafeMin, 1.0e-4));
+float Weight = saturate(
+    WetnessWeight * TransparencyAlpha * UseTransparencyMap * UseRevealNormalMap);
+float3 B = normalize(BaseNormal);
+float2 RevealXY = RevealNormal.xy * max(RevealNormalStrength, 0.0);
+float RevealXYLengthSquared = dot(RevealXY, RevealXY);
+if (RevealXYLengthSquared > 0.999)
+{
+    RevealXY *= sqrt(0.999 / RevealXYLengthSquared);
+}
+float3 R = float3(RevealXY, sqrt(saturate(1.0 - dot(RevealXY, RevealXY))));
+return normalize(float3(
+    B.xy + R.xy * Weight,
+    B.z * lerp(1.0, R.z, Weight)));
+""",
+        reveal_inputs,
+        "float3", -5100, -4300,
+        "Blend coverage-weighted reveal detail before wrinkle and Surface Water normals.",
+    )
+    reveal_decl = c.named_declaration(
+        mf, "ABSORBED_RevealNormal", reveal_normal, ("", "Result"), -3900, -4300
+    )
+
     wrinkle_inputs = []
     for i, name in enumerate((
-        "BaseNormal", "WrinkleNormal", "Wetness", "UseWrinkleNormalMap",
+        "WrinkleNormal", "Wetness", "UseWrinkleNormalMap",
         "WrinkleStrength", "WrinkleWetnessMin", "WrinkleWetnessMax",
     )):
-        wrinkle_inputs.append((name, c.named_usage(mf, declarations[name], -5450, -5400 + i * 650), ("", "Result")))
+        wrinkle_inputs.append((name, c.named_usage(mf, declarations[name], -3550, -3300 + i * 560), ("", "Result")))
+    wrinkle_inputs.insert(
+        0,
+        ("BaseNormal", c.named_usage(mf, reveal_decl, -3550, -3900), ("", "Result")),
+    )
     wrinkle_normal = c.custom_expression(
         mf,
         """
@@ -155,10 +197,10 @@ float3 Detail = normalize(float3(W.xy * Weight, lerp(1.0, W.z, Weight)));
 return normalize(float3(B.xy + Detail.xy, B.z * Detail.z));
 """,
         wrinkle_inputs,
-        "float3", -3900, -3350,
-        "Blend the baked wrinkle normal into the original tangent normal.",
+        "float3", -2150, -2550,
+        "Blend the baked wrinkle normal after reveal detail.",
     )
-    wrinkle_decl = c.named_declaration(mf, "ABSORBED_Normal", wrinkle_normal, ("", "Result"), -2550, -3350)
+    wrinkle_decl = c.named_declaration(mf, "ABSORBED_Normal", wrinkle_normal, ("", "Result"), -950, -2550)
 
     transparency_inputs = [("WetBaseColor", c.named_usage(mf, wet_color_decl, -5450, 0), ("", "Result"))]
     for i, name in enumerate((

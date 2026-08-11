@@ -105,7 +105,7 @@ FLinearColor FWetClothingTextureReadback::GetLinearColor(int32 X, int32 Y) const
         return FLinearColor::Black;
     }
 
-    return bSRGB ? FLinearColor::FromSRGBColor(SRGBColor) : FLinearColor(SRGBColor);
+    return bSRGB ? FLinearColor::FromSRGBColor(SRGBColor) : SRGBColor.ReinterpretAsLinear();
 }
 
 bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(

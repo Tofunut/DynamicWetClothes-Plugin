@@ -27,6 +27,7 @@ struct FDWCTransparencyRevealColorIncrementalJobInput
     FDWCTransparencyRevealColorStroke Stroke;
     TArray<FDWCTransparencyBrushSample> Samples;
     FLinearColor BaseRevealColor = FLinearColor::White;
+    float RevealMetallicDarkeningStrength = 0.0f;
     TArray<FIntPoint> OutputTileCoordinates;
     TArray<FDWCTransparencyRevealColorTilePayload> SnapshotTiles;
     TArray<FDWCTransparencyRevealColorComposeTileSnapshot> ComposeTiles;

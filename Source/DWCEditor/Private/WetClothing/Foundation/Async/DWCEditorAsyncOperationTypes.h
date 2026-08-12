@@ -38,6 +38,7 @@ enum class EDWCEditorAsyncRequestPolicy : uint8
 enum class EDWCEditorResourcePool : uint8
 {
     WorkerPrivateCPU,
+    AssetCommitCPU,
     PreviewWorkspaceCPU,
     SharedCacheCPU,
     UploadStagingCPU,
@@ -49,6 +50,14 @@ enum class EDWCEditorResourceAdmissionResult : uint8
     Admitted,
     TemporarilyUnavailable,
     InvalidRequest
+};
+
+/** Admission lane used by the editor-wide Build barrier. */
+enum class EDWCEditorWorkClass : uint8
+{
+    InteractivePreview,
+    UserBuild,
+    ExclusiveBuild
 };
 
 struct FDWCEditorAsyncOperationKey

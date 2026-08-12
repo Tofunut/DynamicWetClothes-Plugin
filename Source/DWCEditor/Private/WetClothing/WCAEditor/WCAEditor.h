@@ -18,6 +18,7 @@ class SWidget;
 class SWindow;
 class SWCAEditorPanel;
 class UWetClothingAsset;
+struct FWCAEditorCanonicalStateSnapshot;
 
 enum class ECheckBoxState : uint8;
 
@@ -53,7 +54,9 @@ class FWCAEditor : public FAssetEditorToolkit
     void                 RefreshValidationDialogContent(const TSharedRef<SWindow>& DialogWindow);
     FReply               HandleValidationRefreshClicked(TWeakPtr<SWindow> DialogWindow);
     FReply               HandleValidationResolveClicked(TWeakPtr<SWindow> DialogWindow);
+    void                 ExecuteValidationResolveExclusive(TWeakPtr<SWindow> DialogWindow);
     TSharedRef<SWidget>  BuildRuntimeBuildMenu();
+    FWCAEditorCanonicalStateSnapshot BuildCanonicalStateSnapshot(bool bDeepValidation = false) const;
     FDWCEditorBuildStatusSnapshot BuildBuildStatusSnapshot(bool bDeepValidation = false) const;
     bool                 CanExecuteBuildAction(EDWCEditorBuildAction Action) const;
     void                 ExecuteBuildAction(EDWCEditorBuildAction Action);
@@ -61,6 +64,7 @@ class FWCAEditor : public FAssetEditorToolkit
     void                 HandleDumpPreviewDiagnostics();
     void                 HandleResetPreviewDiagnostics();
     FReply               HandleBuildAllRequiredClicked();
+    void                 ExecuteBuildAllRequiredExclusive();
     FReply               HandleBuildCPURuntimeDataClicked();
     FReply               HandleBuildGPURuntimeDataClicked();
     FReply               HandleBakeRenderProfileDataClicked();
@@ -69,7 +73,12 @@ class FWCAEditor : public FAssetEditorToolkit
     FReply               HandleRebakeAffectedTransparencyMapsClicked();
     FReply               HandleGenerateMaterialsClicked();
     FReply               GenerateWetMaterials();
-    bool                 ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSummary = nullptr);
+    bool                 ResolveIssuesAndSave(
+        FString& OutFailure,
+        FString* OutSuccessSummary = nullptr,
+        const TCHAR* BuildTraceName = TEXT("Resolve Required Outputs"),
+        EDWCEditorBuildPlanPolicy PlanPolicy = EDWCEditorBuildPlanPolicy::AllRequired,
+        TOptional<EDWCEditorBuildAction> ExplicitAction = {});
     void                 RefreshAssetStateAndEditor(
         bool bRunDeepValidation = false,
         bool bRebuildActiveModePreview = true);

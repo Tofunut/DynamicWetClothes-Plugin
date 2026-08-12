@@ -37,6 +37,14 @@ class FDWCEditorPreviewCommitCoordinator final
         FDWCEditorTextureLease& OutLease,
         EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
 
+    EDWCEditorPreviewCommitResult InitializeNormalBGRA8(
+        const FDWCEditorPreviewCommitContext& Context,
+        const FDWCEditorTextureKey& Key,
+        const FDWCEditorTextureDescriptor& Descriptor,
+        bool bWithCoverage,
+        FDWCEditorTextureLease& OutLease,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+
     EDWCEditorPreviewCommitResult CommitBGRA8Regions(
         const FDWCEditorPreviewCommitContext& Context,
         const FDWCEditorTextureLease& Lease,

@@ -9,28 +9,28 @@ namespace
     constexpr FDWCTransparencyStageArtifactSpec Specs[] = {
         {EDWCTransparencyTempArtifactKind::BaseRevealColor,
          EDWCTransparencyStage::Source, EDWCTransparencyArtifactDependency::Source,
-         TEXT("BaseRevealColor"), TSF_BGRA8, true, true, false},
+         TEXT("BaseRevealColor"), TSF_BGRA8, true},
         {EDWCTransparencyTempArtifactKind::ValidHit,
          EDWCTransparencyStage::Source, EDWCTransparencyArtifactDependency::Source,
-         TEXT("ValidHit"), TSF_G8, false, true, false},
+         TEXT("ValidHit"), TSF_G8, false},
         {EDWCTransparencyTempArtifactKind::HitSource,
          EDWCTransparencyStage::Source, EDWCTransparencyArtifactDependency::Source,
-         TEXT("HitSource"), TSF_G16, false, true, false},
+         TEXT("HitSource"), TSF_G16, false},
         {EDWCTransparencyTempArtifactKind::HitDistance,
          EDWCTransparencyStage::Source, EDWCTransparencyArtifactDependency::Source,
-         TEXT("HitDistance"), TSF_R16F, false, true, false},
+         TEXT("HitDistance"), TSF_R16F, false},
         {EDWCTransparencyTempArtifactKind::OuterCoverage,
          EDWCTransparencyStage::Source, EDWCTransparencyArtifactDependency::Source,
-         TEXT("OuterCoverage"), TSF_G8, false, true, false},
+         TEXT("OuterCoverage"), TSF_G8, false},
         {EDWCTransparencyTempArtifactKind::OuterIslandID,
          EDWCTransparencyStage::Source, EDWCTransparencyArtifactDependency::Source,
-         TEXT("OuterIslandID"), TSF_G16, false, true, false},
+         TEXT("OuterIslandID"), TSF_G16, false},
         {EDWCTransparencyTempArtifactKind::BaseRevealSurface,
          EDWCTransparencyStage::Source, EDWCTransparencyArtifactDependency::RevealSurface,
-         TEXT("BaseRevealSurface"), TSF_BGRA8, false, false, true},
+         TEXT("BaseRevealSurface"), TSF_BGRA8, false},
         {EDWCTransparencyTempArtifactKind::CorrectedRevealColor,
          EDWCTransparencyStage::Reveal, EDWCTransparencyArtifactDependency::Reveal,
-         TEXT("CorrectedRevealColor"), TSF_BGRA8, true, false, false}
+         TEXT("CorrectedRevealColor"), TSF_BGRA8, true}
     };
 
     UTexture2D* ResolveTexture(
@@ -39,6 +39,34 @@ namespace
     {
         return bLoadTexture ? Reference.Texture.LoadSynchronous() : Reference.Texture.Get();
     }
+}
+
+FDWCTransparencySourceArtifactSelection
+FDWCTransparencySourceArtifactSelection::Canonical(const bool bRequiresRevealSurface)
+{
+    FDWCTransparencySourceArtifactSelection Result;
+    Result.bRequireRevealSurface = bRequiresRevealSurface;
+    return Result;
+}
+
+FDWCTransparencySourceArtifactSelection
+FDWCTransparencySourceArtifactSelection::Stage4(
+    const bool bRequiresRevealSurface,
+    const bool bRequiresOuterIslandID)
+{
+    FDWCTransparencySourceArtifactSelection Result;
+    Result.bRequireRevealSurface = bRequiresRevealSurface;
+    Result.bRequireOuterIslandID = bRequiresOuterIslandID;
+    return Result;
+}
+
+FDWCTransparencySourceArtifactSelection
+FDWCTransparencySourceArtifactSelection::Diagnostics(const bool bRequiresRevealSurface)
+{
+    FDWCTransparencySourceArtifactSelection Result = Canonical(bRequiresRevealSurface);
+    Result.bRequireHitSource = true;
+    Result.bRequireHitDistance = true;
+    return Result;
 }
 
 const FDWCTransparencyStageArtifactSpec* FDWCTransparencyStageArtifactContract::FindSpec(
@@ -94,15 +122,34 @@ void FDWCTransparencyStageArtifactContract::GetRequiredSourceArtifacts(
     const bool bRequiresRevealSurface,
     TArray<EDWCTransparencyTempArtifactKind>& OutKinds)
 {
+    GetRequiredSourceArtifacts(
+        FDWCTransparencySourceArtifactSelection::Canonical(bRequiresRevealSurface),
+        OutKinds);
+}
+
+void FDWCTransparencyStageArtifactContract::GetRequiredSourceArtifacts(
+    const FDWCTransparencySourceArtifactSelection& Selection,
+    TArray<EDWCTransparencyTempArtifactKind>& OutKinds)
+{
     OutKinds.Reset();
-    for (const FDWCTransparencyStageArtifactSpec& Spec : Specs)
+    OutKinds.Add(EDWCTransparencyTempArtifactKind::BaseRevealColor);
+    OutKinds.Add(EDWCTransparencyTempArtifactKind::ValidHit);
+    OutKinds.Add(EDWCTransparencyTempArtifactKind::OuterCoverage);
+    if (Selection.bRequireOuterIslandID)
     {
-        if (Spec.Stage == EDWCTransparencyStage::Source &&
-            (Spec.bRequiredForAllSources ||
-             (bRequiresRevealSurface && Spec.bRequiredForProjectedSources)))
-        {
-            OutKinds.Add(Spec.Kind);
-        }
+        OutKinds.Add(EDWCTransparencyTempArtifactKind::OuterIslandID);
+    }
+    if (Selection.bRequireRevealSurface)
+    {
+        OutKinds.Add(EDWCTransparencyTempArtifactKind::BaseRevealSurface);
+    }
+    if (Selection.bRequireHitSource)
+    {
+        OutKinds.Add(EDWCTransparencyTempArtifactKind::HitSource);
+    }
+    if (Selection.bRequireHitDistance)
+    {
+        OutKinds.Add(EDWCTransparencyTempArtifactKind::HitDistance);
     }
 }
 
@@ -172,6 +219,23 @@ bool FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
     const bool bLoadTextures,
     FString& OutError)
 {
+    return InspectSourceArtifactSet(
+        Layer,
+        SourceSignature,
+        ExpectedResolution,
+        FDWCTransparencySourceArtifactSelection::Canonical(Layer.RequiresRevealSurface()),
+        bLoadTextures,
+        OutError);
+}
+
+bool FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+    const FWetClothingTransparencyLayerData& Layer,
+    const FString& SourceSignature,
+    const FIntPoint ExpectedResolution,
+    const FDWCTransparencySourceArtifactSelection& Selection,
+    const bool bLoadTextures,
+    FString& OutError)
+{
     OutError.Reset();
     if (SourceSignature.IsEmpty() || ExpectedResolution.X <= 0 || ExpectedResolution.Y <= 0)
     {
@@ -180,7 +244,7 @@ bool FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
     }
 
     TArray<EDWCTransparencyTempArtifactKind> RequiredKinds;
-    GetRequiredSourceArtifacts(Layer.RequiresRevealSurface(), RequiredKinds);
+    GetRequiredSourceArtifacts(Selection, RequiredKinds);
     FGuid CommitGeneration;
     for (const EDWCTransparencyTempArtifactKind Kind : RequiredKinds)
     {

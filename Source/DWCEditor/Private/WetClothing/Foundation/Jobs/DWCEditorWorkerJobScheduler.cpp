@@ -5,11 +5,26 @@
 #include "HAL/PlatformTime.h"
 #include "WetClothing/Foundation/Async/DWCEditorAsyncOperationContract.h"
 #include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
+#include "WetClothing/Foundation/Operations/DWCEditorOperationPhaseGraph.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDWCEditorWorkerJobs, Log, All);
 
 namespace
 {
+    FDWCEditorOperationPhaseResourcePlan MakeWorkerResourcePlan(
+        const FDWCEditorWorkerMemoryEstimate& Estimate,
+        const uint64 RetainedBytes = 0)
+    {
+        FDWCEditorOperationPhaseResourcePlan Plan;
+        Plan.AddPeak(
+            EDWCEditorResourcePool::WorkerPrivateCPU,
+            Estimate.GetOperationPrivateBytes());
+        Plan.AddRetained(
+            EDWCEditorResourcePool::WorkerPrivateCPU,
+            FMath::Min(RetainedBytes, Estimate.GetOperationPrivateBytes()));
+        return Plan;
+    }
+
     const TCHAR* WorkerLifecycleToString(const EDWCEditorWorkerJobLifecycleState State)
     {
         switch (State)
@@ -72,6 +87,9 @@ struct FDWCEditorWorkerJobScheduler::FQueuedJob
     uint64 RetainedPhaseBytes = 0;
     EDWCEditorWorkerJobCompletion Completion = EDWCEditorWorkerJobCompletion::Failed;
     FString CompletionError;
+    FDWCEditorOperationPhaseGraph PhaseGraph;
+    FName ActivePhaseName;
+    int32 WorkerPhaseIndex = 0;
 };
 
 FDWCEditorWorkerJobScheduler::FDWCEditorWorkerJobScheduler(
@@ -114,6 +132,13 @@ void FDWCEditorWorkerJobScheduler::SetDomainRevisionProvider(FDomainRevisionProv
     DomainRevisionProvider = MoveTemp(InProvider);
 }
 
+void FDWCEditorWorkerJobScheduler::SetAdmissionBarrier(FAdmissionBarrier InBarrier)
+{
+    check(IsInGameThread());
+    AdmissionBarrier = MoveTemp(InBarrier);
+    PumpAdmissions();
+}
+
 FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitPrepared(
     const FDWCEditorWorkerJobDescriptor& Descriptor,
     FPrepare Prepare,
@@ -150,6 +175,20 @@ FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitInternal(
     {
         if (OutError != nullptr) *OutError = TEXT("The editor worker job is missing its prepare or apply callback.");
         return {};
+    }
+    if (AdmissionBarrier)
+    {
+        FString BarrierError;
+        if (!AdmissionBarrier(Descriptor, BarrierError))
+        {
+            if (OutError != nullptr)
+            {
+                *OutError = BarrierError.IsEmpty()
+                    ? TEXT("The editor worker request is blocked by an exclusive Build.")
+                    : MoveTemp(BarrierError);
+            }
+            return {};
+        }
     }
 
     const uint64 RequestedBytes = Descriptor.GetReservedBytes();
@@ -202,6 +241,14 @@ FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitInternal(
     Job->Apply = MoveTemp(Apply);
     Job->Finished = MoveTemp(Finished);
     Job->SubmittedSeconds = FPlatformTime::Seconds();
+    {
+        FDWCEditorOperationPhaseDescriptor PreparePhase;
+        PreparePhase.Name = TEXT("Prepare");
+        PreparePhase.Thread = EDWCEditorOperationPhaseThread::GameThread;
+        PreparePhase.Resources = MakeWorkerResourcePlan(Descriptor.MemoryEstimate);
+        PreparePhase.DebugName = Descriptor.DebugName + TEXT(" prepare");
+        Job->PhaseGraph.AddPhase(MoveTemp(PreparePhase));
+    }
     PendingAdmissionJobs.Add(Job);
     if (RequestPolicy == EDWCEditorAsyncRequestPolicy::LatestWins)
     {
@@ -301,6 +348,20 @@ void FDWCEditorWorkerJobScheduler::PumpAdmissions()
                 bMadeProgress = true;
                 continue;
             }
+            if (AdmissionBarrier)
+            {
+                FString BarrierError;
+                if (!AdmissionBarrier(Job->Descriptor, BarrierError))
+                {
+                    RequestJobCancellation(Job);
+                    FinalizeNonRunningJob(
+                        Job,
+                        EDWCEditorWorkerJobCompletion::Canceled,
+                        MoveTemp(BarrierError));
+                    bMadeProgress = true;
+                    continue;
+                }
+            }
             if (Job->Descriptor.GetRequestPolicy() == EDWCEditorAsyncRequestPolicy::LatestWins &&
                 !IsCurrentGeneration(Job->Ticket))
             {
@@ -381,6 +442,8 @@ bool FDWCEditorWorkerJobScheduler::TryAdmitPendingJob(
     HighWaterReservedBytes = FMath::Max(HighWaterReservedBytes, CalculateReservedBytes());
     TransitionJob(Job, EDWCEditorAsyncOperationState::Admitted);
     TransitionJob(Job, EDWCEditorAsyncOperationState::Preparing);
+    Job->ActivePhaseName = TEXT("Prepare");
+    Job->PhaseGraph.MarkRunning(Job->ActivePhaseName);
 
     Job->PrepareStartedSeconds = FPlatformTime::Seconds();
     FPreparedWorkerJob Prepared;
@@ -441,6 +504,18 @@ bool FDWCEditorWorkerJobScheduler::TryAdmitPendingJob(
         ? Job->Descriptor.MemoryEstimate
         : Prepared.ActualMemoryEstimate;
     Job->Work = MoveTemp(Prepared.Work);
+    Job->PhaseGraph.MarkCompleted(Job->ActivePhaseName);
+    {
+        FDWCEditorOperationPhaseDescriptor WorkerPhase;
+        WorkerPhase.Name = FName(*FString::Printf(TEXT("Worker.%d"), Job->WorkerPhaseIndex++));
+        WorkerPhase.Dependencies.Add(Job->ActivePhaseName);
+        WorkerPhase.Thread = EDWCEditorOperationPhaseThread::WorkerThread;
+        WorkerPhase.Resources = MakeWorkerResourcePlan(Job->ActualMemoryEstimate);
+        WorkerPhase.DebugName = Job->Descriptor.DebugName;
+        const FName WorkerPhaseName = WorkerPhase.Name;
+        Job->PhaseGraph.AddPhase(MoveTemp(WorkerPhase));
+        Job->ActivePhaseName = WorkerPhaseName;
+    }
     PreparingJobs.RemoveSingle(Job);
     ReadyJobs.Add(Job);
     Job->LifecycleState = EDWCEditorWorkerJobLifecycleState::Ready;
@@ -462,7 +537,8 @@ bool FDWCEditorWorkerJobScheduler::TryAdmitPendingJob(
 bool FDWCEditorWorkerJobScheduler::TryAdmitPendingPhase(
     const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
 {
-    const uint64 RequestedBytes = FMath::Max<uint64>(Job->ActualMemoryEstimate.GetTotalBytes(), 1);
+    const uint64 RequestedBytes = FMath::Max<uint64>(
+        Job->ActualMemoryEstimate.GetOperationPrivateBytes(), 1);
     if (RequestedBytes > PerJobMemoryBudgetBytes)
     {
         ++BudgetRejectionCount;
@@ -619,6 +695,65 @@ void FDWCEditorWorkerJobScheduler::CancelDomain(const EDWCEditorAuthoringDomain 
     PumpAdmissions();
 }
 
+void FDWCEditorWorkerJobScheduler::CancelWorkClass(const EDWCEditorWorkClass WorkClass)
+{
+    check(IsInGameThread());
+    const auto Matches = [WorkClass](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
+    {
+        return Job->Descriptor.WorkClass == WorkClass;
+    };
+    const auto CancelNonRunning = [this, &Matches](
+        TArray<TSharedRef<FQueuedJob, ESPMode::ThreadSafe>>& Jobs)
+    {
+        for (int32 Index = Jobs.Num() - 1; Index >= 0; --Index)
+        {
+            TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job = Jobs[Index];
+            if (Matches(Job))
+            {
+                GenerationByKey.FindOrAdd(Job->Descriptor.Key) += 1;
+                RequestJobCancellation(Job);
+                FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Canceled, FString());
+            }
+        }
+    };
+
+    CancelNonRunning(PendingAdmissionJobs);
+    CancelNonRunning(PendingPhaseAdmissionJobs);
+    CancelNonRunning(ReadyJobs);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PreparingJobs)
+    {
+        if (Matches(Job))
+        {
+            GenerationByKey.FindOrAdd(Job->Descriptor.Key) += 1;
+            RequestJobCancellation(Job);
+        }
+    }
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ActiveJobs)
+    {
+        if (Matches(Job))
+        {
+            GenerationByKey.FindOrAdd(Job->Descriptor.Key) += 1;
+            RequestJobCancellation(Job);
+        }
+    }
+    PumpAdmissions();
+}
+
+bool FDWCEditorWorkerJobScheduler::HasOutstandingWorkClass(
+    const EDWCEditorWorkClass WorkClass) const
+{
+    const auto Matches = [WorkClass](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
+    {
+        return Job->Descriptor.WorkClass == WorkClass &&
+            Job->LifecycleState != EDWCEditorWorkerJobLifecycleState::Completed;
+    };
+    return PendingAdmissionJobs.ContainsByPredicate(Matches) ||
+        PendingPhaseAdmissionJobs.ContainsByPredicate(Matches) ||
+        PreparingJobs.ContainsByPredicate(Matches) ||
+        ReadyJobs.ContainsByPredicate(Matches) ||
+        ActiveJobs.ContainsByPredicate(Matches);
+}
+
 void FDWCEditorWorkerJobScheduler::Shutdown()
 {
     if (bShuttingDown)
@@ -751,6 +886,7 @@ FDWCEditorWorkerSchedulerDiagnostics FDWCEditorWorkerJobScheduler::GetDiagnostic
         Item.CancellationSeconds = Job->CancelRequestedSeconds > 0.0
             ? Now - Job->CancelRequestedSeconds
             : 0.0;
+        Item.PhaseGraph = Job->PhaseGraph.GetSnapshot();
     };
     for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PendingAdmissionJobs) AppendJob(Job);
     for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PendingPhaseAdmissionJobs) AppendJob(Job);
@@ -818,6 +954,7 @@ void FDWCEditorWorkerJobScheduler::StartEligibleJobs()
         ActiveJobs.Add(Job);
         TransitionJob(Job, EDWCEditorAsyncOperationState::Running);
         Job->LifecycleState = EDWCEditorWorkerJobLifecycleState::Running;
+        Job->PhaseGraph.MarkRunning(Job->ActivePhaseName);
         Job->StartedSeconds = FPlatformTime::Seconds();
         UE_LOG(
             LogDWCEditorWorkerJobs,
@@ -868,11 +1005,56 @@ void FDWCEditorWorkerJobScheduler::HandleWorkerFinished(
         PumpAdmissions();
         return;
     }
+    Job->PhaseGraph.MarkCompleted(Job->ActivePhaseName);
     TransitionJob(Job, EDWCEditorAsyncOperationState::CommitPending);
     Job->LifecycleState = EDWCEditorWorkerJobLifecycleState::Finalizing;
     Job->CommitStartedSeconds = FPlatformTime::Seconds();
     Job->ResultBytes = Result.IsValid() ? Result->ResultBytes : 0;
-    const FString ResultError = Result.IsValid() ? Result->Error : FString();
+    FString ResultError = Result.IsValid() ? Result->Error : FString();
+
+    const FDWCEditorWorkerMemoryEstimate CommitEstimate = Result.IsValid()
+        ? Result->CommitMemoryEstimate
+        : FDWCEditorWorkerMemoryEstimate();
+    const bool bHasExplicitCommitEstimate = !CommitEstimate.IsEmpty();
+    if (bHasExplicitCommitEstimate)
+    {
+        const uint64 CommitBytes = FMath::Max<uint64>(
+            CommitEstimate.GetOperationPrivateBytes(), 1);
+        FString ResizeError;
+        const uint64 ReservedBytes = Job->MemoryLease.GetReservedBytes();
+        if (CommitBytes > ReservedBytes)
+        {
+            ResizeError = FString::Printf(
+                TEXT("declared %.2f MiB, admitted phase peak %.2f MiB"),
+                static_cast<double>(CommitBytes) / FDWCEditorResourceBudgetConfig::MiB,
+                static_cast<double>(ReservedBytes) / FDWCEditorResourceBudgetConfig::MiB);
+        }
+        if (!ResizeError.IsEmpty() ||
+            !Job->MemoryLease.TryResize(CommitBytes, &ResizeError))
+        {
+            ResultError = FString::Printf(
+                TEXT("The worker result did not fit its declared commit phase memory: %s"),
+                *ResizeError);
+            if (Result.IsValid())
+            {
+                Result->bSucceeded = false;
+                Result->Error = ResultError;
+            }
+        }
+    }
+
+    {
+        FDWCEditorOperationPhaseDescriptor CommitPhase;
+        CommitPhase.Name = TEXT("Commit");
+        CommitPhase.Dependencies.Add(Job->ActivePhaseName);
+        CommitPhase.Thread = EDWCEditorOperationPhaseThread::GameThread;
+        CommitPhase.Resources = MakeWorkerResourcePlan(
+            bHasExplicitCommitEstimate ? CommitEstimate : Job->ActualMemoryEstimate);
+        CommitPhase.DebugName = Job->Descriptor.DebugName + TEXT(" commit");
+        Job->PhaseGraph.AddPhase(MoveTemp(CommitPhase));
+        Job->ActivePhaseName = TEXT("Commit");
+        Job->PhaseGraph.MarkRunning(Job->ActivePhaseName);
+    }
 
     const bool bDomainRevisionCurrent = Job->Ticket.Domain == EDWCEditorAuthoringDomain::None ||
         !DomainRevisionProvider ||
@@ -904,6 +1086,15 @@ void FDWCEditorWorkerJobScheduler::HandleWorkerFinished(
         Completion = EDWCEditorWorkerJobCompletion::Applied;
     }
 
+    if (Completion == EDWCEditorWorkerJobCompletion::Applied)
+    {
+        Job->PhaseGraph.MarkCompleted(Job->ActivePhaseName);
+    }
+    else
+    {
+        Job->PhaseGraph.MarkFailed(Job->ActivePhaseName, ResultError);
+    }
+
     Result.Reset();
     Job->Prepare = nullptr;
     Job->Work = nullptr;
@@ -912,6 +1103,20 @@ void FDWCEditorWorkerJobScheduler::HandleWorkerFinished(
     if (Job->OperationState == EDWCEditorAsyncOperationState::Committing)
     {
         TransitionJob(Job, EDWCEditorAsyncOperationState::Retiring);
+    }
+    if (Completion == EDWCEditorWorkerJobCompletion::Applied)
+    {
+        FDWCEditorOperationPhaseDescriptor RetirePhase;
+        RetirePhase.Name = TEXT("Retire");
+        RetirePhase.Dependencies.Add(Job->ActivePhaseName);
+        RetirePhase.Thread = EDWCEditorOperationPhaseThread::GameThread;
+        RetirePhase.DebugName = Job->Descriptor.DebugName + TEXT(" retire");
+        if (Job->PhaseGraph.AddPhase(MoveTemp(RetirePhase)))
+        {
+            Job->ActivePhaseName = TEXT("Retire");
+            Job->PhaseGraph.MarkRunning(Job->ActivePhaseName);
+            Job->PhaseGraph.MarkCompleted(Job->ActivePhaseName);
+        }
     }
     MarkCompleted(Job, Completion);
     NotifyFinished(Job, Completion, ResultError);
@@ -961,9 +1166,9 @@ bool FDWCEditorWorkerJobScheduler::HandleWorkerContinuation(
     }
 
     const uint64 RetainedBytes = FMath::Max<uint64>(
-        Continuation->RetainedMemoryEstimate.GetTotalBytes(), 1);
+        Continuation->RetainedMemoryEstimate.GetOperationPrivateBytes(), 1);
     const uint64 NextPhaseBytes = FMath::Max<uint64>(
-        Continuation->NextPhaseMemoryEstimate.GetTotalBytes(), 1);
+        Continuation->NextPhaseMemoryEstimate.GetOperationPrivateBytes(), 1);
     if (RetainedBytes > NextPhaseBytes || NextPhaseBytes > PerJobMemoryBudgetBytes)
     {
         ++BudgetRejectionCount;
@@ -985,12 +1190,33 @@ bool FDWCEditorWorkerJobScheduler::HandleWorkerContinuation(
         return true;
     }
 
+    Job->PhaseGraph.MarkCompleted(Job->ActivePhaseName);
+
     Job->Work = MoveTemp(Continuation->NextWork);
     Job->ActualMemoryEstimate = Continuation->NextPhaseMemoryEstimate;
     Job->PendingPhaseName = Continuation->NextPhaseName;
     Job->RetainedPhaseBytes = RetainedBytes;
     Job->PhaseAdmissionStartedSeconds = FPlatformTime::Seconds();
     Job->LifecycleState = EDWCEditorWorkerJobLifecycleState::PendingPhaseAdmission;
+    {
+        FDWCEditorOperationPhaseDescriptor WorkerPhase;
+        WorkerPhase.Name = Continuation->NextPhaseName.IsNone()
+            ? FName(*FString::Printf(TEXT("Worker.%d"), Job->WorkerPhaseIndex))
+            : FName(*FString::Printf(
+                TEXT("Worker.%d.%s"),
+                Job->WorkerPhaseIndex,
+                *Continuation->NextPhaseName.ToString()));
+        ++Job->WorkerPhaseIndex;
+        WorkerPhase.Dependencies.Add(Job->ActivePhaseName);
+        WorkerPhase.Thread = EDWCEditorOperationPhaseThread::WorkerThread;
+        WorkerPhase.Resources = MakeWorkerResourcePlan(
+            Continuation->NextPhaseMemoryEstimate,
+            RetainedBytes);
+        WorkerPhase.DebugName = Job->Descriptor.DebugName;
+        const FName WorkerPhaseName = WorkerPhase.Name;
+        Job->PhaseGraph.AddPhase(MoveTemp(WorkerPhase));
+        Job->ActivePhaseName = WorkerPhaseName;
+    }
     PendingPhaseAdmissionJobs.Add(Job);
     return true;
 }
@@ -1153,6 +1379,7 @@ void FDWCEditorWorkerJobScheduler::FinalizeNonRunningJob(
     const FString& Error)
 {
     check(IsInGameThread());
+    Job->PhaseGraph.CancelOutstanding(Error);
     PendingAdmissionJobs.RemoveSingle(Job);
     PendingPhaseAdmissionJobs.RemoveSingle(Job);
     PreparingJobs.RemoveSingle(Job);
@@ -1170,6 +1397,7 @@ void FDWCEditorWorkerJobScheduler::FinalizeDetachedJob(
     const FString& Error)
 {
     check(IsInGameThread());
+    Job->PhaseGraph.CancelOutstanding(Error);
     RequestJobCancellation(Job);
     Job->Prepare = nullptr;
     Job->Work = nullptr;

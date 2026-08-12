@@ -19,6 +19,11 @@
 
 class FAssetThumbnail;
 class FAssetThumbnailPool;
+class FDWCEditorCacheStore;
+class FDWCEditorRenderUploadQueue;
+class FDWCEditorResourceGovernor;
+class FDWCEditorTextureWorkspace;
+class FDWCEditorWorkerJobScheduler;
 class IDetailsView;
 class STableViewBase;
 class SInlineEditableTextBlock;
@@ -27,18 +32,26 @@ class UTexture;
 class UTexture2D;
 struct FSlateBrush;
 struct FDWCDataUVBuildResult;
+enum class EDWCEditorPreviewSuspendReason : uint8;
 
 class SWetClothingPartEditorPanel : public SCompoundWidget
 {
   public:
     SLATE_BEGIN_ARGS(SWetClothingPartEditorPanel) {}
     SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorCacheStore>, CacheStore)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorResourceGovernor>, ResourceGovernor)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorWorkerJobScheduler>, WorkerJobScheduler)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
 
     void RefreshFromAsset();
+    void SuspendPreview(EDWCEditorPreviewSuspendReason Reason);
+    void ResumePreviewIfNeeded();
     bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
     bool BakeRenderProfileDataAndUpdateMaterials(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveBakedRenderProfileAssets() const;
@@ -260,6 +273,14 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
 
   private:
     TWeakObjectPtr<UWetClothingAsset>                 WetClothingAsset;
+    TSharedPtr<FDWCEditorCacheStore>                   CacheStore;
+    TSharedPtr<FDWCEditorTextureWorkspace>             TextureWorkspace;
+    TSharedPtr<FDWCEditorRenderUploadQueue>            RenderUploadQueue;
+    TSharedPtr<FDWCEditorResourceGovernor>              ResourceGovernor;
+    TSharedPtr<FDWCEditorWorkerJobScheduler>            WorkerJobScheduler;
+    FDWCEditorCacheKey                                  ActiveTopologyKey;
+    FDWCEditorCacheLease                                ActiveTopologyLease;
+    bool                                                bHasActiveTopologyKey = false;
     TSharedPtr<IDetailsView>                          DetailsView;
     TSharedPtr<SDWCPartViewport>                      PreviewViewport;
     TSharedPtr<SDWCPartViewport>                      SurfaceWaterTilingPreviewViewport;

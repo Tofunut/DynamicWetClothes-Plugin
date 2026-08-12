@@ -40,7 +40,12 @@ FVector3f FDWCEditorNormalSourceSnapshot::SampleBilinear(const FVector2f& UV) co
     const int32   Y1 = FMath::Min(Y0 + 1, Texture.Height - 1);
     const float   FracX = SampleX - static_cast<float>(X0);
     const float   FracY = SampleY - static_cast<float>(Y0);
-    const FColor* Pixels = reinterpret_cast<const FColor*>(Texture.RawData->GetData());
+    const TArray64<uint8>* RawData = Texture.GetRawData();
+    if (RawData == nullptr)
+    {
+        return FVector3f(0.0f, 0.0f, 1.0f);
+    }
+    const FColor* Pixels = reinterpret_cast<const FColor*>(RawData->GetData());
     const FColor& C00 = Pixels[Y0 * Texture.Width + X0];
     const FColor& C10 = Pixels[Y0 * Texture.Width + X1];
     const FColor& C01 = Pixels[Y1 * Texture.Width + X0];

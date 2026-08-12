@@ -185,7 +185,8 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     UPROPERTY(VisibleAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Wrinkle"))
     int32 WrinkleMapResolution = 1024;
 
-    UPROPERTY(VisibleAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Transparency"))
+    UPROPERTY(meta = (DeprecatedProperty,
+        DeprecationMessage = "Transparency resolution is resolved per target material slot."))
     int32 TransparencyMapResolution = 1024;
 
     /** Original UV channel on the DWC Prepared Skeletal Mesh used by Part Edit and DWC UV Channel generation. */
@@ -220,7 +221,6 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     int32 GetGPUSimulationMapResolution() const { return GPUSimulationMapResolution; }
     int32 GetSurfaceWaterRTResolution() const { return SurfaceWaterRTResolution; }
     int32 GetWrinkleMapResolution() const { return WrinkleMapResolution; }
-    int32 GetTransparencyMapResolution() const { return TransparencyMapResolution; }
 
     void NormalizeMapResolutions()
     {

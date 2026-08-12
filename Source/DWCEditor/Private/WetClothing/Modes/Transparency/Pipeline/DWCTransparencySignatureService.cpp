@@ -1,6 +1,8 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyResolutionResolver.h"
+#include "WetClothing/Modes/Transparency/MaterialBake/DWCTransparencyMaterialBakeResolutionResolver.h"
 
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/DWCBakeLayer.h"
@@ -323,7 +325,7 @@ FDWCTransparencySignatureService::BuildMaterialSurfaceBakeIdentity(
     const FTransform& BakeTransform,
     const int32 MaterialSlotIndex,
     const int32 SourceUVChannel,
-    const int32 Resolution)
+    const int32 SourceBakeResolution)
 {
     FDWCTransparencyMaterialSurfaceBakeIdentity Identity;
     Identity.SourceMeshContentSignature =
@@ -337,10 +339,10 @@ FDWCTransparencySignatureService::BuildMaterialSurfaceBakeIdentity(
     Identity.PlacementSignature = BuildPlacementSignature(BakeTransform);
 
     const FString Canonical = FString::Printf(
-        TEXT("DWC.Transparency.MaterialSurfaceBake.v%d|Properties=BaseColor,Normal,Metallic|Mesh=%s|MeshContent=%s|Slot=%d|UV=%d|Resolution=%d|Material=%s|Placement=%s"),
+        TEXT("DWC.Transparency.MaterialSurfaceBake.v%d|Properties=BaseColor,Normal,Metallic|Mesh=%s|MeshContent=%s|Slot=%d|UV=%d|SourceBakeResolution=%d|Material=%s|Placement=%s"),
         FDWCTransparencyMaterialSurfaceBakeIdentity::Version,
         *GetPathNameSafe(SourceMesh), *Identity.SourceMeshContentSignature,
-        MaterialSlotIndex, SourceUVChannel, Resolution,
+        MaterialSlotIndex, SourceUVChannel, SourceBakeResolution,
         *Identity.EffectiveMaterialSignature, *Identity.PlacementSignature);
     Identity.Digest = HashCanonical(Canonical);
     return Identity;
@@ -367,9 +369,34 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
     FString& OutMaterialBakeSignature,
     FString& OutError)
 {
+    const FDWCTransparencyResolvedOutputResolution ResolvedOutputResolution =
+        FDWCTransparencyResolutionResolver::Resolve(Asset, Layer);
+    return BuildSourceSignature(
+        Asset,
+        Layer,
+        ResolvedOutputResolution,
+        OutSignature,
+        OutMaterialBakeSignature,
+        OutError);
+}
+
+bool FDWCTransparencySignatureService::BuildSourceSignature(
+    const UWetClothingAsset& Asset,
+    const FWetClothingTransparencyLayerData& Layer,
+    const FDWCTransparencyResolvedOutputResolution& ResolvedOutputResolution,
+    FString& OutSignature,
+    FString& OutMaterialBakeSignature,
+    FString& OutError)
+{
     OutSignature.Reset();
     OutMaterialBakeSignature.Reset();
     OutError.Reset();
+
+    if (!ResolvedOutputResolution.IsValid())
+    {
+        OutError = TEXT("Transparency source signature requires a valid resolved output resolution.");
+        return false;
+    }
 
     const USkeletalMesh* Mesh = Asset.GetRuntimeSkeletalMesh();
     const USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
@@ -388,8 +415,7 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
         return false;
     }
 
-    const int32 Resolution = FMath::Clamp(
-        Asset.Authored.TransparencyData.TransparencyBakeResolution, 16, 4096);
+    const int32 Resolution = ResolvedOutputResolution.Size;
     TMap<const USkeletalMesh*, FString> TangentBasisSignatures;
     const auto ResolveTangentBasisSignature = [&TangentBasisSignatures, LODIndex](
         const USkeletalMesh* SignatureMesh) -> const FString&
@@ -403,10 +429,11 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
             BuildImportedTangentBasisSignature(SignatureMesh, LODIndex));
     };
     FString Canonical = FString::Printf(
-        TEXT("DWC.Transparency.Source.v4|Mesh=%s|Layer=%s|Type=%d|Slot=%d|UV=%d|LOD=0|Resolution=%d|Address=%d|DataUV=%s|OuterBasis=%s"),
+        TEXT("DWC.Transparency.Source.v8|Mesh=%s|Layer=%s|Type=%d|Slot=%d|UV=%d|LOD=0|OutputResolution=%d|ResolutionIdentity=%s|Address=%d|DataUV=%s|OuterBasis=%s|OuterCoverage=Subpixel2x2"),
         *GetPathNameSafe(Mesh), *Layer.LayerGuid.ToString(EGuidFormats::DigitsWithHyphens),
         static_cast<int32>(Layer.SourceType), Layer.TargetSurface.OuterMaterialSlotIndex,
-        DataUV, Resolution, static_cast<int32>(Layer.TargetSurface.UVAddressMode),
+        DataUV, Resolution, *ResolvedOutputResolution.Identity,
+        static_cast<int32>(Layer.TargetSurface.UVAddressMode),
         *DataUVMetadata->DataUVOutputSignature,
         *ResolveTangentBasisSignature(Mesh));
     AppendTargetWetPartEligibility(Asset, Layer.TargetSurface.OuterMaterialSlotIndex, Canonical);
@@ -451,10 +478,13 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
             UMaterialInterface* Material = SourceMesh->GetMaterials().IsValidIndex(Inner.MaterialSlotIndex)
                 ? SourceMesh->GetMaterials()[Inner.MaterialSlotIndex].MaterialInterface
                 : nullptr;
+            const FDWCTransparencyResolvedMaterialBakeResolution SourceBakeResolution =
+                FDWCTransparencyMaterialBakeResolutionResolver::Resolve(Material);
             const FDWCTransparencyMaterialSurfaceBakeIdentity MaterialIdentity =
                 BuildMaterialSurfaceBakeIdentity(
                     SourceMesh, Material, FTransform::Identity,
-                    Inner.MaterialSlotIndex, Inner.SourceUVChannel, Resolution);
+                    Inner.MaterialSlotIndex, Inner.SourceUVChannel,
+                    SourceBakeResolution.Resolution);
             if (!MaterialIdentity.IsValid())
             {
                 OutError = TEXT("Could not identify a Same Mesh source material surface.");
@@ -497,11 +527,14 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
             Canonical += FString::Printf(
                 TEXT("|SourceBasis=%s"),
                 *ResolveTangentBasisSignature(Source.Layer.SkeletalMesh));
+            const FDWCTransparencyResolvedMaterialBakeResolution SourceBakeResolution =
+                FDWCTransparencyMaterialBakeResolutionResolver::Resolve(
+                    Source.EffectiveMaterial);
             const FDWCTransparencyMaterialSurfaceBakeIdentity MaterialIdentity =
                 BuildMaterialSurfaceBakeIdentity(
                     Source.Layer.SkeletalMesh, Source.EffectiveMaterial,
                     Source.Layer.BakeTransform, Source.MaterialSlotIndex,
-                    Source.Layer.SourceUVChannel, Resolution);
+                    Source.Layer.SourceUVChannel, SourceBakeResolution.Resolution);
             if (!MaterialIdentity.IsValid())
             {
                 OutError = TEXT("Could not identify a Blueprint source material surface.");
@@ -538,11 +571,14 @@ bool FDWCTransparencySignatureService::BuildSourceSignature(
             Canonical += FString::Printf(
                 TEXT("|SourceBasis=%s"),
                 *ResolveTangentBasisSignature(Source.Layer.SkeletalMesh));
+            const FDWCTransparencyResolvedMaterialBakeResolution SourceBakeResolution =
+                FDWCTransparencyMaterialBakeResolutionResolver::Resolve(
+                    Source.EffectiveMaterial);
             const FDWCTransparencyMaterialSurfaceBakeIdentity MaterialIdentity =
                 BuildMaterialSurfaceBakeIdentity(
                     Source.Layer.SkeletalMesh, Source.EffectiveMaterial,
                     Source.Layer.BakeTransform, Source.MaterialSlotIndex,
-                    Source.Layer.SourceUVChannel, Resolution);
+                    Source.Layer.SourceUVChannel, SourceBakeResolution.Resolution);
             if (!MaterialIdentity.IsValid())
             {
                 OutError = TEXT("Could not identify an External Mesh source material surface.");

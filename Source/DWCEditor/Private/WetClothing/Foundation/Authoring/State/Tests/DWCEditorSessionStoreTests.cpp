@@ -124,7 +124,7 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         EDWCTransparencyVisualizationMode::CorrectionDifference);
 
     const FGuid LayerGuid = FGuid::NewGuid();
-    FDWCEditorSessionReducer::Reduce(State, FDWCSelectTransparencyLayerAction{LayerGuid});
+    FDWCEditorSessionReducer::Reduce(State, FDWCSelectTransparencyLayerAction{LayerGuid, 6});
     FDWCReconcileAuthoringAction Reconcile;
     Reconcile.AuthoringRevision = 7;
     Reconcile.Domain = EDWCEditorAuthoringDomain::Transparency;
@@ -137,6 +137,10 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
     TestFalse(
         TEXT("A removed transparency layer is no longer selected"),
         State.Transparency.SelectedLayerGuid.IsValid());
+    TestEqual(
+        TEXT("Removing a layer preserves the inspected material slot"),
+        State.Transparency.SelectedMaterialSlotIndex,
+        6);
     TestEqual(TEXT("The authoring revision is reconciled"), State.AuthoringRevision, uint64(7));
     TestEqual(TEXT("The transparency revision is reconciled"), State.TransparencyAuthoringRevision, uint64(7));
     TestEqual(TEXT("An unrelated domain revision is unchanged"), State.WrinkleAuthoringRevision, uint64(0));

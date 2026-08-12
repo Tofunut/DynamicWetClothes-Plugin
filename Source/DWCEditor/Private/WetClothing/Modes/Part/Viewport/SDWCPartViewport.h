@@ -5,11 +5,15 @@
 #include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingPartData.h"
+#include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
+#include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "SEditorViewport.h"
 #include "UObject/GCObject.h"
 
 class FAdvancedPreviewScene;
+class FDWCEditorCacheStore;
+class FDWCEditorTextureWorkspace;
 class FDWCPartViewportClient;
 class UWetClothingAsset;
 class UMaterial;
@@ -18,6 +22,8 @@ class UMaterialInstanceConstant;
 class UMaterialInstanceDynamic;
 class USkeletalMeshComponent;
 class UTexture2D;
+struct FDWCEditorMemoryOwnerRecord;
+enum class EDWCEditorPreviewSuspendReason : uint8;
 
 DECLARE_DELEGATE_TwoParams(FOnWetClothingPreviewIslandPicked, int32 /*UVIslandID*/, bool /*bAppendSelection*/);
 
@@ -49,6 +55,8 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
   public:
     SLATE_BEGIN_ARGS(SDWCPartViewport) {}
     SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorCacheStore>, CacheStore)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
     SLATE_ARGUMENT(bool, SurfaceWaterTilingPreview)
     SLATE_EVENT(FOnWetClothingPreviewIslandPicked, OnIslandPicked)
     SLATE_END_ARGS()
@@ -63,11 +71,13 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     }
 
     void        RefreshPreviewMesh();
+    void        SuspendPreview(EDWCEditorPreviewSuspendReason Reason);
+    void        ResumePreviewIfNeeded();
     void        BeginPreviewUpdate();
     void        EndPreviewUpdate();
     void        SetHighlightedMaterialSlot(int32 SlotIndex);
     void        ClearMaterialSlotHighlight();
-    void        SetSelectableIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& InIslands);
+    void        SetSelectableTopology(const FDWCEditorCacheKey& InTopologyKey);
     void        SetHighlightedUVIslandIDs(const TSet<int32>& InUVIslandIDs);
     void        ClearHighlightedIsland();
     void        SetWetPartIslandAssignments(const TMap<int32, int32>& InUVIslandToWetPartID, const TMap<int32, FLinearColor>& InIslandColors);
@@ -115,19 +125,16 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void                ApplySurfaceWaterPreviewTextureParameters();
     void                ApplySurfaceWaterPreviewRenderOverrides();
     void                RequestViewportRedraw();
+    const class FDWCPartTopologyCacheValue* GetCurrentTopology() const;
     void                CacheOriginalMaterials();
     void                RestoreOriginalMaterials();
     UMaterialInterface* ResolveWetPartOverlayMaterial();
+    void                CollectMemoryDiagnostics(TArray<FDWCEditorMemoryOwnerRecord>& OutOwners) const;
 
   private:
-    struct FPartPreviewTextureCacheEntry
-    {
-        TObjectPtr<UTexture2D> PartTexture = nullptr;
-        TObjectPtr<UTexture2D> SelectionTexture = nullptr;
-        bool                   bHasOverlay = false;
-    };
-
     TWeakObjectPtr<UWetClothingAsset>    WetClothingAsset;
+    TSharedPtr<FDWCEditorCacheStore>      CacheStore;
+    TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
     FOnWetClothingPreviewIslandPicked    OnIslandPicked;
     TSharedPtr<FAdvancedPreviewScene>    PreviewScene;
     TSharedPtr<FDWCPartViewportClient>   ViewportClient;
@@ -136,13 +143,17 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UMaterialInstanceDynamic> WetPartOverlayMID = nullptr;
     TObjectPtr<UTexture2D>               PartPreviewColorTexture = nullptr;
     TObjectPtr<UTexture2D>               PartPreviewSelectionTexture = nullptr;
-    // Reusing already-rasterized 1024x1024 Part preview textures makes A -> B -> A
-    // material-slot switching cheap and avoids another UpdateResource() upload. The key
-    // includes topology object identity and assignment/selection state.
-    TMap<uint32, FPartPreviewTextureCacheEntry> PartPreviewTextureCache;
-    // Topology-only cache for the expensive nearest-owner fallback used by UV-degenerate
-    // seam/piping triangles. Maps orphan TriangleID -> nearest editable TriangleID.
-    TMap<uint32, TMap<int32, int32>>       PartPreviewNearestOwnerTriangleCache;
+    FDWCEditorTextureLease                PartPreviewColorLease;
+    FDWCEditorTextureLease                PartPreviewSelectionLease;
+    FDWCEditorTextureLease                SurfacePreviewWetnessLease;
+    FDWCEditorTextureLease                SurfacePreviewWetPartDataLease;
+    FDWCEditorTextureLease                SurfacePreviewDropletLease;
+    FDWCEditorTextureLease                SurfacePreviewFlowDropletLease;
+    FGuid                                 PreviewTextureOwnerGuid = FGuid::NewGuid();
+    // Current-topology memoization for the expensive nearest-owner fallback used by
+    // UV-degenerate seam/piping triangles. Maps orphan TriangleID -> editable TriangleID.
+    uint32                                PartPreviewNearestOwnerTopologySignature = 0;
+    TMap<int32, int32>                    PartPreviewNearestOwnerTriangleCache;
     TObjectPtr<UMaterialInterface>         SurfaceWaterPreviewMaterialParent = nullptr;
     TObjectPtr<UMaterial>                  SurfaceWaterPreviewBaseMaterial = nullptr;
     TObjectPtr<UMaterialInstanceConstant>  SurfaceWaterPreviewStaticMaterial = nullptr;
@@ -151,15 +162,9 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UTexture2D>                 SurfacePreviewWetPartDataTexture = nullptr;
     TObjectPtr<UTexture2D>                 SurfacePreviewDropletRT = nullptr;
     TObjectPtr<UTexture2D>                 SurfacePreviewFlowDropletRT = nullptr;
-    TObjectPtr<UTexture2D>                 SurfacePreviewAuthoredDropletNormal = nullptr;
-    TObjectPtr<UTexture2D>                 SurfacePreviewAuthoredDropletMask = nullptr;
-    TObjectPtr<UTexture2D>                 SurfacePreviewAuthoredDroplet2Normal = nullptr;
-    TObjectPtr<UTexture2D>                 SurfacePreviewAuthoredDroplet2Mask = nullptr;
-    TWeakObjectPtr<UTexture2D>             SurfacePreviewSourceDropletNormal;
-    TWeakObjectPtr<UTexture2D>             SurfacePreviewSourceDropletMask;
-    TWeakObjectPtr<UTexture2D>             SurfacePreviewSourceDroplet2Normal;
-    TWeakObjectPtr<UTexture2D>             SurfacePreviewSourceDroplet2Mask;
-    TArray<FColor>                         SurfacePreviewCachedSourcePartDataPixels;
+    // Mutable layout buffer reused by dynamic Surface Water preview changes. Layout
+    // rebuilds replace it; slider changes only overwrite selected texels in place.
+    TArray<FColor>                         SurfacePreviewWorkingPartDataPixels;
     TArray<uint8>                          SurfacePreviewCachedSelectedMask;
     FVector2D                              SurfacePreviewCachedSingleCircleCenter = FVector2D::ZeroVector;
     int32                                  SurfacePreviewCachedWidth = 0;
@@ -177,10 +182,9 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     FLinearColor                           SurfaceWaterPreviewBaseFallbackProfile5 = FLinearColor::Black;
     FLinearColor                           SurfaceWaterPreviewBaseFallbackProfile6 = FLinearColor::Black;
     TArray<TObjectPtr<UMaterialInterface>> OriginalPreviewMaterials;
-    TArray<FWetClothingAssetUVIsland>      CurrentSelectableIslands;
-    // Shared FWCAUVIslandViewCache entries that produced CurrentSelectableIslands.
-    // Stable object identity lets repeated refreshes detect unchanged preview topology.
-    TArray<TSharedPtr<FWetClothingAssetUVIsland>> CurrentSelectableIslandSources;
+    FDWCEditorCacheKey                            CurrentTopologyKey;
+    FDWCEditorCacheLease                          CurrentTopologyLease;
+    bool                                          bHasCurrentTopologyKey = false;
     TSet<int32>                                   CurrentHighlightedUVIslandIDs;
     TMap<int32, int32>                            CurrentWetPartIslandAssignments;
     TMap<int32, FLinearColor>                     CurrentWetPartIslandColors;
@@ -209,4 +213,6 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     bool                                          bSelectionOverlayDirty = false;
     bool                                          bSurfacePreviewDirty = false;
     bool                                          bPreviewPaused = false;
+    bool                                          bPreviewSuspended = false;
+    FName                                         MemoryDiagnosticCollectorName;
 };

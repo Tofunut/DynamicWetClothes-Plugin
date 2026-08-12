@@ -55,10 +55,10 @@ bool FDWCEditorCacheStoreReuseTest::RunTest(const FString& Parameters)
     TSharedRef<const IDWCEditorCacheValue, ESPMode::ThreadSafe> BaseValue = Value;
     Store.Put(Key, BaseValue);
 
-    TestTrue(TEXT("Inserted value is reused"), Store.Find<FTestCacheValue>(Key).IsValid());
+    TestTrue(TEXT("Inserted value is reused"), Store.Contains<FTestCacheValue>(Key));
     TestTrue(TEXT("Store tracks payload and entry memory"), Store.GetUsedBytes() >= static_cast<uint64>(128));
     Store.InvalidateOwner(Owner);
-    TestFalse(TEXT("Owner invalidation removes the value"), Store.Find<FTestCacheValue>(Key).IsValid());
+    TestFalse(TEXT("Owner invalidation removes the value"), Store.Contains<FTestCacheValue>(Key));
     return true;
 }
 
@@ -86,11 +86,11 @@ bool FDWCEditorCacheStoreScopedInvalidationTest::RunTest(const FString& Paramete
     Store.InvalidateOwnerNamespace(Owner, SlotOne.Namespace, SlotOne.MaterialSlotIndex);
 
     TestFalse(TEXT("The requested slot is invalidated."),
-        Store.Find<FTestCacheValue>(SlotOne).IsValid());
+        Store.Contains<FTestCacheValue>(SlotOne));
     TestTrue(TEXT("Another slot in the same namespace remains cached."),
-        Store.Find<FTestCacheValue>(SlotTwo).IsValid());
+        Store.Contains<FTestCacheValue>(SlotTwo));
     TestTrue(TEXT("Another namespace for the same owner remains cached."),
-        Store.Find<FTestCacheValue>(OtherNamespace).IsValid());
+        Store.Contains<FTestCacheValue>(OtherNamespace));
     return true;
 }
 
@@ -114,10 +114,7 @@ bool FDWCEditorCacheStorePinnedEntryEvictionTest::RunTest(const FString& Paramet
 
     // Keep an active lease alive while inserting a newer entry. The cache must
     // not evict the entry that is actively used by a spatial query.
-    TSharedRef<FTestCacheValue, ESPMode::ThreadSafe> PinnedValue =
-        MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(PayloadBytes);
-    TSharedRef<const IDWCEditorCacheValue, ESPMode::ThreadSafe> BasePinnedValue = PinnedValue;
-    Store.Put(FirstKey, BasePinnedValue);
+    Store.Put(FirstKey, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(PayloadBytes));
     FDWCEditorCacheLease Lease = Store.FindLease<FTestCacheValue>(FirstKey);
     TestTrue(TEXT("Lease pins the first cache entry"), Lease.IsValid());
     TestEqual(TEXT("Cache tracks the active lease"), Store.GetActiveLeaseCount(), 1);
@@ -126,17 +123,22 @@ bool FDWCEditorCacheStorePinnedEntryEvictionTest::RunTest(const FString& Paramet
 
     TestTrue(TEXT("The cache map stays within budget after evicting an unleased entry"),
         Store.GetUsedBytes() <= Store.GetBudgetBytes());
-    TestTrue(TEXT("The actively leased entry remains cached"), Store.Find<FTestCacheValue>(FirstKey).IsValid());
+    TestTrue(TEXT("The actively leased entry remains cached"), Store.Contains<FTestCacheValue>(FirstKey));
     TestFalse(TEXT("The unleased entry is evicted when the pinned entry cannot be removed"),
-        Store.Find<FTestCacheValue>(SecondKey).IsValid());
-    TestEqual(TEXT("The caller's leased payload remains valid"), PinnedValue->Bytes, PayloadBytes);
+        Store.Contains<FTestCacheValue>(SecondKey));
+    const FTestCacheValue* LeasedValue = Lease.GetAs<FTestCacheValue>();
+    TestNotNull(TEXT("The caller's leased payload remains valid"), LeasedValue);
+    if (LeasedValue != nullptr)
+    {
+        TestEqual(TEXT("The leased payload preserves its data"), LeasedValue->Bytes, PayloadBytes);
+    }
 
     Lease.Reset();
     TestEqual(TEXT("Releasing the lease updates the cache count"), Store.GetActiveLeaseCount(), 0);
     Store.Put(SecondKey, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(PayloadBytes));
     TestFalse(TEXT("The former entry becomes evictable after lease release"),
-        Store.Find<FTestCacheValue>(FirstKey).IsValid());
-    TestTrue(TEXT("The new entry remains cached after release"), Store.Find<FTestCacheValue>(SecondKey).IsValid());
+        Store.Contains<FTestCacheValue>(FirstKey));
+    TestTrue(TEXT("The new entry remains cached after release"), Store.Contains<FTestCacheValue>(SecondKey));
     return true;
 }
 
@@ -164,7 +166,7 @@ bool FDWCEditorCacheStoreInvalidationLeaseTest::RunTest(const FString& Parameter
 
     Store.InvalidateOwner(Owner);
     TestFalse(TEXT("Invalidation removes the entry from the cache index"),
-        Store.Find<FTestCacheValue>(Key).IsValid());
+        Store.Contains<FTestCacheValue>(Key));
     TestTrue(TEXT("The active lease keeps the invalidated payload alive"), Lease.IsValid());
     TestEqual(TEXT("Invalidated entry is reported as retired"), Store.GetRetiredEntryCount(), 1);
     TestTrue(TEXT("Retired payload remains included in the memory estimate"),
@@ -257,7 +259,7 @@ bool FDWCEditorCacheStoreGovernorLeaseLifetimeTest::RunTest(const FString&)
     FDWCEditorCacheLease Lease = Store.FindLease<FTestCacheValue>(Key);
     TestTrue(TEXT("The cache payload can be leased"), Lease.IsValid());
     Store.InvalidateOwner(Owner);
-    TestFalse(TEXT("Invalidation removes the cache lookup"), Store.Find<FTestCacheValue>(Key).IsValid());
+    TestFalse(TEXT("Invalidation removes the cache lookup"), Store.Contains<FTestCacheValue>(Key));
     TestEqual(TEXT("A retired leased entry keeps its governor reservation"),
         Governor->GetDiagnostics().GlobalCPUUsedBytes, ResidentBytes);
 
@@ -294,9 +296,9 @@ bool FDWCEditorCacheStoreGovernorLRUTest::RunTest(const FString&)
     TestTrue(TEXT("Second LRU entry is admitted after evicting the first"),
         Store.Put(SecondKey, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(256)));
     TestFalse(TEXT("The least recently used entry was evicted"),
-        Store.Find<FTestCacheValue>(FirstKey).IsValid());
+        Store.Contains<FTestCacheValue>(FirstKey));
     TestTrue(TEXT("The newest entry remains resident"),
-        Store.Find<FTestCacheValue>(SecondKey).IsValid());
+        Store.Contains<FTestCacheValue>(SecondKey));
     TestTrue(TEXT("The local cache remains within its byte budget"),
         Store.GetUsedBytes() <= LocalBudgetBytes);
     TestEqual(TEXT("Governor accounting matches the remaining cache entry"),
@@ -305,6 +307,65 @@ bool FDWCEditorCacheStoreGovernorLRUTest::RunTest(const FString&)
     Store.Reset();
     TestEqual(TEXT("Reset returns the final cache reservation"),
         Governor->GetDiagnostics().GlobalCPUUsedBytes, 0ull);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorCacheStoreAtomicReplacementTest,
+    "DWC.Editor.Foundation.Cache.AtomicReplacement",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorCacheStoreAtomicReplacementTest::RunTest(const FString&)
+{
+    constexpr uint64 BudgetBytes = 1024;
+    const TSharedRef<FDWCEditorResourceGovernor> Governor =
+        MakeShared<FDWCEditorResourceGovernor>(MakeCacheGovernorBudget(BudgetBytes));
+    FDWCEditorCacheStore Store(Governor, FGuid::NewGuid(), BudgetBytes);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorCacheKey Key;
+    Key.Namespace = TEXT("AtomicReplacement");
+    Key.Owner = FObjectKey(Owner);
+
+    TestTrue(TEXT("Baseline cache entry is admitted"),
+        Store.Put(Key, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(128)));
+    FDWCEditorCacheLease OriginalLease = Store.FindLease<FTestCacheValue>(Key);
+    const FTestCacheValue* OriginalValue = OriginalLease.GetAs<FTestCacheValue>();
+    TestNotNull(TEXT("Baseline value is leased"), OriginalValue);
+
+    TestFalse(TEXT("Oversized replacement is rejected"),
+        Store.Put(Key, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(2048)));
+    FDWCEditorCacheLease PreservedLease = Store.FindLease<FTestCacheValue>(Key);
+    const FTestCacheValue* PreservedValue = PreservedLease.GetAs<FTestCacheValue>();
+    TestNotNull(TEXT("Rejected replacement preserves the indexed entry"), PreservedValue);
+    if (PreservedValue != nullptr)
+    {
+        TestEqual(TEXT("Rejected replacement preserves the original payload"),
+            PreservedValue->Bytes, 128ull);
+    }
+    TestEqual(TEXT("Rejected replacement is diagnosed once"), Store.GetAdmissionRejectCount(), 1ull);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorCacheStoreLeaseBackedAccessTest,
+    "DWC.Editor.Foundation.Cache.LeaseBackedAccess",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorCacheStoreLeaseBackedAccessTest::RunTest(const FString&)
+{
+    FDWCEditorCacheStore Store(1024 * 1024);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    FDWCEditorCacheKey Key;
+    Key.Namespace = TEXT("LeaseBackedAccess");
+    Key.Owner = FObjectKey(Owner);
+
+    TestTrue(TEXT("Cache entry is inserted"),
+        Store.Put(Key, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(256)));
+    TestTrue(TEXT("Presence can be queried without exposing payload ownership"),
+        Store.Contains<FTestCacheValue>(Key));
+    FDWCEditorCacheLease Lease = Store.FindLease<FTestCacheValue>(Key);
+    TestTrue(TEXT("Payload access is backed by an active entry lease"), Lease.IsValid());
+    TestEqual(TEXT("One active payload owner is tracked"), Store.GetActiveLeaseCount(), 1);
     return true;
 }
 

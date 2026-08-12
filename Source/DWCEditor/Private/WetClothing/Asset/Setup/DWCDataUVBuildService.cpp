@@ -11,6 +11,7 @@
 #include "DWCPreparedMeshEditTransaction.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/ScopeExit.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshLODModel.h"
@@ -19,6 +20,7 @@
 #include "MeshDescription.h"
 #include "SkeletalMeshAttributes.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
+#include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
 #include "Utility/DWCLog.h"
@@ -26,6 +28,89 @@
 namespace DWCDataUVBuildServicePrivate
 {
     static constexpr int32 CanonicalDataUVLODIndex = 0;
+
+    int32 ResolveMaxParallelMaterialSlots(const FDWCDataUVBuildOptions* Options)
+    {
+        return FMath::Clamp(Options != nullptr ? Options->MaxParallelMaterialSlots : 2, 1, 4);
+    }
+
+    template <typename BodyType>
+    void RunBoundedMaterialSlotTasks(
+        const int32 NumTasks,
+        const int32 MaxParallelTasks,
+        BodyType&& Body)
+    {
+        const int32 LaneCount = FMath::Clamp(MaxParallelTasks, 1, FMath::Max(NumTasks, 1));
+        if (LaneCount == 1)
+        {
+            for (int32 TaskIndex = 0; TaskIndex < NumTasks; ++TaskIndex)
+            {
+                Body(TaskIndex);
+            }
+            return;
+        }
+
+        ParallelFor(
+            LaneCount,
+            [&Body, NumTasks, LaneCount](const int32 LaneIndex)
+            {
+                for (int32 TaskIndex = LaneIndex; TaskIndex < NumTasks; TaskIndex += LaneCount)
+                {
+                    Body(TaskIndex);
+                }
+            });
+    }
+
+    uint64 EstimateDataUVPeakBytes(
+        const USkeletalMesh* Mesh,
+        const TArray<int32>& RequestedLODIndices,
+        const int32 MaxParallelMaterialSlots)
+    {
+        constexpr uint64 MiB = 1024ull * 1024ull;
+        const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
+        if (RenderData == nullptr)
+        {
+            return 32ull * MiB;
+        }
+
+        TArray<int32, TInlineAllocator<4>> LODIndices;
+        if (!RequestedLODIndices.IsEmpty())
+        {
+            for (const int32 LODIndex : RequestedLODIndices)
+            {
+                if (RenderData->LODRenderData.IsValidIndex(LODIndex))
+                {
+                    LODIndices.AddUnique(LODIndex);
+                }
+            }
+        }
+        else if (!RenderData->LODRenderData.IsEmpty())
+        {
+            LODIndices.Add(CanonicalDataUVLODIndex);
+        }
+
+        uint64 RetainedSnapshots = 0;
+        uint64 LargestWorkerCopy = 0;
+        for (const int32 LODIndex : LODIndices)
+        {
+            const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
+            uint64 TriangleCount = 0;
+            for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
+            {
+                TriangleCount += static_cast<uint64>(Section.NumTriangles);
+            }
+            const uint64 VertexCount = static_cast<uint64>(LODData.GetNumVertices());
+            const uint64 SnapshotBytes = VertexCount * 128ull + TriangleCount * 160ull;
+            const uint64 WorkerBytes = VertexCount * 192ull + TriangleCount * 256ull;
+            RetainedSnapshots += SnapshotBytes;
+            LargestWorkerCopy = FMath::Max(LargestWorkerCopy, WorkerBytes);
+        }
+
+        return FMath::Max<uint64>(
+            32ull * MiB,
+            16ull * MiB + RetainedSnapshots +
+                LargestWorkerCopy * static_cast<uint64>(FMath::Max(MaxParallelMaterialSlots, 1)));
+    }
 
     void SetFailure(FDWCDataUVBuildResult& Result, const FString& Message)
     {
@@ -630,8 +715,9 @@ namespace DWCDataUVBuildServicePrivate
 
         TArray<FSlotSourcePreflightResult> SlotResults;
         SlotResults.SetNum(SortedMaterialSlotIndices.Num());
-        ParallelFor(
+        RunBoundedMaterialSlotTasks(
             SortedMaterialSlotIndices.Num(),
+            ResolveMaxParallelMaterialSlots(Options),
             [&](const int32 SlotArrayIndex)
             {
                 FSlotSourcePreflightResult& SlotResult = SlotResults[SlotArrayIndex];
@@ -881,6 +967,45 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     {
         SetFailure(Result, TEXT("The Wet Clothing Asset has no Source Skeletal Mesh."));
         return Result;
+    }
+
+    FDWCEditorMemoryLease DataUVMemoryLease;
+    if (Options != nullptr && Options->ResourceGovernor.IsValid())
+    {
+        FDWCEditorResourceReservationRequest Reservation;
+        Reservation.Pool = EDWCEditorResourcePool::WorkerPrivateCPU;
+        Reservation.Bytes = EstimateDataUVPeakBytes(
+            SourceMesh,
+            Options->TargetLODIndices,
+            ResolveMaxParallelMaterialSlots(Options));
+        Reservation.Owner.Key.Namespace = TEXT("DWC.DataUV.Build");
+        Reservation.Owner.Key.ResourceGuid = FGuid::NewGuid();
+        Reservation.Owner.SessionEpoch = Options->ResourceSessionEpoch.IsValid()
+            ? Options->ResourceSessionEpoch
+            : FGuid::NewGuid();
+        Reservation.Owner.OperationId = FPlatformTime::Cycles64();
+        Reservation.Owner.Generation = 1;
+        Reservation.DebugName = FString::Printf(
+            TEXT("DWC Data UV build for %s"),
+            *Asset.GetName());
+
+        EDWCEditorResourceAdmissionResult Admission = EDWCEditorResourceAdmissionResult::InvalidRequest;
+        FString ReservationError;
+        DataUVMemoryLease = Options->ResourceGovernor->TryAcquireForAdmission(
+            Reservation,
+            Admission,
+            &ReservationError);
+        if (!DataUVMemoryLease.IsValid())
+        {
+            SetFailure(
+                Result,
+                ReservationError.IsEmpty()
+                    ? TEXT("DWC UV generation could not reserve its bounded working memory.")
+                    : FString::Printf(
+                          TEXT("DWC UV generation could not reserve its bounded working memory: %s"),
+                          *ReservationError));
+            return Result;
+        }
     }
 
     // Cheap ownership/path validation must finish before invalidation, progress UI,
@@ -1413,8 +1538,9 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     }
     else
     {
-        ParallelFor(
+        RunBoundedMaterialSlotTasks(
             SortedWettableMaterialSlotIndices.Num(),
+            ResolveMaxParallelMaterialSlots(Options),
             [&](const int32 SlotArrayIndex)
             {
                 FSlotPreflightResult& SlotResult = SlotPreflightResults[SlotArrayIndex];

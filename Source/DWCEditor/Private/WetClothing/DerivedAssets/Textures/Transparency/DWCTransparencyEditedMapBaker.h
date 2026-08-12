@@ -22,11 +22,17 @@ enum class EDWCTransparencyStage4RevealSource : uint8
 struct FDWCTransparencyStage4MemoryPlan
 {
     uint64 ResidentSharedBytes = 0;
+    /** Request inputs retained only while the game-thread snapshot is prepared. */
+    uint64 PrepareInputBytes = 0;
     uint64 SnapshotBytes = 0;
     uint64 OutputBytes = 0;
     uint64 ScratchBytes = 0;
+    /** Snapshot bytes transferred into the output rather than duplicated. */
+    uint64 TransferableSnapshotBytes = 0;
 
     uint64 GetTotalBytes() const;
+    uint64 GetPreparePeakBytes() const;
+    uint64 GetWorkerPeakBytes() const;
 };
 
 struct FDWCTransparencyEditedMapBakeResult
@@ -65,6 +71,8 @@ class FDWCTransparencyEditedMapBakeSnapshot
     uint64 GetEstimatedPrivateBytes() const;
     /** Bytes returned as final/rebuilt color and Reveal Normal payloads. */
     uint64 GetEstimatedOutputBytes() const;
+    /** Snapshot storage that becomes output storage during worker execution. */
+    uint64 GetEstimatedTransferableBytes() const;
     /** Peak scratch used by alpha feathering and dilation. */
     uint64 GetEstimatedScratchBytes() const;
     /** Total worker-private estimate retained for compatibility with existing callers. */
@@ -89,7 +97,8 @@ struct FDWCTransparencyEditedMapComputedResult
     bool bAppliedWrinkleSuppression = false;
     /** Created only when Stage 4 had to rebuild a missing/stale Stage 3 checkpoint. */
     bool bRebuiltCorrectedRevealCheckpoint = false;
-    TArray<FColor> RebuiltCorrectedRevealPixels;
+    /** Stage 2 alpha retained separately; checkpoint RGB is shared with FinalPixels. */
+    TArray<uint8> RebuiltCorrectedRevealAlpha;
     FString WarningMessage;
     uint64 ResultBytes = 0;
 };
@@ -106,8 +115,23 @@ class FDWCTransparencyEditedMapBaker
         FDWCTransparencyStage4MemoryPlan& OutPlan,
         FString& OutErrorMessage);
 
+    static bool BuildMemoryPlan(
+        FIntPoint Resolution,
+        uint64 SourcePayloadBytes,
+        uint64 AuthoringInputBytes,
+        bool bRestoresCanonicalArtifacts,
+        bool bRequiresRevealNormal,
+        bool bRequiresOuterIslandID,
+        FDWCTransparencyStage4MemoryPlan& OutPlan,
+        FString& OutErrorMessage);
+
     /** Estimates the canonical Stage 2 payload without restoring its Temp artifacts. */
     static uint64 EstimateCanonicalSourcePayloadBytes(FIntPoint Resolution);
+
+    static uint64 EstimateStage4SourcePayloadBytes(
+        FIntPoint Resolution,
+        bool bRequiresRevealSurface,
+        bool bRequiresOuterIslandID);
 
     static bool BuildSnapshot(
         const UWetClothingAsset& WetClothingAsset,
@@ -160,7 +184,7 @@ class FDWCTransparencyEditedMapBaker
         FString& OutErrorMessage);
 
     static FDWCTransparencyEditedMapComputedResult ComputeSnapshot(
-        const FDWCTransparencyEditedMapBakeSnapshot& Snapshot,
+        FDWCTransparencyEditedMapBakeSnapshot& Snapshot,
         const FDWCEditorCancellationToken* CancellationToken = nullptr);
 
     static bool CommitComputedResult(

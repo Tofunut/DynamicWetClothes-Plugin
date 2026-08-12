@@ -117,7 +117,7 @@ bool FDWCRevealBakeRayProjector::FBakeProjectionBvhNode::IsLeaf() const
 
 bool FDWCRevealBakeRayProjector::FBakeProjectionBvh::Build(
     const FDWCRevealBakeSurface&               OuterSurface,
-    const TArray<FDWCRevealBakeSurface>&       SourceSurfaces,
+    const TConstArrayView<FDWCRevealBakeSurface> SourceSurfaces,
     const FDWCRevealBakeRayProjectionSettings& Settings)
 {
     TriangleRefs.Reset();
@@ -321,14 +321,18 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
         return false;
     }
 
-    TArray<int32> OccupiedPixelTriangles;
-    OccupiedPixelTriangles.Init(INDEX_NONE, Settings.Resolution.X * Settings.Resolution.Y);
-    TArray<uint8> OverlappedPixels;
-    if (OutOverlappedPixelCount != nullptr)
-    {
-        OverlappedPixels.Init(0, Settings.Resolution.X * Settings.Resolution.Y);
-    }
-    OutSamples.Reserve(Settings.Resolution.X * Settings.Resolution.Y / 2);
+    const int32 PixelCount = Settings.Resolution.X * Settings.Resolution.Y;
+    TArray<int32> OccupiedPixelSamples;
+    OccupiedPixelSamples.Init(INDEX_NONE, PixelCount);
+    // Low four bits store the 2x2 coverage mask. The high bit prevents
+    // duplicate overlap diagnostics without allocating a second full image.
+    constexpr uint8 CoverageMaskBits = 0x0f;
+    constexpr uint8 OverlapReportedBit = 0x80;
+    TArray<uint8> RasterFlags;
+    RasterFlags.Init(0, PixelCount);
+    // Do not reserve a fraction of a 4K image: FDWCRevealBakeTexelSample is
+    // intentionally rich and that eager reservation can exceed the job budget.
+    OutSamples.Reserve(FMath::Min(PixelCount, 64 * 1024));
 
     for (int32 SurfaceTriangleIndex = 0; SurfaceTriangleIndex < OuterSurface.Triangles.Num(); ++SurfaceTriangleIndex)
     {
@@ -348,20 +352,18 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
         {
             for (int32 X = PixelBounds.Min.X; X < PixelBounds.Max.X; ++X)
             {
-                const FVector2D UV(
-                    (static_cast<double>(X) + 0.5) / static_cast<double>(Settings.Resolution.X),
-                    (static_cast<double>(Y) + 0.5) / static_cast<double>(Settings.Resolution.Y));
-
-                FVector Barycentric;
-                if (!ComputeBarycentricInUV(UV, Triangle, Barycentric))
+                const uint8 TriangleCoverageMask = ComputeSubpixelMask(
+                    X, Y, Settings.Resolution, Triangle);
+                if (TriangleCoverageMask == 0)
                 {
                     continue;
                 }
 
                 const int32 PixelKey = MakePixelKey(X, Y, Settings.Resolution.X);
-                const int32 ExistingTriangleIndex = OccupiedPixelTriangles[PixelKey];
-                if (ExistingTriangleIndex != INDEX_NONE)
+                const int32 ExistingSampleIndex = OccupiedPixelSamples[PixelKey];
+                if (ExistingSampleIndex != INDEX_NONE)
                 {
+                    const int32 ExistingTriangleIndex = OutSamples[ExistingSampleIndex].TriangleIndex;
                     const FDWCRevealBakeSurfaceTriangle& ExistingTriangle = OuterSurface.Triangles[ExistingTriangleIndex];
                     bool                                 bSharesVertex = false;
                     for (int32 ExistingCorner = 0; ExistingCorner < 3 && !bSharesVertex; ++ExistingCorner)
@@ -371,28 +373,65 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
                             bSharesVertex |= ExistingTriangle.VertexIndices[ExistingCorner] == Triangle.VertexIndices[NewCorner];
                         }
                     }
-                    if (!bSharesVertex && OutOverlappedPixelCount != nullptr && OverlappedPixels[PixelKey] == 0)
+                    if (!bSharesVertex)
                     {
-                        OverlappedPixels[PixelKey] = 1;
-                        ++(*OutOverlappedPixelCount);
+                        if (OutOverlappedPixelCount != nullptr &&
+                            (RasterFlags[PixelKey] & OverlapReportedBit) == 0)
+                        {
+                            RasterFlags[PixelKey] |= OverlapReportedBit;
+                            ++(*OutOverlappedPixelCount);
+                        }
+                        continue;
                     }
+
+                    RasterFlags[PixelKey] |= TriangleCoverageMask;
                     continue;
                 }
 
-                FDWCRevealBakeTexelSample Sample;
+                FDWCRevealBakeTexelSample& Sample = OutSamples.AddDefaulted_GetRef();
                 Sample.Pixel = FIntPoint(X, Y);
-                Sample.UV = UV;
-                Sample.Position = InterpolateVector(Barycentric, Triangle.Positions);
-                Sample.Normal = InterpolateDirection(Barycentric, Triangle.Normals).GetSafeNormal();
-                Sample.TriangleIndex = Triangle.TriangleIndex;
-                Sample.MaterialSlotIndex = Triangle.MaterialSlotIndex;
-                Sample.UVIslandID = Triangle.UVIslandID;
-                Sample.Barycentric = Barycentric;
-
-                OccupiedPixelTriangles[PixelKey] = SurfaceTriangleIndex;
-                OutSamples.Add(Sample);
+                // During rasterization this is the surface-array index. It is
+                // replaced with the persistent triangle ID in the final pass.
+                Sample.TriangleIndex = SurfaceTriangleIndex;
+                OccupiedPixelSamples[PixelKey] = OutSamples.Num() - 1;
+                RasterFlags[PixelKey] |= TriangleCoverageMask;
             }
         }
+    }
+
+    constexpr uint8 SubsampleCountByMask[] =
+    {
+        0, 1, 1, 2, 1, 2, 2, 3,
+        1, 2, 2, 3, 2, 3, 3, 4
+    };
+    constexpr uint8 CoverageBySubsampleCount[] = { 0, 64, 128, 191, 255 };
+    for (FDWCRevealBakeTexelSample& Sample : OutSamples)
+    {
+        const int32 SurfaceTriangleIndex = Sample.TriangleIndex;
+        const int32 X = Sample.Pixel.X;
+        const int32 Y = Sample.Pixel.Y;
+        const int32 PixelKey = MakePixelKey(X, Y, Settings.Resolution.X);
+        const FDWCRevealBakeSurfaceTriangle& Triangle = OuterSurface.Triangles[SurfaceTriangleIndex];
+        FVector2D UV;
+        FVector Barycentric;
+        if (!ResolveRepresentativeSample(X, Y, Settings.Resolution, Triangle, UV, Barycentric))
+        {
+            SetError(OutErrorMessage, TEXT("A covered outer texel has no representative surface point."));
+            OutSamples.Reset();
+            return false;
+        }
+
+        const uint8 CoverageMask = RasterFlags[PixelKey] & CoverageMaskBits;
+        const uint8 CoveredSubsampleCount = SubsampleCountByMask[CoverageMask];
+
+        Sample.UV = UV;
+        Sample.Coverage = CoverageBySubsampleCount[CoveredSubsampleCount];
+        Sample.Position = InterpolateVector(Barycentric, Triangle.Positions);
+        Sample.Normal = InterpolateDirection(Barycentric, Triangle.Normals).GetSafeNormal();
+        Sample.TriangleIndex = Triangle.TriangleIndex;
+        Sample.MaterialSlotIndex = Triangle.MaterialSlotIndex;
+        Sample.UVIslandID = Triangle.UVIslandID;
+        Sample.Barycentric = Barycentric;
     }
 
     if (OutSamples.Num() == 0)
@@ -437,6 +476,77 @@ bool FDWCRevealBakeTexelSampler::ComputeBarycentricInUV(
     return true;
 }
 
+uint8 FDWCRevealBakeTexelSampler::ComputeSubpixelMask(
+    const int32 X,
+    const int32 Y,
+    const FIntPoint& Resolution,
+    const FDWCRevealBakeSurfaceTriangle& Triangle)
+{
+    constexpr double SubpixelOffsets[2] = { 0.25, 0.75 };
+    uint8 Mask = 0;
+    uint8 Bit = 1;
+    for (const double OffsetY : SubpixelOffsets)
+    {
+        for (const double OffsetX : SubpixelOffsets)
+        {
+            const FVector2D UV(
+                (static_cast<double>(X) + OffsetX) / static_cast<double>(Resolution.X),
+                (static_cast<double>(Y) + OffsetY) / static_cast<double>(Resolution.Y));
+            FVector Barycentric;
+            if (ComputeBarycentricInUV(UV, Triangle, Barycentric))
+            {
+                Mask |= Bit;
+            }
+            Bit <<= 1;
+        }
+    }
+    return Mask;
+}
+
+bool FDWCRevealBakeTexelSampler::ResolveRepresentativeSample(
+    const int32 X,
+    const int32 Y,
+    const FIntPoint& Resolution,
+    const FDWCRevealBakeSurfaceTriangle& Triangle,
+    FVector2D& OutUV,
+    FVector& OutBarycentric)
+{
+    OutUV = FVector2D(
+        (static_cast<double>(X) + 0.5) / static_cast<double>(Resolution.X),
+        (static_cast<double>(Y) + 0.5) / static_cast<double>(Resolution.Y));
+    if (ComputeBarycentricInUV(OutUV, Triangle, OutBarycentric))
+    {
+        return true;
+    }
+
+    constexpr double SubpixelOffsets[2] = { 0.25, 0.75 };
+    FVector2D UVSum = FVector2D::ZeroVector;
+    int32 ValidSubsampleCount = 0;
+    for (const double OffsetY : SubpixelOffsets)
+    {
+        for (const double OffsetX : SubpixelOffsets)
+        {
+            const FVector2D CandidateUV(
+                (static_cast<double>(X) + OffsetX) / static_cast<double>(Resolution.X),
+                (static_cast<double>(Y) + OffsetY) / static_cast<double>(Resolution.Y));
+            FVector CandidateBarycentric;
+            if (ComputeBarycentricInUV(CandidateUV, Triangle, CandidateBarycentric))
+            {
+                UVSum += CandidateUV;
+                ++ValidSubsampleCount;
+            }
+        }
+    }
+
+    if (ValidSubsampleCount == 0)
+    {
+        return false;
+    }
+
+    OutUV = UVSum / static_cast<double>(ValidSubsampleCount);
+    return ComputeBarycentricInUV(OutUV, Triangle, OutBarycentric);
+}
+
 void FDWCRevealBakeTexelSampler::SetError(FString* OutErrorMessage, const TCHAR* InMessage)
 {
     if (OutErrorMessage != nullptr)
@@ -447,12 +557,13 @@ void FDWCRevealBakeTexelSampler::SetError(FString* OutErrorMessage, const TCHAR*
 
 bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
     const FDWCRevealBakeSurface&                    OuterSurface,
-    const TArray<FDWCRevealBakeSurface>&            SourceSurfaces,
+    const TConstArrayView<FDWCRevealBakeSurface>    SourceSurfaces,
     const TArray<FDWCRevealBakeTexelSample>&        Samples,
     const FDWCRevealBakeRayProjectionSettings&      Settings,
     TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
     FString*                                        OutErrorMessage,
-    const FDWCEditorCancellationToken*              CancellationToken)
+    const FDWCEditorCancellationToken*              CancellationToken,
+    const TConstArrayView<int32>                    SampleIndices)
 {
     if (Samples.Num() == 0)
     {
@@ -480,16 +591,28 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
         return false;
     }
 
-    int32 SampleIndex = 0;
-    for (const FDWCRevealBakeTexelSample& Sample : Samples)
+    const int32 ProjectionSampleCount = SampleIndices.IsEmpty()
+        ? Samples.Num()
+        : SampleIndices.Num();
+    for (int32 ProjectionSampleIndex = 0; ProjectionSampleIndex < ProjectionSampleCount;
+         ++ProjectionSampleIndex)
     {
-        if ((SampleIndex++ & 255) == 0 &&
+        if ((ProjectionSampleIndex & 255) == 0 &&
             CancellationToken != nullptr &&
             CancellationToken->IsCanceled())
         {
             SetError(OutErrorMessage, TEXT("Transparency ray projection was canceled."));
             return false;
         }
+        const int32 SampleIndex = SampleIndices.IsEmpty()
+            ? ProjectionSampleIndex
+            : SampleIndices[ProjectionSampleIndex];
+        if (!Samples.IsValidIndex(SampleIndex))
+        {
+            SetError(OutErrorMessage, TEXT("A transparency projection sample index is invalid."));
+            return false;
+        }
+        const FDWCRevealBakeTexelSample& Sample = Samples[SampleIndex];
         const FVector RayDirection = -Sample.Normal.GetSafeNormal();
         const FVector RayOrigin = Sample.Position + RayDirection * Settings.RayStartOffset;
 
@@ -580,6 +703,14 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
             bHasBlockerCandidate &&
             (!bHasRevealCandidate ||
              IsPreferredCandidate(BestBlockerCandidate, BestRevealCandidate));
+        SelectedHit.bBlocked = bBlocked;
+        if (bBlocked)
+        {
+            SelectedHit.Distance = BestBlockerCandidate.Distance;
+            SelectedHit.SourceLayerId = BestBlockerCandidate.SourceSurface != nullptr
+                ? BestBlockerCandidate.SourceSurface->LayerId
+                : NAME_None;
+        }
         if (bHasRevealCandidate && !bBlocked)
         {
             SelectedHit = MakeRayHit(Sample, BestRevealCandidate, MaxRevealDistance);

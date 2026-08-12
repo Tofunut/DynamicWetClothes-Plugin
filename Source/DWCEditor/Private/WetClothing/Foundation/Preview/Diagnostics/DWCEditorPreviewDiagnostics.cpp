@@ -199,6 +199,29 @@ void FDWCEditorPreviewDiagnostics::DumpAllSessions()
     }
 }
 
+void FDWCEditorPreviewDiagnostics::AppendGlobalMemoryOwners(
+    TArray<FDWCEditorMemoryOwnerRecord>& OutOwners)
+{
+    TSet<FString> SeenOwnerIdentifiers;
+    SeenOwnerIdentifiers.Reserve(OutOwners.Num() + 32);
+    for (const FDWCEditorMemoryOwnerRecord& Owner : OutOwners)
+    {
+        SeenOwnerIdentifiers.Add(Owner.Identifier);
+    }
+
+    const TArray<FDWCEditorPreviewSession*>& Sessions = GetActivePreviewSessions();
+    for (int32 SessionIndex = 0; SessionIndex < Sessions.Num(); ++SessionIndex)
+    {
+        if (const FDWCEditorPreviewSession* Session = Sessions[SessionIndex])
+        {
+            Session->AppendGlobalMemoryOwners(
+                SessionIndex,
+                SeenOwnerIdentifiers,
+                OutOwners);
+        }
+    }
+}
+
 void FDWCEditorPreviewDiagnostics::ResetAllCounters()
 {
     for (FDWCEditorPreviewSession* Session : GetActivePreviewSessions())
@@ -230,6 +253,11 @@ void FDWCEditorPreviewDiagnostics::ResetAllCounters()
 
 uint64 FDWCEditorPreviewDiagnostics::EstimateTextureBytes(const UTexture2D* Texture)
 {
+    return EstimateTextureCPUBytes(Texture) + EstimateTextureGPUBytes(Texture);
+}
+
+uint64 FDWCEditorPreviewDiagnostics::EstimateTextureCPUBytes(const UTexture2D* Texture)
+{
     if (Texture == nullptr)
     {
         return 0;
@@ -244,12 +272,22 @@ uint64 FDWCEditorPreviewDiagnostics::EstimateTextureBytes(const UTexture2D* Text
         }
     }
 
+    return BulkDataBytes;
+}
+
+uint64 FDWCEditorPreviewDiagnostics::EstimateTextureGPUBytes(const UTexture2D* Texture)
+{
+    if (Texture == nullptr)
+    {
+        return 0;
+    }
+
     const uint64 MinimumTextureBytes =
         static_cast<uint64>(FMath::Max(Texture->GetSizeX(), 0)) *
         static_cast<uint64>(FMath::Max(Texture->GetSizeY(), 0)) * sizeof(FColor);
     const uint64 ResidentResourceBytes =
         static_cast<uint64>(Texture->CalcTextureMemorySizeEnum(TMC_ResidentMips));
-    return BulkDataBytes + FMath::Max(ResidentResourceBytes, MinimumTextureBytes);
+    return FMath::Max(ResidentResourceBytes, MinimumTextureBytes);
 }
 
 FString FDWCEditorPreviewDiagnostics::FormatBytes(const uint64 Bytes)

@@ -48,6 +48,7 @@ struct FDWCSetWrinkleCrossPreviewAction
 struct FDWCSelectTransparencyLayerAction
 {
     FGuid LayerGuid;
+    int32 MaterialSlotIndex = INDEX_NONE;
 };
 
 /** Selects a target part and its resolver-derived stage atomically. */
@@ -55,6 +56,7 @@ struct FDWCSelectTransparencyLayerAndStageAction
 {
     FGuid LayerGuid;
     EDWCTransparencyEditorStage Stage = EDWCTransparencyEditorStage::StructureSetup;
+    int32 MaterialSlotIndex = INDEX_NONE;
 };
 
 struct FDWCSetTransparencyStageAction

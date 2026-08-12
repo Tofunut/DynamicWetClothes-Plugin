@@ -15,6 +15,7 @@
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetRendering/DWCSurfaceTextureSharedAsset.h"
+#include "WetClothing/Foundation/Assets/DWCEditorArtifactStore.h"
 
 namespace
 {
@@ -87,10 +88,29 @@ namespace
         }
     }
 
+    void AddValidationIssue(
+        TArray<FDWCRenderProfileValidationIssue>& Issues,
+        const FName Code,
+        const FString& Detail,
+        const int32 MaterialSlotIndex = INDEX_NONE,
+        const FString& ProfileStableKey = FString(),
+        const EDWCRenderProfileIssueResolution Resolution =
+            EDWCRenderProfileIssueResolution::BakeRenderProfile,
+        const bool bFailed = false)
+    {
+        FDWCRenderProfileValidationIssue& Issue = Issues.AddDefaulted_GetRef();
+        Issue.Code = Code;
+        Issue.MaterialSlotIndex = MaterialSlotIndex;
+        Issue.ProfileStableKey = ProfileStableKey;
+        Issue.Detail = Detail;
+        Issue.Resolution = Resolution;
+        Issue.bFailed = bFailed;
+    }
+
     void AppendMissingRenderProfileBakeData(
-        const UWetClothingAsset&            Asset,
+        const UWetClothingAsset& Asset,
         const FWetClothingBakedWetPartData& Baked,
-        TArray<FString>&                    PendingLines)
+        TArray<FDWCRenderProfileValidationIssue>& Issues)
     {
         TArray<FExpectedWetPartRenderProfile> ExpectedProfiles;
         CollectExpectedWetPartRenderProfiles(Asset, ExpectedProfiles);
@@ -117,9 +137,13 @@ namespace
                 CheckedMaterialSlots.Add(ExpectedProfile.MaterialSlotIndex);
                 if (Baked.FindSlot(ExpectedProfile.MaterialSlotIndex) == nullptr)
                 {
-                    PendingLines.Add(FString::Printf(
-                        TEXT("Wet Part Data Texture is missing for slot %d."),
-                        ExpectedProfile.MaterialSlotIndex));
+                    AddValidationIssue(
+                        Issues,
+                        TEXT("RenderProfile.WetPartDataTextureMissing"),
+                        FString::Printf(
+                            TEXT("Wet Part Data Texture is missing for slot %d."),
+                            ExpectedProfile.MaterialSlotIndex),
+                        ExpectedProfile.MaterialSlotIndex);
                 }
             }
 
@@ -142,10 +166,15 @@ namespace
                 const int32 WetPartID = ExpectedProfile.Entry != nullptr
                                             ? ExpectedProfile.Entry->WetPartID
                                             : INDEX_NONE;
-                PendingLines.Add(FString::Printf(
-                    TEXT("Wet Part %d in slot %d uses a profile that is missing from baked Render Profile Lookup Texture."),
-                    WetPartID,
-                    ExpectedProfile.MaterialSlotIndex));
+                AddValidationIssue(
+                    Issues,
+                    TEXT("RenderProfile.ProfileMissing"),
+                    FString::Printf(
+                        TEXT("Wet Part %d in slot %d uses a profile that is missing from baked Render Profile Lookup Texture."),
+                        WetPartID,
+                        ExpectedProfile.MaterialSlotIndex),
+                    ExpectedProfile.MaterialSlotIndex,
+                    StableKey);
                 continue;
             }
 
@@ -160,10 +189,16 @@ namespace
                     Parameters,
                     SurfaceTextureError))
             {
-                PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' has invalid authored Surface Water texture settings: %s"),
-                    *StableKey,
-                    *SurfaceTextureError));
+                AddValidationIssue(
+                    Issues,
+                    TEXT("RenderProfile.SurfaceTextureInputInvalid"),
+                    FString::Printf(
+                        TEXT("Profile '%s' has invalid authored Surface Water texture settings: %s"),
+                        *StableKey,
+                        *SurfaceTextureError),
+                    ExpectedProfile.MaterialSlotIndex,
+                    StableKey,
+                    EDWCRenderProfileIssueResolution::Manual);
                 continue;
             }
 
@@ -185,9 +220,14 @@ namespace
                     TEXT("DropletNormal"),
                     true))
             {
-                PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a Render Profile Lookup Texture rebake so its 512 Droplet normal reference is regenerated."),
-                    *StableKey));
+                AddValidationIssue(
+                    Issues,
+                    TEXT("RenderProfile.DropletNormalStale"),
+                    FString::Printf(
+                        TEXT("Profile '%s' requires a Render Profile Lookup Texture rebake so its 512 Droplet normal reference is regenerated."),
+                        *StableKey),
+                    ExpectedProfile.MaterialSlotIndex,
+                    StableKey);
             }
             if (!SourcePathMatches(
                     Surface.DropletMaskTexture,
@@ -198,9 +238,14 @@ namespace
                     TEXT("DropletMask"),
                     false))
             {
-                PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a Render Profile Lookup Texture rebake so its 512 Droplet mask reference is regenerated."),
-                    *StableKey));
+                AddValidationIssue(
+                    Issues,
+                    TEXT("RenderProfile.DropletMaskStale"),
+                    FString::Printf(
+                        TEXT("Profile '%s' requires a Render Profile Lookup Texture rebake so its 512 Droplet mask reference is regenerated."),
+                        *StableKey),
+                    ExpectedProfile.MaterialSlotIndex,
+                    StableKey);
             }
             if (!SourcePathMatches(
                     Surface.DropletFlowNormalTexture,
@@ -211,9 +256,14 @@ namespace
                     TEXT("DropletFlowNormal"),
                     true))
             {
-                PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a Render Profile Data rebake so its Droplet2 normal reference is regenerated."),
-                    *StableKey));
+                AddValidationIssue(
+                    Issues,
+                    TEXT("RenderProfile.FlowNormalStale"),
+                    FString::Printf(
+                        TEXT("Profile '%s' requires a Render Profile Data rebake so its Droplet2 normal reference is regenerated."),
+                        *StableKey),
+                    ExpectedProfile.MaterialSlotIndex,
+                    StableKey);
             }
             if (!SourcePathMatches(
                     Surface.DropletFlowMaskTexture,
@@ -224,9 +274,14 @@ namespace
                     TEXT("DropletFlowMask"),
                     false))
             {
-                PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a Render Profile Data rebake so its Droplet2 mask reference is regenerated."),
-                    *StableKey));
+                AddValidationIssue(
+                    Issues,
+                    TEXT("RenderProfile.FlowMaskStale"),
+                    FString::Printf(
+                        TEXT("Profile '%s' requires a Render Profile Data rebake so its Droplet2 mask reference is regenerated."),
+                        *StableKey),
+                    ExpectedProfile.MaterialSlotIndex,
+                    StableKey);
             }
         }
     }
@@ -244,23 +299,37 @@ namespace
 
 } // namespace
 
-bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
-    const UWetClothingAsset* WetClothingAsset,
-    FString*                 OutSummary)
+FDWCRenderProfileValidationSnapshot FWetClothingRenderProfileBakeService::EvaluateVisualBakeState(
+    const UWetClothingAsset* WetClothingAsset)
 {
-    TArray<FString> PendingLines;
+    FDWCRenderProfileValidationSnapshot Snapshot;
+    Snapshot.bRequired = WetClothingAsset != nullptr &&
+        WetClothingAsset->HasAnyWettableMaterialSlot();
     if (WetClothingAsset == nullptr || WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
     {
-        PendingLines.Add(TEXT("Prepared DWC Skeletal Mesh is unavailable."));
+        AddValidationIssue(
+            Snapshot.Issues,
+            TEXT("RenderProfile.RuntimeMeshMissing"),
+            TEXT("Prepared DWC Skeletal Mesh is unavailable."),
+            INDEX_NONE,
+            FString(),
+            EDWCRenderProfileIssueResolution::Manual);
     }
     else if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()))
     {
-        PendingLines.Add(TEXT("The sealed DWC UV Channel is invalid; create a new WCA before building the Render Profile Lookup Texture."));
+        AddValidationIssue(
+            Snapshot.Issues,
+            TEXT("RenderProfile.DataUVInvalid"),
+            TEXT("The sealed DWC UV Channel is invalid; create a new WCA before building the Render Profile Lookup Texture."),
+            INDEX_NONE,
+            FString(),
+            EDWCRenderProfileIssueResolution::Manual);
     }
     else
     {
         TSet<int32> WetMaterialSlots;
         CollectWetMaterialSlots(WetClothingAsset, WetMaterialSlots);
+        Snapshot.bRequired = !WetMaterialSlots.IsEmpty();
         if (!WetMaterialSlots.IsEmpty())
         {
             const TArray<FSkeletalMaterial>& Materials = WetClothingAsset->GetRuntimeSkeletalMesh()->GetMaterials();
@@ -269,7 +338,13 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
             {
                 if (!Materials.IsValidIndex(MaterialSlotIndex))
                 {
-                    PendingLines.Add(FString::Printf(TEXT("Material slot %d is out of range."), MaterialSlotIndex));
+                    AddValidationIssue(
+                        Snapshot.Issues,
+                        TEXT("RenderProfile.MaterialSlotOutOfRange"),
+                        FString::Printf(TEXT("Material slot %d is out of range."), MaterialSlotIndex),
+                        MaterialSlotIndex,
+                        FString(),
+                        EDWCRenderProfileIssueResolution::Manual);
                     continue;
                 }
 
@@ -289,7 +364,13 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
                     Override->GeneratedMaterialInstance == nullptr ||
                     Override->SourceMaterial != SourceMaterial)
                 {
-                    PendingLines.Add(FString::Printf(TEXT("Unified wet material setup is required for slot %d."), MaterialSlotIndex));
+                    AddValidationIssue(
+                        Snapshot.Issues,
+                        TEXT("RenderProfile.GeneratedMaterialRequired"),
+                        FString::Printf(TEXT("Unified wet material setup is required for slot %d."), MaterialSlotIndex),
+                        MaterialSlotIndex,
+                        FString(),
+                        EDWCRenderProfileIssueResolution::GenerateMaterials);
                 }
             }
 
@@ -297,37 +378,67 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
             const FString                       ExpectedSignature = FWetClothingWetPartDataTextureBaker::MakeBuildSignature(WetClothingAsset);
             if (!Baked.IsValid())
             {
-                PendingLines.Add(TEXT("Wet Part Data Texture bake is required."));
+                AddValidationIssue(
+                    Snapshot.Issues,
+                    TEXT("RenderProfile.WetPartDataMissing"),
+                    TEXT("Wet Part Data Texture bake is required."));
             }
             else if (Baked.DataUVChannelIndex != WetClothingAsset->GetDWCDataUVChannelIndex())
             {
-                PendingLines.Add(TEXT("Wet Part Data Texture was built for an old DWC UV Channel."));
+                AddValidationIssue(
+                    Snapshot.Issues,
+                    TEXT("RenderProfile.WetPartDataUVStale"),
+                    TEXT("Wet Part Data Texture was built for an old DWC UV Channel."));
             }
             else if (Baked.Resolution != DWCWetPartDataTextureBake::Resolution ||
                      Baked.PaddingPixels != DWCWetPartDataTextureBake::PaddingPixels ||
                      Baked.SurfaceTextureResolution != DWCSurfaceTextureNormalization::Resolution)
             {
-                PendingLines.Add(TEXT("Wet Part Data Texture fixed bake settings are outdated."));
+                AddValidationIssue(
+                    Snapshot.Issues,
+                    TEXT("RenderProfile.WetPartDataSettingsStale"),
+                    TEXT("Wet Part Data Texture fixed bake settings are outdated."));
             }
             else if (Baked.BuildSignature != ExpectedSignature)
             {
-                PendingLines.Add(TEXT("Wet Part Data Texture data is out of date."));
+                AddValidationIssue(
+                    Snapshot.Issues,
+                    TEXT("RenderProfile.WetPartDataSignatureStale"),
+                    TEXT("Wet Part Data Texture data is out of date."));
             }
 
             if (Baked.IsValid())
             {
-                AppendMissingRenderProfileBakeData(*WetClothingAsset, Baked, PendingLines);
+                AppendMissingRenderProfileBakeData(*WetClothingAsset, Baked, Snapshot.Issues);
             }
         }
     }
 
+    return Snapshot;
+}
+
+bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
+    const UWetClothingAsset* WetClothingAsset,
+    FString* OutSummary)
+{
+    const FDWCRenderProfileValidationSnapshot Snapshot =
+        EvaluateVisualBakeState(WetClothingAsset);
+
     if (OutSummary != nullptr)
     {
+        TArray<FString> PendingLines;
+        PendingLines.Reserve(Snapshot.Issues.Num());
+        for (const FDWCRenderProfileValidationIssue& Issue : Snapshot.Issues)
+        {
+            PendingLines.Add(Issue.Detail);
+        }
         *OutSummary = PendingLines.IsEmpty()
-                          ? TEXT("Render profile data is up to date.")
-                          : FString::Printf(TEXT("Pending Render Profile Bake:\n- %s"), *FString::Join(PendingLines, TEXT("\n- ")));
+            ? TEXT("Render profile data is up to date.")
+            : FString::Printf(
+                TEXT("Pending Render Profile Bake:\n- %s"),
+                *FString::Join(PendingLines, TEXT("\n- ")));
     }
-    return !PendingLines.IsEmpty();
+    return Snapshot.HasPendingTasks();
 }
 
 bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMaterials(
@@ -540,7 +651,18 @@ bool FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(UWetClot
         WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction.Get(),
         PackagesToSave);
 #endif
-
-    return PackagesToSave.IsEmpty() ||
-           FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) == FEditorFileUtils::PR_Success;
+    FDWCEditorArtifactStore::Get()->CollectDirtyPackages(
+        *WetClothingAsset, PackagesToSave);
+    if (PackagesToSave.IsEmpty())
+    {
+        return true;
+    }
+    const bool bSaved =
+        FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) ==
+        FEditorFileUtils::PR_Success;
+    if (bSaved)
+    {
+        FDWCEditorArtifactStore::Get()->NotifyPackagesSaved(PackagesToSave);
+    }
+    return bSaved;
 }

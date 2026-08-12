@@ -141,6 +141,9 @@ bool FDWCEditorTextureWorkspaceReuseTest::RunTest(const FString&)
     Descriptor.PixelFormat = PF_B8G8R8A8;
     Descriptor.InitialBGRA8 = FColor(128, 128, 255, 255);
 
+    FDWCEditorTextureLease MissingLease = Workspace.AcquireExistingLease(Key, Descriptor);
+    TestFalse(TEXT("Existing-only acquire does not allocate a cache miss"), MissingLease.IsValid());
+
     TArray<FColor> Pixels;
     Pixels.Init(Descriptor.InitialBGRA8, 16);
     const FDWCEditorTextureHandle First = Workspace.PublishBGRA8(
@@ -149,6 +152,12 @@ bool FDWCEditorTextureWorkspaceReuseTest::RunTest(const FString&)
         MoveTemp(Pixels));
     TestTrue(TEXT("Published entry is valid"), First.IsValid());
     TestNotNull(TEXT("Published entry owns a transient texture"), First.IsValid() ? First->GetTexture() : nullptr);
+
+    FDWCEditorTextureLease ExistingLease = Workspace.AcquireExistingLease(Key, Descriptor);
+    TestTrue(TEXT("Existing-only acquire leases a published entry"), ExistingLease.IsValid());
+    TestTrue(TEXT("Existing-only acquire returns the published entry"),
+        ExistingLease.IsValid() && ExistingLease.GetHandle() == First);
+    ExistingLease.Reset();
 
     const FDWCEditorTextureHandle Reused = Workspace.Acquire(Key, Descriptor);
     TestTrue(TEXT("Same descriptor reuses the entry"), First == Reused);
@@ -615,6 +624,48 @@ bool FDWCEditorRenderUploadQueuePriorityDiagnosticsTest::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorTextureWorkspaceDirectNormalInitializationTest,
+    "DWC.Editor.Foundation.TextureWorkspace.DirectNormalInitialization",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorTextureWorkspaceDirectNormalInitializationTest::RunTest(const FString&)
+{
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>();
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    const FDWCEditorTextureKey Key = MakeTextureKey(
+        Owner,
+        EDWCEditorTexturePurpose::WrinkleHover,
+        2);
+    FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(8, 8));
+    Descriptor.WorkingSize = FIntPoint(16, 16);
+
+    FDWCEditorTextureLease Lease = Workspace.InitializeNormalBGRA8AndAcquireLease(
+        Key,
+        Descriptor,
+        false,
+        EDWCEditorTextureUploadPriority::Interactive);
+    TestTrue(TEXT("Direct normal initialization returns a lease"), Lease.IsValid());
+    if (Lease.IsValid())
+    {
+        TestEqual(TEXT("Output pixels are initialized in workspace storage"),
+            Lease->GetBGRA8Pixels().Num(), 64);
+        TestEqual(TEXT("Working normal pixels are initialized in workspace storage"),
+            Lease->GetWorkingNormalSurface().PackedNormalXY.Num(), 256);
+        TestFalse(TEXT("Coverage storage is omitted when it is not requested"),
+            Lease->GetWorkingNormalSurface().HasCoverage());
+        TestEqual(TEXT("Neutral output uses the descriptor color"),
+            Lease->GetBGRA8Pixels()[0], Descriptor.InitialBGRA8);
+    }
+
+    Lease.Reset();
+    ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorRenderUploadQueueSubmissionTicketTest,
     "DWC.Editor.Foundation.TextureWorkspace.UploadQueue.SubmissionTicket",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -653,14 +704,14 @@ bool FDWCEditorRenderUploadQueueSubmissionTicketTest::RunTest(const FString&)
         QueuedTiming.RequestedRegionCount, 1u);
     TestTrue(TEXT("A full dirty request is identified"), QueuedTiming.bFullTextureUpload);
 
-    int32 RenderEnqueuedNotifications = 0;
+    int32 CompletedNotifications = 0;
     FDWCEditorTextureUploadObserverHandle ObserverHandle = UploadQueue->Observe(
         Ticket,
-        [&RenderEnqueuedNotifications](const EDWCEditorTextureUploadStatus Status)
+        [&CompletedNotifications](const EDWCEditorTextureUploadStatus Status)
         {
-            if (Status == EDWCEditorTextureUploadStatus::RenderEnqueued)
+            if (Status == EDWCEditorTextureUploadStatus::Completed)
             {
-                ++RenderEnqueuedNotifications;
+                ++CompletedNotifications;
             }
         });
     TestTrue(TEXT("A queued ticket accepts a state observer"), ObserverHandle.IsValid());
@@ -696,6 +747,7 @@ bool FDWCEditorRenderUploadQueueSubmissionTicketTest::RunTest(const FString&)
     const EDWCEditorTextureUploadStatus FinalFlushStatus = UploadQueue->GetStatus(Ticket);
     TestTrue(TEXT("Repeated flushes either finish the upload or retain it for a resource retry"),
         FinalFlushStatus == EDWCEditorTextureUploadStatus::RenderEnqueued ||
+        FinalFlushStatus == EDWCEditorTextureUploadStatus::Completed ||
         FinalFlushStatus == EDWCEditorTextureUploadStatus::Queued);
     FDWCEditorTextureUploadTiming FinalTiming;
     TestTrue(TEXT("The final flush retains timing telemetry"),
@@ -704,25 +756,41 @@ bool FDWCEditorRenderUploadQueueSubmissionTicketTest::RunTest(const FString&)
         FinalTiming.QueueWaitMs >= 0.0 && FinalTiming.SliceDelayMs >= 0.0 &&
         FinalTiming.StagingCopyMs >= 0.0 &&
         FinalTiming.SubmitCallMs >= 0.0 && FinalTiming.SubmittedToObservedMs >= 0.0);
-    if (FinalFlushStatus == EDWCEditorTextureUploadStatus::RenderEnqueued)
+    if (FinalFlushStatus == EDWCEditorTextureUploadStatus::RenderEnqueued ||
+        FinalFlushStatus == EDWCEditorTextureUploadStatus::Completed)
     {
-        TestEqual(TEXT("Render enqueue notifies the observer exactly once"),
-            RenderEnqueuedNotifications, 1);
         TestTrue(TEXT("A render-enqueued ticket records its submit timestamp"), FinalTiming.WasSubmitted());
         TestTrue(TEXT("Submission does not precede selection"),
             FinalTiming.SubmittedSeconds >= FinalTiming.SelectedSeconds);
-        TestTrue(TEXT("Status observation is recorded separately"), FinalTiming.WasObserved());
-        TestTrue(TEXT("Observation does not precede submission"),
-            FinalTiming.ObservedSeconds >= FinalTiming.SubmittedSeconds);
         TestEqual(TEXT("The complete sliced upload accounts for every source byte"),
             FinalTiming.SubmittedBytes, 8ull * 8ull * sizeof(FColor));
+    }
+
+    FlushRenderingCommands();
+    UploadQueue->Flush();
+    const EDWCEditorTextureUploadStatus CompletedStatus = UploadQueue->GetStatus(Ticket);
+    FDWCEditorTextureUploadTiming RenderTiming;
+    TestTrue(TEXT("Render callback telemetry remains queryable"),
+        UploadQueue->GetTiming(Ticket, RenderTiming));
+    if (FinalFlushStatus == EDWCEditorTextureUploadStatus::RenderEnqueued ||
+        FinalFlushStatus == EDWCEditorTextureUploadStatus::Completed)
+    {
+        TestEqual(TEXT("A render callback promotes the upload to completed"),
+            CompletedStatus, EDWCEditorTextureUploadStatus::Completed);
+        TestEqual(TEXT("Completion notifies the observer exactly once"),
+            CompletedNotifications, 1);
+        TestEqual(TEXT("Every submitted slice reaches its render cleanup callback"),
+            RenderTiming.CompletedRegionCount, RenderTiming.SubmittedRegionCount);
+        TestTrue(TEXT("The final render callback timestamp is recorded"),
+            RenderTiming.RenderCallbackSeconds > 0.0);
+        TestTrue(TEXT("Completed status observation is recorded"), RenderTiming.WasObserved());
 
         int32 LateObserverNotifications = 0;
         const FDWCEditorTextureUploadObserverHandle LateObserver = UploadQueue->Observe(
             Ticket,
             [&LateObserverNotifications](const EDWCEditorTextureUploadStatus Status)
             {
-                if (Status == EDWCEditorTextureUploadStatus::RenderEnqueued)
+                if (Status == EDWCEditorTextureUploadStatus::Completed)
                 {
                     ++LateObserverNotifications;
                 }
@@ -730,18 +798,6 @@ bool FDWCEditorRenderUploadQueueSubmissionTicketTest::RunTest(const FString&)
         TestFalse(TEXT("A terminal ticket does not retain a late observer"), LateObserver.IsValid());
         TestEqual(TEXT("A late observer sees the terminal state immediately"),
             LateObserverNotifications, 1);
-    }
-
-    FlushRenderingCommands();
-    FDWCEditorTextureUploadTiming RenderTiming;
-    TestTrue(TEXT("Render callback telemetry remains queryable"),
-        UploadQueue->GetTiming(Ticket, RenderTiming));
-    if (FinalFlushStatus == EDWCEditorTextureUploadStatus::RenderEnqueued)
-    {
-        TestEqual(TEXT("Every submitted slice reaches its render cleanup callback"),
-            RenderTiming.CompletedRegionCount, RenderTiming.SubmittedRegionCount);
-        TestTrue(TEXT("The final render callback timestamp is recorded"),
-            RenderTiming.RenderCallbackSeconds > 0.0);
     }
 
     Workspace.MarkDirty(Handle, FIntRect(0, 0, 8, 8), false,

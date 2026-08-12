@@ -11,6 +11,7 @@ class UWetClothingAsset;
 enum class EDWCWrinkleSuppressionDependencyStatus : uint8
 {
     Missing,
+    Stale,
     Ready,
     Unreadable
 };
@@ -60,7 +61,8 @@ class FDWCWrinkleSuppressionCoverageService final
 
     static FDWCWrinkleSuppressionDependencySnapshot ResolveDependency(
         const UWetClothingAsset* Asset,
-        int32 MaterialSlotIndex);
+        int32 MaterialSlotIndex,
+        bool bExactCurrentness = false);
 
     bool AcquireCoverage(
         const UWetClothingAsset& Asset,

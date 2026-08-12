@@ -5,6 +5,7 @@
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "Engine/Texture2D.h"
 #include "Misc/SecureHash.h"
+#include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
 
 namespace
 {
@@ -78,7 +79,7 @@ FName FDWCWrinkleCoverageCacheValue::StaticCacheTypeName()
 
 uint64 FDWCWrinkleCoverageCacheValue::GetAllocatedSizeBytes() const
 {
-    return Readback.RawData.IsValid() ? Readback.RawData->GetAllocatedSize() : 0;
+    return Readback.GetAllocatedBytes();
 }
 
 bool FDWCWrinkleCoverageCacheValue::IsValid() const
@@ -128,7 +129,8 @@ FName FDWCWrinkleSuppressionCoverageService::CacheNamespace()
 FDWCWrinkleSuppressionDependencySnapshot
 FDWCWrinkleSuppressionCoverageService::ResolveDependency(
     const UWetClothingAsset* Asset,
-    const int32 MaterialSlotIndex)
+    const int32 MaterialSlotIndex,
+    const bool bExactCurrentness)
 {
     check(IsInGameThread());
     FDWCWrinkleSuppressionDependencySnapshot Result;
@@ -150,6 +152,18 @@ FDWCWrinkleSuppressionCoverageService::ResolveDependency(
     if (BakedMap == nullptr)
     {
         Result.Detail = TEXT("No baked wrinkle coverage mask matches this material slot.");
+        return Result;
+    }
+    const FWetWrinkleMaterialSlotBakeState Currentness =
+        FWetWrinkleNormalMapBaker::EvaluateMaterialSlotBakeState(
+            Asset, MaterialSlotIndex, bExactCurrentness);
+    if (!Currentness.IsCurrent() ||
+        (!bExactCurrentness && !DWCBuildStatus::IsUsable(Asset->GetBakeState().WrinkleMaps)))
+    {
+        Result.Status = EDWCWrinkleSuppressionDependencyStatus::Stale;
+        Result.Detail = Currentness.Detail.IsEmpty()
+            ? TEXT("The baked wrinkle coverage mask is out of date.")
+            : Currentness.Detail;
         return Result;
     }
     UTexture2D* Texture = BakedMap->BakedWrinkleMask.Get();

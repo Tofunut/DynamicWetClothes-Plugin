@@ -5,6 +5,7 @@
 
 class FDWCEditorWorkerJobScheduler;
 class FDWCEditorBuildOperationManager;
+class FDWCEditorCacheStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorSurfacePatchProjectionCacheService;
 class FDWCWrinkleSuppressionCoverageService;
@@ -46,7 +47,8 @@ class FDWCEditorBakeCoordinator final
         TSharedRef<FDWCEditorBuildOperationManager> InOperationManager,
         TSharedRef<FDWCEditorSpatialQueryService> InSpatialQueryService,
         TSharedRef<FDWCEditorSurfacePatchProjectionCacheService> InSurfacePatchProjectionCache,
-        TSharedPtr<FDWCWrinkleSuppressionCoverageService> InCoverageService);
+        TSharedPtr<FDWCWrinkleSuppressionCoverageService> InCoverageService,
+        TSharedPtr<FDWCEditorCacheStore> InCacheStore = nullptr);
     ~FDWCEditorBakeCoordinator();
 
     bool RequestWrinkleBake(
@@ -117,6 +119,7 @@ class FDWCEditorBakeCoordinator final
     TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
     TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService> SurfacePatchProjectionCache;
     TSharedPtr<FDWCWrinkleSuppressionCoverageService> CoverageService;
+    TSharedPtr<FDWCEditorCacheStore> CacheStore;
     TSharedPtr<FWrinkleBatch> ActiveWrinkleBatch;
     TSharedPtr<FTransparencyBatch> ActiveTransparencyBatch;
     bool bShuttingDown = false;

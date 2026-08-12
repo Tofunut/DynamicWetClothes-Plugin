@@ -17,6 +17,7 @@ enum class EDWCEditorPreviewSuspendReason : uint8
 {
     ModeSwitch,
     BeginPIE,
+    ExclusiveBuild,
     EditorClosing
 };
 
@@ -77,6 +78,10 @@ class FDWCEditorPreviewSession final
     void FlushRenderResourceBindings();
 
     void DumpDiagnostics(int32 SessionIndex) const;
+    void AppendGlobalMemoryOwners(
+        int32 SessionIndex,
+        TSet<FString>& SeenOwnerIdentifiers,
+        TArray<FDWCEditorMemoryOwnerRecord>& OutOwners) const;
     void ResetDiagnosticCounters();
 
     FDWCEditorPreviewSessionSlotsChanged& OnSlotsChanged();
@@ -96,6 +101,7 @@ class FDWCEditorPreviewSession final
     bool IsPreviewMaterialSlotActive(int32 MaterialSlotIndex) const;
     void HandleObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
     bool IsSourceOrBaseMaterial(const UObject* Object, UMaterialInterface* SourceMaterial) const;
+    uint64 CalculateSessionContainerBytes() const;
 
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TWeakObjectPtr<UWorld> PreviewWorld;

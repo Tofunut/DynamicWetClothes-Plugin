@@ -3116,91 +3116,11 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
     TArray<FString>&         OutMessages)
 {
     OutMessages.Reset();
-    if (WetClothingAsset == nullptr)
+    TArray<FWCAGeneratedMaterialValidationIssue> Issues;
+    ValidateGeneratedMaterialOverridesStructured(WetClothingAsset, false, Issues);
+    for (const FWCAGeneratedMaterialValidationIssue& Issue : Issues)
     {
-        return;
-    }
-
-#if WITH_EDITORONLY_DATA
-    UMaterialFunctionInterface* ExpectedFunction =
-        LoadPluginDwcMaterialFunction(DwcEvaluateSurfaceAppearanceFunction);
-    if (WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction == nullptr ||
-        WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction != ExpectedFunction)
-    {
-        OutMessages.Add(TEXT("MF_DWC_EvaluateSurfaceAppearance is missing or out of date."));
-    }
-#endif
-
-    const FDWCWetClothingAssetSetupSettings& Setup = WetClothingAsset->GetSetupSettings();
-    if (!Setup.bBuildCPUVertexSimulationData && !Setup.bBuildGPUWetnessMapSimulationData)
-    {
-        return;
-    }
-
-    const TArray<int32> WettableSlots = CollectWettableMaterialSlotIndices(*WetClothingAsset);
-    if (WettableSlots.IsEmpty())
-    {
-        return;
-    }
-
-    USkeletalMesh* RuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
-    if (RuntimeMesh == nullptr)
-    {
-        OutMessages.Add(TEXT("Assign a runtime skeletal mesh before generating wet materials."));
-        return;
-    }
-
-    const TArray<FSkeletalMaterial>& Materials = RuntimeMesh->GetMaterials();
-    for (const int32 MaterialSlotIndex : WettableSlots)
-    {
-        if (!Materials.IsValidIndex(MaterialSlotIndex))
-        {
-            OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: wettable material slot is out of range for the runtime mesh."),
-                MaterialSlotIndex));
-            continue;
-        }
-
-        UMaterialInterface* SourceMaterial = ResolveGeneratedMaterialSource(
-            WetClothingAsset,
-            MaterialSlotIndex,
-            Materials[MaterialSlotIndex].MaterialInterface);
-        const FWetClothingGeneratedWetMaterialOverride* MaterialOverride =
-            FindGeneratedWetMaterialOverride(*WetClothingAsset, MaterialSlotIndex);
-        UMaterial*          GeneratedMaterial = MaterialOverride != nullptr ? MaterialOverride->GeneratedMaterial.Get() : nullptr;
-        UMaterialInterface* GeneratedMaterialInstance = MaterialOverride != nullptr ? MaterialOverride->GeneratedMaterialInstance.Get() : nullptr;
-
-        if (SourceMaterial == nullptr)
-        {
-            OutMessages.Add(FString::Printf(TEXT("Slot %d: source material could not be resolved."), MaterialSlotIndex));
-        }
-        else if (MaterialOverride == nullptr || GeneratedMaterial == nullptr ||
-                 GeneratedMaterialInstance == nullptr)
-        {
-            OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: missing unified generated DWC material or runtime instance."),
-                MaterialSlotIndex));
-        }
-        else if (MaterialOverride->SourceMaterial != SourceMaterial)
-        {
-            OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: generated materials reference an outdated source material."),
-                MaterialSlotIndex));
-        }
-        else if (GeneratedMaterialInstance->GetMaterial() != GeneratedMaterial)
-        {
-            OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: runtime material instance no longer uses the recorded generated parent."),
-                MaterialSlotIndex));
-        }
-        else
-        {
-            FString StaleReason;
-            if (!IsGeneratedMaterialOverrideCurrent(WetClothingAsset, MaterialSlotIndex, &StaleReason))
-            {
-                OutMessages.Add(StaleReason);
-            }
-        }
+        OutMessages.Add(Issue.Message);
     }
 }
 
@@ -3209,18 +3129,55 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
     TArray<FString>&         OutMessages)
 {
     OutMessages.Reset();
+    TArray<FWCAGeneratedMaterialValidationIssue> Issues;
+    ValidateGeneratedMaterialOverridesStructured(WetClothingAsset, true, Issues);
+    for (const FWCAGeneratedMaterialValidationIssue& Issue : Issues)
+    {
+        OutMessages.Add(Issue.Message);
+    }
+}
+
+void FWCAMaterialGenerator::ValidateGeneratedMaterialOverridesStructured(
+    const UWetClothingAsset* WetClothingAsset,
+    const bool bDeepValidation,
+    TArray<FWCAGeneratedMaterialValidationIssue>& OutIssues)
+{
+    OutIssues.Reset();
     if (WetClothingAsset == nullptr)
     {
         return;
     }
 
-#if WITH_EDITORONLY_DATA
-    UMaterialFunctionInterface* ExpectedFunction =
-        LoadPluginDwcMaterialFunction(DwcEvaluateSurfaceAppearanceFunction);
-    if (WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction == nullptr ||
-        WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction != ExpectedFunction)
+    auto AddIssue = [&OutIssues](
+        const FName Code,
+        const int32 MaterialSlotIndex,
+        FString Message,
+        const bool bFailed = false)
     {
-        OutMessages.Add(TEXT("MF_DWC_EvaluateSurfaceAppearance is missing or out of date."));
+        FWCAGeneratedMaterialValidationIssue& Issue = OutIssues.AddDefaulted_GetRef();
+        Issue.Code = Code;
+        Issue.MaterialSlotIndex = MaterialSlotIndex;
+        Issue.Message = MoveTemp(Message);
+        Issue.bFailed = bFailed;
+    };
+
+#if WITH_EDITORONLY_DATA
+    UMaterialFunctionInterface* RecordedFunction =
+        WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction;
+    if (RecordedFunction == nullptr)
+    {
+        AddIssue(
+            TEXT("SurfaceAppearanceFunctionReference"),
+            INDEX_NONE,
+            TEXT("MF_DWC_EvaluateSurfaceAppearance is missing."));
+    }
+    else if (bDeepValidation &&
+             RecordedFunction != LoadPluginDwcMaterialFunction(DwcEvaluateSurfaceAppearanceFunction))
+    {
+        AddIssue(
+            TEXT("SurfaceAppearanceFunctionReference"),
+            INDEX_NONE,
+            TEXT("MF_DWC_EvaluateSurfaceAppearance is out of date."));
     }
 #endif
 
@@ -3231,9 +3188,9 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
     }
 
     FString SharedFunctionError;
-    if (!ValidateSurfaceAppearanceFunctions(SharedFunctionError))
+    if (bDeepValidation && !ValidateSurfaceAppearanceFunctions(SharedFunctionError))
     {
-        OutMessages.Add(SharedFunctionError);
+        AddIssue(TEXT("SurfaceAppearanceFunctionGraph"), INDEX_NONE, MoveTemp(SharedFunctionError), true);
     }
 
     const TArray<int32> WettableSlots = CollectWettableMaterialSlotIndices(*WetClothingAsset);
@@ -3245,7 +3202,10 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
     USkeletalMesh* RuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
     if (RuntimeMesh == nullptr)
     {
-        OutMessages.Add(TEXT("Assign a runtime skeletal mesh before generating wet materials."));
+        AddIssue(
+            TEXT("RuntimeMeshMissing"),
+            INDEX_NONE,
+            TEXT("Assign a runtime skeletal mesh before generating wet materials."));
         return;
     }
 
@@ -3255,7 +3215,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
     {
         if (!Materials.IsValidIndex(MaterialSlotIndex))
         {
-            OutMessages.Add(FString::Printf(
+            AddIssue(TEXT("SlotOutOfRange"), MaterialSlotIndex, FString::Printf(
                 TEXT("Slot %d: wettable material slot is out of range for the runtime mesh."),
                 MaterialSlotIndex));
             continue;
@@ -3267,7 +3227,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
             Materials[MaterialSlotIndex].MaterialInterface);
         if (SourceMaterial == nullptr)
         {
-            OutMessages.Add(FString::Printf(
+            AddIssue(TEXT("SourceMaterialMissing"), MaterialSlotIndex, FString::Printf(
                 TEXT("Slot %d: source material could not be resolved."),
                 MaterialSlotIndex));
             continue;
@@ -3281,7 +3241,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
         if (MaterialOverride == nullptr || GeneratedMaterial == nullptr ||
             GeneratedMaterialInstance == nullptr)
         {
-            OutMessages.Add(FString::Printf(
+            AddIssue(TEXT("GeneratedOverrideMissing"), MaterialSlotIndex, FString::Printf(
                 TEXT("Slot %d: missing unified generated DWC material or runtime instance."),
                 MaterialSlotIndex));
             continue;
@@ -3289,7 +3249,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
 
         if (MaterialOverride->SourceMaterial != SourceMaterial)
         {
-            OutMessages.Add(FString::Printf(
+            AddIssue(TEXT("SourceMaterialOutOfDate"), MaterialSlotIndex, FString::Printf(
                 TEXT("Slot %d: generated materials are out of date because the source material changed."),
                 MaterialSlotIndex));
             continue;
@@ -3298,14 +3258,19 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
         FString StaleReason;
         if (!IsGeneratedMaterialOverrideCurrent(WetClothingAsset, MaterialSlotIndex, &StaleReason))
         {
-            OutMessages.Add(StaleReason);
+            AddIssue(TEXT("GeneratedOverrideOutOfDate"), MaterialSlotIndex, MoveTemp(StaleReason));
+            continue;
+        }
+
+        if (!bDeepValidation)
+        {
             continue;
         }
 
         if (!IsUnifiedDwcMaterial(GeneratedMaterial) ||
             (GeneratedMaterialInstance != nullptr && GeneratedMaterialInstance->GetMaterial() != GeneratedMaterial))
         {
-            OutMessages.Add(FString::Printf(
+            AddIssue(TEXT("UnifiedParentMismatch"), MaterialSlotIndex, FString::Printf(
                 TEXT("Slot %d: generated material instance does not use the recorded unified parent."),
                 MaterialSlotIndex));
             continue;
@@ -3321,7 +3286,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
                 Evaluate,
                 WetnessSelectorFailure))
         {
-            OutMessages.Add(FString::Printf(
+            AddIssue(TEXT("WetnessSelectorInvalid"), MaterialSlotIndex, FString::Printf(
                 TEXT("Slot %d: %s Run Generate Materials to rebuild the material."),
                 MaterialSlotIndex,
                 *WetnessSelectorFailure));
@@ -3339,7 +3304,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
 
         if (!IsMaterialConfiguredForDwc(GeneratedMaterialInstance, CPUOptions))
         {
-            OutMessages.Add(FString::Printf(
+            AddIssue(TEXT("CPUSetupMissing"), MaterialSlotIndex, FString::Printf(
                 TEXT("Slot %d: generated runtime material '%s' is missing DWC material setup."),
                 MaterialSlotIndex,
                 *GetNameSafe(GeneratedMaterialInstance)));
@@ -3358,7 +3323,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
                                                      : FString::Printf(
                                                            TEXT(" Missing runtime parameters: %s."),
                                                            *FString::Join(MissingGpuParameters, TEXT(", ")));
-            OutMessages.Add(FString::Printf(
+            AddIssue(TEXT("GPUSetupMissing"), MaterialSlotIndex, FString::Printf(
                 TEXT("Slot %d: generated runtime material '%s' is missing DWC GPU wetness-map parameters.%s"),
                 MaterialSlotIndex,
                 *GetNameSafe(GeneratedMaterialInstance),

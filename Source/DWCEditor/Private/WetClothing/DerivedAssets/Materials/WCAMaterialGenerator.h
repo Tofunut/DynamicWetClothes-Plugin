@@ -22,6 +22,15 @@ struct FWetClothingUnifiedMaterialSetupResult
     FString                     Message;
 };
 
+/** Structured generated-material validation result. Consumers must not parse Message for ownership. */
+struct FWCAGeneratedMaterialValidationIssue
+{
+    FName Code;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    FString Message;
+    bool bFailed = false;
+};
+
 class FWCAMaterialGenerator
 {
   public:
@@ -97,6 +106,12 @@ class FWCAMaterialGenerator
 
     /** Deep graph and static-permutation validation used by explicit validation/generation workflows. */
     static void ValidateGeneratedMaterialOverrides(const UWetClothingAsset* WetClothingAsset, TArray<FString>& OutMessages);
+
+    /** Canonical structured validation used by editor validation and build-status evaluators. */
+    static void ValidateGeneratedMaterialOverridesStructured(
+        const UWetClothingAsset* WetClothingAsset,
+        bool bDeepValidation,
+        TArray<FWCAGeneratedMaterialValidationIssue>& OutIssues);
 
     static bool ValidateSurfaceAppearanceFunctions(FString& OutErrorMessage);
 };

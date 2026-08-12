@@ -293,11 +293,13 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     FDWCEditorSessionState& State,
     const FDWCSelectTransparencyLayerAction& Action)
 {
-    if (State.Transparency.SelectedLayerGuid == Action.LayerGuid)
+    if (State.Transparency.SelectedLayerGuid == Action.LayerGuid &&
+        State.Transparency.SelectedMaterialSlotIndex == Action.MaterialSlotIndex)
     {
         return EDWCEditorSessionEffect::None;
     }
     State.Transparency.SelectedLayerGuid = Action.LayerGuid;
+    State.Transparency.SelectedMaterialSlotIndex = Action.MaterialSlotIndex;
     return EDWCEditorSessionEffect::SyncSelection |
         EDWCEditorSessionEffect::RebuildPreviewContent;
 }
@@ -310,12 +312,14 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     const EDWCTransparencyEditorStage* ExistingStage =
         Transparency.StageByLayer.Find(Action.LayerGuid);
     if (Transparency.SelectedLayerGuid == Action.LayerGuid &&
+        Transparency.SelectedMaterialSlotIndex == Action.MaterialSlotIndex &&
         ExistingStage != nullptr && *ExistingStage == Action.Stage)
     {
         return EDWCEditorSessionEffect::None;
     }
 
     Transparency.SelectedLayerGuid = Action.LayerGuid;
+    Transparency.SelectedMaterialSlotIndex = Action.MaterialSlotIndex;
     Transparency.StageByLayer.FindOrAdd(Action.LayerGuid) = Action.Stage;
     return EDWCEditorSessionEffect::SyncControls |
         EDWCEditorSessionEffect::SyncSelection |

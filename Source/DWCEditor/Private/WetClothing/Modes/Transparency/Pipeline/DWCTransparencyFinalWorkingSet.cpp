@@ -2,6 +2,7 @@
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyFinalWorkingSet.h"
 
 #include "DataAssets/WetClothingAsset.h"
+#include "Engine/Texture2D.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 
@@ -20,22 +21,36 @@ namespace
     {
         return Size > 0 ? (Value % Size + Size) % Size : 0;
     }
+
+    bool MatchesResolvedOutputResolution(
+        const UTexture2D* Texture,
+        const FIntPoint Resolution)
+    {
+        return Texture != nullptr && Resolution.X > 0 && Resolution.Y > 0 &&
+            Texture->Source.GetSizeX() == Resolution.X &&
+            Texture->Source.GetSizeY() == Resolution.Y;
+    }
 }
 
 TSharedPtr<const FDWCTransparencyAlphaDomainSnapshot>
 FDWCTransparencyAlphaDomainSnapshot::Create(
     const FDWCTransparencySourcePayload& SourcePayload,
-    FString* OutError)
+    FString* OutError,
+    const bool bIncludeOuterIslandIDs)
 {
     TSharedPtr<FDWCTransparencyAlphaDomainSnapshot> Result =
         MakeShared<FDWCTransparencyAlphaDomainSnapshot>();
     Result->LayerGuid = SourcePayload.LayerGuid;
     Result->MaterialSlotIndex = SourcePayload.MaterialSlotIndex;
     Result->Resolution = SourcePayload.Resolution;
+    Result->OutputResolutionIdentity = SourcePayload.OutputResolutionIdentity;
     Result->SourceSignature = SourcePayload.BuildSignature;
     Result->BaseAlpha = SourcePayload.AutoAlphaBuffer;
     Result->OuterCoverage = SourcePayload.OuterCoverageBuffer;
-    Result->OuterIslandIDs = SourcePayload.OuterIslandIDBuffer;
+    if (bIncludeOuterIslandIDs)
+    {
+        Result->OuterIslandIDs = SourcePayload.OuterIslandIDBuffer;
+    }
     Result->ValidSource = SourcePayload.ValidHitBuffer;
     if (!Result->IsValid(OutError))
     {
@@ -48,9 +63,11 @@ bool FDWCTransparencyAlphaDomainSnapshot::IsValid(FString* OutError) const
 {
     const int64 PixelCount = static_cast<int64>(Resolution.X) * Resolution.Y;
     if (!LayerGuid.IsValid() || MaterialSlotIndex == INDEX_NONE ||
-        Resolution.X <= 0 || Resolution.Y <= 0 || SourceSignature.IsEmpty() ||
+        Resolution.X <= 0 || Resolution.Y <= 0 || OutputResolutionIdentity.IsEmpty() ||
+        SourceSignature.IsEmpty() ||
         BaseAlpha.Num() != PixelCount || OuterCoverage.Num() != PixelCount ||
-        OuterIslandIDs.Num() != PixelCount || ValidSource.Num() != PixelCount)
+        (OuterIslandIDs.Num() != 0 && OuterIslandIDs.Num() != PixelCount) ||
+        ValidSource.Num() != PixelCount)
     {
         return Fail(OutError, TEXT("The Stage 4 alpha domain is missing identity or alpha-domain buffers."));
     }
@@ -60,6 +77,7 @@ bool FDWCTransparencyAlphaDomainSnapshot::IsValid(FString* OutError) const
 uint64 FDWCTransparencyAlphaDomainSnapshot::GetAllocatedBytes() const
 {
     return static_cast<uint64>(sizeof(FDWCTransparencyAlphaDomainSnapshot)) +
+        static_cast<uint64>(OutputResolutionIdentity.GetAllocatedSize()) +
         static_cast<uint64>(SourceSignature.GetAllocatedSize()) +
         static_cast<uint64>(BaseAlpha.GetAllocatedSize()) +
         static_cast<uint64>(OuterCoverage.GetAllocatedSize()) +
@@ -200,6 +218,7 @@ bool FDWCTransparencyFinalWorkingSet::IsValid(FString* OutError) const
         Identity.MaterialSlotIndex == AlphaDomain->MaterialSlotIndex &&
         Identity.LODIndex == 0 &&
         Identity.Resolution == AlphaDomain->Resolution &&
+        Identity.OutputResolutionIdentity == AlphaDomain->OutputResolutionIdentity &&
         Alpha.Resolution == Identity.Resolution;
 }
 
@@ -224,7 +243,8 @@ bool FDWCTransparencyFinalWorkingSetBuilder::Build(
     if (SourcePayload->LayerGuid != Layer.LayerGuid ||
         SourcePayload->MaterialSlotIndex != Layer.TargetSurface.OuterMaterialSlotIndex ||
         SourcePayload->UVChannelIndex != DataUV || SourcePayload->LODIndex != 0 ||
-        SourcePayload->Resolution != AlphaSnapshot.Resolution)
+        SourcePayload->Resolution != AlphaSnapshot.Resolution ||
+        SourcePayload->OutputResolutionIdentity.IsEmpty())
     {
         OutError = TEXT("The Stage 4 source payload does not match the selected layer, DWC Data UV, LOD 0, or alpha resolution.");
         return false;
@@ -235,10 +255,15 @@ bool FDWCTransparencyFinalWorkingSetBuilder::Build(
     OutWorkingSet.Identity.DataUVChannelIndex = DataUV;
     OutWorkingSet.Identity.LODIndex = 0;
     OutWorkingSet.Identity.Resolution = SourcePayload->Resolution;
+    OutWorkingSet.Identity.OutputResolutionIdentity =
+        SourcePayload->OutputResolutionIdentity;
     OutWorkingSet.Identity.Revision = AuthoringRevision;
+    const bool bRequiresOuterIslandIDs =
+        AlphaSnapshot.Mode == EDWCTransparencyAlphaSnapshotMode::StrokeReplay;
     OutWorkingSet.AlphaDomain = FDWCTransparencyAlphaDomainSnapshot::Create(
         *SourcePayload,
-        &OutError);
+        &OutError,
+        bRequiresOuterIslandIDs);
     if (!OutWorkingSet.AlphaDomain.IsValid())
     {
         return false;
@@ -302,6 +327,12 @@ FDWCTransparencyFinalCurrentness FDWCTransparencyFinalWorkingSetBuilder::Evaluat
         Result.Reason = EDWCTransparencyStaleReason::SourceInputsChanged;
         Result.Detail = TEXT("The baked map does not match the Stage 4 slot or resolution.");
     }
+    else if (!MatchesResolvedOutputResolution(
+        BakedMap->TransparencyMap.Get(), WorkingSet.Identity.Resolution))
+    {
+        Result.Reason = EDWCTransparencyStaleReason::SourceInputsChanged;
+        Result.Detail = TEXT("The baked Transparency Map dimensions do not match the resolved output resolution.");
+    }
     else if (BakedMap->SourceWrinkleMaskBuildSignature != WorkingSet.WrinkleDependency.BuildSignature ||
         BakedMap->SourceWrinkleMaskBakeGuid != WorkingSet.WrinkleDependency.BakeGuid)
     {
@@ -325,6 +356,13 @@ FDWCTransparencyFinalCurrentness FDWCTransparencyFinalWorkingSetBuilder::Evaluat
     {
         Result.Reason = EDWCTransparencyStaleReason::MissingArtifact;
         Result.Detail = TEXT("This raycast transparency layer requires a coverage-weighted runtime Reveal Normal.");
+    }
+    else if (WorkingSet.bRequiresRuntimeRevealNormal &&
+        !MatchesResolvedOutputResolution(
+            BakedMap->RevealNormalMap.Get(), WorkingSet.Identity.Resolution))
+    {
+        Result.Reason = EDWCTransparencyStaleReason::SourceInputsChanged;
+        Result.Detail = TEXT("The baked Reveal Normal dimensions do not match the resolved output resolution.");
     }
     else if (BakedMap->FinalAlphaBuildSignature != WorkingSet.FinalAlphaSignature)
     {

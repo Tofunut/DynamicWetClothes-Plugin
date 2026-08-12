@@ -54,8 +54,6 @@ namespace
 
     struct FSessionBudgetContext
     {
-        TWeakPtr<FDWCEditorResourceGovernor> ResourceGovernor;
-        FDWCEditorAsyncOperationIdentity MemoryOwner;
         uint64 CacheBudgetBytes = DefaultCacheBudgetBytes;
     };
 
@@ -116,58 +114,43 @@ namespace
         TArray<FColor>&& Pixels,
         const FIntPoint Resolution,
         const bool bSRGB,
-        FWetClothingTextureReadback& OutReadback)
+        FWetClothingTextureReadback& OutReadback,
+        FString& OutError)
     {
-        if (Resolution.X <= 0 || Resolution.Y <= 0 || Pixels.Num() != Resolution.X * Resolution.Y)
-        {
-            return false;
-        }
-        TSharedPtr<TArray64<uint8>> RawData = MakeShared<TArray64<uint8>>();
-        RawData->SetNumUninitialized(static_cast<int64>(Pixels.Num()) * sizeof(FColor));
-        FMemory::Memcpy(RawData->GetData(), Pixels.GetData(), RawData->Num());
-        OutReadback.Width = Resolution.X;
-        OutReadback.Height = Resolution.Y;
-        OutReadback.BytesPerPixel = sizeof(FColor);
-        OutReadback.bSRGB = bSRGB;
-        OutReadback.Format = TSF_BGRA8;
-        OutReadback.AddressX = TA_Clamp;
-        OutReadback.AddressY = TA_Clamp;
-        OutReadback.RawData = MoveTemp(RawData);
-        return OutReadback.IsValid();
+        return FWetClothingTextureReadbackUtils::TryCreateBGRA8Readback(
+            MoveTemp(Pixels),
+            Resolution,
+            bSRGB,
+            OutReadback,
+            OutError,
+            TEXT("Transparency material color payload"));
     }
 
     bool MakeG8Readback(
         TArray<uint8>&& Values,
         const FIntPoint Resolution,
-        FWetClothingTextureReadback& OutReadback)
+        FWetClothingTextureReadback& OutReadback,
+        FString& OutError)
     {
-        if (Resolution.X <= 0 || Resolution.Y <= 0 || Values.Num() != Resolution.X * Resolution.Y)
-        {
-            return false;
-        }
-        TSharedPtr<TArray64<uint8>> RawData = MakeShared<TArray64<uint8>>();
-        RawData->Append(Values.GetData(), Values.Num());
-        OutReadback.Width = Resolution.X;
-        OutReadback.Height = Resolution.Y;
-        OutReadback.BytesPerPixel = 1;
-        OutReadback.bSRGB = false;
-        OutReadback.Format = TSF_G8;
-        OutReadback.AddressX = TA_Clamp;
-        OutReadback.AddressY = TA_Clamp;
-        OutReadback.RawData = MoveTemp(RawData);
-        return OutReadback.IsValid();
+        return FWetClothingTextureReadbackUtils::TryCreateG8Readback(
+            MoveTemp(Values),
+            Resolution,
+            OutReadback,
+            OutError,
+            TEXT("Transparency material metallic payload"));
     }
 
     bool IsPayloadShapeValid(
         const EDWCTransparencyMaterialColorPayloadKind PayloadKind,
-        const FIntPoint LogicalResolution,
+        const FIntPoint SourceBakeResolution,
         const FWetClothingTextureReadback& TextureData)
     {
         const FIntPoint PhysicalResolution(TextureData.Width, TextureData.Height);
-        return TextureData.IsValid() && LogicalResolution.X > 0 && LogicalResolution.Y > 0 &&
+        return TextureData.IsValid() &&
+            SourceBakeResolution.X > 0 && SourceBakeResolution.Y > 0 &&
             (PayloadKind == EDWCTransparencyMaterialColorPayloadKind::ConstantColor
                 ? PhysicalResolution == FIntPoint(1, 1)
-                : PhysicalResolution == LogicalResolution);
+                : PhysicalResolution == SourceBakeResolution);
     }
 
     FLinearColor SamplePayload(
@@ -217,11 +200,11 @@ namespace
 
     bool ValidatePropertyShape(
         const FIntPoint& PhysicalResolution,
-        const int32 LogicalResolution,
+        const int32 SourceBakeResolution,
         EDWCTransparencyMaterialColorPayloadKind& OutKind)
     {
-        const FIntPoint LogicalSize(LogicalResolution, LogicalResolution);
-        if (PhysicalResolution == LogicalSize)
+        const FIntPoint SourceBakeSize(SourceBakeResolution, SourceBakeResolution);
+        if (PhysicalResolution == SourceBakeSize)
         {
             OutKind = EDWCTransparencyMaterialColorPayloadKind::Texture;
             return true;
@@ -237,7 +220,7 @@ namespace
     bool ExtractColorPayload(
         FBakeOutput& Output,
         const EMaterialProperty Property,
-        const int32 LogicalResolution,
+        const int32 SourceBakeResolution,
         const FColor& Fallback,
         const bool bRequired,
         FBakedMaterialColorPayload& OutPayload,
@@ -264,13 +247,14 @@ namespace
             return true;
         }
 
-        if (!ValidatePropertyShape(*PropertySize, LogicalResolution, OutPayload.Kind))
+        if (!ValidatePropertyShape(*PropertySize, SourceBakeResolution, OutPayload.Kind))
         {
             if (bRequired)
             {
                 OutError = FString::Printf(
                     TEXT("The engine MaterialBaking module returned an unsupported Base Color size %dx%d; expected %dx%d or a uniform 1x1 result."),
-                    PropertySize->X, PropertySize->Y, LogicalResolution, LogicalResolution);
+                    PropertySize->X, PropertySize->Y,
+                    SourceBakeResolution, SourceBakeResolution);
                 return false;
             }
             OutPayload.Kind = EDWCTransparencyMaterialColorPayloadKind::ConstantColor;
@@ -294,7 +278,7 @@ namespace
 
     bool ExtractMetallicPayload(
         FBakeOutput& Output,
-        const int32 LogicalResolution,
+        const int32 SourceBakeResolution,
         FBakedMaterialScalarPayload& OutPayload,
         bool& bOutPropertyAvailable)
     {
@@ -305,7 +289,7 @@ namespace
         if (PropertyPixels == nullptr || PropertySize == nullptr ||
             PropertySize->X <= 0 || PropertySize->Y <= 0 ||
             PropertyPixels->Num() != PropertySize->X * PropertySize->Y ||
-            !ValidatePropertyShape(*PropertySize, LogicalResolution, OutPayload.Kind))
+            !ValidatePropertyShape(*PropertySize, SourceBakeResolution, OutPayload.Kind))
         {
             OutPayload.Kind = EDWCTransparencyMaterialColorPayloadKind::ConstantColor;
             OutPayload.PhysicalResolution = FIntPoint(1, 1);
@@ -329,7 +313,7 @@ namespace
         const FTransform& BakeTransform,
         const int32 MaterialSlotIndex,
         const int32 SourceUVChannel,
-        const int32 Resolution,
+        const int32 SourceBakeResolution,
         FBakedMaterialSurfacePayload& OutPayload,
         FString& OutError)
     {
@@ -395,9 +379,10 @@ namespace
 
         FMaterialData MaterialData;
         MaterialData.Material = &Material;
-        MaterialData.PropertySizes.Add(MP_BaseColor, FIntPoint(Resolution, Resolution));
-        MaterialData.PropertySizes.Add(MP_Normal, FIntPoint(Resolution, Resolution));
-        MaterialData.PropertySizes.Add(MP_Metallic, FIntPoint(Resolution, Resolution));
+        const FIntPoint SourceBakeSize(SourceBakeResolution, SourceBakeResolution);
+        MaterialData.PropertySizes.Add(MP_BaseColor, SourceBakeSize);
+        MaterialData.PropertySizes.Add(MP_Normal, SourceBakeSize);
+        MaterialData.PropertySizes.Add(MP_Metallic, SourceBakeSize);
         MaterialData.bPerformBorderSmear = true;
         MaterialData.bPerformShrinking = false;
         MaterialData.BlendMode = BLEND_Opaque;
@@ -429,7 +414,7 @@ namespace
         FBakeOutput& Output = Outputs[0];
         bool bBaseColorAvailable = false;
         if (!ExtractColorPayload(
-                Output, MP_BaseColor, Resolution, FColor::Black, true,
+                Output, MP_BaseColor, SourceBakeResolution, FColor::Black, true,
                 OutPayload.BaseColor, bBaseColorAvailable, OutError))
         {
             return false;
@@ -440,14 +425,16 @@ namespace
             return false;
         }
         if (!ExtractColorPayload(
-                Output, MP_Normal, Resolution, FColor(128, 128, 255, 255), false,
+                Output, MP_Normal, SourceBakeResolution,
+                FColor(128, 128, 255, 255), false,
                 OutPayload.TangentNormal, OutPayload.bHasBakedNormalProperty, OutError))
         {
             return false;
         }
         OutPayload.TangentNormal.bSRGB = false;
         if (!ExtractMetallicPayload(
-                Output, Resolution, OutPayload.Metallic, OutPayload.bHasBakedMetallicProperty))
+                Output, SourceBakeResolution,
+                OutPayload.Metallic, OutPayload.bHasBakedMetallicProperty))
         {
             OutError = TEXT("Could not normalize the baked material Metallic payload.");
             return false;
@@ -456,27 +443,20 @@ namespace
     }
 }
 
-void FDWCTransparencyMaterialColorBakeCache::ConfigureResourceGovernor(
+void FDWCTransparencyMaterialColorBakeCache::ConfigureCacheBudget(
     UWetClothingAsset& Asset,
-    TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor,
-    const FGuid& SessionEpoch,
     const uint64 InCacheBudgetBytes)
 {
     check(IsInGameThread());
     Clear(&Asset);
     FSessionBudgetContext& Context = GSessionBudgetContexts.Add(FObjectKey(&Asset));
-    Context.ResourceGovernor = ResourceGovernor;
     Context.CacheBudgetBytes = FMath::Max<uint64>(InCacheBudgetBytes, 1);
-    Context.MemoryOwner.Key.Namespace = TEXT("DWC.TransparencyMaterialColorCache");
-    Context.MemoryOwner.SessionEpoch = SessionEpoch.IsValid() ? SessionEpoch : FGuid::NewGuid();
-    Context.MemoryOwner.OperationId = 1;
-    Context.MemoryOwner.Generation = 1;
 }
 
 bool FDWCTransparencyMaterialColorBakeKey::IsValid() const
 {
     return SourceMeshPath.IsValid() && MaterialSlotIndex != INDEX_NONE &&
-        SourceUVChannel >= 0 && LogicalResolution > 0 &&
+        SourceUVChannel >= 0 && SourceBakeResolution > 0 &&
         IdentityVersion == FDWCTransparencyMaterialSurfaceBakeIdentity::Version &&
         !CacheIdentity.IsEmpty() && !SourceMeshContentSignature.IsEmpty() &&
         !EffectiveMaterialSignature.IsEmpty() && !PlacementSignature.IsEmpty();
@@ -488,7 +468,8 @@ bool FDWCTransparencyMaterialColorBakeKey::operator==(
     return SourceMeshPath == Other.SourceMeshPath &&
         OwnerAssetPath == Other.OwnerAssetPath &&
         MaterialSlotIndex == Other.MaterialSlotIndex &&
-        SourceUVChannel == Other.SourceUVChannel && LogicalResolution == Other.LogicalResolution &&
+        SourceUVChannel == Other.SourceUVChannel &&
+        SourceBakeResolution == Other.SourceBakeResolution &&
         IdentityVersion == Other.IdentityVersion && CacheIdentity == Other.CacheIdentity &&
         SourceMeshContentSignature == Other.SourceMeshContentSignature &&
         EffectiveMaterialSignature == Other.EffectiveMaterialSignature &&
@@ -501,7 +482,7 @@ uint32 GetTypeHash(const FDWCTransparencyMaterialColorBakeKey& Key)
     Hash = HashCombineFast(Hash, GetTypeHash(Key.SourceMeshPath));
     Hash = HashCombineFast(Hash, GetTypeHash(Key.MaterialSlotIndex));
     Hash = HashCombineFast(Hash, GetTypeHash(Key.SourceUVChannel));
-    Hash = HashCombineFast(Hash, GetTypeHash(Key.LogicalResolution));
+    Hash = HashCombineFast(Hash, GetTypeHash(Key.SourceBakeResolution));
     Hash = HashCombineFast(Hash, GetTypeHash(Key.IdentityVersion));
     Hash = HashCombineFast(Hash, GetTypeHash(Key.CacheIdentity));
     Hash = HashCombineFast(Hash, GetTypeHash(Key.SourceMeshContentSignature));
@@ -511,14 +492,14 @@ uint32 GetTypeHash(const FDWCTransparencyMaterialColorBakeKey& Key)
 
 bool FDWCTransparencyMaterialColorBakeResult::InitializePayload(
     const EDWCTransparencyMaterialColorPayloadKind InPayloadKind,
-    const FIntPoint InLogicalResolution,
+    const FIntPoint InSourceBakeResolution,
     const FIntPoint InPhysicalResolution,
     TArray<FColor>&& InPixels,
     const bool bSRGB,
     FString& OutError)
 {
     OutError.Reset();
-    if (InLogicalResolution.X <= 0 || InLogicalResolution.Y <= 0 ||
+    if (InSourceBakeResolution.X <= 0 || InSourceBakeResolution.Y <= 0 ||
         InPhysicalResolution.X <= 0 || InPhysicalResolution.Y <= 0 ||
         InPixels.Num() != InPhysicalResolution.X * InPhysicalResolution.Y)
     {
@@ -533,31 +514,35 @@ bool FDWCTransparencyMaterialColorBakeResult::InitializePayload(
             return false;
         }
     }
-    else if (InPhysicalResolution != InLogicalResolution)
+    else if (InPhysicalResolution != InSourceBakeResolution)
     {
-        OutError = TEXT("A texture material color payload must match its logical resolution.");
+        OutError = TEXT("A texture material color payload must match its source bake resolution.");
         return false;
     }
 
     FWetClothingTextureReadback Readback;
-    if (!MakeReadback(MoveTemp(InPixels), InPhysicalResolution, bSRGB, Readback))
+    if (!MakeReadback(MoveTemp(InPixels), InPhysicalResolution, bSRGB, Readback, OutError))
     {
-        OutError = TEXT("Could not create an immutable material color payload.");
+        if (OutError.IsEmpty())
+        {
+            OutError = TEXT("Could not create an immutable material color payload.");
+        }
         return false;
     }
     return InitializePayloadFromReadback(
-        InPayloadKind, InLogicalResolution, MoveTemp(Readback), OutError);
+        InPayloadKind, InSourceBakeResolution, MoveTemp(Readback), OutError);
 }
 
 bool FDWCTransparencyMaterialColorBakeResult::InitializePayloadFromReadback(
     const EDWCTransparencyMaterialColorPayloadKind InPayloadKind,
-    const FIntPoint InLogicalResolution,
+    const FIntPoint InSourceBakeResolution,
     FWetClothingTextureReadback&& InTextureData,
     FString& OutError)
 {
     OutError.Reset();
     const FIntPoint ReadbackResolution(InTextureData.Width, InTextureData.Height);
-    if (InLogicalResolution.X <= 0 || InLogicalResolution.Y <= 0 || !InTextureData.IsValid())
+    if (InSourceBakeResolution.X <= 0 || InSourceBakeResolution.Y <= 0 ||
+        !InTextureData.IsValid())
     {
         OutError = TEXT("The cached material color payload is incomplete.");
         return false;
@@ -570,17 +555,17 @@ bool FDWCTransparencyMaterialColorBakeResult::InitializePayloadFromReadback(
             return false;
         }
     }
-    else if (ReadbackResolution != InLogicalResolution)
+    else if (ReadbackResolution != InSourceBakeResolution)
     {
-        OutError = TEXT("The cached texture material color payload does not match its logical resolution.");
+        OutError = TEXT("The cached texture material color payload does not match its source bake resolution.");
         return false;
     }
 
     PayloadKind = InPayloadKind;
-    LogicalResolution = InLogicalResolution;
+    SourceBakeResolution = InSourceBakeResolution;
     PhysicalResolution = ReadbackResolution;
     TextureData = MoveTemp(InTextureData);
-    AllocatedBytes = TextureData.RawData.IsValid() ? TextureData.RawData->GetAllocatedSize() : 0;
+    AllocatedBytes = TextureData.GetAllocatedBytes();
     return true;
 }
 
@@ -599,8 +584,8 @@ bool FDWCTransparencyMaterialColorBakeResult::InitializeSurfacePayloadFromReadba
         OutError = TEXT("A valid Base Color payload is required before adding material surface properties.");
         return false;
     }
-    if (!IsPayloadShapeValid(InNormalPayloadKind, LogicalResolution, InNormalTextureData) ||
-        !IsPayloadShapeValid(InMetallicPayloadKind, LogicalResolution, InMetallicTextureData))
+    if (!IsPayloadShapeValid(InNormalPayloadKind, SourceBakeResolution, InNormalTextureData) ||
+        !IsPayloadShapeValid(InMetallicPayloadKind, SourceBakeResolution, InMetallicTextureData))
     {
         OutError = TEXT("The cached material Normal or Metallic payload dimensions are incomplete.");
         return false;
@@ -615,30 +600,30 @@ bool FDWCTransparencyMaterialColorBakeResult::InitializeSurfacePayloadFromReadba
     bHasBakedNormalProperty = bInHasBakedNormalProperty;
     bHasBakedMetallicProperty = bInHasBakedMetallicProperty;
     AllocatedBytes =
-        (TextureData.RawData.IsValid() ? TextureData.RawData->GetAllocatedSize() : 0) +
-        (NormalTextureData.RawData.IsValid() ? NormalTextureData.RawData->GetAllocatedSize() : 0) +
-        (MetallicTextureData.RawData.IsValid() ? MetallicTextureData.RawData->GetAllocatedSize() : 0);
+        TextureData.GetAllocatedBytes() +
+        NormalTextureData.GetAllocatedBytes() +
+        MetallicTextureData.GetAllocatedBytes();
     return true;
 }
 
 bool FDWCTransparencyMaterialColorBakeResult::IsValid() const
 {
     if (!Key.IsValid() || !TextureData.IsValid() ||
-        LogicalResolution.X <= 0 || LogicalResolution.Y <= 0 ||
+        SourceBakeResolution.X <= 0 || SourceBakeResolution.Y <= 0 ||
         PhysicalResolution != FIntPoint(TextureData.Width, TextureData.Height))
     {
         return false;
     }
     return PayloadKind == EDWCTransparencyMaterialColorPayloadKind::ConstantColor
         ? PhysicalResolution == FIntPoint(1, 1)
-        : PhysicalResolution == LogicalResolution;
+        : PhysicalResolution == SourceBakeResolution;
 }
 
 bool FDWCTransparencyMaterialColorBakeResult::HasCompleteSurfacePayload() const
 {
     return IsValid() &&
-        IsPayloadShapeValid(NormalPayloadKind, LogicalResolution, NormalTextureData) &&
-        IsPayloadShapeValid(MetallicPayloadKind, LogicalResolution, MetallicTextureData);
+        IsPayloadShapeValid(NormalPayloadKind, SourceBakeResolution, NormalTextureData) &&
+        IsPayloadShapeValid(MetallicPayloadKind, SourceBakeResolution, MetallicTextureData);
 }
 
 FLinearColor FDWCTransparencyMaterialColorBakeResult::Sample(const FVector2D& UV) const
@@ -671,13 +656,42 @@ float FDWCTransparencyMaterialColorBakeResult::SampleMetallic(const FVector2D& U
         : 0.0f;
 }
 
+uint64 FDWCTransparencyMaterialColorBakeResult::GetImmediatelyReclaimableBytes() const
+{
+    const FWetClothingTextureReadback* Readbacks[] = {
+        &TextureData,
+        &NormalTextureData,
+        &MetallicTextureData};
+    uint64 ReclaimableBytes = 0;
+    TSet<const void*> CountedPayloads;
+    for (const FWetClothingTextureReadback* Readback : Readbacks)
+    {
+        const void* PayloadIdentity = Readback->GetPayloadIdentity();
+        if (PayloadIdentity == nullptr || CountedPayloads.Contains(PayloadIdentity))
+        {
+            continue;
+        }
+        CountedPayloads.Add(PayloadIdentity);
+        int32 InternalReferenceCount = 0;
+        for (const FWetClothingTextureReadback* Candidate : Readbacks)
+        {
+            InternalReferenceCount += Candidate->GetPayloadIdentity() == PayloadIdentity ? 1 : 0;
+        }
+        if (Readback->GetPayloadSharedReferenceCount() == InternalReferenceCount)
+        {
+            ReclaimableBytes += Readback->GetAllocatedBytes();
+        }
+    }
+    return ReclaimableBytes;
+}
+
 TSharedPtr<const FDWCTransparencyMaterialColorBakeResult>
 FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
     UWetClothingAsset& Asset,
     USkeletalMesh& SourceMesh,
     const int32 MaterialSlotIndex,
     const int32 SourceUVChannel,
-    const int32 Resolution,
+    const int32 SourceBakeResolution,
     FString& OutError)
 {
     check(IsInGameThread());
@@ -696,7 +710,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
 
     return ResolveOrBake(
         Asset, SourceMesh, *Material, FTransform::Identity, MaterialSlotIndex,
-        SourceUVChannel, Resolution, OutError);
+        SourceUVChannel, SourceBakeResolution, OutError);
 }
 
 TSharedPtr<const FDWCTransparencyMaterialColorBakeResult>
@@ -707,7 +721,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
     const FTransform& BakeTransform,
     const int32 MaterialSlotIndex,
     const int32 SourceUVChannel,
-    const int32 Resolution,
+    const int32 SourceBakeResolution,
     FString& OutError)
 {
     check(IsInGameThread());
@@ -723,11 +737,11 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
     Key.OwnerAssetPath = FSoftObjectPath(&Asset);
     Key.MaterialSlotIndex = MaterialSlotIndex;
     Key.SourceUVChannel = SourceUVChannel;
-    Key.LogicalResolution = Resolution;
+    Key.SourceBakeResolution = SourceBakeResolution;
     const FDWCTransparencyMaterialSurfaceBakeIdentity Identity =
         FDWCTransparencySignatureService::BuildMaterialSurfaceBakeIdentity(
             &SourceMesh, &EffectiveMaterial, BakeTransform, MaterialSlotIndex,
-            SourceUVChannel, Resolution);
+            SourceUVChannel, SourceBakeResolution);
     Key.IdentityVersion = FDWCTransparencyMaterialSurfaceBakeIdentity::Version;
     Key.CacheIdentity = Identity.Digest;
     Key.SourceMeshContentSignature = Identity.SourceMeshContentSignature;
@@ -745,7 +759,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
         UE_LOG(
             LogDWCTransparencyMaterialBake, VeryVerbose,
             TEXT("Reused resident source material color for '%s' slot %d UV%d at %d."),
-            *SourceMesh.GetName(), MaterialSlotIndex, SourceUVChannel, Resolution);
+            *SourceMesh.GetName(), MaterialSlotIndex, SourceUVChannel, SourceBakeResolution);
         return Existing->Result;
     }
 
@@ -757,7 +771,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
     UTexture2D* PersistentNormalTexture = nullptr;
     UTexture2D* PersistentMetallicTexture = nullptr;
     if (FDWCTransparencyTempAssetStore::FindCurrentSourceMaterialSurface(
-            Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, Resolution,
+            Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel, SourceBakeResolution,
             Identity, true, PersistentReference,
             PersistentBaseColorTexture, PersistentNormalTexture, PersistentMetallicTexture))
     {
@@ -792,7 +806,8 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
             }
             if (bBaseColorMetadataMatches && bNormalMetadataMatches && bMetallicMetadataMatches &&
                 Result->InitializePayloadFromReadback(
-                    BaseColorPayloadKind, FIntPoint(Resolution, Resolution),
+                    BaseColorPayloadKind,
+                    FIntPoint(SourceBakeResolution, SourceBakeResolution),
                     MoveTemp(PersistentBaseColorReadback), OutError) &&
                 Result->InitializeSurfacePayloadFromReadbacks(
                     PersistentReference.NormalPayloadKind, MoveTemp(PersistentNormalReadback),
@@ -803,8 +818,9 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
                 Result->bLoadedFromPersistentCache = true;
                 UE_LOG(
                     LogDWCTransparencyMaterialBake, Verbose,
-                    TEXT("Loaded persistent source material surface for '%s' slot %d UV%d (logical=%d, color=%dx%d, normal=%dx%d, metallic=%dx%d)."),
-                    *SourceMesh.GetName(), MaterialSlotIndex, SourceUVChannel, Resolution,
+                    TEXT("Loaded persistent source material surface for '%s' slot %d UV%d (sourceBake=%d, color=%dx%d, normal=%dx%d, metallic=%dx%d)."),
+                    *SourceMesh.GetName(), MaterialSlotIndex, SourceUVChannel,
+                    SourceBakeResolution,
                     Result->PhysicalResolution.X, Result->PhysicalResolution.Y,
                     Result->NormalPhysicalResolution.X, Result->NormalPhysicalResolution.Y,
                     Result->MetallicPhysicalResolution.X, Result->MetallicPhysicalResolution.Y);
@@ -818,7 +834,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
         FBakedMaterialSurfacePayload Payload;
         if (!BakeMaterialSurface(
                 SourceMesh, EffectiveMaterial, BakeTransform, MaterialSlotIndex, SourceUVChannel,
-                Resolution, Payload, OutError))
+                SourceBakeResolution, Payload, OutError))
         {
             return nullptr;
         }
@@ -827,7 +843,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
         UTexture2D* CommittedMetallicTexture = nullptr;
         if (!FDWCTransparencyTempAssetStore::CommitSourceMaterialSurface(
                 Asset, SourceMesh, MaterialSlotIndex, SourceUVChannel,
-                FIntPoint(Resolution, Resolution),
+                FIntPoint(SourceBakeResolution, SourceBakeResolution),
                 Payload.BaseColor.PhysicalResolution, Payload.BaseColor.Kind,
                 Payload.BaseColor.Pixels, Payload.BaseColor.bSRGB,
                 Payload.TangentNormal.PhysicalResolution, Payload.TangentNormal.Kind,
@@ -840,7 +856,9 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
             return nullptr;
         }
         if (!Result->InitializePayload(
-                Payload.BaseColor.Kind, FIntPoint(Resolution, Resolution), Payload.BaseColor.PhysicalResolution,
+                Payload.BaseColor.Kind,
+                FIntPoint(SourceBakeResolution, SourceBakeResolution),
+                Payload.BaseColor.PhysicalResolution,
                 MoveTemp(Payload.BaseColor.Pixels), Payload.BaseColor.bSRGB, OutError))
         {
             return nullptr;
@@ -849,10 +867,10 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
         FWetClothingTextureReadback MetallicReadback;
         if (!MakeReadback(
                 MoveTemp(Payload.TangentNormal.Pixels), Payload.TangentNormal.PhysicalResolution,
-                false, NormalReadback) ||
+                false, NormalReadback, OutError) ||
             !MakeG8Readback(
                 MoveTemp(Payload.Metallic.Values), Payload.Metallic.PhysicalResolution,
-                MetallicReadback) ||
+                MetallicReadback, OutError) ||
             !Result->InitializeSurfacePayloadFromReadbacks(
                 Payload.TangentNormal.Kind, MoveTemp(NormalReadback), Payload.bHasBakedNormalProperty,
                 Payload.Metallic.Kind, MoveTemp(MetallicReadback), Payload.bHasBakedMetallicProperty,
@@ -866,10 +884,10 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
         }
         UE_LOG(
             LogDWCTransparencyMaterialBake, Display,
-            TEXT("Baked source material surface for '%s' slot %d UV%d in %.1f ms (logical=%d, color=%dx%d, normal=%dx%d, metallic=%dx%d, normal=%s, metallic=%s, %llu bytes)."),
+            TEXT("Baked source material surface for '%s' slot %d UV%d in %.1f ms (sourceBake=%d, color=%dx%d, normal=%dx%d, metallic=%dx%d, normal=%s, metallic=%s, %llu bytes)."),
             *SourceMesh.GetName(), MaterialSlotIndex, SourceUVChannel,
             (FPlatformTime::Seconds() - BakeStartSeconds) * 1000.0,
-            Resolution,
+            SourceBakeResolution,
             Result->PhysicalResolution.X, Result->PhysicalResolution.Y,
             Result->NormalPhysicalResolution.X, Result->NormalPhysicalResolution.Y,
             Result->MetallicPhysicalResolution.X, Result->MetallicPhysicalResolution.Y,
@@ -881,53 +899,6 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
     const FSessionBudgetContext* SessionContext = GSessionBudgetContexts.Find(FObjectKey(&Asset));
     bool bRetainInCache =
         SessionContext == nullptr || Result->AllocatedBytes <= SessionContext->CacheBudgetBytes;
-    const TSharedPtr<FDWCEditorResourceGovernor> Governor =
-        SessionContext != nullptr ? SessionContext->ResourceGovernor.Pin() : nullptr;
-    if (SessionContext != nullptr && !Governor.IsValid())
-    {
-        bRetainInCache = false;
-    }
-    else if (Governor.IsValid())
-    {
-        if (bRetainInCache)
-        {
-            FDWCEditorResourceReservationRequest Request;
-            Request.Pool = EDWCEditorResourcePool::SharedCacheCPU;
-            Request.Bytes = FMath::Max<uint64>(Result->AllocatedBytes, 1);
-            Request.Owner = SessionContext->MemoryOwner;
-            Request.DebugName = TEXT("Transparency material color cache");
-            FDWCEditorMemoryLease Lease = Governor->TryAcquire(Request);
-            while (!Lease.IsValid() && !GMaterialColorCache.IsEmpty())
-            {
-                const FDWCTransparencyMaterialColorBakeKey* OldestKey = nullptr;
-                uint64 OldestSerial = MAX_uint64;
-                for (const TPair<FDWCTransparencyMaterialColorBakeKey, FCacheEntry>& Pair : GMaterialColorCache)
-                {
-                    if (Pair.Key.OwnerAssetPath == Key.OwnerAssetPath &&
-                        Pair.Value.LastUsedSerial < OldestSerial)
-                    {
-                        OldestKey = &Pair.Key;
-                        OldestSerial = Pair.Value.LastUsedSerial;
-                    }
-                }
-                if (OldestKey == nullptr)
-                {
-                    break;
-                }
-                const FDWCTransparencyMaterialColorBakeKey KeyToRemove = *OldestKey;
-                GMaterialColorCache.Remove(KeyToRemove);
-                Lease = Governor->TryAcquire(Request);
-            }
-            if (Lease.IsValid())
-            {
-                Result->MemoryLease = MakeShared<FDWCEditorMemoryLease, ESPMode::ThreadSafe>(MoveTemp(Lease));
-            }
-            else
-            {
-                bRetainInCache = false;
-            }
-        }
-    }
 
     if (bRetainInCache)
     {
@@ -954,6 +925,70 @@ void FDWCTransparencyMaterialColorBakeCache::InvalidateMesh(const USkeletalMesh*
             It.RemoveCurrent();
         }
     }
+}
+
+uint64 FDWCTransparencyMaterialColorBakeCache::GetReclaimableBytes(
+    const UWetClothingAsset* Asset)
+{
+    check(IsInGameThread());
+    if (Asset == nullptr)
+    {
+        return 0;
+    }
+
+    const FSoftObjectPath AssetPath(Asset);
+    uint64 ReclaimableBytes = 0;
+    for (const TPair<FDWCTransparencyMaterialColorBakeKey, FCacheEntry>& Pair : GMaterialColorCache)
+    {
+        if (Pair.Key.OwnerAssetPath == AssetPath && Pair.Value.Result.IsValid() &&
+            Pair.Value.Result.IsUnique())
+        {
+            ReclaimableBytes += Pair.Value.Result->AllocatedBytes;
+        }
+    }
+    return ReclaimableBytes;
+}
+
+uint64 FDWCTransparencyMaterialColorBakeCache::ReclaimUnleasedBytes(
+    const UWetClothingAsset* Asset,
+    const uint64 TargetBytes)
+{
+    check(IsInGameThread());
+    if (Asset == nullptr)
+    {
+        return 0;
+    }
+
+    const FSoftObjectPath AssetPath(Asset);
+    uint64 ReleasedReferenceBytes = 0;
+    uint64 ImmediatelyReclaimedBytes = 0;
+    while (ReleasedReferenceBytes < TargetBytes)
+    {
+        const FDWCTransparencyMaterialColorBakeKey* OldestKey = nullptr;
+        uint64 OldestSerial = MAX_uint64;
+        for (const TPair<FDWCTransparencyMaterialColorBakeKey, FCacheEntry>& Pair : GMaterialColorCache)
+        {
+            if (Pair.Key.OwnerAssetPath == AssetPath && Pair.Value.Result.IsValid() &&
+                Pair.Value.Result.IsUnique() && Pair.Value.LastUsedSerial < OldestSerial)
+            {
+                OldestKey = &Pair.Key;
+                OldestSerial = Pair.Value.LastUsedSerial;
+            }
+        }
+        if (OldestKey == nullptr)
+        {
+            break;
+        }
+        const FDWCTransparencyMaterialColorBakeKey KeyToRemove = *OldestKey;
+        if (const FCacheEntry* Entry = GMaterialColorCache.Find(KeyToRemove);
+            Entry != nullptr && Entry->Result.IsValid())
+        {
+            ReleasedReferenceBytes += Entry->Result->AllocatedBytes;
+            ImmediatelyReclaimedBytes += Entry->Result->GetImmediatelyReclaimableBytes();
+        }
+        GMaterialColorCache.Remove(KeyToRemove);
+    }
+    return ImmediatelyReclaimedBytes;
 }
 
 void FDWCTransparencyMaterialColorBakeCache::Clear()

@@ -12,6 +12,7 @@
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "UObject/ObjectKey.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorMemoryDiagnostics.h"
 #include "WetClothing/Foundation/UV/DWCUVGeometry.h"
 
 namespace WCAUVIslandViewCachePrivate
@@ -90,6 +91,61 @@ namespace WCAUVIslandViewCachePrivate
     TMap<FObjectKey, uint64>                                   GMeshRevisions;
     TMap<FObjectKey, uint64>                                   GAssetRevisions;
     uint64                                                     GGlobalRevision = 1;
+
+    void CollectUVIslandCacheMemory(TArray<FDWCEditorMemoryOwnerRecord>& OutOwners)
+    {
+        uint64 Bytes = GUVIslandCache.GetAllocatedSize() +
+            GMeshRevisions.GetAllocatedSize() +
+            GAssetRevisions.GetAllocatedSize();
+        int32 IslandCount = 0;
+        int32 TriangleCount = 0;
+        for (const TPair<FWCAUVIslandViewCacheKey, FWCAUVIslandViewCacheEntry>& Pair : GUVIslandCache)
+        {
+            Bytes += Pair.Value.Islands.GetAllocatedSize();
+            for (const TSharedPtr<FWetClothingAssetUVIsland>& Island : Pair.Value.Islands)
+            {
+                if (!Island.IsValid())
+                {
+                    continue;
+                }
+                Bytes += sizeof(FWetClothingAssetUVIsland) +
+                    Island->TriangleIDs.GetAllocatedSize() +
+                    Island->UVTriangles.GetAllocatedSize();
+                ++IslandCount;
+                TriangleCount += Island->UVTriangles.Num();
+            }
+        }
+
+        FDWCEditorMemoryOwnerRecord& Owner = OutOwners.AddDefaulted_GetRef();
+        Owner.Identifier = TEXT("WetPart.UVIslandViewCache");
+        Owner.Subsystem = TEXT("WetPart");
+        Owner.Resource = TEXT("UVIslandViewCache");
+        Owner.Category = EDWCEditorMemoryCategory::SharedCacheCPU;
+        Owner.Accounting = EDWCEditorMemoryAccounting::Resident;
+        Owner.CurrentBytes = Bytes;
+        Owner.EntryCount = GUVIslandCache.Num();
+        Owner.Context = FString::Printf(
+            TEXT("islands=%d; triangles=%d; meshRevisions=%d; assetRevisions=%d"),
+            IslandCount,
+            TriangleCount,
+            GMeshRevisions.Num(),
+            GAssetRevisions.Num());
+    }
+
+    struct FUVIslandCacheMemoryDiagnosticRegistration
+    {
+        FUVIslandCacheMemoryDiagnosticRegistration()
+        {
+            FDWCEditorMemoryDiagnostics::RegisterCollector(
+                TEXT("WetPartUVIslandViewCache"),
+                &CollectUVIslandCacheMemory);
+        }
+
+        ~FUVIslandCacheMemoryDiagnosticRegistration()
+        {
+            FDWCEditorMemoryDiagnostics::UnregisterCollector(TEXT("WetPartUVIslandViewCache"));
+        }
+    } GUVIslandCacheMemoryDiagnosticRegistration;
 
     uint64 GetMeshRevision(const USkeletalMesh* Mesh)
     {
@@ -177,6 +233,76 @@ bool FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
     MoveBuiltIslandsToEntry(MoveTemp(BuiltIslands), NewEntry);
     CopyCachedIslands(NewEntry, OutIslands);
     GUVIslandCache.Add(Key, MoveTemp(NewEntry));
+    return true;
+}
+
+bool FWCAUVIslandViewCache::BuildMaterialSlotUVIslandsUncached(
+    const UWetClothingAsset*                       WetClothingAsset,
+    const int32                                    LODIndex,
+    const int32                                    UVChannelIndex,
+    const int32                                    MaterialSlotIndex,
+    TArray<TSharedPtr<FWetClothingAssetUVIsland>>& OutIslands,
+    FString*                                       OutErrorMessage)
+{
+    OutIslands.Reset();
+    if (WetClothingAsset == nullptr)
+    {
+        FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, TEXT("No Wet Clothing Asset is assigned."));
+        return false;
+    }
+
+    const USkeletalMesh* AnalysisMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
+    if (AnalysisMesh == nullptr)
+    {
+        AnalysisMesh = WetClothingAsset->GetSourceSkeletalMesh();
+    }
+    if (AnalysisMesh == nullptr)
+    {
+        FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, TEXT("No mesh is available for UV island analysis."));
+        return false;
+    }
+
+    const int32 OriginalUVChannelIndex = WetClothingAsset->GetOriginalUVChannelIndex();
+    const FDWCEditorUVTopologyData* Topology = WetClothingAsset->FindOriginalUVTopologyForLOD(LODIndex);
+    const bool bUseStoredTopology =
+        Topology != nullptr && Topology->bIsValid &&
+        Topology->UVChannelIndex == OriginalUVChannelIndex &&
+        UVChannelIndex == OriginalUVChannelIndex &&
+        Topology->GeneratorVersion == DWCGeneratedDataVersion::OriginalUVTopology &&
+        !Topology->BuildSignature.IsEmpty() && !Topology->Islands.IsEmpty();
+
+    TArray<FWetClothingAssetUVIsland> BuiltIslands;
+    bool bBuilt = false;
+    if (bUseStoredTopology)
+    {
+        bBuilt = FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslandsFromTopology(
+            AnalysisMesh,
+            LODIndex,
+            UVChannelIndex,
+            MaterialSlotIndex,
+            Topology->Islands,
+            BuiltIslands,
+            OutErrorMessage);
+    }
+    if (!bBuilt)
+    {
+        BuiltIslands.Reset();
+        bBuilt = FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
+            AnalysisMesh,
+            LODIndex,
+            UVChannelIndex,
+            MaterialSlotIndex,
+            BuiltIslands,
+            OutErrorMessage);
+    }
+    if (!bBuilt)
+    {
+        return false;
+    }
+
+    FWCAUVIslandViewCacheEntry Entry;
+    MoveBuiltIslandsToEntry(MoveTemp(BuiltIslands), Entry);
+    OutIslands = MoveTemp(Entry.Islands);
     return true;
 }
 

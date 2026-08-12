@@ -23,6 +23,7 @@ namespace
         Map.BuildSignature = TEXT("Final");
         Map.bContainsColorRGB = true;
         Map.bContainsTransparencyAlpha = true;
+        Map.Resolution = 4;
         return Map;
     }
 }
@@ -42,6 +43,8 @@ bool FDWCTransparencyRuntimeBindingContractTest::RunTest(const FString&)
         FDWCTransparencyRuntimeContract::Resolve(&Map);
     TestEqual(TEXT("Manual-color runtime binds the final transparency map."),
         Binding.TransparencyMap, Transparency);
+    TestEqual(TEXT("Runtime exposes the validated resolved output resolution."),
+        Binding.ResolvedOutputResolution, 4);
     TestNull(TEXT("Reveal Normal is optional for a manual-color runtime map."),
         Binding.RevealNormalMap);
 
@@ -78,6 +81,20 @@ bool FDWCTransparencyRuntimeBindingContractTest::RunTest(const FString&)
     Binding = FDWCTransparencyRuntimeContract::Resolve(&Map);
     TestNull(TEXT("An incomplete Reveal Normal payload is never bound."),
         Binding.RevealNormalMap);
+
+    Map.bSourceCoverageBakedIntoRevealNormal = true;
+    Map.RevealNormalMap = UTexture2D::CreateTransient(8, 8, PF_B8G8R8A8);
+    Binding = FDWCTransparencyRuntimeContract::Resolve(&Map);
+    TestEqual(TEXT("A Reveal Normal dimension mismatch preserves transparency."),
+        Binding.TransparencyMap, Transparency);
+    TestNull(TEXT("A Reveal Normal dimension mismatch is not bound."),
+        Binding.RevealNormalMap);
+
+    Map.Resolution = 8;
+    Binding = FDWCTransparencyRuntimeContract::Resolve(&Map);
+    TestNull(TEXT("A final transparency dimension mismatch rejects the binding."),
+        Binding.TransparencyMap);
+    Map.Resolution = 4;
 
     Map.BuildSignature.Reset();
     Binding = FDWCTransparencyRuntimeContract::Resolve(&Map);

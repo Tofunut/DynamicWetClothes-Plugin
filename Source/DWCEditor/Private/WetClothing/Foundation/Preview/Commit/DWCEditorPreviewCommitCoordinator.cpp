@@ -154,6 +154,31 @@ EDWCEditorPreviewCommitResult FDWCEditorPreviewCommitCoordinator::CommitNormalBG
         : EDWCEditorPreviewCommitResult::WorkspaceRejected);
 }
 
+EDWCEditorPreviewCommitResult FDWCEditorPreviewCommitCoordinator::InitializeNormalBGRA8(
+    const FDWCEditorPreviewCommitContext& Context,
+    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureDescriptor& Descriptor,
+    const bool bWithCoverage,
+    FDWCEditorTextureLease& OutLease,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    OutLease.Reset();
+    const EDWCEditorPreviewCommitResult Validation = Validate(Context);
+    if (Validation != EDWCEditorPreviewCommitResult::Applied)
+    {
+        return RecordResult(Validation);
+    }
+
+    OutLease = TextureWorkspace->InitializeNormalBGRA8AndAcquireLease(
+        Key,
+        Descriptor,
+        bWithCoverage,
+        Priority);
+    return RecordResult(OutLease.IsValid()
+        ? EDWCEditorPreviewCommitResult::Applied
+        : EDWCEditorPreviewCommitResult::WorkspaceRejected);
+}
+
 EDWCEditorPreviewCommitResult FDWCEditorPreviewCommitCoordinator::CommitBGRA8Regions(
     const FDWCEditorPreviewCommitContext& Context,
     const FDWCEditorTextureLease& Lease,

@@ -6,7 +6,7 @@
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionEvaluator.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionRegistry.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildPlanResolver.h"
-#include "WetClothing/WCAEditor/WCAValidationReport.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationSnapshot.h"
 
 namespace
 {
@@ -165,49 +165,6 @@ bool FDWCEditorBuildPlanOrderingTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FDWCEditorValidationBuildActionMappingTest,
-    "DWC.Editor.Foundation.Build.ValidationFixMapping",
-    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FDWCEditorValidationBuildActionMappingTest::RunTest(const FString& Parameters)
-{
-    struct FExpectedMapping
-    {
-        EWCAValidationFixKind FixKind;
-        EDWCEditorBuildAction Action;
-    };
-    const FExpectedMapping Expected[] = {
-        {EWCAValidationFixKind::Save, EDWCEditorBuildAction::SaveAsset},
-        {EWCAValidationFixKind::InitializeDataUV, EDWCEditorBuildAction::InitializeDataUV},
-        {EWCAValidationFixKind::PrepareRuntimeData, EDWCEditorBuildAction::BuildCPURuntimeData},
-        {EWCAValidationFixKind::BakeGPUMaps, EDWCEditorBuildAction::BuildGPURuntimeData},
-        {EWCAValidationFixKind::BakeRenderProfileData, EDWCEditorBuildAction::BakeRenderProfileData},
-        {EWCAValidationFixKind::GenerateMaterials, EDWCEditorBuildAction::GenerateMaterials},
-        {EWCAValidationFixKind::BakeWrinkleMaps, EDWCEditorBuildAction::BakeWrinkleTextures},
-        {EWCAValidationFixKind::BakeTransparencyMaps, EDWCEditorBuildAction::BakeTransparencyTextures},
-        {EWCAValidationFixKind::RebakeAffectedTransparencyMaps,
-            EDWCEditorBuildAction::RebakeAffectedTransparencyMaps}
-    };
-
-    for (const FExpectedMapping& Mapping : Expected)
-    {
-        const TOptional<EDWCEditorBuildAction> Action =
-            GetBuildActionForValidationFix(Mapping.FixKind);
-        TestTrue(TEXT("Automatic validation fix has a common build action"), Action.IsSet());
-        if (Action.IsSet())
-        {
-            TestEqual(TEXT("Validation fix maps to the expected common action"),
-                Action.GetValue(), Mapping.Action);
-        }
-    }
-    TestFalse(TEXT("Manual validation issues are not dispatched automatically"),
-        GetBuildActionForValidationFix(EWCAValidationFixKind::Manual).IsSet());
-    TestFalse(TEXT("Informational validation issues have no build action"),
-        GetBuildActionForValidationFix(EWCAValidationFixKind::None).IsSet());
-    return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorBuildFailedPrerequisiteRetryTest,
     "DWC.Editor.Foundation.Build.FailedPrerequisiteRetry",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -258,6 +215,94 @@ bool FDWCEditorBuildAffectedTransparencySelectionTest::RunTest(const FString& Pa
         Affected->State, EDWCEditorBuildActionState::Required);
     TestEqual(TEXT("Affected slot metadata is retained"), Affected->MaterialSlotIndices.Num(), 1);
     TestEqual(TEXT("Affected layer metadata is retained"), Affected->LayerGuids.Num(), 1);
+
+    Input.bTransparencyTargetStateProvided = true;
+    Input.TransparencyLayerGuids = {FGuid::NewGuid()};
+    const FDWCEditorBuildStatusSnapshot MixedSnapshot =
+        FDWCEditorBuildActionEvaluator::Evaluate(Input);
+    TestEqual(TEXT("Canonical mixed targets retain the required full bake"),
+        MixedSnapshot.Find(EDWCEditorBuildAction::BakeTransparencyTextures)->State,
+        EDWCEditorBuildActionState::Required);
+    TestEqual(TEXT("Canonical mixed targets retain the affected-only rebake"),
+        MixedSnapshot.Find(EDWCEditorBuildAction::RebakeAffectedTransparencyMaps)->State,
+        EDWCEditorBuildActionState::Required);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorValidationSuggestedPlanTest,
+    "DWC.Editor.Foundation.Build.ValidationSuggestedPlan",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorValidationSuggestedPlanTest::RunTest(const FString& Parameters)
+{
+    FDWCEditorBuildEvaluationInput Input = MakeReadyInput();
+    Input.bAssetDirty = true;
+    // Exercise reconciliation: validation is authoritative for this request even
+    // when the independently captured service status has not observed the change yet.
+    Input.WrinkleTexturesState = EDWCEditorBuildActionState::UpToDate;
+    Input.TransparencyTexturesState = EDWCEditorBuildActionState::UpToDate;
+    Input.WrinkleMaterialSlotIndices = {14};
+    const FGuid LayerGuid = FGuid::NewGuid();
+    Input.TransparencyMaterialSlotIndices = {14};
+    Input.TransparencyLayerGuids = {LayerGuid};
+    const FDWCEditorBuildStatusSnapshot BuildSnapshot =
+        FDWCEditorBuildActionEvaluator::Evaluate(Input);
+
+    FWCAEditorValidationSnapshot ValidationSnapshot;
+    FDWCEditorValidationDiagnostic& Wrinkle = ValidationSnapshot.Diagnostics.AddDefaulted_GetRef();
+    Wrinkle.Code = TEXT("Wrinkle.Output.Stale");
+    Wrinkle.Target.Domain = EDWCEditorValidationDomain::Wrinkle;
+    Wrinkle.Target.MaterialSlotIndex = 14;
+    Wrinkle.Remediation = EDWCEditorValidationRemediation::BuildAction;
+    Wrinkle.SuggestedAction = EDWCEditorBuildAction::BakeWrinkleTextures;
+    FDWCEditorValidationActionState& WrinkleAction = ValidationSnapshot.Actions.Add(
+        EDWCEditorBuildAction::BakeWrinkleTextures);
+    WrinkleAction.Action = EDWCEditorBuildAction::BakeWrinkleTextures;
+    WrinkleAction.State = EDWCEditorBuildActionState::Required;
+    WrinkleAction.Targets.Add(Wrinkle.Target);
+
+    FDWCEditorValidationDiagnostic& Transparency = ValidationSnapshot.Diagnostics.AddDefaulted_GetRef();
+    Transparency.Code = TEXT("Transparency.Output.Stale");
+    Transparency.Target.Domain = EDWCEditorValidationDomain::Transparency;
+    Transparency.Target.MaterialSlotIndex = 14;
+    Transparency.Target.LayerGuid = LayerGuid;
+    Transparency.Remediation = EDWCEditorValidationRemediation::BuildAction;
+    Transparency.SuggestedAction = EDWCEditorBuildAction::BakeTransparencyTextures;
+    FDWCEditorValidationActionState& TransparencyAction = ValidationSnapshot.Actions.Add(
+        EDWCEditorBuildAction::BakeTransparencyTextures);
+    TransparencyAction.Action = EDWCEditorBuildAction::BakeTransparencyTextures;
+    TransparencyAction.State = EDWCEditorBuildActionState::Required;
+    TransparencyAction.Targets.Add(Transparency.Target);
+
+    FDWCEditorValidationDiagnostic& Manual = ValidationSnapshot.Diagnostics.AddDefaulted_GetRef();
+    Manual.Code = TEXT("WetPart.Input.Invalid");
+    Manual.Target.Domain = EDWCEditorValidationDomain::WetPart;
+    Manual.Remediation = EDWCEditorValidationRemediation::Manual;
+
+    const FDWCEditorBuildPlan Plan =
+        FDWCEditorBuildPlanResolver::ResolveValidationSuggested(BuildSnapshot, ValidationSnapshot);
+    TestTrue(TEXT("Validation-suggested plan is executable"), Plan.IsExecutable());
+    TestEqual(TEXT("Plan records its request policy"),
+        Plan.Policy, EDWCEditorBuildPlanPolicy::ValidationSuggested);
+    TestTrue(TEXT("Manual diagnostics are retained outside automatic steps"),
+        Plan.ManualDiagnosticCodes.Contains(Manual.Code));
+    TestTrue(TEXT("Wrinkle action is selected"),
+        FindStep(Plan, EDWCEditorBuildAction::BakeWrinkleTextures) != INDEX_NONE);
+    TestTrue(TEXT("Transparency action is selected"),
+        FindStep(Plan, EDWCEditorBuildAction::BakeTransparencyTextures) != INDEX_NONE);
+    TestTrue(TEXT("Wrinkle precedes transparency when both are selected"),
+        FindStep(Plan, EDWCEditorBuildAction::BakeWrinkleTextures) <
+        FindStep(Plan, EDWCEditorBuildAction::BakeTransparencyTextures));
+
+    const FDWCEditorBuildPlanStep& TransparencyStep = Plan.Steps[
+        FindStep(Plan, EDWCEditorBuildAction::BakeTransparencyTextures)];
+    TestTrue(TEXT("Material-slot target is retained"),
+        TransparencyStep.MaterialSlotIndices.Contains(14));
+    TestTrue(TEXT("Layer target is retained"),
+        TransparencyStep.LayerGuids.Contains(LayerGuid));
+    TestTrue(TEXT("Diagnostic provenance is retained"),
+        TransparencyStep.SourceDiagnosticCodes.Contains(Transparency.Code));
     return true;
 }
 

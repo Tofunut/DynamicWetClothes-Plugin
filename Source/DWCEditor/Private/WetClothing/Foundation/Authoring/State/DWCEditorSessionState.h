@@ -196,6 +196,8 @@ struct FDWCEditorTransparencySessionState
         RevealPaint.Strength = 1.0f;
     }
 
+    /** Selected target slot exists independently from an authored transparency layer. */
+    int32 SelectedMaterialSlotIndex = INDEX_NONE;
     FGuid SelectedLayerGuid;
     FDWCTransparencyEditContext EditContext;
     TMap<FGuid, EDWCTransparencyEditorStage> StageByLayer;

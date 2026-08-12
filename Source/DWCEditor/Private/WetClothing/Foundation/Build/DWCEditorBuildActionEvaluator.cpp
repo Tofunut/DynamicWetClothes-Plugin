@@ -135,14 +135,26 @@ FDWCEditorBuildEvaluationInput FDWCEditorBuildActionEvaluator::CaptureAssetState
     ServiceState.bHasValidDataUV = Asset.HasValidDataUVForLOD(Asset.GetSimulationLODIndex());
     ServiceState.bCPUBackendEnabled = Setup.bBuildCPUVertexSimulationData;
     ServiceState.bGPUBackendEnabled = Setup.bBuildGPUWetnessMapSimulationData;
-    ServiceState.bHasWrinkleContent = Asset.HasWrinkleBakeContent();
-    ServiceState.bHasTransparencyContent = Asset.HasTransparencyBakeContent();
+    if (!ServiceState.bWrinkleTargetStateProvided)
+    {
+        ServiceState.bHasWrinkleContent = Asset.HasWrinkleBakeContent();
+    }
+    if (!ServiceState.bTransparencyTargetStateProvided)
+    {
+        ServiceState.bHasTransparencyContent = Asset.HasTransparencyBakeContent();
+    }
     ServiceState.DataUVState = ConvertBakeStatus(BakeState.GeneratedDataUV);
     ServiceState.CPURuntimeDataState = ConvertBakeStatus(BakeState.CPURuntimeData);
     ServiceState.GPURuntimeDataState = ConvertBakeStatus(BakeState.GPURuntimeData);
     ServiceState.GPUMapsState = ConvertBakeStatus(BakeState.GPUMaps);
-    ServiceState.WrinkleTexturesState = ConvertBakeStatus(BakeState.WrinkleMaps);
-    ServiceState.TransparencyTexturesState = ConvertBakeStatus(BakeState.TransparencyMaps);
+    if (!ServiceState.bWrinkleTargetStateProvided)
+    {
+        ServiceState.WrinkleTexturesState = ConvertBakeStatus(BakeState.WrinkleMaps);
+    }
+    if (!ServiceState.bTransparencyTargetStateProvided)
+    {
+        ServiceState.TransparencyTexturesState = ConvertBakeStatus(BakeState.TransparencyMaps);
+    }
     ServiceState.SurfaceMode = SurfaceMode;
     return ServiceState;
 }
@@ -195,13 +207,26 @@ FDWCEditorBuildStatusSnapshot FDWCEditorBuildActionEvaluator::Evaluate(
 
     AddStatus(Snapshot, EDWCEditorBuildAction::BakeWrinkleTextures,
         Input.bHasWrinkleContent ? Input.WrinkleTexturesState : EDWCEditorBuildActionState::Unavailable,
-        Input.bHasWrinkleContent ? FString() : TEXT("No authored wrinkle content is available."));
+        Input.bHasWrinkleContent ? Input.WrinkleTexturesReason : TEXT("No authored wrinkle content is available."));
     AddStatus(Snapshot, EDWCEditorBuildAction::BakeTransparencyTextures,
         Input.bHasTransparencyContent ? Input.TransparencyTexturesState : EDWCEditorBuildActionState::Unavailable,
-        Input.bHasTransparencyContent ? FString() : TEXT("No authored transparency content is available."));
+        Input.bHasTransparencyContent ? Input.TransparencyTexturesReason : TEXT("No authored transparency content is available."));
     AddStatus(Snapshot, EDWCEditorBuildAction::RebakeAffectedTransparencyMaps,
         Input.bHasTransparencyContent ? Input.AffectedTransparencyState : EDWCEditorBuildActionState::Unavailable,
         Input.bHasTransparencyContent ? Input.AffectedTransparencyReason : TEXT("No authored transparency content is available."));
+
+    if (FDWCEditorBuildActionStatus* Full = Snapshot.Actions.Find(
+            EDWCEditorBuildAction::BakeTransparencyTextures))
+    {
+        Full->MaterialSlotIndices = Input.TransparencyMaterialSlotIndices;
+        Full->LayerGuids = Input.TransparencyLayerGuids;
+    }
+
+    if (FDWCEditorBuildActionStatus* Wrinkle = Snapshot.Actions.Find(
+            EDWCEditorBuildAction::BakeWrinkleTextures))
+    {
+        Wrinkle->MaterialSlotIndices = Input.WrinkleMaterialSlotIndices;
+    }
 
     if (FDWCEditorBuildActionStatus* Affected = Snapshot.Actions.Find(
             EDWCEditorBuildAction::RebakeAffectedTransparencyMaps))
@@ -212,8 +237,12 @@ FDWCEditorBuildStatusSnapshot FDWCEditorBuildActionEvaluator::Evaluate(
         {
             FDWCEditorBuildActionStatus& Full = Snapshot.Actions.FindChecked(
                 EDWCEditorBuildAction::BakeTransparencyTextures);
-            Full.State = EDWCEditorBuildActionState::UpToDate;
-            Full.Reason = TEXT("All stale transparency outputs are covered by the affected rebake action.");
+            if (!Input.bTransparencyTargetStateProvided ||
+                Full.State == EDWCEditorBuildActionState::UpToDate)
+            {
+                Full.State = EDWCEditorBuildActionState::UpToDate;
+                Full.Reason = TEXT("All stale transparency outputs are covered by the affected rebake action.");
+            }
         }
     }
 

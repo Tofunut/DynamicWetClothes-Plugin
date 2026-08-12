@@ -34,6 +34,10 @@ class FDWCEditorTextureWorkspace final : public FGCObject
     FDWCEditorTextureHandle Acquire(
         const FDWCEditorTextureKey& Key,
         const FDWCEditorTextureDescriptor& Descriptor);
+    /** Acquires an existing retained entry without allocating a miss. */
+    FDWCEditorTextureLease AcquireExistingLease(
+        const FDWCEditorTextureKey& Key,
+        const FDWCEditorTextureDescriptor& Descriptor);
     FDWCEditorTextureLease AcquireLease(const FDWCEditorTextureHandle& Entry);
     FDWCEditorTextureLease TransferBGRA8AndAcquireLease(
         const FDWCEditorTextureKey& Key,
@@ -46,10 +50,21 @@ class FDWCEditorTextureWorkspace final : public FGCObject
         TArray<FColor>&& Pixels,
         FDWCEditorNormalRasterSurface&& WorkingSurface,
         EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+    /** Initializes a neutral normal preview directly in workspace-owned storage. */
+    FDWCEditorTextureLease InitializeNormalBGRA8AndAcquireLease(
+        const FDWCEditorTextureKey& Key,
+        const FDWCEditorTextureDescriptor& Descriptor,
+        bool bWithCoverage,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
     FDWCEditorTextureLease TransferG8AndAcquireLease(
         const FDWCEditorTextureKey& Key,
         const FDWCEditorTextureDescriptor& Descriptor,
         TArray<uint8>&& Pixels,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+    FDWCEditorTextureLease TransferR32FAndAcquireLease(
+        const FDWCEditorTextureKey& Key,
+        const FDWCEditorTextureDescriptor& Descriptor,
+        TArray<float>&& Pixels,
         EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
     FDWCEditorTextureHandle PublishBGRA8(
         const FDWCEditorTextureKey& Key,
@@ -66,6 +81,11 @@ class FDWCEditorTextureWorkspace final : public FGCObject
         const FDWCEditorTextureKey& Key,
         const FDWCEditorTextureDescriptor& Descriptor,
         TArray<uint8>&& Pixels,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+    FDWCEditorTextureHandle PublishR32F(
+        const FDWCEditorTextureKey& Key,
+        const FDWCEditorTextureDescriptor& Descriptor,
+        TArray<float>&& Pixels,
         EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
     FDWCEditorPreviewRegionCommitOutcome CommitBGRA8Regions(
         const FDWCEditorTextureLease& Lease,
@@ -119,6 +139,12 @@ class FDWCEditorTextureWorkspace final : public FGCObject
     void InvalidateOwner(const UObject* Owner);
     void Reset();
     void TrimToBudget();
+    uint64 GetReclaimableCPUBytes() const;
+    uint64 GetReclaimableGPUBytes() const;
+    uint64 ReclaimUnleasedCPUBytes(uint64 TargetBytes, uint64* OutRetiringGPUBytes = nullptr);
+    uint64 RetireUnleasedGPUBytes(uint64 TargetBytes);
+    uint64 RetireUnleasedPurposes(TConstArrayView<EDWCEditorTexturePurpose> Purposes);
+    void GetGPUResidencySnapshot(TArray<FDWCEditorTextureGPUResidencyRecord>& OutRecords) const;
     /** Polls render fences and releases transient UTexture2D references after GPU retire completes. */
     void ProcessRetiredGPUResources();
 

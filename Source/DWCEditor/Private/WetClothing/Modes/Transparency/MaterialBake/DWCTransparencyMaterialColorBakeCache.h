@@ -3,7 +3,6 @@
 
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingTransparencyData.h"
-#include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
 
 class UMaterialInterface;
@@ -16,7 +15,7 @@ struct FDWCTransparencyMaterialColorBakeKey
     FSoftObjectPath SourceMeshPath;
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 SourceUVChannel = 0;
-    int32 LogicalResolution = 0;
+    int32 SourceBakeResolution = 0;
     int32 IdentityVersion = 0;
     FString CacheIdentity;
     FString SourceMeshContentSignature;
@@ -38,7 +37,7 @@ struct FDWCTransparencyMaterialColorBakeResult
     FDWCTransparencyMaterialColorBakeKey Key;
     EDWCTransparencyMaterialColorPayloadKind PayloadKind =
         EDWCTransparencyMaterialColorPayloadKind::Texture;
-    FIntPoint LogicalResolution = FIntPoint::ZeroValue;
+    FIntPoint SourceBakeResolution = FIntPoint::ZeroValue;
     FIntPoint PhysicalResolution = FIntPoint::ZeroValue;
     FWetClothingTextureReadback TextureData;
     EDWCTransparencyMaterialColorPayloadKind NormalPayloadKind =
@@ -51,20 +50,20 @@ struct FDWCTransparencyMaterialColorBakeResult
     FWetClothingTextureReadback MetallicTextureData;
     bool bHasBakedNormalProperty = false;
     bool bHasBakedMetallicProperty = false;
+    /** Referenced immutable payload bytes. Ownership and accounting live in each readback payload. */
     uint64 AllocatedBytes = 0;
     bool bLoadedFromPersistentCache = false;
-    TSharedPtr<FDWCEditorMemoryLease, ESPMode::ThreadSafe> MemoryLease;
 
     bool InitializePayload(
         EDWCTransparencyMaterialColorPayloadKind InPayloadKind,
-        FIntPoint InLogicalResolution,
+        FIntPoint InSourceBakeResolution,
         FIntPoint InPhysicalResolution,
         TArray<FColor>&& InPixels,
         bool bSRGB,
         FString& OutError);
     bool InitializePayloadFromReadback(
         EDWCTransparencyMaterialColorPayloadKind InPayloadKind,
-        FIntPoint InLogicalResolution,
+        FIntPoint InSourceBakeResolution,
         FWetClothingTextureReadback&& InTextureData,
         FString& OutError);
     bool InitializeSurfacePayloadFromReadbacks(
@@ -80,6 +79,7 @@ struct FDWCTransparencyMaterialColorBakeResult
     FLinearColor Sample(const FVector2D& UV) const;
     FVector3f SampleTangentNormal(const FVector2D& UV) const;
     float SampleMetallic(const FVector2D& UV) const;
+    uint64 GetImmediatelyReclaimableBytes() const;
 };
 
 /**
@@ -90,17 +90,15 @@ struct FDWCTransparencyMaterialColorBakeResult
 class FDWCTransparencyMaterialColorBakeCache
 {
   public:
-    static void ConfigureResourceGovernor(
+    static void ConfigureCacheBudget(
         UWetClothingAsset& Asset,
-        TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor,
-        const FGuid& SessionEpoch,
         uint64 InCacheBudgetBytes);
     static TSharedPtr<const FDWCTransparencyMaterialColorBakeResult> ResolveOrBake(
         UWetClothingAsset& Asset,
         USkeletalMesh& SourceMesh,
         int32 MaterialSlotIndex,
         int32 SourceUVChannel,
-        int32 Resolution,
+        int32 SourceBakeResolution,
         FString& OutError);
 
     /** Uses the effective component material and placement captured by a source provider. */
@@ -111,10 +109,12 @@ class FDWCTransparencyMaterialColorBakeCache
         const FTransform& BakeTransform,
         int32 MaterialSlotIndex,
         int32 SourceUVChannel,
-        int32 Resolution,
+        int32 SourceBakeResolution,
         FString& OutError);
 
     static void InvalidateMesh(const USkeletalMesh* SourceMesh);
+    static uint64 GetReclaimableBytes(const UWetClothingAsset* Asset);
+    static uint64 ReclaimUnleasedBytes(const UWetClothingAsset* Asset, uint64 TargetBytes);
     static void Clear();
     static void Clear(const UWetClothingAsset* Asset);
 };

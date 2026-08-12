@@ -46,13 +46,6 @@ bool FDWCEditorCacheStore::Put(
     check(IsInGameThread());
     CleanupRetiredEntries();
 
-    if (const TSharedPtr<FDWCEditorCacheEntry>* Existing = Entries.Find(Key))
-    {
-        TrackRetiredEntry(*Existing);
-        UsedBytes -= (*Existing)->ResidentBytes;
-        Entries.Remove(Key);
-    }
-
     TSharedPtr<FDWCEditorCacheEntry> Entry = MakeShared<FDWCEditorCacheEntry>();
     Entry->Value = Value;
     Entry->PayloadBytes = Value->GetAllocatedSizeBytes();
@@ -62,10 +55,24 @@ bool FDWCEditorCacheStore::Put(
         static_cast<uint64>(Key.Signature.GetAllocatedSize()) +
         Entry->PayloadBytes;
 
-    while (GetTrackedBytes() + Entry->ResidentBytes > BudgetBytes && EvictOldestUnleased())
+    const TSharedPtr<FDWCEditorCacheEntry> Existing = Entries.FindRef(Key);
+    const bool bExistingCanRetireImmediately =
+        Existing.IsValid() && Existing->ActiveLeaseCount.GetValue() <= 0;
+    const auto GetProjectedBytes = [this, &Entry, &Existing, bExistingCanRetireImmediately]()
+    {
+        const uint64 ReplacedBytes = bExistingCanRetireImmediately
+            ? Existing->ResidentBytes
+            : 0;
+        const uint64 TrackedBytes = GetTrackedBytes();
+        return TrackedBytes >= ReplacedBytes
+            ? TrackedBytes - ReplacedBytes + Entry->ResidentBytes
+            : Entry->ResidentBytes;
+    };
+
+    while (GetProjectedBytes() > BudgetBytes && EvictOldestUnleased(&Key))
     {
     }
-    if (GetTrackedBytes() + Entry->ResidentBytes > BudgetBytes)
+    if (GetProjectedBytes() > BudgetBytes)
     {
         ++AdmissionRejectCount;
         return false;
@@ -73,23 +80,47 @@ bool FDWCEditorCacheStore::Put(
 
     if (ResourceGovernor.IsValid())
     {
-        FDWCEditorResourceReservationRequest Request;
-        Request.Pool = EDWCEditorResourcePool::SharedCacheCPU;
-        Request.Bytes = Entry->ResidentBytes;
-        Request.Owner = MemoryOwner;
-        Request.DebugName = FString::Printf(TEXT("Shared cache: %s"), *Key.Namespace.ToString());
-        Entry->MemoryLease = ResourceGovernor->TryAcquire(Request);
-        while (!Entry->MemoryLease.IsValid() && EvictOldestUnleased())
+        if (bExistingCanRetireImmediately && Existing->MemoryLease.IsValid())
         {
-            Entry->MemoryLease = ResourceGovernor->TryAcquire(Request);
+            FString ResizeError;
+            while (!Existing->MemoryLease.TryResize(Entry->ResidentBytes, &ResizeError) &&
+                   EvictOldestUnleased(&Key))
+            {
+                ResizeError.Reset();
+            }
+            if (Existing->MemoryLease.GetReservedBytes() != Entry->ResidentBytes)
+            {
+                ++AdmissionRejectCount;
+                return false;
+            }
+            Entry->MemoryLease = MoveTemp(Existing->MemoryLease);
         }
-        if (!Entry->MemoryLease.IsValid())
+        else
         {
-            ++AdmissionRejectCount;
-            return false;
+            FDWCEditorResourceReservationRequest Request;
+            Request.Pool = EDWCEditorResourcePool::SharedCacheCPU;
+            Request.Bytes = Entry->ResidentBytes;
+            Request.Owner = MemoryOwner;
+            Request.DebugName = FString::Printf(TEXT("Shared cache: %s"), *Key.Namespace.ToString());
+            Entry->MemoryLease = ResourceGovernor->TryAcquire(Request);
+            while (!Entry->MemoryLease.IsValid() && EvictOldestUnleased(&Key))
+            {
+                Entry->MemoryLease = ResourceGovernor->TryAcquire(Request);
+            }
+            if (!Entry->MemoryLease.IsValid())
+            {
+                ++AdmissionRejectCount;
+                return false;
+            }
         }
     }
 
+    if (Existing.IsValid())
+    {
+        UsedBytes -= Existing->ResidentBytes;
+        Entries.Remove(Key);
+        TrackRetiredEntry(Existing);
+    }
     Entry->LastUsedSerial = ++UseSerial;
     Entries.Add(Key, Entry);
     UsedBytes += Entry->ResidentBytes;
@@ -275,6 +306,36 @@ void FDWCEditorCacheStore::AppendDiagnosticMemoryBucket(
     Bucket.HitCount = HitCount;
     Bucket.MissCount = MissCount;
     Bucket.EvictionCount = EvictionCount;
+    Bucket.GlobalOwnerIdentifier = FString::Printf(TEXT("CacheStore/%p"), static_cast<const void*>(this));
+    Bucket.GlobalCategory = EDWCEditorMemoryCategory::SharedCacheCPU;
+    Bucket.bIncludeInGlobalSnapshot = true;
+}
+
+uint64 FDWCEditorCacheStore::GetReclaimableBytes() const
+{
+    check(IsInGameThread());
+    uint64 ReclaimableBytes = 0;
+    for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
+    {
+        if (Pair.Value.IsValid() && Pair.Value->ActiveLeaseCount.GetValue() <= 0)
+        {
+            ReclaimableBytes += Pair.Value->ResidentBytes;
+        }
+    }
+    return ReclaimableBytes;
+}
+
+uint64 FDWCEditorCacheStore::ReclaimUnleasedBytes(const uint64 TargetBytes)
+{
+    check(IsInGameThread());
+    CleanupRetiredEntries();
+    const uint64 BeforeBytes = GetTrackedBytes();
+    while (BeforeBytes >= GetTrackedBytes() &&
+           BeforeBytes - GetTrackedBytes() < TargetBytes &&
+           EvictOldestUnleased())
+    {
+    }
+    return BeforeBytes >= GetTrackedBytes() ? BeforeBytes - GetTrackedBytes() : 0;
 }
 
 void FDWCEditorCacheStore::ResetDiagnosticCounters()
@@ -285,12 +346,16 @@ void FDWCEditorCacheStore::ResetDiagnosticCounters()
     AdmissionRejectCount = 0;
 }
 
-bool FDWCEditorCacheStore::EvictOldestUnleased()
+bool FDWCEditorCacheStore::EvictOldestUnleased(const FDWCEditorCacheKey* ExcludedKey)
 {
     const FDWCEditorCacheKey* OldestKey = nullptr;
     uint64 OldestSerial = TNumericLimits<uint64>::Max();
     for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
     {
+        if (ExcludedKey != nullptr && Pair.Key == *ExcludedKey)
+        {
+            continue;
+        }
         if (!Pair.Value.IsValid() || Pair.Value->ActiveLeaseCount.GetValue() > 0)
         {
             continue;

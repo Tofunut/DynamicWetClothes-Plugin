@@ -8,11 +8,12 @@ class UMaterialInterface;
 class USkeletalMesh;
 class UWetClothingAsset;
 struct FWetClothingTransparencyLayerData;
+struct FDWCTransparencyResolvedOutputResolution;
 enum class EDWCTransparencyTempArtifactKind : uint8;
 
 struct FDWCTransparencyMaterialSurfaceBakeIdentity
 {
-    static constexpr int32 Version = 3;
+    static constexpr int32 Version = 4;
 
     FString SourceMeshContentSignature;
     FString EffectiveMaterialSignature;
@@ -54,7 +55,7 @@ class FDWCTransparencySignatureService
         const FTransform& BakeTransform,
         int32 MaterialSlotIndex,
         int32 SourceUVChannel,
-        int32 Resolution);
+        int32 SourceBakeResolution);
 
     static FString BuildStageArtifactSignature(
         EDWCTransparencyTempArtifactKind Kind,
@@ -64,6 +65,14 @@ class FDWCTransparencySignatureService
     static bool BuildSourceSignature(
         const UWetClothingAsset& Asset,
         const FWetClothingTransparencyLayerData& Layer,
+        FString& OutSignature,
+        FString& OutMaterialBakeSignature,
+        FString& OutError);
+
+    static bool BuildSourceSignature(
+        const UWetClothingAsset& Asset,
+        const FWetClothingTransparencyLayerData& Layer,
+        const FDWCTransparencyResolvedOutputResolution& ResolvedOutputResolution,
         FString& OutSignature,
         FString& OutMaterialBakeSignature,
         FString& OutError);

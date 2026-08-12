@@ -28,7 +28,7 @@ class FDWCEditorWorkerJobScheduler final
 
         uint64 GetReservedBytes() const
         {
-            return ActualMemoryEstimate.GetTotalBytes();
+            return ActualMemoryEstimate.GetOperationPrivateBytes();
         }
     };
     using FPrepare = TFunction<bool(
@@ -43,6 +43,9 @@ class FDWCEditorWorkerJobScheduler final
         EDWCEditorWorkerJobCompletion,
         const FString&)>;
     using FDomainRevisionProvider = TFunction<uint64(EDWCEditorAuthoringDomain)>;
+    using FAdmissionBarrier = TFunction<bool(
+        const FDWCEditorWorkerJobDescriptor&,
+        FString&)>;
 
     static constexpr int32 DefaultMaxActiveJobs = 2;
     // Pending requests retain only lightweight prepare closures. Prepared jobs
@@ -68,6 +71,7 @@ class FDWCEditorWorkerJobScheduler final
     ~FDWCEditorWorkerJobScheduler();
 
     void SetDomainRevisionProvider(FDomainRevisionProvider InProvider);
+    void SetAdmissionBarrier(FAdmissionBarrier InBarrier);
     FDWCEditorWorkerJobTicket SubmitPrepared(
         const FDWCEditorWorkerJobDescriptor& Descriptor,
         FPrepare Prepare,
@@ -78,6 +82,8 @@ class FDWCEditorWorkerJobScheduler final
     /** Cancels exactly one request without invalidating newer jobs that share its key. */
     bool CancelTicket(const FDWCEditorWorkerJobTicket& Ticket);
     void CancelDomain(EDWCEditorAuthoringDomain Domain);
+    void CancelWorkClass(EDWCEditorWorkClass WorkClass);
+    bool HasOutstandingWorkClass(EDWCEditorWorkClass WorkClass) const;
     void Shutdown();
 
     int32 GetQueuedJobCount() const;
@@ -147,6 +153,7 @@ class FDWCEditorWorkerJobScheduler final
     TArray<TSharedRef<FQueuedJob, ESPMode::ThreadSafe>> ActiveJobs;
     TMap<FDWCEditorWorkerJobKey, uint64> GenerationByKey;
     FDomainRevisionProvider DomainRevisionProvider;
+    FAdmissionBarrier AdmissionBarrier;
     TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
     FGuid SessionEpoch;
     uint64 NextJobId = 1;

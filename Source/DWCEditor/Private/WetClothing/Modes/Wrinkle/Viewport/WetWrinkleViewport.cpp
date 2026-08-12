@@ -413,7 +413,7 @@ void SWetWrinkleViewport::Tick(const FGeometry& AllottedGeometry, const double I
     {
         const EDWCEditorTextureUploadStatus UploadStatus =
             RenderUploadQueue->GetStatus(PatchHoverPreviewState.PendingPresentationUpload);
-        if (UploadStatus == EDWCEditorTextureUploadStatus::RenderEnqueued ||
+        if (UploadStatus == EDWCEditorTextureUploadStatus::Completed ||
             UploadStatus == EDWCEditorTextureUploadStatus::Stale ||
             UploadStatus == EDWCEditorTextureUploadStatus::Invalid)
         {
@@ -430,7 +430,7 @@ void SWetWrinkleViewport::Tick(const FGeometry& AllottedGeometry, const double I
     {
         const EDWCEditorTextureUploadStatus UploadStatus =
             RenderUploadQueue->GetStatus(PatchHoverPreviewState.PendingAccumulatedUpload);
-        if (UploadStatus == EDWCEditorTextureUploadStatus::RenderEnqueued)
+        if (UploadStatus == EDWCEditorTextureUploadStatus::Completed)
         {
             FinishPatchHoverHandoff();
         }
@@ -1951,7 +1951,7 @@ void SWetWrinkleViewport::HandlePatchHoverUploadStatus(
         RenderUploadQueue->RemoveObserver(State.PendingPresentationObserver);
     }
 
-    const bool bCanPresent = Status == EDWCEditorTextureUploadStatus::RenderEnqueued &&
+    const bool bCanPresent = Status == EDWCEditorTextureUploadStatus::Completed &&
         State.PendingPresentedPayload.IsSet() &&
         State.PendingPresentedPayload->IsValid() &&
         State.StagingTextureHandle.IsValid();
@@ -2212,7 +2212,6 @@ bool SWetWrinkleViewport::EnsureTransientProceduralPreviewState(
         return true;
     }
 
-    const FColor FlatNormal = EncodeWetWrinkleNormal(FVector(0.0f, 0.0f, 1.0f));
     // The edited stroke is logical tool input and survives resource recreation.
     ResetTransientProceduralPreviewResources();
     TransientProceduralPreviewState.SourceTexture = SourceTexture;
@@ -2225,24 +2224,19 @@ bool SWetWrinkleViewport::EnsureTransientProceduralPreviewState(
         ReleaseTransientProceduralPreviewState();
         return false;
     }
-    TArray<FColor> Pixels;
-    Pixels.Init(FlatNormal, PixelCount);
-    FDWCEditorNormalRasterSurface WorkingSurface;
-    WorkingSurface.Initialize(WorkingTextureSize, false);
     FDWCEditorPreviewCommitContext CommitContext;
     CommitContext.ConsumerToken = PreviewCommitLifetime.CaptureToken();
     CommitContext.DebugName = TEXT("Transient procedural wrinkle preview");
     CommitContext.IsCurrent = [this]() { return !bPreviewSuspended; };
     const EDWCEditorPreviewCommitResult CommitResult = PreviewCommitCoordinator.IsValid()
-        ? PreviewCommitCoordinator->CommitNormalBGRA8(
+        ? PreviewCommitCoordinator->InitializeNormalBGRA8(
         CommitContext,
         MakeWrinkleTextureKey(
             WetClothingAsset.Get(),
             EDWCEditorTexturePurpose::WrinkleProcedural,
             MaterialSlotIndex),
         MakeWrinkleNormalDescriptor(TextureSize, WorkingTextureSize),
-        MoveTemp(Pixels),
-        MoveTemp(WorkingSurface),
+        false,
         TransientProceduralPreviewState.TextureHandle,
         EDWCEditorTextureUploadPriority::Interactive)
         : EDWCEditorPreviewCommitResult::CoordinatorShutdown;
@@ -2464,14 +2458,7 @@ bool SWetWrinkleViewport::EnsurePatchHoverPreviewState(
         const FGuid& LayerGuid,
         FDWCEditorTextureLease& OutLease)
     {
-        TArray<FColor> Pixels;
-        Pixels.Init(EncodeWetWrinkleNormal(FVector::UpVector), TextureSize.X * TextureSize.Y);
-        FDWCEditorNormalRasterSurface WorkingSurface;
-        if (!WorkingSurface.Initialize(WorkingTextureSize, false))
-        {
-            return false;
-        }
-        return PreviewCommitCoordinator->CommitNormalBGRA8(
+        return PreviewCommitCoordinator->InitializeNormalBGRA8(
             CommitContext,
             MakeWrinkleTextureKey(
                 WetClothingAsset.Get(),
@@ -2479,8 +2466,7 @@ bool SWetWrinkleViewport::EnsurePatchHoverPreviewState(
                 MaterialSlotIndex,
                 LayerGuid),
             MakeWrinkleNormalDescriptor(TextureSize, WorkingTextureSize),
-            MoveTemp(Pixels),
-            MoveTemp(WorkingSurface),
+            false,
             OutLease,
             EDWCEditorTextureUploadPriority::Interactive) == EDWCEditorPreviewCommitResult::Applied;
     };
@@ -4063,11 +4049,29 @@ void SWetWrinkleViewport::CollectDiagnosticMemoryStats(
             TransientProceduralPreviewState.LastCommittedStroke->Points.GetAllocatedSize());
     }
     Procedural.EntryCount = !TransientProceduralStrokeHits.IsEmpty() ? 1 : 0;
+    Procedural.GlobalCategory = EDWCEditorMemoryCategory::PersistentEditorCPU;
+    Procedural.bIncludeInGlobalSnapshot = true;
 
     FDWCEditorPreviewMemoryBucket& Generated = OutBuckets.AddDefaulted_GetRef();
     Generated.Name = TEXT("Wrinkle generated-map preview");
     Generated.UsedBytes = FDWCEditorPreviewDiagnostics::EstimateTextureBytes(GeneratedNormalPreviewTexture);
     Generated.EntryCount = GeneratedNormalPreviewTexture != nullptr ? 1 : 0;
+
+    FDWCEditorPreviewMemoryBucket& GeneratedCPU = OutBuckets.AddDefaulted_GetRef();
+    GeneratedCPU.Name = TEXT("Wrinkle generated-map preview CPU");
+    GeneratedCPU.UsedBytes =
+        FDWCEditorPreviewDiagnostics::EstimateTextureCPUBytes(GeneratedNormalPreviewTexture);
+    GeneratedCPU.EntryCount = Generated.EntryCount;
+    GeneratedCPU.GlobalCategory = EDWCEditorMemoryCategory::PersistentEditorCPU;
+    GeneratedCPU.bIncludeInGlobalSnapshot = true;
+
+    FDWCEditorPreviewMemoryBucket& GeneratedGPU = OutBuckets.AddDefaulted_GetRef();
+    GeneratedGPU.Name = TEXT("Wrinkle generated-map preview GPU");
+    GeneratedGPU.UsedBytes =
+        FDWCEditorPreviewDiagnostics::EstimateTextureGPUBytes(GeneratedNormalPreviewTexture);
+    GeneratedGPU.EntryCount = Generated.EntryCount;
+    GeneratedGPU.GlobalCategory = EDWCEditorMemoryCategory::PreviewGPU;
+    GeneratedGPU.bIncludeInGlobalSnapshot = true;
 }
 
 void SWetWrinkleViewport::CollectDiagnosticOperationStats(

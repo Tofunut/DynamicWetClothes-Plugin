@@ -144,7 +144,7 @@ namespace
 
         const FDWCWrinkleSuppressionDependencySnapshot CurrentWrinkle =
             FDWCWrinkleSuppressionCoverageService::ResolveDependency(
-                &Asset, Candidate.MaterialSlotIndex);
+                &Asset, Candidate.MaterialSlotIndex, true);
         const FString CurrentWrinkleSignature = CurrentWrinkle.IsAvailable()
             ? CurrentWrinkle.BuildSignature
             : FString();
@@ -226,6 +226,10 @@ void FDWCTransparencyAffectedStage4Rebake::CollectCandidates(
     for (const FWetClothingTransparencyLayerData& Layer :
          Asset.Authored.TransparencyData.TransparencyLayers)
     {
+        if (!Layer.IsRuntimeEnabled())
+        {
+            continue;
+        }
         const int32 Slot = Layer.TargetSurface.OuterMaterialSlotIndex;
         if (!RequestedSlots.IsEmpty() && !RequestedSlots.Contains(Slot))
         {
@@ -264,7 +268,8 @@ bool FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
     const FWetClothingTransparencyLayerData& Layer,
     const FDWCTransparencySourcePayload& Identity,
     FDWCTransparencySourcePayload& OutResult,
-    FString& OutError)
+    FString& OutError,
+    const bool bRequireOuterIslandID)
 {
     check(IsInGameThread());
     OutResult = Identity;
@@ -288,10 +293,15 @@ bool FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
             true);
     };
     FString ArtifactError;
+    const FDWCTransparencySourceArtifactSelection ArtifactSelection =
+        FDWCTransparencySourceArtifactSelection::Stage4(
+            Layer.RequiresRevealSurface(),
+            bRequireOuterIslandID);
     if (!FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
             Layer,
             OutResult.BuildSignature,
             OutResult.Resolution,
+            ArtifactSelection,
             true,
             ArtifactError))
     {
@@ -302,18 +312,20 @@ bool FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
 
     UTexture2D* BaseReveal = FindSourceArtifact(
         EDWCTransparencyTempArtifactKind::BaseRevealColor);
-    UTexture2D* BaseRevealSurface = FDWCTransparencyTempAssetStore::FindCurrentArtifact(
-        Layer,
-        EDWCTransparencyTempArtifactKind::BaseRevealSurface,
-        FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+    UTexture2D* BaseRevealSurface = Layer.RequiresRevealSurface()
+        ? FDWCTransparencyTempAssetStore::FindCurrentArtifact(
+            Layer,
             EDWCTransparencyTempArtifactKind::BaseRevealSurface,
-            OutResult.BuildSignature),
-        true);
+            FDWCTransparencyStageArtifactContract::BuildExpectedSignature(
+                EDWCTransparencyTempArtifactKind::BaseRevealSurface,
+                OutResult.BuildSignature),
+            true)
+        : nullptr;
     UTexture2D* ValidHit = FindSourceArtifact(EDWCTransparencyTempArtifactKind::ValidHit);
     UTexture2D* OuterCoverage = FindSourceArtifact(EDWCTransparencyTempArtifactKind::OuterCoverage);
-    UTexture2D* OuterIslandID = FindSourceArtifact(EDWCTransparencyTempArtifactKind::OuterIslandID);
-    UTexture2D* HitSource = FindSourceArtifact(EDWCTransparencyTempArtifactKind::HitSource);
-    UTexture2D* HitDistance = FindSourceArtifact(EDWCTransparencyTempArtifactKind::HitDistance);
+    UTexture2D* OuterIslandID = bRequireOuterIslandID
+        ? FindSourceArtifact(EDWCTransparencyTempArtifactKind::OuterIslandID)
+        : nullptr;
 
     const int32 PixelCount = OutResult.Resolution.X * OutResult.Resolution.Y;
     if (PixelCount <= 0)
@@ -324,13 +336,17 @@ bool FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
     }
 
     OutResult.InnerColorBuffer.SetNumUninitialized(PixelCount);
-    OutResult.RevealSurfaceAuthoring.SetNumUninitialized(OutResult.Resolution);
+    if (Layer.RequiresRevealSurface())
+    {
+        OutResult.RevealSurfaceAuthoring.SetNumUninitialized(OutResult.Resolution);
+    }
     OutResult.AutoAlphaBuffer.SetNumUninitialized(PixelCount);
     OutResult.OuterCoverageBuffer.SetNumUninitialized(PixelCount);
-    OutResult.OuterIslandIDBuffer.SetNumUninitialized(PixelCount);
+    if (bRequireOuterIslandID)
+    {
+        OutResult.OuterIslandIDBuffer.SetNumUninitialized(PixelCount);
+    }
     OutResult.ValidHitBuffer.Init(false, PixelCount);
-    OutResult.HitDistanceBuffer.SetNumUninitialized(PixelCount);
-    OutResult.SourcePriorityBuffer.SetNumUninitialized(PixelCount);
     OutResult.ValidHitCount = 0;
     OutResult.OuterSampleCount = 0;
     OutResult.NoHitCount = 0;
@@ -356,7 +372,6 @@ bool FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
 
     const int64 ColorBytes = static_cast<int64>(PixelCount) * sizeof(FColor);
     const int64 UInt16Bytes = static_cast<int64>(PixelCount) * sizeof(uint16);
-    const int64 Float16Bytes = static_cast<int64>(PixelCount) * sizeof(FFloat16);
     if (!ReadExpected(BaseReveal, TSF_BGRA8, ColorBytes))
     {
         OutResult = FDWCTransparencySourcePayload();
@@ -373,15 +388,19 @@ bool FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
         OutResult.InnerColorBuffer[Index].A = 255;
     }
 
-    if (!ReadExpected(BaseRevealSurface, TSF_BGRA8, ColorBytes))
+    if (Layer.RequiresRevealSurface() &&
+        !ReadExpected(BaseRevealSurface, TSF_BGRA8, ColorBytes))
     {
         OutResult = FDWCTransparencySourcePayload();
         return false;
     }
-    FMemory::Memcpy(
-        OutResult.RevealSurfaceAuthoring.GetData(),
-        ArtifactBytes.GetData(),
-        static_cast<SIZE_T>(PixelCount) * sizeof(FColor));
+    if (Layer.RequiresRevealSurface())
+    {
+        FMemory::Memcpy(
+            OutResult.RevealSurfaceAuthoring.GetData(),
+            ArtifactBytes.GetData(),
+            static_cast<SIZE_T>(PixelCount) * sizeof(FColor));
+    }
 
     if (!ReadExpected(ValidHit, TSF_G8, PixelCount))
     {
@@ -412,39 +431,18 @@ bool FDWCTransparencyAffectedStage4Rebake::RestoreCanonicalArtifacts(
         OutResult.NoHitCount += bCovered && !bValidHit ? 1 : 0;
     }
 
-    if (!ReadExpected(OuterIslandID, TSF_G16, UInt16Bytes))
+    if (bRequireOuterIslandID &&
+        !ReadExpected(OuterIslandID, TSF_G16, UInt16Bytes))
     {
         OutResult = FDWCTransparencySourcePayload();
         return false;
     }
-    FMemory::Memcpy(
-        OutResult.OuterIslandIDBuffer.GetData(),
-        ArtifactBytes.GetData(),
-        static_cast<SIZE_T>(PixelCount) * sizeof(uint16));
-
-    if (!ReadExpected(HitSource, TSF_G16, UInt16Bytes))
+    if (bRequireOuterIslandID)
     {
-        OutResult = FDWCTransparencySourcePayload();
-        return false;
-    }
-    const uint16* EncodedSourcePriorities = reinterpret_cast<const uint16*>(ArtifactBytes.GetData());
-    for (int32 Index = 0; Index < PixelCount; ++Index)
-    {
-        const uint16 EncodedPriority = EncodedSourcePriorities[Index];
-        OutResult.SourcePriorityBuffer[Index] = EncodedPriority > 0
-            ? static_cast<int16>(FMath::Min<int32>(static_cast<int32>(EncodedPriority) - 1, MAX_int16))
-            : INDEX_NONE;
-    }
-
-    if (!ReadExpected(HitDistance, TSF_R16F, Float16Bytes))
-    {
-        OutResult = FDWCTransparencySourcePayload();
-        return false;
-    }
-    const FFloat16* EncodedHitDistances = reinterpret_cast<const FFloat16*>(ArtifactBytes.GetData());
-    for (int32 Index = 0; Index < PixelCount; ++Index)
-    {
-        OutResult.HitDistanceBuffer[Index] = static_cast<float>(EncodedHitDistances[Index]);
+        FMemory::Memcpy(
+            OutResult.OuterIslandIDBuffer.GetData(),
+            ArtifactBytes.GetData(),
+            static_cast<SIZE_T>(PixelCount) * sizeof(uint16));
     }
     return true;
 }

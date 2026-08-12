@@ -62,6 +62,8 @@ class FDWCEditorSurfacePatchProjectionCacheService final
     void ResetDiagnosticCounters();
 
     uint64 GetUsedBytes() const;
+    uint64 GetReclaimableBytes() const;
+    uint64 ReclaimUnleasedBytes(uint64 TargetBytes);
     uint64 GetBudgetBytes() const { return BudgetBytes; }
     int32 GetEntryCount() const;
     FDWCEditorSurfacePatchProjectionCacheDiagnostics GetDiagnostics() const;
@@ -229,6 +231,7 @@ class FDWCEditorSurfacePatchProjectionCacheService final
 
     static FKey MakeKey(const FDWCEditorSurfacePatchProjectionRequest& Request);
     bool EvictOldestUnleased_Locked();
+    uint64 GetReclaimableBytes_Locked() const;
     void RetireActiveEntries_Locked();
     void SweepRetired_Locked() const;
     uint64 GetActiveBytes_Locked() const;

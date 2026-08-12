@@ -8,12 +8,18 @@ struct FDWCEditorResourceBudgetConfig
 {
     static constexpr uint64 MiB = 1024ull * 1024ull;
 
-    uint64 GlobalEditorCPUBytes = 1024ull * MiB;
+    uint64 GlobalEditorCPUBytes = 1536ull * MiB;
     uint64 WorkerPrivateCPUBytes = 512ull * MiB;
-    uint64 PreviewWorkspaceCPUBytes = 640ull * MiB;
-    uint64 SharedCacheCPUBytes = 192ull * MiB;
+    uint64 AssetCommitCPUBytes = 384ull * MiB;
+    uint64 PreviewWorkspaceCPUBytes = 768ull * MiB;
+    uint64 SharedCacheCPUBytes = 256ull * MiB;
     uint64 UploadStagingCPUBytes = 64ull * MiB;
     uint64 PreviewGPUBytes = 384ull * MiB;
+
+    /** CPU pool budgets are retention targets when a process-wide broker is present. */
+    bool bAllowCPUPoolBorrowing = false;
+    /** Emits throttled owner snapshots when the process-wide editor governor rejects a final request. */
+    bool bEnableAdmissionFailureDiagnostics = false;
 
     uint64 GetPoolBudgetBytes(EDWCEditorResourcePool Pool) const;
 };
@@ -53,9 +59,34 @@ private:
     uint64 ReservationId = 0;
 };
 
+/** Move-only all-or-nothing ownership for a set of resource-pool reservations. */
+class FDWCEditorMemoryLeaseSet
+{
+public:
+    FDWCEditorMemoryLeaseSet() = default;
+    ~FDWCEditorMemoryLeaseSet() = default;
+
+    FDWCEditorMemoryLeaseSet(const FDWCEditorMemoryLeaseSet&) = delete;
+    FDWCEditorMemoryLeaseSet& operator=(const FDWCEditorMemoryLeaseSet&) = delete;
+    FDWCEditorMemoryLeaseSet(FDWCEditorMemoryLeaseSet&&) noexcept = default;
+    FDWCEditorMemoryLeaseSet& operator=(FDWCEditorMemoryLeaseSet&&) noexcept = default;
+
+    bool IsValid() const { return !Leases.IsEmpty(); }
+    int32 Num() const { return Leases.Num(); }
+    uint64 GetReservedBytes() const;
+    uint64 GetReservedBytes(EDWCEditorResourcePool Pool) const;
+    void Reset() { Leases.Reset(); }
+
+private:
+    friend class FDWCEditorResourceGovernor;
+    TArray<FDWCEditorMemoryLease> Leases;
+};
+
 class FDWCEditorResourceGovernor
 {
 public:
+    using FPressureHandler = TFunction<bool(const FDWCEditorResourceReservationRequest&)>;
+
     explicit FDWCEditorResourceGovernor(
         const FDWCEditorResourceBudgetConfig& InConfig = FDWCEditorResourceBudgetConfig());
 
@@ -69,10 +100,20 @@ public:
         const FDWCEditorResourceReservationRequest& Request,
         EDWCEditorResourceAdmissionResult& OutResult,
         FString* OutError = nullptr);
+    /** Acquires one merged reservation per pool and rolls every lease back on failure. */
+    FDWCEditorMemoryLeaseSet TryAcquireBundleForAdmission(
+        const TArray<FDWCEditorResourceReservationRequest>& Requests,
+        EDWCEditorResourceAdmissionResult& OutResult,
+        FString* OutError = nullptr);
 
     FDWCEditorResourceGovernorDiagnostics GetDiagnostics() const;
     void ResetDiagnosticCounters();
+    void SetPressureHandler(FPressureHandler InHandler);
 
 private:
+    bool TryRelievePressure(const FDWCEditorResourceReservationRequest& Request) const;
+
     TSharedRef<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe> State;
+    mutable FCriticalSection PressureHandlerMutex;
+    FPressureHandler PressureHandler;
 };

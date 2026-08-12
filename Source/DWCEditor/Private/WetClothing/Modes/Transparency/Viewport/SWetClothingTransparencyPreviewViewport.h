@@ -58,6 +58,7 @@ class SWetClothingTransparencyPreviewViewport
     , public IDWCEditorSurfaceToolTarget
 {
   public:
+    SWetClothingTransparencyPreviewViewport();
     SLATE_BEGIN_ARGS(SWetClothingTransparencyPreviewViewport) {}
     SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
     SLATE_ARGUMENT(FDWCEditorWorkerJobSchedulerPtr, WorkerJobScheduler)

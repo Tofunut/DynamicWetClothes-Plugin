@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
+#include "WetClothing/Foundation/Resources/DWCEditorResourceBroker.h"
 #include "WetClothing/WCAEditor/WCAEditorMode.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -14,6 +15,7 @@ class FDWCEditorCacheStore;
 class FDWCWrinkleSuppressionCoverageService;
 class FDWCEditorRenderUploadQueue;
 class FDWCEditorPreviewCommitCoordinator;
+class FDWCEditorPreviewGPUResidencyManager;
 class FDWCEditorResourceGovernor;
 class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
@@ -98,6 +100,12 @@ public:
     bool IsWrinkleBakeActive() const;
     EDWCEditorTransparencyBakeKind GetActiveTransparencyBakeKind() const;
     TSet<EDWCEditorBuildAction> GetRunningBuildActions() const;
+    bool RequestExclusiveBuild(
+        const FString& DebugName,
+        TFunction<void()> Work,
+        FString* OutError = nullptr);
+    bool CanStartBuildAction(FString* OutReason = nullptr) const;
+    bool IsExclusiveBuildActive() const;
     bool SaveBakedVisualAssets() const;
     bool SaveTransparencySetupAssets() const;
     void SetEditorMode(EWCAEditorMode NewMode);
@@ -107,6 +115,7 @@ private:
     EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleStatusRefreshTimer(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleTextureUploadTimer(double CurrentTime, float DeltaTime);
+    EActiveTimerReturnType HandleExclusiveBuildTimer(double CurrentTime, float DeltaTime);
     void UpdateCachedStatus(bool bRefreshAssetState = true);
     void HandleAuthoringDocumentChanged(const FDWCEditorAuthoringChange& Change);
     void SuspendPreviewMode(EWCAEditorMode Mode, EDWCEditorPreviewSuspendReason Reason);
@@ -114,6 +123,10 @@ private:
     void SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason Reason);
     void HandlePreBeginPIE(bool bIsSimulating);
     void HandleEndPIE(bool bIsSimulating);
+    void RegisterResourceParticipants();
+    void UnregisterResourceParticipants();
+    void HandleExclusiveBuildBarrierChanged(bool bActive);
+    void FinishExclusiveBuild();
 
 private:
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
@@ -124,12 +137,21 @@ private:
     TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService> SurfacePatchProjectionCache;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
+    TSharedPtr<FDWCEditorPreviewGPUResidencyManager> PreviewGPUResidencyManager;
     TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
     TSharedPtr<FDWCEditorSessionStore> SessionStore;
     TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
+    TSharedPtr<FDWCEditorResourceBroker> ResourceBroker;
+    FGuid ResourceBrokerSessionId;
+    TArray<uint64> ResourceParticipantIds;
     TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> WorkerJobScheduler;
     TSharedPtr<FDWCEditorBuildOperationManager> BuildOperationManager;
     TSharedPtr<FDWCEditorBakeCoordinator> BakeCoordinator;
+    TUniquePtr<FDWCEditorExclusiveBuildLease> ExclusiveBuildLease;
+    TFunction<void()> PendingExclusiveBuildWork;
+    double ExclusiveBuildDrainStartedSeconds = 0.0;
+    bool bExclusiveBuildWorkExecuting = false;
+    bool bPIEActive = false;
     TSharedPtr<IDetailsView> DetailsView;
     FSimpleDelegate OnStatusChanged;
     TSharedPtr<SBox> ModeContentBox;

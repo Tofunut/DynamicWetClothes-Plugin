@@ -350,7 +350,9 @@ bool FDWCTransparencyComposite::BuildCoverageEdgeFeatherBuffer(
         return false;
     }
 
-    OutBuffer.Init(255, PixelCount);
+    // Preserve subpixel target-surface coverage even when distance feathering
+    // is disabled. Full interior texels remain 255.
+    OutBuffer = OuterCoverage;
     const int32 FeatherSteps = FMath::CeilToInt(FMath::Max(FeatherPixels, 0.0f));
     if (FeatherSteps <= 0)
     {
@@ -443,10 +445,12 @@ bool FDWCTransparencyComposite::BuildCoverageEdgeFeatherBuffer(
             continue;
         }
 
-        OutBuffer[PixelIndex] = static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(
+        const float DistanceWeight = FMath::Clamp(
             static_cast<float>(Distance) / (static_cast<float>(FeatherSteps) + 1.0f),
             0.0f,
-            1.0f) * 255.0f));
+            1.0f);
+        OutBuffer[PixelIndex] = static_cast<uint8>(FMath::RoundToInt(
+            static_cast<float>(OuterCoverage[PixelIndex]) * DistanceWeight));
     }
     return true;
 }

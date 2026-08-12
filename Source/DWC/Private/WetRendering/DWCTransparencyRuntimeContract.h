@@ -14,6 +14,7 @@ struct FDWCTransparencyRuntimeBinding
     UTexture2D* TransparencyMap = nullptr;
     UTexture2D* RevealNormalMap = nullptr;
     float RevealNormalStrength = 0.0f;
+    int32 ResolvedOutputResolution = 0;
 
     bool UsesTransparencyMap() const { return TransparencyMap != nullptr; }
     bool UsesRevealNormalMap() const { return RevealNormalMap != nullptr; }

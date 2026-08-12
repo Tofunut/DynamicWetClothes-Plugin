@@ -28,7 +28,7 @@ class FDWCTransparencyTempAssetStore
         const USkeletalMesh& SourceMesh,
         int32 MaterialSlotIndex,
         int32 SourceUVChannel,
-        int32 LogicalResolution,
+        int32 SourceBakeResolution,
         const FDWCTransparencyMaterialSurfaceBakeIdentity& Identity,
         bool bLoadIfNeeded,
         FDWCTransparencyMaterialColorCacheReference& OutReference,
@@ -42,7 +42,7 @@ class FDWCTransparencyTempAssetStore
         USkeletalMesh& SourceMesh,
         int32 MaterialSlotIndex,
         int32 SourceUVChannel,
-        FIntPoint LogicalResolution,
+        FIntPoint SourceBakeResolution,
         FIntPoint BaseColorPhysicalResolution,
         EDWCTransparencyMaterialColorPayloadKind BaseColorPayloadKind,
         TConstArrayView<FColor> BaseColorPixels,
@@ -72,6 +72,17 @@ class FDWCTransparencyTempAssetStore
         UWetClothingAsset& Asset,
         FWetClothingTransparencyLayerData& Layer,
         TConstArrayView<FColor> CorrectedRevealPixels,
+        FIntPoint Resolution,
+        const FString& SourceSignature,
+        const FString& RevealSignature,
+        FString& OutError);
+
+    /** Commits RGB from final pixels while restoring the Stage 2 checkpoint alpha. */
+    static bool CommitRevealArtifact(
+        UWetClothingAsset& Asset,
+        FWetClothingTransparencyLayerData& Layer,
+        TConstArrayView<FColor> CorrectedRevealRgbPixels,
+        TConstArrayView<uint8> CorrectedRevealAlpha,
         FIntPoint Resolution,
         const FString& SourceSignature,
         const FString& RevealSignature,

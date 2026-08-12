@@ -14,14 +14,11 @@ namespace
     FDWCEditorNormalSourceSnapshot MakeConstantNormalSource(const FColor Color)
     {
         FDWCEditorNormalSourceSnapshot Source;
-        Source.Texture.Width = 1;
-        Source.Texture.Height = 1;
-        Source.Texture.BytesPerPixel = sizeof(FColor);
-        Source.Texture.bSRGB = false;
-        Source.Texture.Format = TSF_BGRA8;
-        Source.Texture.RawData = MakeShared<TArray64<uint8>>();
-        Source.Texture.RawData->SetNumUninitialized(sizeof(FColor));
-        FMemory::Memcpy(Source.Texture.RawData->GetData(), &Color, sizeof(FColor));
+        TArray<FColor> Pixels{Color};
+        FString Error;
+        FWetClothingTextureReadbackUtils::TryCreateBGRA8Readback(
+            MoveTemp(Pixels), FIntPoint(1, 1), false, Source.Texture, Error,
+            TEXT("Raster test normal source"));
         return Source;
     }
 

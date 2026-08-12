@@ -4,9 +4,9 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "DataAssets/WetClothingWrinkleData.h"
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Texture2D.h"
 #include "Misc/PackageName.h"
+#include "WetClothing/Foundation/Assets/DWCEditorArtifactStore.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCWrinkleSuppressionCoverageService.h"
@@ -19,6 +19,15 @@
 
 namespace
 {
+    bool MatchesResolvedOutputResolution(
+        const UTexture2D* Texture,
+        const FIntPoint Resolution)
+    {
+        return Texture != nullptr && Resolution.X > 0 && Resolution.Y > 0 &&
+            Texture->Source.GetSizeX() == Resolution.X &&
+            Texture->Source.GetSizeY() == Resolution.Y;
+    }
+
     struct FResolvedStage4Reveal
     {
         EDWCTransparencyStage4RevealSource Source =
@@ -74,6 +83,40 @@ namespace
         return Result;
     }
 
+    TSharedRef<const FDWCTransparencySourcePayload> BuildRetainedStage4Source(
+        const FDWCTransparencySourcePayload& Source,
+        const EDWCTransparencyStage4RevealSource RevealSource,
+        const bool bRequiresRevealSurface)
+    {
+        TSharedRef<FDWCTransparencySourcePayload> Result =
+            MakeShared<FDWCTransparencySourcePayload>();
+        Result->LayerGuid = Source.LayerGuid;
+        Result->MaterialSlotIndex = Source.MaterialSlotIndex;
+        Result->UVChannelIndex = Source.UVChannelIndex;
+        Result->LODIndex = Source.LODIndex;
+        Result->Resolution = Source.Resolution;
+        Result->OutputResolutionIdentity = Source.OutputResolutionIdentity;
+        Result->BuildSignature = Source.BuildSignature;
+        Result->OuterSampleCount = Source.OuterSampleCount;
+        Result->ValidHitCount = Source.ValidHitCount;
+        Result->NoHitCount = Source.NoHitCount;
+        Result->OverlappedUVPixelCount = Source.OverlappedUVPixelCount;
+
+        if (bRequiresRevealSurface)
+        {
+            Result->RevealSurfaceAuthoring = Source.RevealSurfaceAuthoring;
+        }
+        if (RevealSource == EDWCTransparencyStage4RevealSource::CanonicalReplay)
+        {
+            Result->InnerColorBuffer = Source.InnerColorBuffer;
+            Result->AutoAlphaBuffer = Source.AutoAlphaBuffer;
+            Result->OuterCoverageBuffer = Source.OuterCoverageBuffer;
+            Result->OuterIslandIDBuffer = Source.OuterIslandIDBuffer;
+            Result->ValidHitBuffer = Source.ValidHitBuffer;
+        }
+        return Result;
+    }
+
     uint64 SaturatingAdd(const uint64 A, const uint64 B)
     {
         return B > MAX_uint64 - A ? MAX_uint64 : A + B;
@@ -92,43 +135,45 @@ namespace
         return FString::Printf(TEXT("T_%s"), *AssetToken);
     }
 
-    FString BuildTransparencyMapAssetName(const UWetClothingAsset& Asset, const FDWCTransparencySourcePayload& SourcePayload)
+    FString BuildTransparencyMapAssetName(const UWetClothingAsset& Asset, const int32 MaterialSlotIndex)
     {
         const FString BaseName = BuildTransparencyGeneratedTextureAssetBaseName(Asset);
         return FString::Printf(
             TEXT("%s_Slot%d_TransparencyMap"),
             *BaseName,
-            SourcePayload.MaterialSlotIndex);
+            MaterialSlotIndex);
     }
 
     FString BuildRevealNormalMapAssetName(
         const UWetClothingAsset& Asset,
-        const FDWCTransparencySourcePayload& SourcePayload)
+        const int32 MaterialSlotIndex)
     {
         const FString BaseName = BuildTransparencyGeneratedTextureAssetBaseName(Asset);
         return FString::Printf(
             TEXT("%s_Slot%d_RevealNormalMap"),
             *BaseName,
-            SourcePayload.MaterialSlotIndex);
+            MaterialSlotIndex);
     }
 
-    UTexture2D* CreateOrUpdateFinalTransparencyTextureAsset(
+    bool BuildFinalTransparencyTextureRequest(
         UWetClothingAsset& Asset,
         const FWetClothingTransparencyLayerData& Layer,
-        const FDWCTransparencySourcePayload& SourcePayload,
+        const int32 MaterialSlotIndex,
+        const FIntPoint Resolution,
         const TArray<FColor>& Pixels,
         const bool bRevealNormal,
+        FDWCEditorArtifactTextureRequest& OutRequest,
         FString& OutErrorMessage)
     {
         const FString PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(Asset, TEXT("Textures/Transparency"));
         const FString AssetName = bRevealNormal
-            ? BuildRevealNormalMapAssetName(Asset, SourcePayload)
-            : BuildTransparencyMapAssetName(Asset, SourcePayload);
+            ? BuildRevealNormalMapAssetName(Asset, MaterialSlotIndex)
+            : BuildTransparencyMapAssetName(Asset, MaterialSlotIndex);
         const TCHAR* OutputLabel = bRevealNormal ? TEXT("Reveal Normal") : TEXT("Transparency");
         if (PackagePath.IsEmpty())
         {
             OutErrorMessage = TEXT("Could not resolve the generated Transparency Textures package path.");
-            return nullptr;
+            return false;
         }
 
         const FString PackageName = PackagePath / AssetName;
@@ -137,9 +182,9 @@ namespace
         bool bFromSerializedReference = false;
 
         const FWetClothingBakedTransparencyMap* ExistingMap = Layer.BakedMaps.FindByPredicate(
-            [&SourcePayload](const FWetClothingBakedTransparencyMap& Candidate)
+            [MaterialSlotIndex](const FWetClothingBakedTransparencyMap& Candidate)
             {
-                return Candidate.MaterialSlotIndex == SourcePayload.MaterialSlotIndex;
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
             });
         if (ExistingMap != nullptr &&
             IsValid(bRevealNormal ? ExistingMap->RevealNormalMap.Get() : ExistingMap->TransparencyMap.Get()) &&
@@ -159,13 +204,11 @@ namespace
                     OutputLabel,
                     *ObjectPath,
                     *GetNameSafe(ExistingObject->GetClass()));
-                return nullptr;
+                return false;
             }
             Texture = Cast<UTexture2D>(ExistingObject);
         }
 
-        UPackage* Package = nullptr;
-        bool bCreatedAsset = false;
         if (Texture != nullptr)
         {
             FGuid ExistingOwnerGuid;
@@ -177,7 +220,7 @@ namespace
                     OutputLabel,
                     *GetPathNameSafe(Texture),
                     *ExistingOwnerGuid.ToString(EGuidFormats::DigitsWithHyphens));
-                return nullptr;
+                return false;
             }
             if (!bHasOwnerGuid && !bFromSerializedReference)
             {
@@ -185,66 +228,33 @@ namespace
                     TEXT("The generated %s output path '%s' contains an unowned texture. It will not be overwritten automatically. Move or rename the existing texture, or restore the original WCA reference."),
                     OutputLabel,
                     *ObjectPath);
-                return nullptr;
+                return false;
             }
-            if (!Asset.TagGeneratedAsset(Texture))
-            {
-                OutErrorMessage = TEXT("Could not associate the existing transparency texture with this Wet Clothing Asset.");
-                return nullptr;
-            }
-
-            Package = Texture->GetOutermost();
-            Texture->Modify();
-        }
-        else
-        {
-            Package = CreatePackage(*PackageName);
-            if (Package == nullptr)
-            {
-                OutErrorMessage = FString::Printf(TEXT("Could not create package '%s'."), *PackageName);
-                return nullptr;
-            }
-
-            Texture = NewObject<UTexture2D>(Package, *AssetName, RF_Public | RF_Standalone | RF_Transactional);
-            if (Texture == nullptr)
-            {
-                OutErrorMessage = FString::Printf(TEXT("Could not create transparency map '%s'."), *ObjectPath);
-                return nullptr;
-            }
-
-            if (!Asset.TagGeneratedAsset(Texture))
-            {
-                OutErrorMessage = TEXT("Could not associate the new transparency texture with this Wet Clothing Asset.");
-                return nullptr;
-            }
-            bCreatedAsset = true;
         }
 
-        Texture->Source.Init(
-            SourcePayload.Resolution.X,
-            SourcePayload.Resolution.Y,
-            1,
-            1,
-            TSF_BGRA8,
-            reinterpret_cast<const uint8*>(Pixels.GetData()));
-        Texture->CompressionSettings = bRevealNormal ? TC_Normalmap : TC_Default;
-        Texture->MipGenSettings = TMGS_NoMipmaps;
-        Texture->SRGB = !bRevealNormal;
-        Texture->LODGroup = bRevealNormal ? TEXTUREGROUP_WorldNormalMap : TEXTUREGROUP_Pixels2D;
+        OutRequest = FDWCEditorArtifactTextureRequest();
+        OutRequest.OwnerAsset = &Asset;
+        OutRequest.PackageName = PackageName;
+        OutRequest.AssetName = AssetName;
+        OutRequest.ExistingTexture = Texture;
+        OutRequest.bExistingReferenceIsTrusted = bFromSerializedReference;
+        OutRequest.Resolution = Resolution;
+        OutRequest.SourceFormat = TSF_BGRA8;
+        OutRequest.PixelData = reinterpret_cast<const uint8*>(Pixels.GetData());
+        OutRequest.PixelBytes = static_cast<uint64>(Pixels.Num()) * sizeof(FColor);
+        OutRequest.Settings.CompressionSettings = bRevealNormal ? TC_Normalmap : TC_Default;
+        OutRequest.Settings.bSRGB = !bRevealNormal;
+        OutRequest.Settings.LODGroup = bRevealNormal
+            ? TEXTUREGROUP_WorldNormalMap
+            : TEXTUREGROUP_Pixels2D;
         const TextureAddress Address = Layer.TargetSurface.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap
             ? TA_Wrap
             : TA_Clamp;
-        Texture->AddressX = Address;
-        Texture->AddressY = Address;
-        Texture->PostEditChange();
-        Texture->MarkPackageDirty();
-        Package->MarkPackageDirty();
-
-        if (bCreatedAsset)
-        {
-            FAssetRegistryModule::AssetCreated(Texture);
-        }
-        return Texture;
+        OutRequest.Settings.AddressX = Address;
+        OutRequest.Settings.AddressY = Address;
+        OutRequest.DebugName = FString::Printf(TEXT("Transparency final %s"), OutputLabel);
+        OutErrorMessage.Reset();
+        return true;
     }
 
     void ApplyCoverageEdgeFeather(
@@ -272,11 +282,12 @@ namespace
         }
     }
 
-    void DilateOutsideCoverage(
+    void DilateOutsideCoverageBounded(
         const FIntPoint Resolution,
         const TArray<uint8>& OuterCoverage,
         const int32 PaddingPixels,
-        TArray<FColor>& InOutPixels)
+        TArray<FColor>& InOutPixels,
+        const bool bDirectionalNormal)
     {
         const int32 SafePadding = FMath::Max(PaddingPixels, 0);
         const int32 PixelCount = Resolution.X * Resolution.Y;
@@ -285,76 +296,143 @@ namespace
             return;
         }
 
-        TArray<uint8> Filled = OuterCoverage;
-        TArray<uint8> NextFilled;
-        TArray<FColor> NextPixels;
-        for (int32 Step = 0; Step < SafePadding; ++Step)
+        constexpr uint8 UnfilledDistance = MAX_uint8;
+        TArray<uint8> Distance;
+        Distance.Init(UnfilledDistance, PixelCount);
+        TArray<int32> Frontier;
+        Frontier.Reserve(FMath::Min(PixelCount, 64 * 1024));
+        for (int32 Y = 0; Y < Resolution.Y; ++Y)
         {
-            NextFilled = Filled;
-            NextPixels = InOutPixels;
-            bool bExpanded = false;
-            for (int32 Y = 0; Y < Resolution.Y; ++Y)
+            for (int32 X = 0; X < Resolution.X; ++X)
             {
-                for (int32 X = 0; X < Resolution.X; ++X)
+                const int32 PixelIndex = Y * Resolution.X + X;
+                if (OuterCoverage[PixelIndex] == 0)
                 {
-                    const int32 PixelIndex = Y * Resolution.X + X;
-                    if (Filled[PixelIndex] != 0)
+                    continue;
+                }
+                Distance[PixelIndex] = 0;
+                bool bBoundary = false;
+                for (int32 OffsetY = -1; OffsetY <= 1 && !bBoundary; ++OffsetY)
+                {
+                    for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
                     {
-                        continue;
-                    }
-
-                    int32 SampleCount = 0;
-                    int32 SumR = 0;
-                    int32 SumG = 0;
-                    int32 SumB = 0;
-                    int32 SumA = 0;
-                    for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
-                    {
-                        for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
+                        if (OffsetX == 0 && OffsetY == 0)
                         {
-                            if (OffsetX == 0 && OffsetY == 0)
-                            {
-                                continue;
-                            }
-                            const int32 NeighborX = X + OffsetX;
-                            const int32 NeighborY = Y + OffsetY;
-                            if (NeighborX < 0 || NeighborY < 0 ||
-                                NeighborX >= Resolution.X || NeighborY >= Resolution.Y)
-                            {
-                                continue;
-                            }
-                            const int32 NeighborIndex = NeighborY * Resolution.X + NeighborX;
-                            if (Filled[NeighborIndex] == 0)
-                            {
-                                continue;
-                            }
-                            const FColor& Neighbor = InOutPixels[NeighborIndex];
-                            SumR += Neighbor.R;
-                            SumG += Neighbor.G;
-                            SumB += Neighbor.B;
-                            SumA += Neighbor.A;
-                            ++SampleCount;
+                            continue;
+                        }
+                        const int32 NeighborX = X + OffsetX;
+                        const int32 NeighborY = Y + OffsetY;
+                        bBoundary = NeighborX >= 0 && NeighborY >= 0 &&
+                            NeighborX < Resolution.X && NeighborY < Resolution.Y &&
+                            OuterCoverage[NeighborY * Resolution.X + NeighborX] == 0;
+                        if (bBoundary)
+                        {
+                            break;
                         }
                     }
-                    if (SampleCount > 0)
+                }
+                if (bBoundary)
+                {
+                    Frontier.Add(PixelIndex);
+                }
+            }
+        }
+
+        TArray<int32> NextFrontier;
+        for (int32 Step = 1; Step <= SafePadding && !Frontier.IsEmpty(); ++Step)
+        {
+            NextFrontier.Reset();
+            NextFrontier.Reserve(Frontier.Num());
+            for (const int32 FrontierIndex : Frontier)
+            {
+                const int32 SourceX = FrontierIndex % Resolution.X;
+                const int32 SourceY = FrontierIndex / Resolution.X;
+                for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
+                {
+                    for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
                     {
-                        NextPixels[PixelIndex] = FColor(
-                            SumR / SampleCount,
-                            SumG / SampleCount,
-                            SumB / SampleCount,
-                            SumA / SampleCount);
-                        NextFilled[PixelIndex] = 1;
-                        bExpanded = true;
+                        if (OffsetX == 0 && OffsetY == 0)
+                        {
+                            continue;
+                        }
+                        const int32 X = SourceX + OffsetX;
+                        const int32 Y = SourceY + OffsetY;
+                        if (X < 0 || Y < 0 || X >= Resolution.X || Y >= Resolution.Y)
+                        {
+                            continue;
+                        }
+                        const int32 PixelIndex = Y * Resolution.X + X;
+                        if (Distance[PixelIndex] != UnfilledDistance)
+                        {
+                            continue;
+                        }
+
+                        int32 SampleCount = 0;
+                        int32 SumR = 0;
+                        int32 SumG = 0;
+                        int32 SumB = 0;
+                        int32 SumA = 0;
+                        int32 FirstNeighborIndex = INDEX_NONE;
+                        for (int32 SampleY = -1; SampleY <= 1; ++SampleY)
+                        {
+                            for (int32 SampleX = -1; SampleX <= 1; ++SampleX)
+                            {
+                                if (SampleX == 0 && SampleY == 0)
+                                {
+                                    continue;
+                                }
+                                const int32 NeighborX = X + SampleX;
+                                const int32 NeighborY = Y + SampleY;
+                                if (NeighborX < 0 || NeighborY < 0 ||
+                                    NeighborX >= Resolution.X || NeighborY >= Resolution.Y)
+                                {
+                                    continue;
+                                }
+                                const int32 NeighborIndex = NeighborY * Resolution.X + NeighborX;
+                                if (Distance[NeighborIndex] >= Step)
+                                {
+                                    continue;
+                                }
+                                if (FirstNeighborIndex == INDEX_NONE)
+                                {
+                                    FirstNeighborIndex = NeighborIndex;
+                                }
+                                const FColor& Neighbor = InOutPixels[NeighborIndex];
+                                SumR += Neighbor.R;
+                                SumG += Neighbor.G;
+                                SumB += Neighbor.B;
+                                SumA += Neighbor.A;
+                                ++SampleCount;
+                            }
+                        }
+                        if (SampleCount == 0)
+                        {
+                            continue;
+                        }
+                        InOutPixels[PixelIndex] = bDirectionalNormal
+                            ? InOutPixels[FirstNeighborIndex]
+                            : FColor(
+                                SumR / SampleCount,
+                                SumG / SampleCount,
+                                SumB / SampleCount,
+                                SumA / SampleCount);
+                        Distance[PixelIndex] = static_cast<uint8>(Step);
+                        NextFrontier.Add(PixelIndex);
                     }
                 }
             }
-            InOutPixels = MoveTemp(NextPixels);
-            Filled = MoveTemp(NextFilled);
-            if (!bExpanded)
-            {
-                break;
-            }
+            Frontier = MoveTemp(NextFrontier);
         }
+    }
+
+    void DilateOutsideCoverage(
+        const FIntPoint Resolution,
+        const TArray<uint8>& OuterCoverage,
+        const int32 PaddingPixels,
+        TArray<FColor>& InOutPixels)
+    {
+        DilateOutsideCoverageBounded(
+            Resolution, OuterCoverage, PaddingPixels, InOutPixels, false);
     }
 
     void DilateRevealNormalOutsideCoverage(
@@ -363,75 +441,8 @@ namespace
         const int32 PaddingPixels,
         TArray<FColor>& InOutPixels)
     {
-        const int32 SafePadding = FMath::Max(PaddingPixels, 0);
-        const int32 PixelCount = Resolution.X * Resolution.Y;
-        if (SafePadding <= 0 || OuterCoverage.Num() != PixelCount || InOutPixels.Num() != PixelCount)
-        {
-            return;
-        }
-
-        // A normal is directional data. Padding copies a neighbor intact
-        // instead of averaging encoded RG components.
-        TArray<uint8> Filled = OuterCoverage;
-        TArray<uint8> NextFilled;
-        TArray<FColor> NextPixels;
-        for (int32 Step = 0; Step < SafePadding; ++Step)
-        {
-            NextFilled = Filled;
-            NextPixels = InOutPixels;
-            bool bExpanded = false;
-            for (int32 Y = 0; Y < Resolution.Y; ++Y)
-            {
-                for (int32 X = 0; X < Resolution.X; ++X)
-                {
-                    const int32 PixelIndex = Y * Resolution.X + X;
-                    if (Filled[PixelIndex] != 0)
-                    {
-                        continue;
-                    }
-
-                    int32 BestNeighborIndex = INDEX_NONE;
-                    for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
-                    {
-                        for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
-                        {
-                            if (OffsetX == 0 && OffsetY == 0)
-                            {
-                                continue;
-                            }
-                            const int32 NeighborX = X + OffsetX;
-                            const int32 NeighborY = Y + OffsetY;
-                            if (NeighborX < 0 || NeighborY < 0 ||
-                                NeighborX >= Resolution.X || NeighborY >= Resolution.Y)
-                            {
-                                continue;
-                            }
-                            const int32 NeighborIndex = NeighborY * Resolution.X + NeighborX;
-                            if (Filled[NeighborIndex] == 0)
-                            {
-                                continue;
-                            }
-                            if (BestNeighborIndex == INDEX_NONE)
-                            {
-                                BestNeighborIndex = NeighborIndex;
-                            }
-                        }
-                    }
-                    if (BestNeighborIndex != INDEX_NONE)
-                    {
-                        NextPixels[PixelIndex] = InOutPixels[BestNeighborIndex];
-                        NextFilled[PixelIndex] = 1;
-                        bExpanded = true;
-                    }
-                }
-            }
-            InOutPixels = MoveTemp(NextPixels);
-            Filled = MoveTemp(NextFilled);
-            if (!bExpanded)
-            {
-                break;
-            }
-        }
+        DilateOutsideCoverageBounded(
+            Resolution, OuterCoverage, PaddingPixels, InOutPixels, true);
     }
 }
 
@@ -439,9 +450,31 @@ uint64 FDWCTransparencyStage4MemoryPlan::GetTotalBytes() const
 {
     uint64 Total = 0;
     Total = SaturatingAdd(Total, ResidentSharedBytes);
+    Total = SaturatingAdd(Total, PrepareInputBytes);
     Total = SaturatingAdd(Total, SnapshotBytes);
     Total = SaturatingAdd(Total, OutputBytes);
     return SaturatingAdd(Total, ScratchBytes);
+}
+
+uint64 FDWCTransparencyStage4MemoryPlan::GetPreparePeakBytes() const
+{
+    return SaturatingAdd(
+        SaturatingAdd(ResidentSharedBytes, PrepareInputBytes),
+        SnapshotBytes);
+}
+
+uint64 FDWCTransparencyStage4MemoryPlan::GetWorkerPeakBytes() const
+{
+    const uint64 TransferBytes = FMath::Min(TransferableSnapshotBytes, OutputBytes);
+    const uint64 SourcePhasePeak = SaturatingAdd(
+        SaturatingAdd(ResidentSharedBytes, SnapshotBytes),
+        OutputBytes - TransferBytes);
+    const uint64 PostSourcePeak = SaturatingAdd(
+        SaturatingAdd(
+            SnapshotBytes >= TransferBytes ? SnapshotBytes - TransferBytes : 0,
+            OutputBytes),
+        ScratchBytes);
+    return FMath::Max(SourcePhasePeak, PostSourcePeak);
 }
 
 uint64 FDWCTransparencyEditedMapBaker::EstimateCanonicalSourcePayloadBytes(
@@ -467,11 +500,64 @@ uint64 FDWCTransparencyEditedMapBaker::EstimateCanonicalSourcePayloadBytes(
     return Bytes;
 }
 
+uint64 FDWCTransparencyEditedMapBaker::EstimateStage4SourcePayloadBytes(
+    const FIntPoint Resolution,
+    const bool bRequiresRevealSurface,
+    const bool bRequiresOuterIslandID)
+{
+    if (Resolution.X <= 0 || Resolution.Y <= 0)
+    {
+        return MAX_uint64;
+    }
+    const uint64 PixelCount = SaturatingMultiply(
+        static_cast<uint64>(Resolution.X),
+        static_cast<uint64>(Resolution.Y));
+    if (PixelCount == MAX_uint64)
+    {
+        return MAX_uint64;
+    }
+
+    // Base reveal RGBA, auto alpha, target coverage, and packed valid-hit bits.
+    uint64 Bytes = sizeof(FDWCTransparencySourcePayload) + 64ull * 1024ull;
+    Bytes = SaturatingAdd(Bytes, SaturatingMultiply(PixelCount, 6ull));
+    Bytes = SaturatingAdd(Bytes, (PixelCount + 7ull) / 8ull);
+    if (bRequiresOuterIslandID)
+    {
+        Bytes = SaturatingAdd(Bytes, SaturatingMultiply(PixelCount, sizeof(uint16)));
+    }
+    if (bRequiresRevealSurface)
+    {
+        Bytes = SaturatingAdd(Bytes, SaturatingMultiply(PixelCount, sizeof(FColor)));
+    }
+    return Bytes;
+}
+
 bool FDWCTransparencyEditedMapBaker::BuildMemoryPlan(
     const FIntPoint Resolution,
     const uint64 SourcePayloadBytes,
     const uint64 AuthoringInputBytes,
     const bool bRestoresCanonicalArtifacts,
+    FDWCTransparencyStage4MemoryPlan& OutPlan,
+    FString& OutErrorMessage)
+{
+    return BuildMemoryPlan(
+        Resolution,
+        SourcePayloadBytes,
+        AuthoringInputBytes,
+        bRestoresCanonicalArtifacts,
+        true,
+        true,
+        OutPlan,
+        OutErrorMessage);
+}
+
+bool FDWCTransparencyEditedMapBaker::BuildMemoryPlan(
+    const FIntPoint Resolution,
+    const uint64 SourcePayloadBytes,
+    const uint64 AuthoringInputBytes,
+    const bool bRestoresCanonicalArtifacts,
+    const bool bRequiresRevealNormal,
+    const bool bRequiresOuterIslandID,
     FDWCTransparencyStage4MemoryPlan& OutPlan,
     FString& OutErrorMessage)
 {
@@ -495,23 +581,33 @@ bool FDWCTransparencyEditedMapBaker::BuildMemoryPlan(
 
     const uint64 FixedAllowance = 64ull * 1024ull;
     const uint64 AlphaDomainBytes = SaturatingAdd(
-        SaturatingMultiply(PixelCount, 4ull),
+        SaturatingMultiply(PixelCount, bRequiresOuterIslandID ? 4ull : 2ull),
         SaturatingAdd((PixelCount + 7ull) / 8ull, FixedAllowance));
     const uint64 CorrectedCheckpointBytes = SaturatingMultiply(PixelCount, sizeof(FColor));
-    const uint64 OutputBytes = SaturatingMultiply(
-        SaturatingMultiply(PixelCount, sizeof(FColor)),
-        3ull);
-    const uint64 WorkerScratchBytes = SaturatingMultiply(PixelCount, 10ull);
+    uint64 OutputBytes = SaturatingMultiply(PixelCount, sizeof(FColor));
+    if (bRequiresRevealNormal)
+    {
+        OutputBytes = SaturatingAdd(
+            OutputBytes,
+            SaturatingMultiply(PixelCount, sizeof(FColor)));
+    }
+    OutputBytes = SaturatingAdd(
+        OutputBytes,
+        SaturatingMultiply(PixelCount, sizeof(uint8)));
+    // The largest post-source phase is bounded frontier dilation.
+    const uint64 WorkerScratchBytes = SaturatingMultiply(PixelCount, 9ull);
     const uint64 RestoreScratchBytes = bRestoresCanonicalArtifacts
         ? SaturatingMultiply(PixelCount, sizeof(FColor))
         : 0ull;
 
-    OutPlan.ResidentSharedBytes = SaturatingAdd(SourcePayloadBytes, AuthoringInputBytes);
+    OutPlan.ResidentSharedBytes = SourcePayloadBytes;
+    OutPlan.PrepareInputBytes = AuthoringInputBytes;
     OutPlan.SnapshotBytes = SaturatingAdd(
         SaturatingAdd(AlphaDomainBytes, CorrectedCheckpointBytes),
         SaturatingAdd(AuthoringInputBytes, FixedAllowance));
     OutPlan.OutputBytes = OutputBytes;
     OutPlan.ScratchBytes = FMath::Max(WorkerScratchBytes, RestoreScratchBytes);
+    OutPlan.TransferableSnapshotBytes = CorrectedCheckpointBytes;
     if (OutPlan.GetTotalBytes() == MAX_uint64)
     {
         OutErrorMessage = TEXT("Stage 4 memory planning overflowed the supported reservation size.");
@@ -526,6 +622,11 @@ struct FDWCTransparencyEditedMapBakeSnapshot::FImpl
     // Read-only Stage 3/final packaging dependency. Stage 4 brush replay,
     // validity, feathering, and padding use WorkingSet.AlphaDomain instead.
     TSharedPtr<const FDWCTransparencySourcePayload> SourcePayload;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    FIntPoint SourceResolution = FIntPoint::ZeroValue;
+    FString SourceBuildSignature;
+    int32 SourceValidHitCount = 0;
+    int32 SourceNoHitCount = 0;
     EDWCTransparencyStage4RevealSource RevealSource =
         EDWCTransparencyStage4RevealSource::CanonicalReplay;
     TArray<FColor> CorrectedRevealPixels;
@@ -553,6 +654,7 @@ struct FDWCTransparencyEditedMapBakeSnapshot::FImpl
     bool bValid = false;
     uint64 EstimatedPrivateBytes = 0;
     uint64 EstimatedOutputBytes = 0;
+    uint64 EstimatedTransferableBytes = 0;
     uint64 EstimatedScratchBytes = 0;
     uint64 EstimatedBytes = 0;
 };
@@ -575,9 +677,7 @@ bool FDWCTransparencyEditedMapBakeSnapshot::IsValid() const
 
 int32 FDWCTransparencyEditedMapBakeSnapshot::GetMaterialSlotIndex() const
 {
-    return Impl.IsValid() && Impl->SourcePayload.IsValid()
-        ? Impl->SourcePayload->MaterialSlotIndex
-        : INDEX_NONE;
+    return Impl.IsValid() ? Impl->MaterialSlotIndex : INDEX_NONE;
 }
 
 FGuid FDWCTransparencyEditedMapBakeSnapshot::GetLayerGuid() const
@@ -587,31 +687,23 @@ FGuid FDWCTransparencyEditedMapBakeSnapshot::GetLayerGuid() const
 
 FIntPoint FDWCTransparencyEditedMapBakeSnapshot::GetSourceResolution() const
 {
-    return Impl.IsValid() && Impl->SourcePayload.IsValid()
-        ? Impl->SourcePayload->Resolution
-        : FIntPoint::ZeroValue;
+    return Impl.IsValid() ? Impl->SourceResolution : FIntPoint::ZeroValue;
 }
 
 const FString& FDWCTransparencyEditedMapBakeSnapshot::GetSourceBuildSignature() const
 {
     static const FString Empty;
-    return Impl.IsValid() && Impl->SourcePayload.IsValid()
-        ? Impl->SourcePayload->BuildSignature
-        : Empty;
+    return Impl.IsValid() ? Impl->SourceBuildSignature : Empty;
 }
 
 int32 FDWCTransparencyEditedMapBakeSnapshot::GetSourceValidHitCount() const
 {
-    return Impl.IsValid() && Impl->SourcePayload.IsValid()
-        ? Impl->SourcePayload->ValidHitCount
-        : 0;
+    return Impl.IsValid() ? Impl->SourceValidHitCount : 0;
 }
 
 int32 FDWCTransparencyEditedMapBakeSnapshot::GetSourceNoHitCount() const
 {
-    return Impl.IsValid() && Impl->SourcePayload.IsValid()
-        ? Impl->SourcePayload->NoHitCount
-        : 0;
+    return Impl.IsValid() ? Impl->SourceNoHitCount : 0;
 }
 
 uint64 FDWCTransparencyEditedMapBakeSnapshot::GetEstimatedBytes() const
@@ -627,6 +719,11 @@ uint64 FDWCTransparencyEditedMapBakeSnapshot::GetEstimatedPrivateBytes() const
 uint64 FDWCTransparencyEditedMapBakeSnapshot::GetEstimatedOutputBytes() const
 {
     return Impl.IsValid() ? Impl->EstimatedOutputBytes : 0;
+}
+
+uint64 FDWCTransparencyEditedMapBakeSnapshot::GetEstimatedTransferableBytes() const
+{
+    return Impl.IsValid() ? Impl->EstimatedTransferableBytes : 0;
 }
 
 uint64 FDWCTransparencyEditedMapBakeSnapshot::GetEstimatedScratchBytes() const
@@ -649,8 +746,10 @@ bool FDWCTransparencyEditedMapBaker::IsAutoResultCompatible(
 
     const int32 PixelCount = SourcePayload.Resolution.X * SourcePayload.Resolution.Y;
     if (SourcePayload.Resolution.X <= 0 || SourcePayload.Resolution.Y <= 0 ||
+        SourcePayload.OutputResolutionIdentity.IsEmpty() ||
         SourcePayload.InnerColorBuffer.Num() != PixelCount ||
-        !SourcePayload.RevealSurfaceAuthoring.IsValidForResolution(SourcePayload.Resolution) ||
+        (Layer.RequiresRevealSurface() &&
+         !SourcePayload.RevealSurfaceAuthoring.IsValidForResolution(SourcePayload.Resolution)) ||
         SourcePayload.AutoAlphaBuffer.Num() != PixelCount ||
         SourcePayload.OuterCoverageBuffer.Num() != PixelCount ||
         SourcePayload.ValidHitBuffer.Num() != PixelCount)
@@ -709,7 +808,8 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
     const FDWCWrinkleSuppressionDependencySnapshot SuppressionDependency =
         FDWCWrinkleSuppressionCoverageService::ResolveDependency(
             &WetClothingAsset,
-            SourcePayload.MaterialSlotIndex);
+            SourcePayload.MaterialSlotIndex,
+            true);
     const bool bHasWrinkleSuppression = SuppressionDependency.IsAvailable();
     const FString SourceWrinkleMaskBuildSignature =
         bHasWrinkleSuppression
@@ -752,6 +852,11 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
     {
         Mismatches.Add(TEXT("the output resolution changed"));
     }
+    if (!MatchesResolvedOutputResolution(
+            BakedMap->TransparencyMap.Get(), SourcePayload.Resolution))
+    {
+        Mismatches.Add(TEXT("the Transparency Map dimensions do not match the resolved output resolution"));
+    }
     if (BakedMap->PaddingPixels != TransparencyData.TransparencyPaddingPixels)
     {
         Mismatches.Add(TEXT("the padding setting changed"));
@@ -783,6 +888,12 @@ bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
     if (Layer.RequiresRuntimeRevealNormal() && !BakedMap->HasRuntimeRevealNormalPayload())
     {
         Mismatches.Add(TEXT("the required coverage-weighted Reveal Normal runtime artifact is missing"));
+    }
+    if (Layer.RequiresRuntimeRevealNormal() &&
+        !MatchesResolvedOutputResolution(
+            BakedMap->RevealNormalMap.Get(), SourcePayload.Resolution))
+    {
+        Mismatches.Add(TEXT("the Reveal Normal dimensions do not match the resolved output resolution"));
     }
     if (OutReason != nullptr && !Mismatches.IsEmpty())
     {
@@ -993,6 +1104,11 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
 
     FDWCTransparencyEditedMapBakeSnapshot::FImpl& Snapshot = *OutSnapshot.Impl;
     Snapshot.SourcePayload = MoveTemp(AutoResultRef);
+    Snapshot.MaterialSlotIndex = SourcePayload.MaterialSlotIndex;
+    Snapshot.SourceResolution = SourcePayload.Resolution;
+    Snapshot.SourceBuildSignature = SourcePayload.BuildSignature;
+    Snapshot.SourceValidHitCount = SourcePayload.ValidHitCount;
+    Snapshot.SourceNoHitCount = SourcePayload.NoHitCount;
     Snapshot.RevealSource = Stage4Reveal.Source;
     Snapshot.CorrectedRevealPixels = MoveTemp(Stage4Reveal.CorrectedPixels);
     Snapshot.RevealFallbackWarning = MoveTemp(Stage4Reveal.Warning);
@@ -1017,7 +1133,8 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
     FDWCWrinkleSuppressionDependencySnapshot WrinkleDependency =
         Snapshot.CoverageService->ResolveDependency(
             &WetClothingAsset,
-            SourcePayload.MaterialSlotIndex);
+            SourcePayload.MaterialSlotIndex,
+            true);
     if (WrinkleDependency.IsAvailable())
     {
         Snapshot.bHasWrinkleSuppression = Snapshot.CoverageService->AcquireCoverage(
@@ -1055,6 +1172,10 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
     {
         return false;
     }
+    Snapshot.SourcePayload = BuildRetainedStage4Source(
+        SourcePayload,
+        Snapshot.RevealSource,
+        Snapshot.bRequiresRevealSurface);
     Snapshot.SourceWrinkleMaskBakeGuid =
         Snapshot.bHasWrinkleSuppression
             ? Snapshot.WorkingSet.WrinkleDependency.BakeGuid
@@ -1072,6 +1193,7 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
     const uint64 PixelCount = static_cast<uint64>(SourcePayload.Resolution.X) *
         static_cast<uint64>(SourcePayload.Resolution.Y);
     Snapshot.EstimatedPrivateBytes =
+        Snapshot.SourcePayload->GetAllocatedBytes() +
         Snapshot.WorkingSet.OwnedBytes +
         Snapshot.WorkingSet.RetainedBytes +
         static_cast<uint64>(Snapshot.RevealColorPaintStrokes.GetAllocatedSize()) +
@@ -1083,13 +1205,17 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
             static_cast<uint64>(Stroke.Samples.GetAllocatedSize());
     }
     Snapshot.EstimatedOutputBytes = PixelCount * sizeof(FColor) *
-        (Snapshot.RevealSource == EDWCTransparencyStage4RevealSource::CorrectedCheckpoint
-            ? 2ull
-            : 3ull);
+        (Snapshot.bRequiresRevealSurface ? 2ull : 1ull) +
+        (Snapshot.RevealSource == EDWCTransparencyStage4RevealSource::CanonicalReplay
+            ? PixelCount * sizeof(uint8)
+            : 0ull);
+    Snapshot.EstimatedTransferableBytes =
+        Snapshot.RevealSource == EDWCTransparencyStage4RevealSource::CorrectedCheckpoint
+            ? static_cast<uint64>(Snapshot.CorrectedRevealPixels.GetAllocatedSize())
+            : 0ull;
     // Feathering and the two directional dilation passes use bounded scratch
     // arrays; count their peak rather than reserving them as persistent data.
-    Snapshot.EstimatedScratchBytes = PixelCount *
-        (sizeof(FColor) * 2ull + sizeof(uint8) * 2ull);
+    Snapshot.EstimatedScratchBytes = PixelCount * 9ull;
     Snapshot.EstimatedBytes = Snapshot.EstimatedPrivateBytes +
         Snapshot.EstimatedOutputBytes + Snapshot.EstimatedScratchBytes;
     Snapshot.bValid = true;
@@ -1098,7 +1224,7 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
 }
 
 FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeSnapshot(
-    const FDWCTransparencyEditedMapBakeSnapshot& SnapshotHandle,
+    FDWCTransparencyEditedMapBakeSnapshot& SnapshotHandle,
     const FDWCEditorCancellationToken* CancellationToken)
 {
     FDWCTransparencyEditedMapComputedResult Result;
@@ -1107,7 +1233,7 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
         Result.Error = TEXT("The transparency bake snapshot is invalid.");
         return Result;
     }
-    const FDWCTransparencyEditedMapBakeSnapshot::FImpl& Snapshot = *SnapshotHandle.Impl;
+    FDWCTransparencyEditedMapBakeSnapshot::FImpl& Snapshot = *SnapshotHandle.Impl;
     const FDWCTransparencySourcePayload& SourcePayload = *Snapshot.SourcePayload;
     const FDWCTransparencyAlphaDomainSnapshot& AlphaDomain = *Snapshot.WorkingSet.AlphaDomain;
     const int32 PixelCount = AlphaDomain.Resolution.X * AlphaDomain.Resolution.Y;
@@ -1150,9 +1276,19 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
     Result.WarningMessage = Snapshot.SuppressionWarning;
     const bool bUsesCorrectedReveal =
         Snapshot.RevealSource == EDWCTransparencyStage4RevealSource::CorrectedCheckpoint;
-    Result.FinalPixels = bUsesCorrectedReveal
-        ? Snapshot.CorrectedRevealPixels
-        : SourcePayload.InnerColorBuffer;
+    if (bUsesCorrectedReveal)
+    {
+        Result.FinalPixels = MoveTemp(Snapshot.CorrectedRevealPixels);
+        Snapshot.EstimatedPrivateBytes =
+            Snapshot.EstimatedPrivateBytes >= Snapshot.EstimatedTransferableBytes
+                ? Snapshot.EstimatedPrivateBytes - Snapshot.EstimatedTransferableBytes
+                : 0;
+        Snapshot.EstimatedTransferableBytes = 0;
+    }
+    else
+    {
+        Result.FinalPixels = SourcePayload.InnerColorBuffer;
+    }
     Result.bContainsRevealNormal = Snapshot.bRequiresRevealSurface;
     if (Result.bContainsRevealNormal)
     {
@@ -1186,13 +1322,21 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
                 : TEXT("Metallic reveal-color correction could not be applied.");
             return Result;
         }
+        Result.RebuiltCorrectedRevealAlpha.SetNumUninitialized(PixelCount);
         for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
         {
-            Result.FinalPixels[PixelIndex].A = SourcePayload.AutoAlphaBuffer[PixelIndex];
+            const uint8 SourceAlpha = SourcePayload.AutoAlphaBuffer[PixelIndex];
+            Result.FinalPixels[PixelIndex].A = SourceAlpha;
+            Result.RebuiltCorrectedRevealAlpha[PixelIndex] = SourceAlpha;
         }
-        Result.RebuiltCorrectedRevealPixels = Result.FinalPixels;
         Result.bRebuiltCorrectedRevealCheckpoint = true;
     }
+
+    // Everything below operates on the independent alpha domain and output
+    // arrays. Release the large canonical Stage 2 payload before scratch-heavy
+    // feathering and dilation begin.
+    Snapshot.SourcePayload.Reset();
+    Snapshot.RevealColorPaintStrokes.Reset();
     for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
     {
         if (CancellationToken != nullptr && (PixelIndex & 4095) == 0 && CancellationToken->IsCanceled())
@@ -1268,7 +1412,14 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
     Result.AppliedSampleCount = Snapshot.WorkingSet.Alpha.AppliedSampleCount;
     Result.ResultBytes = Result.FinalPixels.GetAllocatedSize() +
         Result.FinalRevealNormalPixels.GetAllocatedSize() +
-        Result.RebuiltCorrectedRevealPixels.GetAllocatedSize();
+        Result.RebuiltCorrectedRevealAlpha.GetAllocatedSize();
+    Snapshot.WorkingSet.AlphaDomain.Reset();
+    Snapshot.WorkingSet.Alpha.ModifiedTiles.Reset();
+    Snapshot.WorkingSet.Alpha.FallbackStrokes.Reset();
+    Snapshot.WrinkleCoverageLease.Reset();
+    Snapshot.EstimatedPrivateBytes = 1024ull * 1024ull;
+    Snapshot.EstimatedScratchBytes = 0;
+    Snapshot.EstimatedBytes = Snapshot.EstimatedPrivateBytes;
     Result.bSucceeded = true;
     return Result;
 }
@@ -1298,13 +1449,12 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
                 return Candidate.LayerGuid == Snapshot.LayerGuid;
             });
     if (Layer == nullptr ||
-        !Snapshot.SourcePayload.IsValid() ||
-        Layer->TargetSurface.OuterMaterialSlotIndex != Snapshot.SourcePayload->MaterialSlotIndex)
+        Layer->TargetSurface.OuterMaterialSlotIndex != Snapshot.MaterialSlotIndex)
     {
         OutErrorMessage = TEXT("The transparency target changed before the bake result could be committed.");
         return false;
     }
-    const int32 ExpectedPixelCount = Snapshot.SourcePayload->Resolution.X * Snapshot.SourcePayload->Resolution.Y;
+    const int32 ExpectedPixelCount = Snapshot.SourceResolution.X * Snapshot.SourceResolution.Y;
     if (ComputedResult.FinalPixels.Num() != ExpectedPixelCount ||
         (ComputedResult.bContainsRevealNormal &&
          ComputedResult.FinalRevealNormalPixels.Num() != ExpectedPixelCount))
@@ -1364,7 +1514,8 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
         const FDWCWrinkleSuppressionDependencySnapshot CurrentWrinkleDependency =
             Snapshot.CoverageService->ResolveDependency(
                 &WetClothingAsset,
-                Layer->TargetSurface.OuterMaterialSlotIndex);
+                Layer->TargetSurface.OuterMaterialSlotIndex,
+                true);
         if (!CurrentWrinkleDependency.IsAvailable() ||
             CurrentWrinkleDependency.BakeGuid != Snapshot.WorkingSet.WrinkleDependency.BakeGuid ||
             CurrentWrinkleDependency.BuildSignature !=
@@ -1384,8 +1535,9 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
         if (!FDWCTransparencyTempAssetStore::CommitRevealArtifact(
                 WetClothingAsset,
                 *Layer,
-                ComputedResult.RebuiltCorrectedRevealPixels,
-                Snapshot.SourcePayload->Resolution,
+                ComputedResult.FinalPixels,
+                ComputedResult.RebuiltCorrectedRevealAlpha,
+                Snapshot.SourceResolution,
                 Snapshot.WorkingSet.SourceSignature,
                 Snapshot.WorkingSet.RevealSignature,
                 CheckpointError))
@@ -1397,48 +1549,79 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
                 ? CacheWarning
                 : ComputedResult.WarningMessage + TEXT("\n") + CacheWarning;
         }
+        ComputedResult.RebuiltCorrectedRevealAlpha.Reset();
     }
 
-    UTexture2D* Texture = CreateOrUpdateFinalTransparencyTextureAsset(
-        WetClothingAsset,
-        *Layer,
-        *Snapshot.SourcePayload,
-        ComputedResult.FinalPixels,
-        false,
-        OutErrorMessage);
-    if (Texture == nullptr)
+    TArray<FDWCEditorArtifactTextureRequest> ArtifactRequests;
+    ArtifactRequests.Reserve(ComputedResult.bContainsRevealNormal ? 2 : 1);
+    FDWCEditorArtifactTextureRequest TransparencyRequest;
+    if (!BuildFinalTransparencyTextureRequest(
+            WetClothingAsset,
+            *Layer,
+            Snapshot.MaterialSlotIndex,
+            Snapshot.SourceResolution,
+            ComputedResult.FinalPixels,
+            false,
+            TransparencyRequest,
+            OutErrorMessage))
     {
         return false;
     }
+    ArtifactRequests.Add(MoveTemp(TransparencyRequest));
 
-    UTexture2D* RevealNormalTexture = nullptr;
     if (ComputedResult.bContainsRevealNormal)
     {
-        RevealNormalTexture = CreateOrUpdateFinalTransparencyTextureAsset(
-            WetClothingAsset,
-            *Layer,
-            *Snapshot.SourcePayload,
-            ComputedResult.FinalRevealNormalPixels,
-            true,
-            OutErrorMessage);
-        if (RevealNormalTexture == nullptr)
+        FDWCEditorArtifactTextureRequest RevealNormalRequest;
+        if (!BuildFinalTransparencyTextureRequest(
+                WetClothingAsset,
+                *Layer,
+                Snapshot.MaterialSlotIndex,
+                Snapshot.SourceResolution,
+                ComputedResult.FinalRevealNormalPixels,
+                true,
+                RevealNormalRequest,
+                OutErrorMessage))
         {
             return false;
         }
+        ArtifactRequests.Add(MoveTemp(RevealNormalRequest));
+    }
+
+    TArray<FDWCEditorArtifactCommitReceipt> ArtifactReceipts;
+    if (!FDWCEditorArtifactStore::Get()->CommitTextureBatch(
+            ArtifactRequests, ArtifactReceipts, OutErrorMessage) ||
+        ArtifactReceipts.Num() != ArtifactRequests.Num())
+    {
+        return false;
+    }
+    UTexture2D* Texture = ArtifactReceipts[0].Texture;
+    UTexture2D* RevealNormalTexture = ComputedResult.bContainsRevealNormal
+        ? ArtifactReceipts[1].Texture
+        : nullptr;
+    ComputedResult.FinalPixels.Reset();
+    ComputedResult.FinalRevealNormalPixels.Reset();
+
+    if (!MatchesResolvedOutputResolution(Texture, Snapshot.SourceResolution) ||
+        (ComputedResult.bContainsRevealNormal &&
+         !MatchesResolvedOutputResolution(
+             RevealNormalTexture, Snapshot.SourceResolution)))
+    {
+        OutErrorMessage = TEXT("A committed Transparency runtime texture does not match the resolved output resolution.");
+        return false;
     }
 
     WetClothingAsset.Modify();
     FWetClothingBakedTransparencyMap* BakedMap = Layer->BakedMaps.FindByPredicate(
         [&Snapshot](const FWetClothingBakedTransparencyMap& Candidate)
         {
-            return Candidate.MaterialSlotIndex == Snapshot.SourcePayload->MaterialSlotIndex;
+            return Candidate.MaterialSlotIndex == Snapshot.MaterialSlotIndex;
         });
     if (BakedMap == nullptr)
     {
         BakedMap = &Layer->BakedMaps.AddDefaulted_GetRef();
     }
 
-    BakedMap->MaterialSlotIndex = Snapshot.SourcePayload->MaterialSlotIndex;
+    BakedMap->MaterialSlotIndex = Snapshot.MaterialSlotIndex;
     BakedMap->TransparencyMap = Texture;
     BakedMap->RevealNormalMap = RevealNormalTexture;
     BakedMap->RevealNormalBuildSignature = ComputedResult.bContainsRevealNormal
@@ -1451,7 +1634,7 @@ bool FDWCTransparencyEditedMapBaker::CommitComputedResult(
     BakedMap->bContainsInnerMetallicB = false;
     BakedMap->bContainsRevealSurfaceCoverageAlpha = false;
     BakedMap->bMetallicDarkeningBakedIntoColor = true;
-    BakedMap->Resolution = Snapshot.SourcePayload->Resolution.X;
+    BakedMap->Resolution = Snapshot.SourceResolution.X;
     BakedMap->PaddingPixels = Snapshot.PaddingPixels;
     BakedMap->BakedStrokeCount = Snapshot.BakedStrokeCount;
     BakedMap->BakeGuid = FGuid::NewGuid();

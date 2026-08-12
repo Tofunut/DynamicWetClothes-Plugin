@@ -11,6 +11,8 @@ struct FDWCRevealBakeTexelSample
 {
     FIntPoint Pixel = FIntPoint::ZeroValue;
     FVector2D UV = FVector2D::ZeroVector;
+    /** Fraction of the target texel covered by the outer surface, encoded as 0..255. */
+    uint8     Coverage = 255;
     FVector   Position = FVector::ZeroVector;
     FVector   Normal = FVector::UpVector;
     int32     TriangleIndex = INDEX_NONE;
@@ -22,6 +24,8 @@ struct FDWCRevealBakeTexelSample
 struct FDWCRevealBakeRayHit
 {
     bool      bHit = false;
+    /** A blocker won this priority layer. Lower-priority reveal sources must not be considered. */
+    bool      bBlocked = false;
     FIntPoint Pixel = FIntPoint::ZeroValue;
     FName     SourceLayerId = NAME_None;
     int32     SourceTriangleIndex = INDEX_NONE;
@@ -90,6 +94,20 @@ class FDWCRevealBakeTexelSampler
         const FDWCRevealBakeSurfaceTriangle& Triangle,
         FVector&                             OutBarycentric);
 
+    static uint8 ComputeSubpixelMask(
+        int32                                    X,
+        int32                                    Y,
+        const FIntPoint&                         Resolution,
+        const FDWCRevealBakeSurfaceTriangle&     Triangle);
+
+    static bool ResolveRepresentativeSample(
+        int32                                    X,
+        int32                                    Y,
+        const FIntPoint&                         Resolution,
+        const FDWCRevealBakeSurfaceTriangle&     Triangle,
+        FVector2D&                               OutUV,
+        FVector&                                 OutBarycentric);
+
     static void SetError(FString* OutErrorMessage, const TCHAR* InMessage);
 };
 
@@ -98,12 +116,14 @@ class FDWCRevealBakeRayProjector
   public:
     static bool ProjectSamplesToSources(
         const FDWCRevealBakeSurface&                    OuterSurface,
-        const TArray<FDWCRevealBakeSurface>&            SourceSurfaces,
+        TConstArrayView<FDWCRevealBakeSurface>           SourceSurfaces,
         const TArray<FDWCRevealBakeTexelSample>&        Samples,
         const FDWCRevealBakeRayProjectionSettings&      Settings,
         TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
         FString*                                        OutErrorMessage = nullptr,
-        const FDWCEditorCancellationToken*              CancellationToken = nullptr);
+        const FDWCEditorCancellationToken*              CancellationToken = nullptr,
+        /** Empty means every sample; otherwise only these sample indices are projected. */
+        TConstArrayView<int32>                           SampleIndices = {});
 
   private:
     static constexpr double RayIntersectionEpsilon = 1.0e-8;
@@ -141,7 +161,7 @@ class FDWCRevealBakeRayProjector
       public:
         bool Build(
             const FDWCRevealBakeSurface&               OuterSurface,
-            const TArray<FDWCRevealBakeSurface>&       SourceSurfaces,
+            TConstArrayView<FDWCRevealBakeSurface>      SourceSurfaces,
             const FDWCRevealBakeRayProjectionSettings& Settings);
 
         void ForEachRayCandidate(

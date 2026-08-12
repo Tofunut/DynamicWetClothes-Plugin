@@ -328,6 +328,25 @@ void FDWCEditorSurfacePatchProjectionCacheService::AppendDiagnosticMemoryBucket(
     Bucket.HitCount = HitCount;
     Bucket.MissCount = MissCount;
     Bucket.EvictionCount = EvictionCount;
+    Bucket.GlobalOwnerIdentifier = FString::Printf(
+        TEXT("SurfacePatchProjectionCache/%p"),
+        static_cast<const void*>(this));
+    Bucket.GlobalCategory = EDWCEditorMemoryCategory::SharedCacheCPU;
+    Bucket.bIncludeInGlobalSnapshot = true;
+}
+
+uint64 FDWCEditorSurfacePatchProjectionCacheService::GetReclaimableBytes_Locked() const
+{
+    uint64 ReclaimableBytes = 0;
+    for (const TPair<FKey, TSharedPtr<FEntry, ESPMode::ThreadSafe>>& Pair : Entries)
+    {
+        if (Pair.Value.IsValid() && Pair.Value->Lease.IsCacheResident() &&
+            Pair.Value->Lease.IsResidencyUnique())
+        {
+            ReclaimableBytes += Pair.Value->Lease.GetSharedResidentBytes();
+        }
+    }
+    return ReclaimableBytes;
 }
 
 void FDWCEditorSurfacePatchProjectionCacheService::ResetDiagnosticCounters()
@@ -347,6 +366,26 @@ void FDWCEditorSurfacePatchProjectionCacheService::ResetDiagnosticCounters()
 uint64 FDWCEditorSurfacePatchProjectionCacheService::GetUsedBytes() const
 {
     return AccountingState->Snapshot().UsedBytes;
+}
+
+uint64 FDWCEditorSurfacePatchProjectionCacheService::GetReclaimableBytes() const
+{
+    FScopeLock Lock(&Mutex);
+    return GetReclaimableBytes_Locked();
+}
+
+uint64 FDWCEditorSurfacePatchProjectionCacheService::ReclaimUnleasedBytes(
+    const uint64 TargetBytes)
+{
+    FScopeLock Lock(&Mutex);
+    const uint64 BeforeBytes = AccountingState->Snapshot().UsedBytes;
+    while (BeforeBytes >= AccountingState->Snapshot().UsedBytes &&
+           BeforeBytes - AccountingState->Snapshot().UsedBytes < TargetBytes &&
+           EvictOldestUnleased_Locked())
+    {
+    }
+    const uint64 AfterBytes = AccountingState->Snapshot().UsedBytes;
+    return BeforeBytes >= AfterBytes ? BeforeBytes - AfterBytes : 0;
 }
 
 int32 FDWCEditorSurfacePatchProjectionCacheService::GetEntryCount() const

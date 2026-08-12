@@ -180,6 +180,7 @@ namespace
         Identity.UVChannelIndex = 2;
         Identity.LODIndex = 0;
         Identity.Resolution = Resolution;
+        Identity.OutputResolutionIdentity = TEXT("ResolutionIdentity");
         Identity.BuildSignature = Signature;
         return Identity;
     }
@@ -354,7 +355,8 @@ bool FDWCTransparencyFinalCurrentnessContractTest::RunTest(const FString& Parame
 {
     FDWCTransparencyFinalWorkingSet WorkingSet;
     WorkingSet.Identity.MaterialSlotIndex = 5;
-    WorkingSet.Identity.Resolution = FIntPoint(1024, 1024);
+    WorkingSet.Identity.Resolution = FIntPoint(4, 4);
+    WorkingSet.Identity.OutputResolutionIdentity = TEXT("ResolutionIdentity");
     WorkingSet.Settings.PaddingPixels = 8;
     WorkingSet.SuppressionSettingsSignature = TEXT("Settings");
     WorkingSet.FinalAlphaSignature = TEXT("FinalAlpha");
@@ -364,8 +366,11 @@ bool FDWCTransparencyFinalCurrentnessContractTest::RunTest(const FString& Parame
 
     FWetClothingBakedTransparencyMap Baked;
     Baked.MaterialSlotIndex = 5;
-    Baked.TransparencyMap = NewObject<UTexture2D>();
-    Baked.Resolution = 1024;
+    TArray<FColor> RuntimePixels;
+    RuntimePixels.Init(FColor::White, 16);
+    Baked.TransparencyMap = MakeArtifactTexture(
+        FIntPoint(4, 4), TSF_BGRA8, RuntimePixels.GetData());
+    Baked.Resolution = 4;
     Baked.PaddingPixels = 8;
     Baked.BakeGuid = FGuid::NewGuid();
     Baked.BuildSignature = TEXT("Final");
@@ -376,6 +381,15 @@ bool FDWCTransparencyFinalCurrentnessContractTest::RunTest(const FString& Parame
 
     TestTrue(TEXT("Manual Color accepts a baked map without a Reveal Surface payload."),
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).IsCurrent());
+    UTexture2D* CurrentTransparencyMap = Baked.TransparencyMap;
+    TArray<FColor> MismatchedPixels;
+    MismatchedPixels.Init(FColor::White, 64);
+    Baked.TransparencyMap = MakeArtifactTexture(
+        FIntPoint(8, 8), TSF_BGRA8, MismatchedPixels.GetData());
+    TestEqual(TEXT("A final texture dimension mismatch is stale."),
+        FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).Reason,
+        EDWCTransparencyStaleReason::SourceInputsChanged);
+    Baked.TransparencyMap = CurrentTransparencyMap;
     WorkingSet.RevealNormalSignature = TEXT("ManualRevealNormalIsOptional");
     Baked.RevealNormalBuildSignature = TEXT("OptionalRevealNormal");
     TestTrue(TEXT("Manual Color ignores an optional Reveal Normal signature mismatch."),
@@ -387,7 +401,8 @@ bool FDWCTransparencyFinalCurrentnessContractTest::RunTest(const FString& Parame
         FDWCTransparencyFinalWorkingSetBuilder::EvaluateCurrentness(&Baked, WorkingSet).Reason,
         EDWCTransparencyStaleReason::WrinkleDependencyChanged);
     Baked.SourceWrinkleMaskBuildSignature = TEXT("Wrinkle");
-    Baked.RevealNormalMap = NewObject<UTexture2D>();
+    Baked.RevealNormalMap = MakeArtifactTexture(
+        FIntPoint(4, 4), TSF_BGRA8, RuntimePixels.GetData());
     Baked.bSourceCoverageBakedIntoRevealNormal = true;
     Baked.bMetallicDarkeningBakedIntoColor = true;
     WorkingSet.bRequiresRevealSurface = true;
@@ -498,6 +513,7 @@ bool FDWCTransparencyAffectedStage4ArtifactRestoreTest::RunTest(const FString& P
     Identity.UVChannelIndex = 2;
     Identity.LODIndex = 0;
     Identity.Resolution = Resolution;
+    Identity.OutputResolutionIdentity = TEXT("ResolutionIdentity");
     Identity.BuildSignature = Signature;
     FDWCTransparencySourcePayload Restored;
     FString Error;
@@ -511,12 +527,10 @@ bool FDWCTransparencyAffectedStage4ArtifactRestoreTest::RunTest(const FString& P
     TestTrue(TEXT("Valid-hit bit is restored."), Restored.ValidHitBuffer[2]);
     TestEqual(TEXT("Coverage is restored."), Restored.OuterCoverageBuffer[0], static_cast<uint8>(255));
     TestEqual(TEXT("Island identity is restored exactly."), Restored.OuterIslandIDBuffer[0], static_cast<uint16>(4));
-    TestEqual(TEXT("Hit source priority is decoded from the packed Temp artifact."),
-        Restored.SourcePriorityBuffer[2], static_cast<int16>(2));
-    TestEqual(TEXT("No hit source remains explicitly unset."),
-        Restored.SourcePriorityBuffer[1], static_cast<int16>(INDEX_NONE));
-    TestEqual(TEXT("Hit distance is restored from the half-float Temp artifact."),
-        Restored.HitDistanceBuffer[2], 2.5f);
+    TestEqual(TEXT("Stage 4 does not retain diagnostic hit-source data."),
+        Restored.SourcePriorityBuffer.Num(), 0);
+    TestEqual(TEXT("Stage 4 does not retain diagnostic hit-distance data."),
+        Restored.HitDistanceBuffer.Num(), 0);
     TestEqual(TEXT("No-hit count is derived from covered texels."), Restored.NoHitCount, 1);
     return true;
 }
@@ -939,10 +953,10 @@ bool FDWCTransparencyStage4AdmissionPlanTest::RunTest(const FString& Parameters)
         Plan2K.ResidentSharedBytes >= Source2K);
     TestTrue(TEXT("The reservation includes immutable snapshot storage."),
         Plan2K.SnapshotBytes > 2ull * MiB);
-    TestTrue(TEXT("The reservation includes all worst-case Stage 4 outputs."),
-        Plan2K.OutputBytes >= 2048ull * 2048ull * sizeof(FColor) * 3ull);
-    TestTrue(TEXT("The complete 2K plan remains inside the default per-job budget."),
-        Plan2K.GetTotalBytes() < 512ull * MiB);
+    TestTrue(TEXT("The reservation includes runtime outputs and compact checkpoint alpha."),
+        Plan2K.OutputBytes >= 2048ull * 2048ull * (sizeof(FColor) * 2ull + sizeof(uint8)));
+    TestTrue(TEXT("The complete 2K phase peak remains inside the default per-job budget."),
+        Plan2K.GetWorkerPeakBytes() < 512ull * MiB);
 
     FDWCTransparencyStage4MemoryPlan Plan4K;
     const uint64 Source4K =
@@ -958,8 +972,32 @@ bool FDWCTransparencyStage4AdmissionPlanTest::RunTest(const FString& Parameters)
             Plan4K,
             Error));
     TestTrue(
-        TEXT("An over-budget 4K request is visible to scheduler admission before restore."),
-        Plan4K.GetTotalBytes() > 512ull * MiB);
+        TEXT("A 4K request fits because mutually exclusive phase allocations are not summed."),
+        Plan4K.GetWorkerPeakBytes() < 512ull * MiB);
+
+    FDWCTransparencyStage4MemoryPlan Selective4K;
+    const uint64 SelectiveSource4K =
+        FDWCTransparencyEditedMapBaker::EstimateStage4SourcePayloadBytes(
+            FIntPoint(4096, 4096),
+            false,
+            false);
+    TestTrue(
+        TEXT("A sparse manual Stage 4 request produces a selective plan."),
+        FDWCTransparencyEditedMapBaker::BuildMemoryPlan(
+            FIntPoint(4096, 4096),
+            SelectiveSource4K,
+            0,
+            true,
+            false,
+            false,
+            Selective4K,
+            Error));
+    TestTrue(TEXT("Selective Stage 4 retains less source memory than canonical restore."),
+        Selective4K.ResidentSharedBytes < Plan4K.ResidentSharedBytes);
+    TestTrue(TEXT("Selective Stage 4 omits the Reveal Normal output."),
+        Selective4K.OutputBytes < Plan4K.OutputBytes);
+    TestTrue(TEXT("Selective 4K Stage 4 stays within the default per-job budget."),
+        Selective4K.GetWorkerPeakBytes() < 512ull * MiB);
     return true;
 }
 

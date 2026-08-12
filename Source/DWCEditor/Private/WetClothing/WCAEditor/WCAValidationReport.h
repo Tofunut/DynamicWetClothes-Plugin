@@ -4,8 +4,10 @@
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingAssetSetupData.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationTypes.h"
 
 class UWetClothingAsset;
+struct FWCAEditorValidationSnapshot;
 
 enum class EWCAValidationMode : uint8
 {
@@ -33,27 +35,12 @@ enum class EWCAValidationSeverity : uint8
     Error
 };
 
-enum class EWCAValidationFixKind : uint8
-{
-    None,
-    Save,
-    InitializeDataUV,
-    PrepareRuntimeData,
-    BakeGPUMaps,
-    BakeRenderProfileData,
-    BakeWrinkleMaps,
-    BakeTransparencyMaps,
-    RebakeAffectedTransparencyMaps,
-    GenerateMaterials,
-    Manual
-};
-
 struct FWCAValidationIssue
 {
     FName IssueId;
     EWCAValidationSeverity Severity = EWCAValidationSeverity::Info;
     EWCAValidationSection Section = EWCAValidationSection::RenderProfileData;
-    EWCAValidationFixKind FixKind = EWCAValidationFixKind::None;
+    EDWCEditorValidationRemediation Remediation = EDWCEditorValidationRemediation::None;
     TOptional<EDWCEditorBuildAction> BuildAction;
     FText Title;
     FText Status;
@@ -61,10 +48,10 @@ struct FWCAValidationIssue
     FText RequiredAction;
     /** Optional short context such as "Slot 3", "WP_Metal", or a transparency layer name. */
     FText ContextLabel;
+    /** Structured identity used by the canonical snapshot. Display text is never parsed for ownership. */
+    FDWCEditorValidationTargetKey Target;
     bool bFailed = false;
 };
-
-TOptional<EDWCEditorBuildAction> GetBuildActionForValidationFix(EWCAValidationFixKind FixKind);
 
 struct FWCAValidationReport
 {
@@ -79,6 +66,11 @@ struct FWCAValidationReport
 };
 
 FWCAValidationReport BuildWCAValidationReport(
+    UWetClothingAsset& Asset,
+    EWCAValidationMode Mode,
+    bool bRefreshAssetState);
+
+FWCAEditorValidationSnapshot BuildWCAValidationSnapshot(
     UWetClothingAsset& Asset,
     EWCAValidationMode Mode,
     bool bRefreshAssetState);

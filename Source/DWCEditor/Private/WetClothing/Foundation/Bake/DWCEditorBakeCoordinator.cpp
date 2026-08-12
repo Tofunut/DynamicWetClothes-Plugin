@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyResolutionResolver.h"
 
 #include "Algo/Unique.h"
 #include "Core/DWCEditorUtils.h"
@@ -7,6 +8,8 @@
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildOperationManager.h"
+#include "WetClothing/Foundation/Build/DWCTransparencyBuildTargetResolver.h"
+#include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyFinalWorkingSet.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyAffectedStage4Rebake.h"
@@ -40,7 +43,7 @@ namespace
 
     struct FWrinkleBakeWorkerResult final : FDWCEditorWorkerJobResult
     {
-        TSharedPtr<const FWetWrinkleNormalMapBakeSnapshot, ESPMode::ThreadSafe> Snapshot;
+        TSharedPtr<FWetWrinkleNormalMapBakeSnapshot, ESPMode::ThreadSafe> Snapshot;
         FWetWrinkleNormalMapComputedResult Computed;
     };
 
@@ -65,6 +68,36 @@ namespace
         case EDWCEditorWorkerJobCompletion::Failed: return TEXT("worker calculation failed");
         default: return TEXT("completed");
         }
+    }
+
+    bool ValidateTransparencyBuildTarget(
+        const UWetClothingAsset& Asset,
+        const FWetClothingTransparencyLayerData& Layer,
+        FString& OutError)
+    {
+        OutError.Reset();
+        const int32 Slot = Layer.TargetSurface.OuterMaterialSlotIndex;
+        if (!Layer.IsRuntimeEnabled())
+        {
+            OutError = TEXT("The Transparency Target Part is no longer enabled.");
+            return false;
+        }
+        if (Slot == INDEX_NONE || !Asset.IsMaterialSlotWettable(Slot))
+        {
+            OutError = TEXT("The Transparency Target Part no longer targets a Wettable material slot.");
+            return false;
+        }
+        TArray<FString> Errors;
+        if (!FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
+                Asset.GetDWCSkeletalMesh(),
+                Layer,
+                Errors,
+                Asset.GetDWCDataUVChannelIndex()))
+        {
+            OutError = FString::Join(Errors, TEXT("\n"));
+            return false;
+        }
+        return true;
     }
 
     uint64 EstimateAuthoredAlphaSnapshotBytes(
@@ -147,13 +180,15 @@ FDWCEditorBakeCoordinator::FDWCEditorBakeCoordinator(
     TSharedRef<FDWCEditorBuildOperationManager> InOperationManager,
     TSharedRef<FDWCEditorSpatialQueryService> InSpatialQueryService,
     TSharedRef<FDWCEditorSurfacePatchProjectionCacheService> InSurfacePatchProjectionCache,
-    TSharedPtr<FDWCWrinkleSuppressionCoverageService> InCoverageService)
+    TSharedPtr<FDWCWrinkleSuppressionCoverageService> InCoverageService,
+    TSharedPtr<FDWCEditorCacheStore> InCacheStore)
     : Asset(InAsset)
     , Scheduler(InScheduler)
     , OperationManager(MoveTemp(InOperationManager))
     , SpatialQueryService(MoveTemp(InSpatialQueryService))
     , SurfacePatchProjectionCache(MoveTemp(InSurfacePatchProjectionCache))
     , CoverageService(MoveTemp(InCoverageService))
+    , CacheStore(MoveTemp(InCacheStore))
 {
 }
 
@@ -241,7 +276,8 @@ bool FDWCEditorBakeCoordinator::RequestWrinkleBake(
     Batch->MaxInFlightJobs = ResolutionBoundMaxInFlightJobs;
     Batch->SnapshotSession = MakeUnique<FWetWrinkleNormalMapBakeSession>(
         SpatialQueryService.ToSharedRef(),
-        SurfacePatchProjectionCache.ToSharedRef());
+        SurfacePatchProjectionCache.ToSharedRef(),
+        CacheStore);
 
     if (!PumpWrinkleJobs(Batch) && Batch->PendingMaterialSlotIndices.IsEmpty())
     {
@@ -276,6 +312,7 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
         Descriptor.DomainRevision = Scheduler->GetCurrentDomainRevision(Descriptor.Domain);
         Descriptor.Priority = EDWCEditorWorkerJobPriority::UserInitiated;
         Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
+        Descriptor.WorkClass = EDWCEditorWorkClass::UserBuild;
         const FIntPoint FinalTextureSize =
             WetWrinkleTextureRaster::ResolveFinalTextureSize(Batch->Settings.Resolution);
         const FIntPoint WorkingTextureSize =
@@ -314,8 +351,10 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
                     return false;
                 }
                 OutPrepared.ActualMemoryEstimate.SnapshotBytes = Snapshot->GetEstimatedSnapshotBytes();
-                OutPrepared.ActualMemoryEstimate.WorkingBytes = Snapshot->GetEstimatedWorkingBytes();
-                OutPrepared.ActualMemoryEstimate.OutputBytes = Snapshot->GetEstimatedResultBytes();
+                const FWetWrinkleNormalMapBakeMemoryPlan MemoryPlan = Snapshot->GetMemoryPlan();
+                OutPrepared.ActualMemoryEstimate.WorkingBytes =
+                    MemoryPlan.RasterBytes + MemoryPlan.PostProcessBytes;
+                OutPrepared.ActualMemoryEstimate.OutputBytes = MemoryPlan.OutputBytes;
                 OutPrepared.Work = [Snapshot](
                     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkToken)
                 {
@@ -323,9 +362,13 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
                         MakeShared<FWrinkleBakeWorkerResult, ESPMode::ThreadSafe>();
                     Result->Snapshot = Snapshot;
                     Result->Computed = FWetWrinkleNormalMapBaker::ComputeSnapshot(*Snapshot, &WorkToken.Get());
+                    Snapshot->ReleaseWorkerResources();
                     Result->bSucceeded = Result->Computed.bSucceeded;
                     Result->Error = Result->Computed.Error;
                     Result->ResultBytes = Result->Computed.ResultBytes;
+                    Result->CommitMemoryEstimate.SnapshotBytes =
+                        Snapshot->GetEstimatedCommitBytes();
+                    Result->CommitMemoryEstimate.OutputBytes = Result->Computed.ResultBytes;
                     return StaticCastSharedPtr<FDWCEditorWorkerJobResult>(Result);
                 };
                 return true;
@@ -689,6 +732,15 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
             Batch->Failures.Add(TEXT("A requested transparency layer is unavailable."));
             continue;
         }
+        FString TargetError;
+        if (!ValidateTransparencyBuildTarget(*TargetAsset, *Layer, TargetError))
+        {
+            Batch->Failures.Add(FString::Printf(
+                TEXT("Slot %d: %s"),
+                Layer->TargetSurface.OuterMaterialSlotIndex,
+                *TargetError));
+            continue;
+        }
 
         if (Layer->SourceType == EDWCTransparencySourceType::ManualColorOrTexture)
         {
@@ -729,10 +781,16 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
         Descriptor.DomainRevision = Scheduler->GetCurrentDomainRevision(Descriptor.Domain);
         Descriptor.Priority = EDWCEditorWorkerJobPriority::UserInitiated;
         Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
-        const uint64 PixelCount = static_cast<uint64>(
-            TargetAsset->Authored.TransparencyData.TransparencyBakeResolution) *
-            static_cast<uint64>(TargetAsset->Authored.TransparencyData.TransparencyBakeResolution);
-        Descriptor.MemoryEstimate.WorkingBytes = PixelCount * sizeof(FVector4f);
+        Descriptor.WorkClass = EDWCEditorWorkClass::UserBuild;
+        const int32 ResolvedResolution = FDWCTransparencyResolutionResolver::Resolve(
+            *TargetAsset,
+            *Layer).Size;
+        const uint64 PixelCount = static_cast<uint64>(ResolvedResolution) *
+            static_cast<uint64>(ResolvedResolution);
+        // The streamed Stage 2 payload retains color, reveal surface, alpha,
+        // coverage, island, hit, distance, and priority buffers. Material
+        // surfaces are separately leased and never accumulate in this job.
+        Descriptor.MemoryEstimate.WorkingBytes = PixelCount * 24ull;
         Descriptor.DebugName = FString::Printf(
             TEXT("Transparency projection slot %d"),
             Layer->TargetSurface.OuterMaterialSlotIndex);
@@ -770,29 +828,42 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
                     PrepareError = TEXT("The transparency layer was removed before snapshot preparation.");
                     return false;
                 }
-                TSharedRef<FDWCTransparencyAutoMapSnapshot, ESPMode::ThreadSafe> AutoSnapshot =
-                    MakeShared<FDWCTransparencyAutoMapSnapshot, ESPMode::ThreadSafe>();
-                if (!FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshot(
-                        *CurrentAsset,
-                        *CurrentLayer,
-                        *AutoSnapshot,
-                        PrepareError))
+                if (!ValidateTransparencyBuildTarget(
+                        *CurrentAsset, *CurrentLayer, PrepareError))
                 {
                     return false;
                 }
-                OutPrepared.ActualMemoryEstimate.SnapshotBytes = AutoSnapshot->GetEstimatedBytes();
-                OutPrepared.Work = [AutoSnapshot](
+                TSharedPtr<FTransparencyAutoBakeWorkerResult, ESPMode::ThreadSafe> PreparedResult =
+                    MakeShared<FTransparencyAutoBakeWorkerResult, ESPMode::ThreadSafe>();
+                FString GenerateSummary;
+                if (!FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
+                        *CurrentAsset,
+                        *CurrentLayer,
+                        PreparedResult->Computed.SourcePayload,
+                        GenerateSummary,
+                        PreparedResult->Computed.Warnings,
+                        &Token.Get()))
+                {
+                    PrepareError = MoveTemp(GenerateSummary);
+                    return false;
+                }
+                PreparedResult->Computed.bSucceeded = true;
+                PreparedResult->Computed.Summary = MoveTemp(GenerateSummary);
+                PreparedResult->Computed.ResultBytes =
+                    PreparedResult->Computed.SourcePayload.GetAllocatedBytes();
+                PreparedResult->bSucceeded = true;
+                PreparedResult->ResultBytes = PreparedResult->Computed.ResultBytes;
+                OutPrepared.ActualMemoryEstimate.OutputBytes =
+                    PreparedResult->Computed.ResultBytes;
+                OutPrepared.Work = [PreparedResult](
                     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkToken)
                 {
-                    TSharedPtr<FTransparencyAutoBakeWorkerResult, ESPMode::ThreadSafe> Result =
-                        MakeShared<FTransparencyAutoBakeWorkerResult, ESPMode::ThreadSafe>();
-                    Result->Computed = FDWCTransparencyAutoMapGenerator::ComputeSameMeshSnapshot(
-                        *AutoSnapshot,
-                        &WorkToken.Get());
-                    Result->bSucceeded = Result->Computed.bSucceeded;
-                    Result->Error = Result->Computed.Error;
-                    Result->ResultBytes = Result->Computed.ResultBytes;
-                    return StaticCastSharedPtr<FDWCEditorWorkerJobResult>(Result);
+                    if (WorkToken->IsCanceled())
+                    {
+                        PreparedResult->bSucceeded = false;
+                        PreparedResult->Error = TEXT("Transparency projection was canceled before commit.");
+                    }
+                    return StaticCastSharedPtr<FDWCEditorWorkerJobResult>(PreparedResult);
                 };
                 return true;
             },
@@ -1114,8 +1185,14 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
         OutError = TEXT("The transparency layer is unavailable.");
         return false;
     }
+    if (!ValidateTransparencyBuildTarget(*TargetAsset, *Layer, OutError))
+    {
+        return false;
+    }
 
     TSharedPtr<const FDWCTransparencySourcePayload> PlannedSourceIdentity = SourcePayload;
+    const bool bAlphaRequiresOuterIslandID = !AlphaSnapshot.IsValid() ||
+        AlphaSnapshot->Mode == EDWCTransparencyAlphaSnapshotMode::StrokeReplay;
     uint64 PlannedSourceBytes = 0;
     if (bRestoreCanonicalSourceDuringPrepare)
     {
@@ -1131,8 +1208,10 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
         }
         PlannedSourceIdentity = Identity;
         PlannedSourceBytes =
-            FDWCTransparencyEditedMapBaker::EstimateCanonicalSourcePayloadBytes(
-                Identity->Resolution);
+            FDWCTransparencyEditedMapBaker::EstimateStage4SourcePayloadBytes(
+                Identity->Resolution,
+                Layer->RequiresRevealSurface(),
+                true);
     }
     else if (!SourcePayload.IsValid())
     {
@@ -1141,7 +1220,11 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
     }
     else
     {
-        PlannedSourceBytes = SourcePayload->GetAllocatedBytes();
+        PlannedSourceBytes =
+            FDWCTransparencyEditedMapBaker::EstimateStage4SourcePayloadBytes(
+                SourcePayload->Resolution,
+                Layer->RequiresRevealSurface(),
+                true);
     }
 
     const uint64 AlphaInputBytes = AlphaSnapshot.IsValid()
@@ -1153,9 +1236,11 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
     if (!FDWCTransparencyEditedMapBaker::BuildMemoryPlan(
             PlannedSourceIdentity->Resolution,
             PlannedSourceBytes,
-            AuthoringInputBytes,
-            bRestoreCanonicalSourceDuringPrepare,
-            MemoryPlan,
+        AuthoringInputBytes,
+        bRestoreCanonicalSourceDuringPrepare,
+        Layer->RequiresRuntimeRevealNormal(),
+        bAlphaRequiresOuterIslandID,
+        MemoryPlan,
             OutError))
     {
         return false;
@@ -1169,10 +1254,10 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
     Descriptor.DomainRevision = Scheduler->GetCurrentDomainRevision(Descriptor.Domain);
     Descriptor.Priority = EDWCEditorWorkerJobPriority::UserInitiated;
     Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
-    Descriptor.MemoryEstimate.ResidentSharedBytes = MemoryPlan.ResidentSharedBytes;
-    Descriptor.MemoryEstimate.SnapshotBytes = MemoryPlan.SnapshotBytes;
-    Descriptor.MemoryEstimate.OutputBytes = MemoryPlan.OutputBytes;
-    Descriptor.MemoryEstimate.ScratchBytes = MemoryPlan.ScratchBytes;
+    Descriptor.WorkClass = EDWCEditorWorkClass::UserBuild;
+    Descriptor.MemoryEstimate.WorkingBytes = FMath::Max(
+        MemoryPlan.GetPreparePeakBytes(),
+        MemoryPlan.GetWorkerPeakBytes());
     Descriptor.DebugName = FString::Printf(
         TEXT("Transparency bake slot %d"),
         Descriptor.Key.MaterialSlotIndex);
@@ -1212,6 +1297,11 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
                 PrepareError = TEXT("The transparency layer was removed before snapshot preparation.");
                 return false;
             }
+            if (!ValidateTransparencyBuildTarget(
+                    *CurrentAsset, *CurrentLayer, PrepareError))
+            {
+                return false;
+            }
             TSharedPtr<const FDWCTransparencySourcePayload> PreparedSourcePayload = SourcePayload;
             if (bRestoreCanonicalSourceDuringPrepare)
             {
@@ -1226,7 +1316,9 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
                 }
                 if (!PlannedSourceIdentity.IsValid() ||
                     CurrentIdentity.BuildSignature != PlannedSourceIdentity->BuildSignature ||
-                    CurrentIdentity.Resolution != PlannedSourceIdentity->Resolution)
+                    CurrentIdentity.Resolution != PlannedSourceIdentity->Resolution ||
+                    CurrentIdentity.OutputResolutionIdentity !=
+                        PlannedSourceIdentity->OutputResolutionIdentity)
                 {
                     PrepareError =
                         TEXT("The canonical Stage 2 identity changed while the affected Stage 4 rebake was waiting for admission.");
@@ -1239,7 +1331,8 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
                         *CurrentLayer,
                         CurrentIdentity,
                         *RestoredSource,
-                        PrepareError))
+                        PrepareError,
+                        true))
                 {
                     return false;
                 }
@@ -1289,11 +1382,16 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
             {
                 return false;
             }
-            OutPrepared.ActualMemoryEstimate.ResidentSharedBytes =
-                PreparedSourcePayload->GetAllocatedBytes();
-            OutPrepared.ActualMemoryEstimate.SnapshotBytes = Snapshot->GetEstimatedPrivateBytes();
-            OutPrepared.ActualMemoryEstimate.OutputBytes = Snapshot->GetEstimatedOutputBytes();
-            OutPrepared.ActualMemoryEstimate.ScratchBytes = Snapshot->GetEstimatedScratchBytes();
+            FDWCTransparencyStage4MemoryPlan ActualPlan;
+            // BuildSnapshot retains a compact Stage 4 source and accounts it
+            // as snapshot-private memory; the producer's full source is not
+            // owned by the worker job.
+            ActualPlan.ResidentSharedBytes = 0;
+            ActualPlan.SnapshotBytes = Snapshot->GetEstimatedPrivateBytes();
+            ActualPlan.OutputBytes = Snapshot->GetEstimatedOutputBytes();
+            ActualPlan.ScratchBytes = Snapshot->GetEstimatedScratchBytes();
+            ActualPlan.TransferableSnapshotBytes = Snapshot->GetEstimatedTransferableBytes();
+            OutPrepared.ActualMemoryEstimate.WorkingBytes = ActualPlan.GetWorkerPeakBytes();
             OutPrepared.Work = [Snapshot](
                 const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>& WorkToken)
             {
@@ -1304,6 +1402,16 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
                 Result->bSucceeded = Result->Computed.bSucceeded;
                 Result->Error = Result->Computed.Error;
                 Result->ResultBytes = Result->Computed.ResultBytes;
+                Result->CommitMemoryEstimate.SnapshotBytes =
+                    Snapshot->GetEstimatedPrivateBytes();
+                Result->CommitMemoryEstimate.OutputBytes = Result->Computed.ResultBytes;
+                if (Result->Computed.bRebuiltCorrectedRevealCheckpoint)
+                {
+                    const FIntPoint Resolution = Snapshot->GetSourceResolution();
+                    Result->CommitMemoryEstimate.ScratchBytes =
+                        static_cast<uint64>(Resolution.X) *
+                        static_cast<uint64>(Resolution.Y) * sizeof(FColor);
+                }
                 return StaticCastSharedPtr<FDWCEditorWorkerJobResult>(Result);
             };
             return true;
@@ -1329,6 +1437,14 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
             if (CurrentLayer == nullptr)
             {
                 Batch->Failures.Add(FString::Printf(TEXT("Slot %d: the target layer was removed."), MaterialSlotIndex));
+                return;
+            }
+            FString TargetError;
+            if (!ValidateTransparencyBuildTarget(
+                    *CurrentAsset, *CurrentLayer, TargetError))
+            {
+                Batch->Failures.Add(FString::Printf(
+                    TEXT("Slot %d: %s"), MaterialSlotIndex, *TargetError));
                 return;
             }
             FDWCTransparencyEditedMapBakeResult CommitResult;
@@ -1524,8 +1640,16 @@ void FDWCEditorBakeCoordinator::FinalizeTransparencyBatch(
     {
         if (Batch->BakedMapCount > 0)
         {
+            const FDWCTransparencyBuildTargetSnapshot RemainingTargets =
+                FDWCTransparencyBuildTargetResolver::Resolve(*TargetAsset, true);
+            const bool bHasRemainingRequiredOutput =
+                RemainingTargets.FullBakeState == EDWCEditorBuildActionState::Required ||
+                RemainingTargets.FullBakeState == EDWCEditorBuildActionState::Blocked ||
+                RemainingTargets.AffectedStage4State == EDWCEditorBuildActionState::Required;
             TargetAsset->SetTransparencyBakeStatus(
-                Batch->Failures.IsEmpty() ? EDWCBakeStatus::Valid : EDWCBakeStatus::OutOfDate);
+                Batch->Failures.IsEmpty() && !bHasRemainingRequiredOutput
+                    ? EDWCBakeStatus::Valid
+                    : EDWCBakeStatus::OutOfDate);
             TargetAsset->MarkPackageDirty();
         }
         else if (!Batch->Failures.IsEmpty())

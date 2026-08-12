@@ -366,12 +366,13 @@ bool FWetWrinkleProjectionModeCanonicalizationTest::RunTest(const FString&)
         EDWCEditorSurfacePatchBoundaryPolicy::CrossUVSeams);
 
     FDWCEditorNormalSourceSnapshot NormalSource;
-    NormalSource.Texture.Width = 1;
-    NormalSource.Texture.Height = 1;
-    NormalSource.Texture.BytesPerPixel = 4;
-    NormalSource.Texture.Format = TSF_BGRA8;
-    NormalSource.Texture.RawData = MakeShared<TArray64<uint8>>();
-    NormalSource.Texture.RawData->Append({255, 128, 128, 255});
+    TArray<FColor> NormalPixels{FColor(255, 128, 128, 255)};
+    FString ReadbackError;
+    TestTrue(
+        TEXT("The test normal readback is admitted."),
+        FWetClothingTextureReadbackUtils::TryCreateBGRA8Readback(
+            MoveTemp(NormalPixels), FIntPoint(1, 1), false, NormalSource.Texture,
+            ReadbackError, TEXT("Wrinkle authoring controller test normal source")));
     FDWCEditorScalarSourceSnapshot CoverageSource;
     CoverageSource.Size = FIntPoint(1, 1);
     TSharedRef<TArray<float>, ESPMode::ThreadSafe> CoverageValues =

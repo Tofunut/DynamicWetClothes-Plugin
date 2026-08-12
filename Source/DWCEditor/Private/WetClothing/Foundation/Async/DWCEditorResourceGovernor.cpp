@@ -4,12 +4,14 @@
 #include "HAL/PlatformTime.h"
 #include "Misc/ScopeLock.h"
 #include "WetClothing/Foundation/Async/DWCEditorAsyncOperationContract.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorMemoryDiagnostics.h"
 
 namespace
 {
     constexpr EDWCEditorResourcePool ResourcePools[] =
     {
         EDWCEditorResourcePool::WorkerPrivateCPU,
+        EDWCEditorResourcePool::AssetCommitCPU,
         EDWCEditorResourcePool::PreviewWorkspaceCPU,
         EDWCEditorResourcePool::SharedCacheCPU,
         EDWCEditorResourcePool::UploadStagingCPU,
@@ -34,6 +36,25 @@ namespace
             static_cast<double>(UsedBytes) / FDWCEditorResourceBudgetConfig::MiB,
             static_cast<double>(BudgetBytes) / FDWCEditorResourceBudgetConfig::MiB);
     }
+
+    EDWCEditorMemoryCategory GetDiagnosticCategory(const EDWCEditorResourcePool Pool)
+    {
+        switch (Pool)
+        {
+        case EDWCEditorResourcePool::SharedCacheCPU:
+            return EDWCEditorMemoryCategory::SharedCacheCPU;
+        case EDWCEditorResourcePool::UploadStagingCPU:
+            return EDWCEditorMemoryCategory::UploadStagingCPU;
+        case EDWCEditorResourcePool::PreviewGPU:
+            return EDWCEditorMemoryCategory::PreviewGPU;
+        case EDWCEditorResourcePool::PreviewWorkspaceCPU:
+            return EDWCEditorMemoryCategory::PersistentEditorCPU;
+        case EDWCEditorResourcePool::WorkerPrivateCPU:
+        case EDWCEditorResourcePool::AssetCommitCPU:
+        default:
+            return EDWCEditorMemoryCategory::OperationPrivateCPU;
+        }
+    }
 }
 
 class FDWCEditorResourceGovernorState final
@@ -54,6 +75,55 @@ public:
             FPoolState& PoolState = Pools.Add(Pool);
             PoolState.BudgetBytes = Config.GetPoolBudgetBytes(Pool);
         }
+    }
+
+    ~FDWCEditorResourceGovernorState()
+    {
+        FDWCEditorMemoryDiagnostics::UnregisterCollector(MemoryDiagnosticCollectorName);
+    }
+
+    void RegisterMemoryDiagnostics(
+        const TSharedRef<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe>& SharedState)
+    {
+        MemoryDiagnosticCollectorName = FName(
+            *FString::Printf(TEXT("DWCResourceGovernor_%p"), this));
+        const TWeakPtr<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe> WeakState = SharedState;
+        const FString CollectorIdentity = MemoryDiagnosticCollectorName.ToString();
+        FDWCEditorMemoryDiagnostics::RegisterCollector(
+            MemoryDiagnosticCollectorName,
+            [WeakState, CollectorIdentity](TArray<FDWCEditorMemoryOwnerRecord>& OutOwners)
+            {
+                const TSharedPtr<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe> PinnedState =
+                    WeakState.Pin();
+                if (!PinnedState.IsValid())
+                {
+                    return;
+                }
+
+                const FDWCEditorResourceGovernorDiagnostics Diagnostics = PinnedState->GetDiagnostics();
+                for (const FDWCEditorResourceReservationDiagnostic& Reservation : Diagnostics.Reservations)
+                {
+                    FDWCEditorMemoryOwnerRecord& Owner = OutOwners.AddDefaulted_GetRef();
+                    Owner.Identifier = FString::Printf(
+                        TEXT("%s:%llu"),
+                        *CollectorIdentity,
+                        Reservation.ReservationId);
+                    Owner.Subsystem = TEXT("ResourceGovernor");
+                    Owner.Resource = FName(
+                        FDWCEditorAsyncOperationContract::LexToString(Reservation.Pool));
+                    Owner.Category = GetDiagnosticCategory(Reservation.Pool);
+                    Owner.Accounting = EDWCEditorMemoryAccounting::Reservation;
+                    Owner.CurrentBytes = Reservation.ReservedBytes;
+                    Owner.EntryCount = 1;
+                    Owner.Context = FString::Printf(
+                        TEXT("%s; operation=%s; slot=%d; id=%llu; generation=%llu"),
+                        *Reservation.DebugName,
+                        *Reservation.Owner.Key.Namespace.ToString(),
+                        Reservation.Owner.Key.MaterialSlotIndex,
+                        Reservation.Owner.OperationId,
+                        Reservation.Owner.Generation);
+                }
+            });
     }
 
     uint64 TryAcquire(
@@ -86,7 +156,11 @@ public:
             }
             return 0;
         }
-        if (!FitsWithinBudget(PoolState->UsedBytes, Request.Bytes, PoolState->BudgetBytes))
+        const bool bEnforcePoolBudget =
+            Request.Pool == EDWCEditorResourcePool::PreviewGPU ||
+            !Config.bAllowCPUPoolBorrowing;
+        if (bEnforcePoolBudget &&
+            !FitsWithinBudget(PoolState->UsedBytes, Request.Bytes, PoolState->BudgetBytes))
         {
             OutResult = EDWCEditorResourceAdmissionResult::TemporarilyUnavailable;
             if (bRecordTemporaryRejection)
@@ -166,7 +240,11 @@ public:
         }
 
         FPoolState& PoolState = Pools.FindChecked(Reservation->Diagnostic.Pool);
-        if (!FitsWithinBudget(PoolState.UsedBytes, AdditionalBytes, PoolState.BudgetBytes))
+        const bool bEnforcePoolBudget =
+            Reservation->Diagnostic.Pool == EDWCEditorResourcePool::PreviewGPU ||
+            !Config.bAllowCPUPoolBorrowing;
+        if (bEnforcePoolBudget &&
+            !FitsWithinBudget(PoolState.UsedBytes, AdditionalBytes, PoolState.BudgetBytes))
         {
             ++PoolState.RejectionCount;
             if (OutError != nullptr)
@@ -251,7 +329,11 @@ public:
         }
 
         const uint64 AdditionalBytes = NewBytes - CurrentBytes;
-        if (!FitsWithinBudget(PoolState.UsedBytes, AdditionalBytes, PoolState.BudgetBytes))
+        const bool bEnforcePoolBudget =
+            Reservation->Diagnostic.Pool == EDWCEditorResourcePool::PreviewGPU ||
+            !Config.bAllowCPUPoolBorrowing;
+        if (bEnforcePoolBudget &&
+            !FitsWithinBudget(PoolState.UsedBytes, AdditionalBytes, PoolState.BudgetBytes))
         {
             ++PoolState.RejectionCount;
             if (OutError != nullptr)
@@ -352,6 +434,11 @@ public:
         return Diagnostics;
     }
 
+    bool ShouldReportAdmissionFailures() const
+    {
+        return Config.bEnableAdmissionFailureDiagnostics;
+    }
+
     void ResetDiagnosticCounters()
     {
         FScopeLock Lock(&Mutex);
@@ -386,6 +473,7 @@ private:
     uint64 GlobalCPUUsedBytes = 0;
     uint64 GlobalCPUHighWaterBytes = 0;
     uint64 GlobalCPURejectionCount = 0;
+    FName MemoryDiagnosticCollectorName;
 };
 
 uint64 FDWCEditorResourceBudgetConfig::GetPoolBudgetBytes(const EDWCEditorResourcePool Pool) const
@@ -393,6 +481,7 @@ uint64 FDWCEditorResourceBudgetConfig::GetPoolBudgetBytes(const EDWCEditorResour
     switch (Pool)
     {
     case EDWCEditorResourcePool::WorkerPrivateCPU: return WorkerPrivateCPUBytes;
+    case EDWCEditorResourcePool::AssetCommitCPU: return AssetCommitCPUBytes;
     case EDWCEditorResourcePool::PreviewWorkspaceCPU: return PreviewWorkspaceCPUBytes;
     case EDWCEditorResourcePool::SharedCacheCPU: return SharedCacheCPUBytes;
     case EDWCEditorResourcePool::UploadStagingCPU: return UploadStagingCPUBytes;
@@ -514,6 +603,41 @@ FDWCEditorResourceGovernor::FDWCEditorResourceGovernor(
     const FDWCEditorResourceBudgetConfig& InConfig)
     : State(MakeShared<FDWCEditorResourceGovernorState, ESPMode::ThreadSafe>(InConfig))
 {
+    State->RegisterMemoryDiagnostics(State);
+}
+
+uint64 FDWCEditorMemoryLeaseSet::GetReservedBytes() const
+{
+    uint64 TotalBytes = 0;
+    for (const FDWCEditorMemoryLease& Lease : Leases)
+    {
+        const uint64 Bytes = Lease.GetReservedBytes();
+        if (Bytes > MAX_uint64 - TotalBytes)
+        {
+            return MAX_uint64;
+        }
+        TotalBytes += Bytes;
+    }
+
+    return TotalBytes;
+}
+
+uint64 FDWCEditorMemoryLeaseSet::GetReservedBytes(const EDWCEditorResourcePool Pool) const
+{
+    uint64 TotalBytes = 0;
+    for (const FDWCEditorMemoryLease& Lease : Leases)
+    {
+        if (Lease.GetPool() == Pool)
+        {
+            const uint64 Bytes = Lease.GetReservedBytes();
+            if (Bytes > MAX_uint64 - TotalBytes)
+            {
+                return MAX_uint64;
+            }
+            TotalBytes += Bytes;
+        }
+    }
+    return TotalBytes;
 }
 
 FDWCEditorMemoryLease FDWCEditorResourceGovernor::TryAcquire(
@@ -521,7 +645,21 @@ FDWCEditorMemoryLease FDWCEditorResourceGovernor::TryAcquire(
     FString* OutError)
 {
     EDWCEditorResourceAdmissionResult Result = EDWCEditorResourceAdmissionResult::InvalidRequest;
-    const uint64 ReservationId = State->TryAcquire(Request, Result, true, OutError);
+    uint64 ReservationId = State->TryAcquire(Request, Result, true, OutError);
+    if (ReservationId == 0 && Result == EDWCEditorResourceAdmissionResult::TemporarilyUnavailable &&
+        TryRelievePressure(Request))
+    {
+        ReservationId = State->TryAcquire(Request, Result, false, OutError);
+    }
+    if (ReservationId == 0 &&
+        Result == EDWCEditorResourceAdmissionResult::TemporarilyUnavailable &&
+        State->ShouldReportAdmissionFailures())
+    {
+        FDWCEditorMemoryDiagnostics::ReportAdmissionFailure(
+            Request,
+            State->GetDiagnostics(),
+            OutError != nullptr ? *OutError : TEXT("The resource request remained unavailable after pressure reclaim."));
+    }
     return ReservationId != 0
         ? FDWCEditorMemoryLease(State, ReservationId)
         : FDWCEditorMemoryLease();
@@ -532,7 +670,12 @@ FDWCEditorMemoryLease FDWCEditorResourceGovernor::TryAcquireForAdmission(
     EDWCEditorResourceAdmissionResult& OutResult,
     FString* OutError)
 {
-    const uint64 ReservationId = State->TryAcquire(Request, OutResult, false, OutError);
+    uint64 ReservationId = State->TryAcquire(Request, OutResult, false, OutError);
+    if (ReservationId == 0 && OutResult == EDWCEditorResourceAdmissionResult::TemporarilyUnavailable &&
+        TryRelievePressure(Request))
+    {
+        ReservationId = State->TryAcquire(Request, OutResult, false, OutError);
+    }
     return ReservationId != 0
         ? FDWCEditorMemoryLease(State, ReservationId)
         : FDWCEditorMemoryLease();
@@ -546,4 +689,121 @@ FDWCEditorResourceGovernorDiagnostics FDWCEditorResourceGovernor::GetDiagnostics
 void FDWCEditorResourceGovernor::ResetDiagnosticCounters()
 {
     State->ResetDiagnosticCounters();
+}
+
+FDWCEditorMemoryLeaseSet FDWCEditorResourceGovernor::TryAcquireBundleForAdmission(
+    const TArray<FDWCEditorResourceReservationRequest>& Requests,
+    EDWCEditorResourceAdmissionResult& OutResult,
+    FString* OutError)
+{
+    check(IsInGameThread());
+    OutResult = EDWCEditorResourceAdmissionResult::InvalidRequest;
+    if (OutError != nullptr)
+    {
+        OutError->Reset();
+    }
+    if (Requests.IsEmpty())
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = TEXT("A resource reservation bundle must contain at least one request.");
+        }
+        return {};
+    }
+
+    TMap<EDWCEditorResourcePool, FDWCEditorResourceReservationRequest> MergedRequests;
+    const FDWCEditorAsyncOperationIdentity ExpectedOwner = Requests[0].Owner;
+    if (!ExpectedOwner.IsValid())
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = TEXT("A resource reservation bundle requires a valid operation owner.");
+        }
+        return {};
+    }
+    for (const FDWCEditorResourceReservationRequest& Request : Requests)
+    {
+        const bool bSameOwner = Request.Owner.IsSameRequestKey(ExpectedOwner) &&
+            Request.Owner.OperationId == ExpectedOwner.OperationId &&
+            Request.Owner.Generation == ExpectedOwner.Generation &&
+            Request.Owner.Domain == ExpectedOwner.Domain &&
+            Request.Owner.DomainRevision == ExpectedOwner.DomainRevision;
+        if (Request.Bytes == 0 || !bSameOwner)
+        {
+            if (OutError != nullptr)
+            {
+                *OutError = TEXT("Every reservation in a bundle must be non-zero and share one operation owner.");
+            }
+            return {};
+        }
+        FDWCEditorResourceReservationRequest& Merged = MergedRequests.FindOrAdd(Request.Pool);
+        if (Merged.Bytes == 0)
+        {
+            Merged = Request;
+        }
+        else
+        {
+            if (Request.Bytes > MAX_uint64 - Merged.Bytes)
+            {
+                if (OutError != nullptr)
+                {
+                    *OutError = TEXT("The resource reservation bundle byte count overflowed.");
+                }
+                return {};
+            }
+            Merged.Bytes += Request.Bytes;
+            if (!Request.DebugName.IsEmpty())
+            {
+                Merged.DebugName = Request.DebugName;
+            }
+        }
+    }
+
+    TArray<FDWCEditorResourceReservationRequest> OrderedRequests;
+    MergedRequests.GenerateValueArray(OrderedRequests);
+    OrderedRequests.Sort([](const FDWCEditorResourceReservationRequest& A,
+                            const FDWCEditorResourceReservationRequest& B)
+    {
+        return static_cast<uint8>(A.Pool) < static_cast<uint8>(B.Pool);
+    });
+
+    FDWCEditorMemoryLeaseSet Result;
+    Result.Leases.Reserve(OrderedRequests.Num());
+    for (const FDWCEditorResourceReservationRequest& Request : OrderedRequests)
+    {
+        EDWCEditorResourceAdmissionResult RequestResult =
+            EDWCEditorResourceAdmissionResult::InvalidRequest;
+        FDWCEditorMemoryLease Lease = TryAcquireForAdmission(Request, RequestResult, OutError);
+        if (!Lease.IsValid())
+        {
+            Result.Reset();
+            OutResult = RequestResult;
+            return {};
+        }
+        Result.Leases.Add(MoveTemp(Lease));
+    }
+    OutResult = EDWCEditorResourceAdmissionResult::Admitted;
+    return Result;
+}
+
+void FDWCEditorResourceGovernor::SetPressureHandler(FPressureHandler InHandler)
+{
+    FScopeLock Lock(&PressureHandlerMutex);
+    PressureHandler = MoveTemp(InHandler);
+}
+
+bool FDWCEditorResourceGovernor::TryRelievePressure(
+    const FDWCEditorResourceReservationRequest& Request) const
+{
+    if (!IsInGameThread())
+    {
+        return false;
+    }
+
+    FPressureHandler HandlerCopy;
+    {
+        FScopeLock Lock(&PressureHandlerMutex);
+        HandlerCopy = PressureHandler;
+    }
+    return HandlerCopy ? HandlerCopy(Request) : false;
 }

@@ -20,7 +20,13 @@ enum class EDWCEditorTexturePurpose : uint8
     WrinkleHover,
     TransparencyVisualization,
     TransparencyHoverBaseline,
-    TransparencyHoverIslandMask
+    TransparencyHoverIslandMask,
+    WetPartColor,
+    WetPartSelection,
+    WetPartSurfaceData,
+    WetPartSurfaceWetness,
+    WetPartSurfaceDroplet,
+    WetPartSurfaceFlowDroplet
 };
 
 enum class EDWCEditorTextureUploadPriority : uint8
@@ -132,6 +138,7 @@ enum class EDWCEditorTextureUploadStatus : uint8
     Invalid,
     Queued,
     RenderEnqueued,
+    Completed,
     Stale
 };
 
@@ -167,16 +174,25 @@ struct FDWCEditorTextureDescriptor
     TextureGroup LODGroup = TEXTUREGROUP_World;
     FColor InitialBGRA8 = FColor::Black;
     uint8 InitialG8 = 0;
+    float InitialR32F = 0.0f;
 
     bool IsValid() const
     {
         return Size.X > 0 && Size.Y > 0 &&
-            (PixelFormat == PF_B8G8R8A8 || PixelFormat == PF_G8);
+            (PixelFormat == PF_B8G8R8A8 || PixelFormat == PF_G8 || PixelFormat == PF_R32_FLOAT);
     }
 
     int32 GetBytesPerPixel() const
     {
-        return PixelFormat == PF_G8 ? 1 : static_cast<int32>(sizeof(FColor));
+        if (PixelFormat == PF_G8)
+        {
+            return 1;
+        }
+        if (PixelFormat == PF_R32_FLOAT)
+        {
+            return static_cast<int32>(sizeof(float));
+        }
+        return static_cast<int32>(sizeof(FColor));
     }
 
     bool operator==(const FDWCEditorTextureDescriptor& Other) const
@@ -192,7 +208,8 @@ struct FDWCEditorTextureDescriptor
             AddressY == Other.AddressY &&
             LODGroup == Other.LODGroup &&
             InitialBGRA8 == Other.InitialBGRA8 &&
-            InitialG8 == Other.InitialG8;
+            InitialG8 == Other.InitialG8 &&
+            InitialR32F == Other.InitialR32F;
     }
 };
 
@@ -217,27 +234,42 @@ class FDWCEditorTextureWorkspaceEntry final
     const TArray<FColor>& GetBGRA8Pixels() const { return BGRA8Pixels; }
     TArray<uint8>& GetMutableG8Pixels() { return G8Pixels; }
     const TArray<uint8>& GetG8Pixels() const { return G8Pixels; }
+    TArray<float>& GetMutableR32FPixels() { return R32FPixels; }
+    const TArray<float>& GetR32FPixels() const { return R32FPixels; }
     FDWCEditorNormalRasterSurface& GetMutableWorkingNormalSurface() { return WorkingNormalSurface; }
     const FDWCEditorNormalRasterSurface& GetWorkingNormalSurface() const { return WorkingNormalSurface; }
 
     const uint8* GetPixelData() const
     {
-        return Descriptor.PixelFormat == PF_G8
-            ? G8Pixels.GetData()
-            : reinterpret_cast<const uint8*>(BGRA8Pixels.GetData());
+        if (Descriptor.PixelFormat == PF_G8)
+        {
+            return G8Pixels.GetData();
+        }
+        if (Descriptor.PixelFormat == PF_R32_FLOAT)
+        {
+            return reinterpret_cast<const uint8*>(R32FPixels.GetData());
+        }
+        return reinterpret_cast<const uint8*>(BGRA8Pixels.GetData());
     }
 
     int64 GetPixelDataBytes() const
     {
-        return Descriptor.PixelFormat == PF_G8
-            ? static_cast<int64>(G8Pixels.Num())
-            : static_cast<int64>(BGRA8Pixels.Num()) * sizeof(FColor);
+        if (Descriptor.PixelFormat == PF_G8)
+        {
+            return static_cast<int64>(G8Pixels.Num());
+        }
+        if (Descriptor.PixelFormat == PF_R32_FLOAT)
+        {
+            return static_cast<int64>(R32FPixels.Num()) * sizeof(float);
+        }
+        return static_cast<int64>(BGRA8Pixels.Num()) * sizeof(FColor);
     }
 
     uint64 GetAllocatedSizeBytes() const
     {
         return static_cast<uint64>(BGRA8Pixels.GetAllocatedSize()) +
             static_cast<uint64>(G8Pixels.GetAllocatedSize()) +
+            static_cast<uint64>(R32FPixels.GetAllocatedSize()) +
             WorkingNormalSurface.GetAllocatedSizeBytes();
     }
 
@@ -258,6 +290,7 @@ class FDWCEditorTextureWorkspaceEntry final
     TObjectPtr<UTexture2D> Texture = nullptr;
     TArray<FColor> BGRA8Pixels;
     TArray<uint8> G8Pixels;
+    TArray<float> R32FPixels;
     FDWCEditorNormalRasterSurface WorkingNormalSurface;
     // Persistent derived working data revision. Presentation-only changes,
     // such as hover overlays, must not invalidate an admitted region job.
@@ -314,6 +347,18 @@ class FDWCEditorTextureLease final
     TWeakPtr<FDWCEditorTextureLeaseState> State;
     FDWCEditorTextureHandle Entry;
     uint64 LeaseId = 0;
+};
+
+/** Read-only residency record used by the session-level lifecycle and diagnostics. */
+struct FDWCEditorTextureGPUResidencyRecord
+{
+    FDWCEditorTextureKey Key;
+    FIntPoint Size = FIntPoint::ZeroValue;
+    EPixelFormat PixelFormat = PF_Unknown;
+    EDWCEditorTextureGPUState State = EDWCEditorTextureGPUState::CPUOnly;
+    uint64 ResourceGeneration = 0;
+    uint64 EstimatedGPUBytes = 0;
+    uint32 ActiveLeaseCount = 0;
 };
 
 /** Small deterministic region set shared by all preview upload paths. */

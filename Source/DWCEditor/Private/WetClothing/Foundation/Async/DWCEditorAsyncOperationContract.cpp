@@ -126,6 +126,7 @@ const TCHAR* FDWCEditorAsyncOperationContract::LexToString(const EDWCEditorResou
     switch (Pool)
     {
     case EDWCEditorResourcePool::WorkerPrivateCPU: return TEXT("WorkerPrivateCPU");
+    case EDWCEditorResourcePool::AssetCommitCPU: return TEXT("AssetCommitCPU");
     case EDWCEditorResourcePool::PreviewWorkspaceCPU: return TEXT("PreviewWorkspaceCPU");
     case EDWCEditorResourcePool::SharedCacheCPU: return TEXT("SharedCacheCPU");
     case EDWCEditorResourcePool::UploadStagingCPU: return TEXT("UploadStagingCPU");

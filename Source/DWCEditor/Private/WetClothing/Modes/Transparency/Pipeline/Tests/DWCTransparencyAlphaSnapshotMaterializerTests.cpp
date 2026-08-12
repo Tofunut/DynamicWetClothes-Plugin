@@ -23,6 +23,7 @@ bool FDWCTransparencyAlphaSnapshotMaterializerParityTest::RunTest(const FString&
     SourcePayload.LayerGuid = FGuid::NewGuid();
     SourcePayload.MaterialSlotIndex = MaterialSlotIndex;
     SourcePayload.Resolution = Resolution;
+    SourcePayload.OutputResolutionIdentity = TEXT("ResolutionIdentity");
     SourcePayload.BuildSignature = TEXT("AlphaDomainSource");
     SourcePayload.AutoAlphaBuffer.Init(51, PixelCount);
     SourcePayload.OuterCoverageBuffer.Init(255, PixelCount);

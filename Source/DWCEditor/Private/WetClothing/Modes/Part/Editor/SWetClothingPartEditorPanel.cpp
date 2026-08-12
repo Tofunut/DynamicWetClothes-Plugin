@@ -23,7 +23,9 @@
 #include "WetClothing/Modes/Part/Widgets/SWetPartAutoPartitionControls.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
+#include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
+#include "WetClothing/Modes/Part/Topology/DWCPartTopologyCache.h"
 #include "WetClothing/Modes/Part/Viewport/SDWCPartViewport.h"
 #include "DataAssets/WetnessProfile.h"
 #include "WetRendering/WetMaterialParameters.h"
@@ -197,6 +199,11 @@ namespace SWetClothingPartEditorPanelLocal
 void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
 {
     WetClothingAsset = InArgs._WetClothingAsset;
+    CacheStore = InArgs._CacheStore;
+    TextureWorkspace = InArgs._TextureWorkspace;
+    RenderUploadQueue = InArgs._RenderUploadQueue;
+    ResourceGovernor = InArgs._ResourceGovernor;
+    WorkerJobScheduler = InArgs._WorkerJobScheduler;
     DetailsView = InArgs._DetailsView;
 
     const FSlateFontInfo               SectionHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 13);
@@ -890,6 +897,8 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                       + SOverlay::Slot()
                                             [SAssignNew(PreviewViewport, SDWCPartViewport)
                                                  .WetClothingAsset(WetClothingAsset.Get())
+                                                 .CacheStore(CacheStore)
+                                                 .TextureWorkspace(TextureWorkspace)
                                                  .SurfaceWaterTilingPreview(false)
                                                  .OnIslandPicked(this, &SWetClothingPartEditorPanel::HandleUVIslandPickedFromPreview)]
 
@@ -901,6 +910,30 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                   FOnWetClothingPreviewFocusClicked::CreateSP(this, &SWetClothingPartEditorPanel::HandleFocusPreviewClicked))]]];
 
     RefreshFromAsset();
+}
+
+void SWetClothingPartEditorPanel::SuspendPreview(const EDWCEditorPreviewSuspendReason Reason)
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SuspendPreview(Reason);
+    }
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->SuspendPreview(Reason);
+    }
+}
+
+void SWetClothingPartEditorPanel::ResumePreviewIfNeeded()
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ResumePreviewIfNeeded();
+    }
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->ResumePreviewIfNeeded();
+    }
 }
 
 void SWetClothingPartEditorPanel::RefreshFromAsset()
@@ -1082,6 +1115,8 @@ void SWetClothingPartEditorPanel::RefreshUVIslandList()
     const TArray<FUVIslandItemPtr> PreviousUVIslandItems = UVIslandItems;
 
     UVIslandItems.Reset();
+    ActiveTopologyLease.Reset();
+    bHasActiveTopologyKey = false;
     ResetIslandSelection();
     UVStatusMessage = TEXT("Select a material slot.");
 
@@ -1108,12 +1143,23 @@ void SWetClothingPartEditorPanel::RefreshUVIslandList()
     {
         const int32 UVChannelIndex = GetOriginalUVChannelIndex();
         FString     ErrorMessage;
-        const bool  bBuiltIslands = FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
+        const bool bBuiltIslands = FDWCPartTopologyCache::Acquire(
+            CacheStore,
             WetClothingAssetPtr,
             UVChannelIndex,
             SelectedMaterialSlotIndex,
-            UVIslandItems,
+            ActiveTopologyKey,
+            ActiveTopologyLease,
             &ErrorMessage);
+        if (bBuiltIslands)
+        {
+            if (const FDWCPartTopologyCacheValue* Topology =
+                    ActiveTopologyLease.GetAs<FDWCPartTopologyCacheValue>())
+            {
+                UVIslandItems = Topology->Islands;
+                bHasActiveTopologyKey = true;
+            }
+        }
         if (!bBuiltIslands)
         {
             UVStatusMessage = TEXT("UV data could not be loaded.");
@@ -1341,7 +1387,8 @@ void SWetClothingPartEditorPanel::RefreshPreviewWetPartOverlay()
         {
             PreviewViewport->ClearMaterialSlotHighlight();
         }
-        PreviewViewport->SetSelectableIslands(UVIslandItems);
+        PreviewViewport->SetSelectableTopology(
+            bHasActiveTopologyKey ? ActiveTopologyKey : FDWCEditorCacheKey());
         PreviewViewport->SetWetPartIslandAssignments(BuildUVIslandWetPartIDMap(), BuildPreviewUVIslandColorMap());
         PreviewViewport->SetHighlightedUVIslandIDs(SelectedUVIslandIDs);
         PreviewViewport->SetShowWetPartColors(bShowPartColorsInPreview);
@@ -1373,7 +1420,8 @@ void SWetClothingPartEditorPanel::RefreshSurfaceWaterTilingPreview()
     }
 
     SurfaceWaterTilingPreviewViewport->BeginPreviewUpdate();
-    SurfaceWaterTilingPreviewViewport->SetSelectableIslands(UVIslandItems);
+    SurfaceWaterTilingPreviewViewport->SetSelectableTopology(
+        bHasActiveTopologyKey ? ActiveTopologyKey : FDWCEditorCacheKey());
     SurfaceWaterTilingPreviewViewport->SetWetPartIslandAssignments(
         BuildUVIslandWetPartIDMap(),
         BuildPreviewUVIslandColorMap());
@@ -2473,6 +2521,7 @@ FDWCDataUVBuildResult SWetClothingPartEditorPanel::GenerateDataUVForTargetSlots(
     }
 
     FDWCDataUVBuildOptions BuildOptions;
+    BuildOptions.TargetLODIndices = { 0 };
     BuildOptions.bMergeWithExistingLayout = true;
     BuildOptions.bRequireAllMaterialSlots = true;
     BuildOptions.bUseSourceMeshForSafetyPreflight = true;
@@ -2480,6 +2529,11 @@ FDWCDataUVBuildResult SWetClothingPartEditorPanel::GenerateDataUVForTargetSlots(
     // from immutable Source topology before actual generation. This makes repeated builds
     // deterministic and prevents a previous seam split from making exclusions disappear.
     BuildOptions.bRebuildPreparedLODsFromSource = !bHasSkippedExistingDataUVSlot;
+    BuildOptions.ResourceGovernor = ResourceGovernor;
+    BuildOptions.ResourceSessionEpoch = WorkerJobScheduler.IsValid()
+        ? WorkerJobScheduler->GetSessionEpoch()
+        : FGuid::NewGuid();
+    BuildOptions.MaxParallelMaterialSlots = 1;
     if (ConfirmedVisibleExclusionMaterialSlotIndices != nullptr)
     {
         BuildOptions.ConfirmedVisibleExclusionMaterialSlotIndices =
@@ -5340,7 +5394,7 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
                                   [SNew(SBorder)
                                        .Padding(0.0f)
                                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.DarkGroupBorder")))
-                                           [SNew(SOverlay) + SOverlay::Slot()[SAssignNew(SurfaceWaterTilingPreviewViewport, SDWCPartViewport).WetClothingAsset(WetClothingAsset.Get()).SurfaceWaterTilingPreview(true)] + SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Top).Padding(0.0f, 34.0f, 8.0f, 0.0f)[SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ContentPadding(FMargin(8.0f, 3.0f)).Text(LOCTEXT("SurfaceWaterTilingFrameMesh", "Frame")).ToolTipText(LOCTEXT("SurfaceWaterTilingFrameMeshTooltip", "Frame the preview mesh in the viewport.")).OnClicked_Lambda([this]()
+                                           [SNew(SOverlay) + SOverlay::Slot()[SAssignNew(SurfaceWaterTilingPreviewViewport, SDWCPartViewport).WetClothingAsset(WetClothingAsset.Get()).CacheStore(CacheStore).TextureWorkspace(TextureWorkspace).SurfaceWaterTilingPreview(true)] + SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Top).Padding(0.0f, 34.0f, 8.0f, 0.0f)[SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ContentPadding(FMargin(8.0f, 3.0f)).Text(LOCTEXT("SurfaceWaterTilingFrameMesh", "Frame")).ToolTipText(LOCTEXT("SurfaceWaterTilingFrameMeshTooltip", "Frame the preview mesh in the viewport.")).OnClicked_Lambda([this]()
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        {
                                                                if (SurfaceWaterTilingPreviewViewport.IsValid())
                                                                {

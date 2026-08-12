@@ -22,6 +22,7 @@ bool FDWCTransparencyCanonicalSourcePayloadTest::RunTest(const FString& Paramete
     Payload.UVChannelIndex = 2;
     Payload.LODIndex = 0;
     Payload.Resolution = FIntPoint(2, 2);
+    Payload.OutputResolutionIdentity = TEXT("ResolutionIdentity");
     Payload.BuildSignature = TEXT("SourceSignature");
     Payload.OuterIslandIDBuffer.Init(
         FDWCTransparencySourcePayload::InvalidOuterIslandID, 4);
@@ -33,6 +34,7 @@ bool FDWCTransparencyCanonicalSourcePayloadTest::RunTest(const FString& Paramete
     Identity.DataUVChannelIndex = Payload.UVChannelIndex;
     Identity.LODIndex = Payload.LODIndex;
     Identity.Resolution = Payload.Resolution;
+    Identity.OutputResolutionIdentity = Payload.OutputResolutionIdentity;
     Identity.Revision = 17;
 
     TestTrue(TEXT("The canonical source payload maps to a valid stage identity."), Identity.IsValid());
@@ -155,10 +157,113 @@ bool FDWCTransparencyStageArtifactSetContractTest::RunTest(const FString& Parame
             Layer, SourceSignature, Resolution, false, Error));
     Layer.EditorStageCache.Artifacts.Last().CommitGeneration = Generation;
 
+    const FIntPoint OtherSlotResolution(1024, 1024);
+    TestFalse(TEXT("A Stage 2 set cannot be reused by a slot with another resolved extent."),
+        FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            Layer, SourceSignature, OtherSlotResolution, false, Error));
+
     Layer.EditorStageCache.Artifacts.Last().TextureSourceId = FGuid();
     TestFalse(TEXT("A texture rewritten outside its published artifact metadata is stale."),
         FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
             Layer, SourceSignature, Resolution, false, Error));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyPerSlotArtifactResolutionIsolationTest,
+    "DWC.Transparency.Pipeline.PerSlotArtifactResolutionIsolation",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyPerSlotArtifactResolutionIsolationTest::RunTest(const FString& Parameters)
+{
+    const auto PopulateSourceArtifacts = [](
+        FWetClothingTransparencyLayerData& Layer,
+        const FString& Signature,
+        const FIntPoint Resolution)
+    {
+        TArray<EDWCTransparencyTempArtifactKind> RequiredKinds;
+        FDWCTransparencyStageArtifactContract::GetRequiredSourceArtifacts(true, RequiredKinds);
+        const FGuid Generation = FGuid::NewGuid();
+        for (const EDWCTransparencyTempArtifactKind Kind : RequiredKinds)
+        {
+            FDWCTransparencyTempArtifactReference& Reference =
+                Layer.EditorStageCache.Artifacts.AddDefaulted_GetRef();
+            Reference.Kind = Kind;
+            Reference.Texture = FSoftObjectPath(FString::Printf(
+                TEXT("/Game/Generated/%s_%d.%s_%d"),
+                *Signature, static_cast<int32>(Kind),
+                *Signature, static_cast<int32>(Kind)));
+            Reference.BuildSignature =
+                FDWCTransparencyStageArtifactContract::BuildExpectedSignature(Kind, Signature);
+            Reference.ContractVersion = FDWCTransparencyStageArtifactContract::ContractVersion;
+            Reference.CommitGeneration = Generation;
+            Reference.TextureSourceId = FGuid::NewGuid();
+            Reference.Resolution = Resolution;
+        }
+    };
+
+    FWetClothingTransparencyLayerData LayerA;
+    LayerA.TargetSurface.OuterMaterialSlotIndex = 2;
+    FWetClothingTransparencyLayerData LayerB;
+    LayerB.TargetSurface.OuterMaterialSlotIndex = 7;
+    const FIntPoint ResolutionA(1024, 1024);
+    const FIntPoint ResolutionB(4096, 4096);
+    const FString SignatureA(TEXT("SlotA"));
+    const FString SignatureB(TEXT("SlotB"));
+    PopulateSourceArtifacts(LayerA, SignatureA, ResolutionA);
+    PopulateSourceArtifacts(LayerB, SignatureB, ResolutionB);
+
+    FString Error;
+    TestTrue(TEXT("Slot A accepts its own 1K artifact set."),
+        FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            LayerA, SignatureA, ResolutionA, false, Error));
+    TestTrue(TEXT("Slot B accepts its own 4K artifact set."),
+        FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            LayerB, SignatureB, ResolutionB, false, Error));
+    TestFalse(TEXT("Slot A cannot consume slot B's 4K extent."),
+        FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            LayerA, SignatureA, ResolutionB, false, Error));
+    TestFalse(TEXT("Slot B cannot consume slot A's 1K extent."),
+        FDWCTransparencyStageArtifactContract::InspectSourceArtifactSet(
+            LayerB, SignatureB, ResolutionA, false, Error));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencySelectiveArtifactProfileTest,
+    "DWC.Transparency.Pipeline.SelectiveArtifactProfiles",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencySelectiveArtifactProfileTest::RunTest(const FString&)
+{
+    TArray<EDWCTransparencyTempArtifactKind> CoreKinds;
+    FDWCTransparencyStageArtifactContract::GetRequiredSourceArtifacts(
+        FDWCTransparencySourceArtifactSelection::Canonical(true), CoreKinds);
+    TestTrue(TEXT("Core artifacts retain target coverage."),
+        CoreKinds.Contains(EDWCTransparencyTempArtifactKind::OuterCoverage));
+    TestTrue(TEXT("Core projected sources retain reveal surface."),
+        CoreKinds.Contains(EDWCTransparencyTempArtifactKind::BaseRevealSurface));
+    TestFalse(TEXT("Hit source is diagnostic-only."),
+        CoreKinds.Contains(EDWCTransparencyTempArtifactKind::HitSource));
+    TestFalse(TEXT("Hit distance is diagnostic-only."),
+        CoreKinds.Contains(EDWCTransparencyTempArtifactKind::HitDistance));
+
+    TArray<EDWCTransparencyTempArtifactKind> SparseStage4Kinds;
+    FDWCTransparencyStageArtifactContract::GetRequiredSourceArtifacts(
+        FDWCTransparencySourceArtifactSelection::Stage4(true, false),
+        SparseStage4Kinds);
+    TestFalse(TEXT("Sparse Stage 4 does not retain island IDs."),
+        SparseStage4Kinds.Contains(EDWCTransparencyTempArtifactKind::OuterIslandID));
+    TestFalse(TEXT("Stage 4 never retains hit-source diagnostics."),
+        SparseStage4Kinds.Contains(EDWCTransparencyTempArtifactKind::HitSource));
+
+    TArray<EDWCTransparencyTempArtifactKind> DiagnosticKinds;
+    FDWCTransparencyStageArtifactContract::GetRequiredSourceArtifacts(
+        FDWCTransparencySourceArtifactSelection::Diagnostics(true), DiagnosticKinds);
+    TestTrue(TEXT("Diagnostic view requests hit source."),
+        DiagnosticKinds.Contains(EDWCTransparencyTempArtifactKind::HitSource));
+    TestTrue(TEXT("Diagnostic view requests hit distance."),
+        DiagnosticKinds.Contains(EDWCTransparencyTempArtifactKind::HitDistance));
     return true;
 }
 

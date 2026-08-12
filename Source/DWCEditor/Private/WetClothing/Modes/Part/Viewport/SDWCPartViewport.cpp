@@ -32,7 +32,10 @@
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorMemoryDiagnostics.h"
+#include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
 #include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
+#include "WetClothing/Modes/Part/Topology/DWCPartTopologyCache.h"
 
 #define LOCTEXT_NAMESPACE "WetClothingAssetViewport"
 
@@ -740,113 +743,22 @@ namespace
         return UploadSurfacePreviewPixels(Texture, Pixels);
     }
 
-    UTexture2D* ResolveTransientSurfacePreviewTexture(
-        UTexture2D*                 SourceTexture,
-        const bool                  bNormalMap,
-        TObjectPtr<UTexture2D>&     CachedTexture,
-        TWeakObjectPtr<UTexture2D>& CachedSource,
-        const TCHAR*                DebugName)
-    {
-        if (SourceTexture == nullptr)
-        {
-            CachedTexture = nullptr;
-            CachedSource = nullptr;
-            return nullptr;
-        }
-        if (CachedTexture != nullptr && CachedSource.Get() == SourceTexture)
-        {
-            return CachedTexture;
-        }
-
-#if WITH_EDITORONLY_DATA
-        const int32                SourceWidth = IntCastChecked<int32>(SourceTexture->Source.GetSizeX());
-        const int32                SourceHeight = IntCastChecked<int32>(SourceTexture->Source.GetSizeY());
-        const ETextureSourceFormat SourceFormat = SourceTexture->Source.GetFormat();
-        if (SourceWidth > 0 && SourceHeight > 0 &&
-            (SourceFormat == TSF_BGRA8 || SourceFormat == TSF_G8))
-        {
-            TArray64<uint8> SourceBytes;
-            if (SourceTexture->Source.GetMipData(SourceBytes, 0))
-            {
-                constexpr int32 TargetSize = DWCSurfaceTextureSharedAsset::Resolution;
-                TArray<FColor>  Resampled;
-                Resampled.SetNumUninitialized(TargetSize * TargetSize);
-                for (int32 Y = 0; Y < TargetSize; ++Y)
-                {
-                    const int32 SourceY = IntCastChecked<int32>(FMath::Clamp(
-                        FMath::FloorToInt((static_cast<double>(Y) + 0.5) * SourceHeight / TargetSize),
-                        0,
-                        SourceHeight - 1));
-                    for (int32 X = 0; X < TargetSize; ++X)
-                    {
-                        const int32 SourceX = IntCastChecked<int32>(FMath::Clamp(
-                            FMath::FloorToInt((static_cast<double>(X) + 0.5) * SourceWidth / TargetSize),
-                            0,
-                            SourceWidth - 1));
-                        FColor      Pixel;
-                        if (SourceFormat == TSF_BGRA8)
-                        {
-                            const int64 ByteOffset =
-                                (static_cast<int64>(SourceY) * SourceWidth + SourceX) * sizeof(FColor);
-                            FMemory::Memcpy(&Pixel, SourceBytes.GetData() + ByteOffset, sizeof(FColor));
-                        }
-                        else
-                        {
-                            const uint8 Value = SourceBytes[static_cast<int64>(SourceY) * SourceWidth + SourceX];
-                            Pixel = bNormalMap
-                                        ? FColor(Value, Value, 255, 255)
-                                        : FColor(Value, Value, Value, 255);
-                        }
-                        Resampled[Y * TargetSize + X] = Pixel;
-                    }
-                }
-
-                CachedTexture = UTexture2D::CreateTransient(
-                    TargetSize,
-                    TargetSize,
-                    PF_B8G8R8A8,
-                    DebugName != nullptr ? FName(DebugName) : NAME_None);
-                if (CachedTexture != nullptr)
-                {
-                    CachedTexture->SRGB = false;
-                    CachedTexture->CompressionSettings = TC_VectorDisplacementmap;
-                    CachedTexture->MipGenSettings = TMGS_NoMipmaps;
-                    CachedTexture->Filter = TF_Bilinear;
-                    CachedTexture->AddressX = TA_Wrap;
-                    CachedTexture->AddressY = TA_Wrap;
-                    CachedTexture->NeverStream = true;
-                    if (UploadSurfacePreviewPixels(CachedTexture, Resampled))
-                    {
-                        CachedSource = SourceTexture;
-                        return CachedTexture;
-                    }
-                }
-            }
-        }
-#endif
-
-        // Do not feed an arbitrary authored texture into the array registry. A direct
-        // fallback is safe only when it already satisfies the fixed prepared-texture
-        // contract and exposes uploadable mip-0 data. Otherwise slice 0 is preferable
-        // to silently constructing a malformed Texture2DArray.
-        const FTexturePlatformData* PlatformData = SourceTexture->GetPlatformData();
-        const bool                  bDirectFallbackUsable =
-            SourceTexture->GetSizeX() == DWCSurfaceTextureSharedAsset::Resolution &&
-            SourceTexture->GetSizeY() == DWCSurfaceTextureSharedAsset::Resolution &&
-            SourceTexture->GetResource() != nullptr &&
-            PlatformData != nullptr &&
-            !PlatformData->Mips.IsEmpty() &&
-            SourceTexture->GetPixelFormat() != PF_Unknown;
-        CachedTexture = bDirectFallbackUsable ? SourceTexture : nullptr;
-        CachedSource = SourceTexture;
-        return CachedTexture;
-    }
-
 } // namespace
 
 void SDWCPartViewport::Construct(const FArguments& InArgs)
 {
+    MemoryDiagnosticCollectorName = FName(
+        *FString::Printf(TEXT("WetPartViewport_%p"), this));
+    FDWCEditorMemoryDiagnostics::RegisterCollector(
+        MemoryDiagnosticCollectorName,
+        [this](TArray<FDWCEditorMemoryOwnerRecord>& OutOwners)
+        {
+            CollectMemoryDiagnostics(OutOwners);
+        });
+
     WetClothingAsset = InArgs._WetClothingAsset;
+    CacheStore = InArgs._CacheStore;
+    TextureWorkspace = InArgs._TextureWorkspace;
     bSurfaceWaterTilingPreview = InArgs._SurfaceWaterTilingPreview;
     OnIslandPicked = InArgs._OnIslandPicked;
     PreviewScene = MakeShared<FAdvancedPreviewScene>(FPreviewScene::ConstructionValues());
@@ -864,6 +776,14 @@ void SDWCPartViewport::Construct(const FArguments& InArgs)
 
 SDWCPartViewport::~SDWCPartViewport()
 {
+    PartPreviewColorLease.Reset();
+    PartPreviewSelectionLease.Reset();
+    SurfacePreviewWetnessLease.Reset();
+    SurfacePreviewWetPartDataLease.Reset();
+    SurfacePreviewDropletLease.Reset();
+    SurfacePreviewFlowDropletLease.Reset();
+    FDWCEditorMemoryDiagnostics::UnregisterCollector(MemoryDiagnosticCollectorName);
+
     if (PreviewScene.IsValid() && PreviewMeshComponent != nullptr)
     {
         PreviewScene->RemoveComponent(PreviewMeshComponent);
@@ -875,6 +795,156 @@ SDWCPartViewport::~SDWCPartViewport()
     }
 }
 
+void SDWCPartViewport::SuspendPreview(const EDWCEditorPreviewSuspendReason Reason)
+{
+    (void)Reason;
+    if (bPreviewSuspended)
+    {
+        return;
+    }
+
+    bPreviewSuspended = true;
+    SetPreviewPaused(true);
+    ClearPartPreviewOverlay();
+    RestoreOriginalMaterials();
+
+    PartPreviewColorLease.Reset();
+    PartPreviewSelectionLease.Reset();
+    SurfacePreviewWetnessLease.Reset();
+    SurfacePreviewWetPartDataLease.Reset();
+    SurfacePreviewDropletLease.Reset();
+    SurfacePreviewFlowDropletLease.Reset();
+    PartPreviewColorTexture = nullptr;
+    PartPreviewSelectionTexture = nullptr;
+    SurfacePreviewWetnessMap = nullptr;
+    SurfacePreviewWetPartDataTexture = nullptr;
+    SurfacePreviewDropletRT = nullptr;
+    SurfacePreviewFlowDropletRT = nullptr;
+    SurfaceWaterPreviewMaterial = nullptr;
+    RequestViewportRedraw();
+}
+
+void SDWCPartViewport::ResumePreviewIfNeeded()
+{
+    if (!bPreviewSuspended)
+    {
+        return;
+    }
+
+    bPreviewSuspended = false;
+    SetPreviewPaused(false);
+    MarkWetPartOverlayDirty();
+    MarkSelectionOverlayDirty();
+    if (bSurfaceWaterTilingPreview)
+    {
+        MarkSurfacePreviewDirty();
+    }
+    FlushPendingPreviewUpdates();
+}
+
+void SDWCPartViewport::CollectMemoryDiagnostics(
+    TArray<FDWCEditorMemoryOwnerRecord>& OutOwners) const
+{
+    uint64 CPUBytes = CurrentHighlightedUVIslandIDs.GetAllocatedSize() +
+        CurrentWetPartIslandAssignments.GetAllocatedSize() +
+        CurrentWetPartIslandColors.GetAllocatedSize() +
+        PartPreviewNearestOwnerTriangleCache.GetAllocatedSize() +
+        SurfacePreviewWorkingPartDataPixels.GetAllocatedSize() +
+        SurfacePreviewCachedSelectedMask.GetAllocatedSize() +
+        OriginalPreviewMaterials.GetAllocatedSize();
+    int32 TriangleCount = 0;
+    int32 IslandCount = 0;
+    if (const FDWCPartTopologyCacheValue* Topology = GetCurrentTopology())
+    {
+        IslandCount = Topology->Islands.Num();
+        TriangleCount = Topology->PickTriangles.Num();
+    }
+    TSet<const UTexture2D*> CountedTextures;
+    uint64 GPUBytes = 0;
+    uint64 TextureCPUBytes = 0;
+    auto CountTexture = [&CountedTextures, &GPUBytes, &TextureCPUBytes](const UTexture2D* Texture)
+    {
+        if (Texture == nullptr || !Texture->HasAnyFlags(RF_Transient) || CountedTextures.Contains(Texture))
+        {
+            return;
+        }
+        CountedTextures.Add(Texture);
+        GPUBytes += static_cast<uint64>(Texture->CalcTextureMemorySizeEnum(TMC_ResidentMips));
+        if (const FTexturePlatformData* PlatformData = Texture->GetPlatformData())
+        {
+            for (const FTexture2DMipMap& Mip : PlatformData->Mips)
+            {
+                TextureCPUBytes += static_cast<uint64>(FMath::Max<int64>(Mip.BulkData.GetBulkDataSize(), 0));
+            }
+        }
+    };
+    if (!PartPreviewColorLease.IsValid())
+    {
+        CountTexture(PartPreviewColorTexture);
+    }
+    if (!PartPreviewSelectionLease.IsValid())
+    {
+        CountTexture(PartPreviewSelectionTexture);
+    }
+    if (!SurfacePreviewWetnessLease.IsValid())
+    {
+        CountTexture(SurfacePreviewWetnessMap);
+    }
+    if (!SurfacePreviewWetPartDataLease.IsValid())
+    {
+        CountTexture(SurfacePreviewWetPartDataTexture);
+    }
+    if (!SurfacePreviewDropletLease.IsValid())
+    {
+        CountTexture(SurfacePreviewDropletRT);
+    }
+    if (!SurfacePreviewFlowDropletLease.IsValid())
+    {
+        CountTexture(SurfacePreviewFlowDropletRT);
+    }
+
+    CPUBytes += TextureCPUBytes;
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const FString AssetContext = Asset != nullptr ? Asset->GetPathName() : TEXT("None");
+    FDWCEditorMemoryOwnerRecord& CPUOwner = OutOwners.AddDefaulted_GetRef();
+    CPUOwner.Identifier = FString::Printf(TEXT("WetPartViewport.%p.CPU"), this);
+    CPUOwner.Subsystem = TEXT("WetPart");
+    CPUOwner.Resource = TEXT("ViewportCPU");
+    CPUOwner.Category = EDWCEditorMemoryCategory::PersistentEditorCPU;
+    CPUOwner.Accounting = EDWCEditorMemoryAccounting::Resident;
+    CPUOwner.CurrentBytes = CPUBytes;
+    CPUOwner.EntryCount = IslandCount;
+    CPUOwner.Context = FString::Printf(
+        TEXT("asset=%s; triangles=%d; workspaceLeases=%d; nearestOwnerEntries=%d; textureBacking=%.2f MiB"),
+        *AssetContext,
+        TriangleCount,
+        (PartPreviewColorLease.IsValid() ? 1 : 0) +
+            (PartPreviewSelectionLease.IsValid() ? 1 : 0) +
+            (SurfacePreviewWetnessLease.IsValid() ? 1 : 0) +
+            (SurfacePreviewWetPartDataLease.IsValid() ? 1 : 0) +
+            (SurfacePreviewDropletLease.IsValid() ? 1 : 0) +
+            (SurfacePreviewFlowDropletLease.IsValid() ? 1 : 0),
+        PartPreviewNearestOwnerTriangleCache.Num(),
+        static_cast<double>(TextureCPUBytes) / (1024.0 * 1024.0));
+
+    FDWCEditorMemoryOwnerRecord& GPUOwner = OutOwners.AddDefaulted_GetRef();
+    GPUOwner.Identifier = FString::Printf(TEXT("WetPartViewport.%p.GPU"), this);
+    GPUOwner.Subsystem = TEXT("WetPart");
+    GPUOwner.Resource = TEXT("ViewportTextures");
+    GPUOwner.Category = EDWCEditorMemoryCategory::PreviewGPU;
+    GPUOwner.Accounting = EDWCEditorMemoryAccounting::Resident;
+    GPUOwner.CurrentBytes = GPUBytes;
+    GPUOwner.EntryCount = CountedTextures.Num();
+    GPUOwner.Context = FString::Printf(
+        TEXT("asset=%s; unique transient resident texture resources"),
+        *AssetContext);
+
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->CollectMemoryDiagnostics(OutOwners);
+    }
+}
+
 void SDWCPartViewport::AddReferencedObjects(FReferenceCollector& Collector)
 {
     Collector.AddReferencedObject(PreviewMeshComponent);
@@ -882,11 +952,6 @@ void SDWCPartViewport::AddReferencedObjects(FReferenceCollector& Collector)
     Collector.AddReferencedObject(WetPartOverlayMID);
     Collector.AddReferencedObject(PartPreviewColorTexture);
     Collector.AddReferencedObject(PartPreviewSelectionTexture);
-    for (TPair<uint32, FPartPreviewTextureCacheEntry>& Pair : PartPreviewTextureCache)
-    {
-        Collector.AddReferencedObject(Pair.Value.PartTexture);
-        Collector.AddReferencedObject(Pair.Value.SelectionTexture);
-    }
     Collector.AddReferencedObject(SurfaceWaterPreviewMaterialParent);
     Collector.AddReferencedObject(SurfaceWaterPreviewBaseMaterial);
     Collector.AddReferencedObject(SurfaceWaterPreviewStaticMaterial);
@@ -895,10 +960,6 @@ void SDWCPartViewport::AddReferencedObjects(FReferenceCollector& Collector)
     Collector.AddReferencedObject(SurfacePreviewWetPartDataTexture);
     Collector.AddReferencedObject(SurfacePreviewDropletRT);
     Collector.AddReferencedObject(SurfacePreviewFlowDropletRT);
-    Collector.AddReferencedObject(SurfacePreviewAuthoredDropletNormal);
-    Collector.AddReferencedObject(SurfacePreviewAuthoredDropletMask);
-    Collector.AddReferencedObject(SurfacePreviewAuthoredDroplet2Normal);
-    Collector.AddReferencedObject(SurfacePreviewAuthoredDroplet2Mask);
     Collector.AddReferencedObjects(OriginalPreviewMaterials);
 }
 
@@ -936,12 +997,18 @@ void SDWCPartViewport::RefreshPreviewMesh()
     }
 
     PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
-    PartPreviewTextureCache.Reset();
+    PartPreviewColorLease.Reset();
+    PartPreviewSelectionLease.Reset();
+    SurfacePreviewWetnessLease.Reset();
+    SurfacePreviewWetPartDataLease.Reset();
+    SurfacePreviewDropletLease.Reset();
+    SurfacePreviewFlowDropletLease.Reset();
+    PartPreviewNearestOwnerTopologySignature = 0;
     PartPreviewNearestOwnerTriangleCache.Reset();
     if (ViewportClient.IsValid())
     {
         ViewportClient->ClearPickableIslandCache();
-        bPickableTopologyDirty = TargetMesh != nullptr && !CurrentSelectableIslands.IsEmpty();
+        bPickableTopologyDirty = TargetMesh != nullptr && GetCurrentTopology() != nullptr;
     }
     ConfigureStaticPartPreviewPose(PreviewMeshComponent);
     PreviewMeshComponent->ShowAllMaterialSections(0);
@@ -950,6 +1017,10 @@ void SDWCPartViewport::RefreshPreviewMesh()
     WetPartOverlayMID = nullptr;
     PartPreviewColorTexture = nullptr;
     PartPreviewSelectionTexture = nullptr;
+    SurfacePreviewWetnessMap = nullptr;
+    SurfacePreviewWetPartDataTexture = nullptr;
+    SurfacePreviewDropletRT = nullptr;
+    SurfacePreviewFlowDropletRT = nullptr;
     WetPartOverlayMaterial = nullptr;
     RefreshPartPreviewOverlayMaterial();
     SurfaceWaterPreviewMaterial = nullptr;
@@ -1052,16 +1123,12 @@ void SDWCPartViewport::FlushPendingPreviewUpdates()
 
     if (bPickableTopologyDirty && ViewportClient.IsValid())
     {
-        uint32 PickTopologyCacheKey = GetTypeHash(CurrentHighlightedMaterialSlot);
-        for (const TSharedPtr<FWetClothingAssetUVIsland>& Source : CurrentSelectableIslandSources)
+        FDWCEditorCacheLease ClientLease;
+        if (CacheStore.IsValid() && bHasCurrentTopologyKey)
         {
-            PickTopologyCacheKey = HashCombine(PickTopologyCacheKey, PointerHash(Source.Get()));
+            ClientLease = CacheStore->FindLease<FDWCPartTopologyCacheValue>(CurrentTopologyKey);
         }
-        if (PickTopologyCacheKey == 0)
-        {
-            PickTopologyCacheKey = 1;
-        }
-        ViewportClient->SetPickableIslands(CurrentSelectableIslands, PickTopologyCacheKey);
+        ViewportClient->SetPickableTopology(MoveTemp(ClientLease));
     }
 
     const bool bRefreshWetOverlay = bWetPartOverlayDirty;
@@ -1117,50 +1184,29 @@ void SDWCPartViewport::ClearMaterialSlotHighlight()
     RequestViewportRedraw();
 }
 
-void SDWCPartViewport::SetSelectableIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& InIslands)
+const FDWCPartTopologyCacheValue* SDWCPartViewport::GetCurrentTopology() const
 {
-    TArray<TSharedPtr<FWetClothingAssetUVIsland>> NewIslandSources;
-    NewIslandSources.Reserve(InIslands.Num());
-    for (const TSharedPtr<FWetClothingAssetUVIsland>& Island : InIslands)
-    {
-        if (Island.IsValid())
-        {
-            NewIslandSources.Add(Island);
-        }
-    }
+    return CurrentTopologyLease.GetAs<FDWCPartTopologyCacheValue>();
+}
 
-    bool bSameTopology = CurrentSelectableIslandSources.Num() == NewIslandSources.Num();
-    if (bSameTopology)
-    {
-        for (int32 Index = 0; Index < NewIslandSources.Num(); ++Index)
-        {
-            if (CurrentSelectableIslandSources[Index].Get() != NewIslandSources[Index].Get())
-            {
-                bSameTopology = false;
-                break;
-            }
-        }
-    }
-
-    if (bSameTopology)
+void SDWCPartViewport::SetSelectableTopology(const FDWCEditorCacheKey& InTopologyKey)
+{
+    if (bHasCurrentTopologyKey && CurrentTopologyKey == InTopologyKey &&
+        CurrentTopologyLease.IsValid())
     {
         return;
     }
 
-    // Only a real topology change should throw away the expensive Data-UV layout
-    // used by Surface Water Tiling Preview. Repeated UV-view refreshes receive the
-    // same shared cache objects and therefore stay on the fast path above.
-    InvalidateSurfaceWaterPreviewLayoutCache();
-    CurrentSelectableIslandSources = MoveTemp(NewIslandSources);
-    CurrentSelectableIslands.Reset();
-
-    for (const TSharedPtr<FWetClothingAssetUVIsland>& Island : InIslands)
+    FDWCEditorCacheLease NewLease;
+    if (CacheStore.IsValid())
     {
-        if (Island.IsValid())
-        {
-            CurrentSelectableIslands.Add(*Island);
-        }
+        NewLease = CacheStore->FindLease<FDWCPartTopologyCacheValue>(InTopologyKey);
     }
+
+    InvalidateSurfaceWaterPreviewLayoutCache();
+    CurrentTopologyKey = InTopologyKey;
+    CurrentTopologyLease = MoveTemp(NewLease);
+    bHasCurrentTopologyKey = CurrentTopologyLease.IsValid();
 
     bPickableTopologyDirty = true;
     bWetPartOverlayDirty = true;
@@ -1454,8 +1500,9 @@ void SDWCPartViewport::ClearPartPreviewOverlay()
 
 bool SDWCPartViewport::BuildPartPreviewTextures()
 {
+    const FDWCPartTopologyCacheValue* Topology = GetCurrentTopology();
     if (bSurfaceWaterTilingPreview || PreviewMeshComponent == nullptr ||
-        CurrentHighlightedMaterialSlot == INDEX_NONE || CurrentSelectableIslands.IsEmpty())
+        CurrentHighlightedMaterialSlot == INDEX_NONE || Topology == nullptr || Topology->Islands.IsEmpty())
     {
         return false;
     }
@@ -1481,15 +1528,16 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
 
     bool bMayNeedPartColor = false;
     bool bMayNeedSelection = false;
-    for (int32 IslandIndex = 0; IslandIndex < CurrentSelectableIslands.Num(); ++IslandIndex)
+    for (const TSharedPtr<FWetClothingAssetUVIsland>& IslandPtr : Topology->Islands)
     {
-        const FWetClothingAssetUVIsland& Island = CurrentSelectableIslands[IslandIndex];
-        if (CurrentSelectableIslandSources.IsValidIndex(IslandIndex))
+        if (!IslandPtr.IsValid())
         {
-            const uint32 SourceIdentity = PointerHash(CurrentSelectableIslandSources[IslandIndex].Get());
-            TopologySignature = HashCombine(TopologySignature, SourceIdentity);
-            PreviewSignature = HashCombine(PreviewSignature, SourceIdentity);
+            continue;
         }
+        const FWetClothingAssetUVIsland& Island = *IslandPtr;
+        const uint32 SourceIdentity = PointerHash(IslandPtr.Get());
+        TopologySignature = HashCombine(TopologySignature, SourceIdentity);
+        PreviewSignature = HashCombine(PreviewSignature, SourceIdentity);
         TopologySignature = HashCombine(TopologySignature, GetTypeHash(Island.UVIslandID));
         PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(Island.UVIslandID));
 
@@ -1522,26 +1570,50 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
     // nothing for the overlay texture to show. Avoid touching render triangles at all.
     if (!bMayNeedPartColor && !bMayNeedSelection)
     {
+        PartPreviewColorLease.Reset();
+        PartPreviewSelectionLease.Reset();
+        PartPreviewColorTexture = nullptr;
+        PartPreviewSelectionTexture = nullptr;
         return false;
     }
 
     const int32 Width = PartPreviewTextureResolution;
     const int32 Height = PartPreviewTextureResolution;
-    if (const FPartPreviewTextureCacheEntry* CachedPreview = PartPreviewTextureCache.Find(PreviewSignature))
-    {
-        if (!CachedPreview->bHasOverlay ||
-            CachedPreview->PartTexture == nullptr ||
-            CachedPreview->SelectionTexture == nullptr)
-        {
-            return false;
-        }
+    FDWCEditorTextureDescriptor PreviewDescriptor;
+    PreviewDescriptor.Size = FIntPoint(Width, Height);
+    PreviewDescriptor.WorkingSize = PreviewDescriptor.Size;
+    PreviewDescriptor.PixelFormat = PF_B8G8R8A8;
+    PreviewDescriptor.bSRGB = false;
+    PreviewDescriptor.CompressionSettings = TC_VectorDisplacementmap;
+    PreviewDescriptor.MipGenSettings = TMGS_NoMipmaps;
+    PreviewDescriptor.Filter = TF_Nearest;
+    PreviewDescriptor.AddressX = TA_Clamp;
+    PreviewDescriptor.AddressY = TA_Clamp;
+    PreviewDescriptor.InitialBGRA8 = FColor::Transparent;
 
-        // Reuse the actual transient textures. UploadSurfacePreviewPixels() calls
-        // UTexture2D::UpdateResource(), which can synchronize with the render thread;
-        // avoiding that upload is important for instant A -> B -> A slot switching.
-        PartPreviewColorTexture = CachedPreview->PartTexture;
-        PartPreviewSelectionTexture = CachedPreview->SelectionTexture;
-        return true;
+    FDWCEditorTextureKey PartTextureKey;
+    PartTextureKey.Owner = FObjectKey(Asset);
+    PartTextureKey.Purpose = EDWCEditorTexturePurpose::WetPartColor;
+    PartTextureKey.MaterialSlotIndex = CurrentHighlightedMaterialSlot;
+    PartTextureKey.LayerGuid = FGuid(PreviewSignature, TopologySignature, 0x44574350u, 1u);
+    FDWCEditorTextureKey SelectionTextureKey = PartTextureKey;
+    SelectionTextureKey.Purpose = EDWCEditorTexturePurpose::WetPartSelection;
+
+    if (TextureWorkspace.IsValid())
+    {
+        FDWCEditorTextureLease CachedPartLease =
+            TextureWorkspace->AcquireExistingLease(PartTextureKey, PreviewDescriptor);
+        FDWCEditorTextureLease CachedSelectionLease =
+            TextureWorkspace->AcquireExistingLease(SelectionTextureKey, PreviewDescriptor);
+        if (CachedPartLease.IsValid() && CachedSelectionLease.IsValid() &&
+            CachedPartLease->GetTexture() != nullptr && CachedSelectionLease->GetTexture() != nullptr)
+        {
+            PartPreviewColorTexture = CachedPartLease->GetTexture();
+            PartPreviewSelectionTexture = CachedSelectionLease->GetTexture();
+            PartPreviewColorLease = MoveTemp(CachedPartLease);
+            PartPreviewSelectionLease = MoveTemp(CachedSelectionLease);
+            return true;
+        }
     }
 
     TArray<FColor> PartPixels;
@@ -1590,8 +1662,13 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         ColorByEdge.Add(EdgeKey, Color);
     };
 
-    for (const FWetClothingAssetUVIsland& Island : CurrentSelectableIslands)
+    for (const TSharedPtr<FWetClothingAssetUVIsland>& IslandPtr : Topology->Islands)
     {
+        if (!IslandPtr.IsValid())
+        {
+            continue;
+        }
+        const FWetClothingAssetUVIsland& Island = *IslandPtr;
         const bool          bSelected = CurrentHighlightedUVIslandIDs.Contains(Island.UVIslandID);
         const int32*        WetPartID = CurrentWetPartIslandAssignments.Find(Island.UVIslandID);
         const FLinearColor* IslandColor = CurrentWetPartIslandColors.Find(Island.UVIslandID);
@@ -1649,9 +1726,12 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
             return false;
         }
 
-        for (const FWetClothingAssetUVIsland& Island : CurrentSelectableIslands)
+        for (const TSharedPtr<FWetClothingAssetUVIsland>& IslandPtr : Topology->Islands)
         {
-            RenderTriangles.Append(Island.UVTriangles);
+            if (IslandPtr.IsValid())
+            {
+                RenderTriangles.Append(IslandPtr->UVTriangles);
+            }
         }
     }
 
@@ -1876,13 +1956,12 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         int32        NearestInheritedSelectionCount = 0;
         int32        RemainingOrphanCount = 0;
 
-        if (!PartPreviewNearestOwnerTriangleCache.Contains(TopologySignature) &&
-            PartPreviewNearestOwnerTriangleCache.Num() >= 8)
+        if (PartPreviewNearestOwnerTopologySignature != TopologySignature)
         {
+            PartPreviewNearestOwnerTopologySignature = TopologySignature;
             PartPreviewNearestOwnerTriangleCache.Reset();
         }
-        TMap<int32, int32>& NearestOwnerTriangleByOrphan =
-            PartPreviewNearestOwnerTriangleCache.FindOrAdd(TopologySignature);
+        TMap<int32, int32>& NearestOwnerTriangleByOrphan = PartPreviewNearestOwnerTriangleCache;
         TMap<int32, const FPartPreviewOwnerSource*> OwnerSourceByTriangleID;
         OwnerSourceByTriangleID.Reserve(OwnerSources.Num());
         for (const FPartPreviewOwnerSource& Candidate : OwnerSources)
@@ -2076,13 +2155,33 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         return false;
     }
 
-    // Keep the cache bounded. Eight full 1024x1024 color+selection pairs are
-    // enough for normal slot hopping without allowing an editing session to grow
-    // memory indefinitely as assignments/selections change.
-    if (PartPreviewTextureCache.Num() >= 8)
+    if (TextureWorkspace.IsValid())
     {
-        PartPreviewTextureCache.Reset();
+        FDWCEditorTextureLease NewPartLease = TextureWorkspace->TransferBGRA8AndAcquireLease(
+            PartTextureKey,
+            PreviewDescriptor,
+            MoveTemp(PartPixels),
+            EDWCEditorTextureUploadPriority::Normal);
+        FDWCEditorTextureLease NewSelectionLease = TextureWorkspace->TransferBGRA8AndAcquireLease(
+            SelectionTextureKey,
+            PreviewDescriptor,
+            MoveTemp(SelectionPixels),
+            EDWCEditorTextureUploadPriority::Normal);
+        if (!NewPartLease.IsValid() || !NewSelectionLease.IsValid() ||
+            NewPartLease->GetTexture() == nullptr || NewSelectionLease->GetTexture() == nullptr)
+        {
+            return false;
+        }
+
+        PartPreviewColorTexture = NewPartLease->GetTexture();
+        PartPreviewSelectionTexture = NewSelectionLease->GetTexture();
+        PartPreviewColorLease = MoveTemp(NewPartLease);
+        PartPreviewSelectionLease = MoveTemp(NewSelectionLease);
+        return true;
     }
+
+    // Standalone tests may construct the viewport without a WCA session workspace.
+    // Keep one uncached transient pair in that narrow fallback path.
     TObjectPtr<UTexture2D> NewPartTexture = nullptr;
     TObjectPtr<UTexture2D> NewSelectionTexture = nullptr;
     const bool             bPartTextureReady = CreateOrUpdateSurfacePreviewByteTexture(
@@ -2102,10 +2201,6 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
 
     PartPreviewColorTexture = NewPartTexture;
     PartPreviewSelectionTexture = NewSelectionTexture;
-    FPartPreviewTextureCacheEntry& CachedPreview = PartPreviewTextureCache.FindOrAdd(PreviewSignature);
-    CachedPreview.PartTexture = NewPartTexture;
-    CachedPreview.SelectionTexture = NewSelectionTexture;
-    CachedPreview.bHasOverlay = true;
     return true;
 }
 
@@ -2247,9 +2342,21 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
             ? SurfaceWaterPreviewPartSettingsOverride.GetValue()
             : Part->SurfaceWater;
 
-    TSet<int32> SelectedTriangleIDs;
-    for (const FWetClothingAssetUVIsland& Island : CurrentSelectableIslands)
+    const FDWCPartTopologyCacheValue* Topology = GetCurrentTopology();
+    if (Topology == nullptr)
     {
+        OutErrorMessage = TEXT("Wet Part topology is unavailable for the selected slot.");
+        return false;
+    }
+
+    TSet<int32> SelectedTriangleIDs;
+    for (const TSharedPtr<FWetClothingAssetUVIsland>& IslandPtr : Topology->Islands)
+    {
+        if (!IslandPtr.IsValid())
+        {
+            continue;
+        }
+        const FWetClothingAssetUVIsland& Island = *IslandPtr;
         const int32* AssignedWetPartID = CurrentWetPartIslandAssignments.Find(Island.UVIslandID);
         const int32  EffectiveWetPartID = AssignedWetPartID != nullptr ? *AssignedWetPartID : 0;
         if (EffectiveWetPartID != PreviewWetPartID)
@@ -2273,7 +2380,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
         SurfacePreviewCachedWetPartID == PreviewWetPartID &&
         SurfacePreviewCachedWidth > 0 &&
         SurfacePreviewCachedHeight > 0 &&
-        SurfacePreviewCachedSourcePartDataPixels.Num() ==
+        SurfacePreviewWorkingPartDataPixels.Num() ==
             SurfacePreviewCachedWidth * SurfacePreviewCachedHeight &&
         SurfacePreviewCachedSelectedMask.Num() ==
             SurfacePreviewCachedWidth * SurfacePreviewCachedHeight;
@@ -2366,7 +2473,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
             Height,
             DWCWetPartDataTextureBake::PaddingPixels);
 
-        SurfacePreviewCachedSourcePartDataPixels = MoveTemp(SourcePartDataPixels);
+        SurfacePreviewWorkingPartDataPixels = MoveTemp(SourcePartDataPixels);
         SurfacePreviewCachedSelectedMask = MoveTemp(SelectedMask);
         SurfacePreviewCachedWidth = Width;
         SurfacePreviewCachedHeight = Height;
@@ -2406,7 +2513,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
     const float                           FlowHalfHeightPixels = Surface.DropletFlowHeightPixels > UE_KINDA_SMALL_NUMBER
                                                                      ? FMath::Clamp(Surface.DropletFlowHeightPixels * FlowStampSizeScale, 1.0f, 256.0f)
                                                                      : 0.0f;
-    TArray<FColor>                        PreviewPartDataPixels = SurfacePreviewCachedSourcePartDataPixels;
+    TArray<FColor>&                       PreviewPartDataPixels = SurfacePreviewWorkingPartDataPixels;
     TArray<float>                         WetnessPixels;
     TArray<float>                         DropletPixels;
     TArray<float>                         FlowDropletPixels;
@@ -2487,10 +2594,101 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
         }
     }
 
-    if (!CreateOrUpdateSurfacePreviewByteTexture(SurfacePreviewWetPartDataTexture, PreviewPartDataPixels, Width, Height) ||
-        !CreateOrUpdateSurfacePreviewWetnessTexture(SurfacePreviewWetnessMap, WetnessPixels, Width, Height, TF_Nearest) ||
-        !CreateOrUpdateSurfacePreviewWetnessTexture(SurfacePreviewDropletRT, DropletPixels, Width, Height, TF_Bilinear) ||
-        !CreateOrUpdateSurfacePreviewWetnessTexture(SurfacePreviewFlowDropletRT, FlowDropletPixels, Width, Height, TF_Bilinear))
+    if (TextureWorkspace.IsValid())
+    {
+        UWetClothingAsset* TextureOwnerAsset = WetClothingAsset.Get();
+        if (TextureOwnerAsset == nullptr)
+        {
+            OutErrorMessage = TEXT("The Wet Clothing Asset is unavailable for Surface Water preview textures.");
+            return false;
+        }
+
+        const auto MakeKey = [this, TextureOwnerAsset](const EDWCEditorTexturePurpose Purpose)
+        {
+            FDWCEditorTextureKey Key;
+            Key.Owner = FObjectKey(TextureOwnerAsset);
+            Key.Purpose = Purpose;
+            Key.MaterialSlotIndex = PreviewMaterialSlotIndex;
+            Key.LayerGuid = PreviewTextureOwnerGuid;
+            return Key;
+        };
+        const auto MakeDescriptor = [Width, Height](
+                                        const EPixelFormat PixelFormat,
+                                        const TextureFilter Filter)
+        {
+            FDWCEditorTextureDescriptor Descriptor;
+            Descriptor.Size = FIntPoint(Width, Height);
+            Descriptor.WorkingSize = Descriptor.Size;
+            Descriptor.PixelFormat = PixelFormat;
+            Descriptor.bSRGB = false;
+            Descriptor.CompressionSettings = TC_VectorDisplacementmap;
+            Descriptor.MipGenSettings = TMGS_NoMipmaps;
+            Descriptor.Filter = Filter;
+            Descriptor.AddressX = TA_Clamp;
+            Descriptor.AddressY = TA_Clamp;
+            return Descriptor;
+        };
+
+        TArray<FColor> PartDataUpload = PreviewPartDataPixels;
+        FDWCEditorTextureLease NewPartDataLease = TextureWorkspace->TransferBGRA8AndAcquireLease(
+            MakeKey(EDWCEditorTexturePurpose::WetPartSurfaceData),
+            MakeDescriptor(PF_B8G8R8A8, TF_Nearest),
+            MoveTemp(PartDataUpload),
+            EDWCEditorTextureUploadPriority::Interactive);
+        FDWCEditorTextureLease NewWetnessLease = TextureWorkspace->TransferR32FAndAcquireLease(
+            MakeKey(EDWCEditorTexturePurpose::WetPartSurfaceWetness),
+            MakeDescriptor(PF_R32_FLOAT, TF_Nearest),
+            MoveTemp(WetnessPixels),
+            EDWCEditorTextureUploadPriority::Interactive);
+        FDWCEditorTextureLease NewDropletLease = TextureWorkspace->TransferR32FAndAcquireLease(
+            MakeKey(EDWCEditorTexturePurpose::WetPartSurfaceDroplet),
+            MakeDescriptor(PF_R32_FLOAT, TF_Bilinear),
+            MoveTemp(DropletPixels),
+            EDWCEditorTextureUploadPriority::Interactive);
+        FDWCEditorTextureLease NewFlowDropletLease = TextureWorkspace->TransferR32FAndAcquireLease(
+            MakeKey(EDWCEditorTexturePurpose::WetPartSurfaceFlowDroplet),
+            MakeDescriptor(PF_R32_FLOAT, TF_Bilinear),
+            MoveTemp(FlowDropletPixels),
+            EDWCEditorTextureUploadPriority::Interactive);
+        if (!NewPartDataLease.IsValid() || !NewWetnessLease.IsValid() ||
+            !NewDropletLease.IsValid() || !NewFlowDropletLease.IsValid())
+        {
+            OutErrorMessage = TEXT("The preview GPU budget could not retain the Surface Water textures.");
+            return false;
+        }
+
+        SurfacePreviewWetPartDataLease = MoveTemp(NewPartDataLease);
+        SurfacePreviewWetnessLease = MoveTemp(NewWetnessLease);
+        SurfacePreviewDropletLease = MoveTemp(NewDropletLease);
+        SurfacePreviewFlowDropletLease = MoveTemp(NewFlowDropletLease);
+        SurfacePreviewWetPartDataTexture = SurfacePreviewWetPartDataLease->GetTexture();
+        SurfacePreviewWetnessMap = SurfacePreviewWetnessLease->GetTexture();
+        SurfacePreviewDropletRT = SurfacePreviewDropletLease->GetTexture();
+        SurfacePreviewFlowDropletRT = SurfacePreviewFlowDropletLease->GetTexture();
+    }
+    else if (!CreateOrUpdateSurfacePreviewByteTexture(
+                 SurfacePreviewWetPartDataTexture,
+                 PreviewPartDataPixels,
+                 Width,
+                 Height) ||
+             !CreateOrUpdateSurfacePreviewWetnessTexture(
+                 SurfacePreviewWetnessMap,
+                 WetnessPixels,
+                 Width,
+                 Height,
+                 TF_Nearest) ||
+             !CreateOrUpdateSurfacePreviewWetnessTexture(
+                 SurfacePreviewDropletRT,
+                 DropletPixels,
+                 Width,
+                 Height,
+                 TF_Bilinear) ||
+             !CreateOrUpdateSurfacePreviewWetnessTexture(
+                 SurfacePreviewFlowDropletRT,
+                 FlowDropletPixels,
+                 Width,
+                 Height,
+                 TF_Bilinear))
     {
         OutErrorMessage = TEXT("Could not create the transient Surface Water preview textures.");
         return false;
@@ -2503,7 +2701,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
 void SDWCPartViewport::InvalidateSurfaceWaterPreviewLayoutCache()
 {
     bSurfacePreviewLayoutCacheValid = false;
-    SurfacePreviewCachedSourcePartDataPixels.Reset();
+    SurfacePreviewWorkingPartDataPixels.Reset();
     SurfacePreviewCachedSelectedMask.Reset();
     SurfacePreviewCachedSingleCircleCenter = FVector2D::ZeroVector;
     SurfacePreviewCachedWidth = 0;

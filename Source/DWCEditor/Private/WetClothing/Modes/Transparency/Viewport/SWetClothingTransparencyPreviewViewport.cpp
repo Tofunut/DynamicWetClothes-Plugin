@@ -428,6 +428,8 @@ void SWetClothingTransparencyPreviewViewport::Construct(const FArguments& InArgs
     RefreshPreview();
 }
 
+SWetClothingTransparencyPreviewViewport::SWetClothingTransparencyPreviewViewport() = default;
+
 SWetClothingTransparencyPreviewViewport::~SWetClothingTransparencyPreviewViewport()
 {
     PreviewCommitLifetime.Revoke();
@@ -4526,6 +4528,8 @@ void SWetClothingTransparencyPreviewViewport::CollectDiagnosticMemoryStats(
         SourcePayload.UsedBytes = AutoBakePreviewResult->GetAllocatedBytes();
         SourcePayload.EntryCount = 1;
     }
+    SourcePayload.GlobalCategory = EDWCEditorMemoryCategory::PersistentEditorCPU;
+    SourcePayload.bIncludeInGlobalSnapshot = true;
 
     FDWCEditorPreviewMemoryBucket& Working = OutBuckets.AddDefaulted_GetRef();
     Working.Name = TEXT("Transparency working buffers");
@@ -4534,6 +4538,8 @@ void SWetClothingTransparencyPreviewViewport::CollectDiagnosticMemoryStats(
         ManualAlphaTileStore.GetAllocatedBytes() +
         RevealColorTileStore.GetAllocatedBytes();
     Working.EntryCount = 1;
+    Working.GlobalCategory = EDWCEditorMemoryCategory::PersistentEditorCPU;
+    Working.bIncludeInGlobalSnapshot = true;
 
     if (LiveStrokeLayer && LiveStrokeLayer->IsActive())
     {
@@ -4541,6 +4547,8 @@ void SWetClothingTransparencyPreviewViewport::CollectDiagnosticMemoryStats(
         LiveStroke.Name = TEXT("Transparency live sparse stroke");
         LiveStroke.UsedBytes = LiveStrokeLayer->GetAllocatedBytes();
         LiveStroke.EntryCount = LiveStrokeLayer->GetTileCount();
+        LiveStroke.GlobalCategory = EDWCEditorMemoryCategory::OperationPrivateCPU;
+        LiveStroke.bIncludeInGlobalSnapshot = true;
     }
 
     if (!PendingRevealColorCommands.IsEmpty())
@@ -4553,6 +4561,8 @@ void SWetClothingTransparencyPreviewViewport::CollectDiagnosticMemoryStats(
             InteractiveQueue.UsedBytes += Command.Stroke.Samples.GetAllocatedSize();
         }
         InteractiveQueue.EntryCount = PendingRevealColorCommands.Num();
+        InteractiveQueue.GlobalCategory = EDWCEditorMemoryCategory::OperationPrivateCPU;
+        InteractiveQueue.bIncludeInGlobalSnapshot = true;
     }
 
     if (TextureWorkspace.IsValid())

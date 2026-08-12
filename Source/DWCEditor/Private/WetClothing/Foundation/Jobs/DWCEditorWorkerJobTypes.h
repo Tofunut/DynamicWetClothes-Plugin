@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Async/DWCEditorAsyncOperationTypes.h"
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringTypes.h"
+#include "WetClothing/Foundation/Operations/DWCEditorOperationPhaseTypes.h"
 
 class FDWCEditorCancellationToken;
 
@@ -71,6 +72,22 @@ struct FDWCEditorWorkerMemoryEstimate
             OutputBytes,
             ScratchBytes
         };
+        for (const uint64 BucketBytes : Buckets)
+        {
+            if (BucketBytes > MAX_uint64 - TotalBytes)
+            {
+                return MAX_uint64;
+            }
+            TotalBytes += BucketBytes;
+        }
+        return TotalBytes;
+    }
+
+    /** Bytes newly owned by this job. Shared resident handles are broker-accounted elsewhere. */
+    uint64 GetOperationPrivateBytes() const
+    {
+        uint64 TotalBytes = 0;
+        const uint64 Buckets[] = {SnapshotBytes, WorkingBytes, OutputBytes, ScratchBytes};
         for (const uint64 BucketBytes : Buckets)
         {
             if (BucketBytes > MAX_uint64 - TotalBytes)
@@ -174,12 +191,14 @@ struct FDWCEditorWorkerJobDescriptor
     uint64 DomainRevision = 0;
     EDWCEditorWorkerJobPriority Priority = EDWCEditorWorkerJobPriority::Background;
     EDWCEditorAsyncRequestPolicy RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
+    EDWCEditorWorkClass WorkClass = EDWCEditorWorkClass::InteractivePreview;
+    FGuid ExclusiveBuildScopeId;
     FDWCEditorWorkerMemoryEstimate MemoryEstimate;
     FString DebugName;
 
     uint64 GetReservedBytes() const
     {
-        return MemoryEstimate.GetTotalBytes();
+        return MemoryEstimate.GetOperationPrivateBytes();
     }
 
     EDWCEditorAsyncRequestPolicy GetRequestPolicy() const
@@ -220,6 +239,8 @@ struct FDWCEditorWorkerJobResult
     bool bIsPhaseContinuation = false;
     FString Error;
     uint64 ResultBytes = 0;
+    /** Exact memory that remains live while Apply commits this result on the game thread. */
+    FDWCEditorWorkerMemoryEstimate CommitMemoryEstimate;
 };
 
 using FDWCEditorWorkerPhaseWork = TFunction<TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>(
@@ -259,6 +280,7 @@ struct FDWCEditorWorkerJobDiagnostic
     double WorkerSeconds = 0.0;
     double CommitSeconds = 0.0;
     double CancellationSeconds = 0.0;
+    FDWCEditorOperationPhaseGraphSnapshot PhaseGraph;
 };
 
 struct FDWCEditorWorkerSchedulerDiagnostics

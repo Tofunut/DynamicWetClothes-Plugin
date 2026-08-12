@@ -303,7 +303,7 @@ bool FDWCEditorSurfaceOrientationCacheLeaseTest::RunTest(const FString&)
     Store.InvalidateNamespace(Key.Namespace);
     TestFalse(
         TEXT("Invalidation removes the spatial payload from the cache index"),
-        Store.Find<FDWCEditorSpatialData>(Key).IsValid());
+        Store.Contains<FDWCEditorSpatialData>(Key));
     const FDWCEditorSpatialData* LeasedData = Lease.GetAs<FDWCEditorSpatialData>();
     TestNotNull(TEXT("The lease keeps the orientation payload alive"), LeasedData);
     if (LeasedData != nullptr)

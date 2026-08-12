@@ -309,10 +309,7 @@ uint64 FWetWrinkleProjectedHoverRasterPlan::GetSharedResidentSizeBytes() const
     for (const FWetWrinkleIncrementalCommand& Command : Commands)
     {
         Bytes += Command.ProjectedPatch.GetSharedProjectionResidentBytes();
-        if (Command.ProjectedPatch.NormalSource.Texture.RawData.IsValid())
-        {
-            Bytes += Command.ProjectedPatch.NormalSource.Texture.RawData->GetAllocatedSize();
-        }
+        Bytes += Command.ProjectedPatch.NormalSource.Texture.GetAllocatedBytes();
     }
     return Bytes;
 }
@@ -578,11 +575,8 @@ FWetWrinkleIncrementalPreviewWorker::BuildProjectedHoverProjectionPhase(
             Command.ProjectedPatch.GetPrivateProjectionBytes();
         Diagnostics.SharedResidentBytes =
             Command.ProjectedPatch.GetSharedProjectionResidentBytes();
-        if (Command.ProjectedPatch.NormalSource.Texture.RawData.IsValid())
-        {
-            Diagnostics.SharedResidentBytes +=
-                Command.ProjectedPatch.NormalSource.Texture.RawData->GetAllocatedSize();
-        }
+        Diagnostics.SharedResidentBytes +=
+            Command.ProjectedPatch.NormalSource.Texture.GetAllocatedBytes();
     }
     if (CancellationToken->IsCanceled())
     {

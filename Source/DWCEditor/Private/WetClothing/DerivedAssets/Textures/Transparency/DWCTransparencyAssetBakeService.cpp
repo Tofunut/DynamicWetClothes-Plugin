@@ -7,6 +7,7 @@
 #include "Materials/MaterialInstanceConstant.h"
 #include "WetClothing/Modes/Transparency/Temp/DWCTransparencyIntermediateAssetPolicy.h"
 #include "UObject/Package.h"
+#include "WetClothing/Foundation/Assets/DWCEditorArtifactStore.h"
 
 namespace
 {
@@ -70,11 +71,20 @@ bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingA
     }
 #endif
 
+    FDWCEditorArtifactStore::Get()->CollectDirtyPackages(
+        *WetClothingAsset, PackagesToSave);
+
     if (PackagesToSave.IsEmpty())
     {
         return true;
     }
 
-    return FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) ==
-           FEditorFileUtils::PR_Success;
+    const bool bSaved =
+        FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) ==
+        FEditorFileUtils::PR_Success;
+    if (bSaved)
+    {
+        FDWCEditorArtifactStore::Get()->NotifyPackagesSaved(PackagesToSave);
+    }
+    return bSaved;
 }

@@ -54,9 +54,6 @@ class DWCEDITOR_API UWetClothingAssetCreationSettings : public UObject
     UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Wrinkle"))
     EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;
 
-    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Transparency"))
-    EDWCMapResolution TransparencyMapResolution = EDWCMapResolution::Resolution1024;
-
     FDWCWetClothingAssetSetupSettings BuildSettings() const
     {
         FDWCWetClothingAssetSetupSettings Result;
@@ -70,7 +67,6 @@ class DWCEDITOR_API UWetClothingAssetCreationSettings : public UObject
         Result.GPUSimulationMapResolution = DWCMapResolution::ToInt(GPUSimulationMapResolution);
         Result.SurfaceWaterRTResolution = DWCMapResolution::ToInt(SurfaceWaterRTResolution);
         Result.WrinkleMapResolution = DWCMapResolution::ToInt(WrinkleMapResolution);
-        Result.TransparencyMapResolution = DWCMapResolution::ToInt(TransparencyMapResolution);
         return Result;
     }
 };
@@ -112,9 +108,6 @@ class DWCEDITOR_API UWetClothingAssetSetupSettingsObject : public UObject
     UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Wrinkle"))
     EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;
 
-    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Transparency"))
-    EDWCMapResolution TransparencyMapResolution = EDWCMapResolution::Resolution1024;
-
     void InitializeFromSettings(const FDWCWetClothingAssetSetupSettings& InSettings)
     {
         bBuildCPUVertexSimulationData = InSettings.bBuildCPUVertexSimulationData;
@@ -127,7 +120,6 @@ class DWCEDITOR_API UWetClothingAssetSetupSettingsObject : public UObject
         GPUSimulationMapResolution = DWCMapResolution::FromInt(InSettings.GetGPUSimulationMapResolution());
         SurfaceWaterRTResolution = DWCMapResolution::FromInt(InSettings.GetSurfaceWaterRTResolution());
         WrinkleMapResolution = DWCMapResolution::FromInt(InSettings.GetWrinkleMapResolution());
-        TransparencyMapResolution = DWCMapResolution::FromInt(InSettings.GetTransparencyMapResolution());
     }
 
     FDWCWetClothingAssetSetupSettings BuildSettings() const
@@ -143,7 +135,6 @@ class DWCEDITOR_API UWetClothingAssetSetupSettingsObject : public UObject
         Result.GPUSimulationMapResolution = DWCMapResolution::ToInt(GPUSimulationMapResolution);
         Result.SurfaceWaterRTResolution = DWCMapResolution::ToInt(SurfaceWaterRTResolution);
         Result.WrinkleMapResolution = DWCMapResolution::ToInt(WrinkleMapResolution);
-        Result.TransparencyMapResolution = DWCMapResolution::ToInt(TransparencyMapResolution);
         return Result;
     }
 };

@@ -6,6 +6,7 @@
 
 class SWCAEditorPanel;
 class UWetClothingAsset;
+struct FWCAEditorValidationSnapshot;
 
 class FWCAEditorBuildStatusProvider
 {
@@ -14,6 +15,6 @@ class FWCAEditorBuildStatusProvider
         UWetClothingAsset& Asset,
         const SWCAEditorPanel* EditorPanel,
         EDWCEditorBuildSurfaceMode SurfaceMode,
-        bool bDeepValidation);
+        bool bDeepValidation,
+        const FWCAEditorValidationSnapshot* ValidationSnapshot = nullptr);
 };
-

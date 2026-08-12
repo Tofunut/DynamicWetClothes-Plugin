@@ -305,7 +305,8 @@ namespace
         for (const FWetClothingTransparencyLayerData& Layer : Asset.Authored.TransparencyData.TransparencyLayers)
         {
             const int32 MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
-            if (MaterialSlotIndex == INDEX_NONE ||
+            if (!Layer.IsRuntimeEnabled() ||
+                MaterialSlotIndex == INDEX_NONE ||
                 !Asset.IsMaterialSlotWettable(MaterialSlotIndex))
             {
                 continue;
@@ -1689,7 +1690,13 @@ bool UWetClothingAsset::HasWrinkleBakeContent() const
         {
             continue;
         }
-        if (Patch.MaterialSlotIndex != INDEX_NONE && IsMaterialSlotWettable(Patch.MaterialSlotIndex))
+        if (Patch.MaterialSlotIndex != INDEX_NONE &&
+            IsMaterialSlotWettable(Patch.MaterialSlotIndex) &&
+            !Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(Patch.MaterialSlotIndex) &&
+            Patch.WrinkleNormalTexture != nullptr &&
+            Patch.HasValidSurfaceAnchor() &&
+            Patch.HasValidSurfaceFrame() &&
+            Patch.HasValidSurfaceFootprint())
         {
             return true;
         }
@@ -1703,6 +1710,9 @@ bool UWetClothingAsset::HasWrinkleBakeContent() const
         }
         if (Stroke.MaterialSlotIndex != INDEX_NONE &&
             Stroke.Points.Num() >= 2 &&
+            Stroke.WidthUV > 0.0f &&
+            Stroke.Strength > 0.0f &&
+            !Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(Stroke.MaterialSlotIndex) &&
             IsMaterialSlotWettable(Stroke.MaterialSlotIndex))
         {
             return true;
@@ -1721,7 +1731,8 @@ bool UWetClothingAsset::HasTransparencyBakeContent() const
     return Authored.TransparencyData.TransparencyLayers.ContainsByPredicate(
         [this](const FWetClothingTransparencyLayerData& Layer)
         {
-            return Layer.TargetSurface.OuterMaterialSlotIndex != INDEX_NONE &&
+            return Layer.IsRuntimeEnabled() &&
+                   Layer.TargetSurface.OuterMaterialSlotIndex != INDEX_NONE &&
                    IsMaterialSlotWettable(Layer.TargetSurface.OuterMaterialSlotIndex);
         });
 }
@@ -1846,6 +1857,39 @@ void UWetClothingAsset::PostLoad()
     Metadata.SetupSettings.NormalizeMapResolutions();
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
+#if WITH_EDITORONLY_DATA
+    if (Authored.TransparencyData.DataVersion <
+        FWetClothingTransparencyData::PerLayerResolutionDataVersion)
+    {
+        const int32 LegacyResolution = DWCMapResolution::ToInt(
+            DWCMapResolution::FromInt(Authored.TransparencyData.TransparencyBakeResolution));
+        for (FWetClothingTransparencyLayerData& Layer : Authored.TransparencyData.TransparencyLayers)
+        {
+            Layer.OutputResolutionMode = EDWCTransparencyOutputResolutionMode::Override;
+            Layer.OutputResolutionOverride = LegacyResolution;
+        }
+        Authored.TransparencyData.DataVersion =
+            FWetClothingTransparencyData::PerLayerResolutionDataVersion;
+    }
+    if (Authored.TransparencyData.DataVersion <
+        FWetClothingTransparencyData::LayerIntentDataVersion)
+    {
+        int32 DraftCount = 0;
+        int32 RepairedIdentityCount = 0;
+        Authored.TransparencyData.NormalizeLegacyLayerIntents(
+            GetPathName(), DraftCount, RepairedIdentityCount);
+        if (DraftCount > 0 || RepairedIdentityCount > 0)
+        {
+            UE_LOG(
+                LogDWC,
+                Display,
+                TEXT("WetClothingAsset: normalized legacy Transparency data for '%s' (draft=%d, repairedIdentities=%d)."),
+                *GetNameSafe(this),
+                DraftCount,
+                RepairedIdentityCount);
+        }
+    }
+#endif
     if (Metadata.DWCSkeletalMesh != nullptr && Metadata.DWCSkeletalMesh == Metadata.SourceSkeletalMesh)
     {
         // Direct source-mesh modification is no longer supported. Old assets must rebuild a dedicated prepared mesh.
@@ -2620,7 +2664,6 @@ bool UWetClothingAsset::InitializeNewAsset(
     Metadata.SetupSettings = NormalizedSettings;
     // The source mesh is immutable input. A dedicated prepared mesh is created by the DWC UV Channel build service.
     Metadata.DWCSkeletalMesh = nullptr;
-    Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
     Metadata.OriginalUVChannelIndex = Metadata.SetupSettings.OriginalUVChannelIndex;
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
@@ -2698,8 +2741,6 @@ bool UWetClothingAsset::ApplySetupSettings(
         PreviousSettings.GetGPUSimulationMapResolution() != NewSettings.GetGPUSimulationMapResolution();
     const bool bWrinkleResolutionChanged =
         PreviousSettings.GetWrinkleMapResolution() != NewSettings.GetWrinkleMapResolution();
-    const bool bTransparencyResolutionChanged =
-        PreviousSettings.GetTransparencyMapResolution() != NewSettings.GetTransparencyMapResolution();
     const bool bSurfaceWaterRTResolutionChanged =
         PreviousSettings.GetSurfaceWaterRTResolution() != NewSettings.GetSurfaceWaterRTResolution();
 
@@ -2707,7 +2748,6 @@ bool UWetClothingAsset::ApplySetupSettings(
     Metadata.SetupSettings.OriginalUVChannelIndex = Metadata.OriginalUVChannelIndex;
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
-    Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
 
     if ( bDataUVTargetChanged)
     {
@@ -2751,14 +2791,6 @@ bool UWetClothingAsset::ApplySetupSettings(
                     : EDWCBakeStatus::Required)
                 : EDWCBakeStatus::Disabled;
         }
-        if (bTransparencyResolutionChanged)
-        {
-            Derived.Inline.BakeState.TransparencyMaps = HasTransparencyBakeContent()
-                ? (HasSavedBakeOutput(DWCBakeOutput::TransparencyMaps)
-                    ? EDWCBakeStatus::OutOfDate
-                    : EDWCBakeStatus::Required)
-                : EDWCBakeStatus::Disabled;
-        }
     }
 
     TArray<FString> Changes;
@@ -2788,10 +2820,6 @@ bool UWetClothingAsset::ApplySetupSettings(
     if (bWrinkleResolutionChanged)
     {
         Changes.Add(FString::Printf(TEXT("Wrinkle Map resolution: %d -> %d."), PreviousSettings.GetWrinkleMapResolution(), Metadata.SetupSettings.GetWrinkleMapResolution()));
-    }
-    if (bTransparencyResolutionChanged)
-    {
-        Changes.Add(FString::Printf(TEXT("Transparency Map resolution: %d -> %d."), PreviousSettings.GetTransparencyMapResolution(), Metadata.SetupSettings.GetTransparencyMapResolution()));
     }
     if (bSurfaceWaterRTResolutionChanged)
     {
@@ -3362,7 +3390,7 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
         const bool bHasAnyBakedTransparencyMap = Authored.TransparencyData.TransparencyLayers.ContainsByPredicate(
             [](const FWetClothingTransparencyLayerData& Layer)
             {
-                return !Layer.BakedMaps.IsEmpty();
+                return Layer.IsRuntimeEnabled() && !Layer.BakedMaps.IsEmpty();
             });
         const EDWCBakeStatus NewTransparencyMapStatus =
             HasGeneratedBakeOutput(DWCBakeOutput::TransparencyMaps) ||

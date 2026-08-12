@@ -118,6 +118,23 @@ FDWCEditorTextureHandle FDWCEditorTextureWorkspace::Acquire(
     return FindOrCreateEntry(Key, Descriptor, true);
 }
 
+FDWCEditorTextureLease FDWCEditorTextureWorkspace::AcquireExistingLease(
+    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureDescriptor& Descriptor)
+{
+    check(IsInGameThread());
+    FDWCEditorTextureHandle* Existing = Entries.Find(Key);
+    if (Existing == nullptr || !Existing->IsValid() || (*Existing)->Descriptor != Descriptor ||
+        (*Existing)->DataRevision == 0)
+    {
+        return FDWCEditorTextureLease();
+    }
+
+    ++AcquireHitCount;
+    (*Existing)->LastUsedSerial = ++UseSerial;
+    return AcquireLease(*Existing);
+}
+
 FDWCEditorTextureHandle FDWCEditorTextureWorkspace::FindOrCreateEntry(
     const FDWCEditorTextureKey& Key,
     const FDWCEditorTextureDescriptor& Descriptor,
@@ -224,6 +241,59 @@ FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferNormalBGRA8AndAcquire
         Priority));
 }
 
+FDWCEditorTextureLease FDWCEditorTextureWorkspace::InitializeNormalBGRA8AndAcquireLease(
+    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureDescriptor& Descriptor,
+    const bool bWithCoverage,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    if (Descriptor.PixelFormat != PF_B8G8R8A8 ||
+        Descriptor.WorkingSize.X <= 0 || Descriptor.WorkingSize.Y <= 0)
+    {
+        return FDWCEditorTextureLease();
+    }
+
+    const FDWCEditorTextureHandle Entry = FindOrCreateEntry(Key, Descriptor, false);
+    if (!Entry.IsValid())
+    {
+        return FDWCEditorTextureLease();
+    }
+
+    const bool bRefreshResidentTexture = Entry->DataRevision > 0 && Entry->IsGPUResident();
+    Entry->BGRA8Pixels.Init(
+        Descriptor.InitialBGRA8,
+        Descriptor.Size.X * Descriptor.Size.Y);
+    Entry->G8Pixels.Reset();
+    if (!Entry->WorkingNormalSurface.Initialize(Descriptor.WorkingSize, bWithCoverage) ||
+        !SyncEntryCPUReservation(Entry))
+    {
+        RetireEntry(Entry);
+        return FDWCEditorTextureLease();
+    }
+
+    ++Entry->DataRevision;
+    ++Entry->ContentRevision;
+    Entry->LastUsedSerial = ++UseSerial;
+    TrimToBudget(Entry);
+
+    FDWCEditorTextureLease Lease = AcquireLease(Entry);
+    if (!Lease.IsValid())
+    {
+        RetireEntry(Entry);
+        return FDWCEditorTextureLease();
+    }
+    if (bRefreshResidentTexture)
+    {
+        UploadQueue->Enqueue(
+            Entry,
+            FIntRect(0, 0, Descriptor.Size.X, Descriptor.Size.Y),
+            false,
+            Priority);
+    }
+    return Lease;
+}
+
 FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferG8AndAcquireLease(
     const FDWCEditorTextureKey& Key,
     const FDWCEditorTextureDescriptor& Descriptor,
@@ -232,6 +302,16 @@ FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferG8AndAcquireLease(
 {
     check(IsInGameThread());
     return AcquireLease(PublishG8(Key, Descriptor, MoveTemp(Pixels), Priority));
+}
+
+FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferR32FAndAcquireLease(
+    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureDescriptor& Descriptor,
+    TArray<float>&& Pixels,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    return AcquireLease(PublishR32F(Key, Descriptor, MoveTemp(Pixels), Priority));
 }
 
 FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishBGRA8(
@@ -304,6 +384,55 @@ FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishG8(
         return nullptr;
     }
     Entry->G8Pixels = MoveTemp(Pixels);
+    Entry->WorkingNormalSurface = FDWCEditorNormalRasterSurface();
+    if (!SyncEntryCPUReservation(Entry))
+    {
+        RetireEntry(Entry);
+        return nullptr;
+    }
+    ++Entry->DataRevision;
+    ++Entry->ContentRevision;
+    TrimToBudget(Entry);
+    bool bDeferredInitialUpload = false;
+    if (!EnsureTexture(Entry, true, &bDeferredInitialUpload))
+    {
+        return nullptr;
+    }
+    if (Entry->ContentRevision > 1 || bDeferredInitialUpload)
+    {
+        UploadQueue->Enqueue(
+            Entry,
+            FIntRect(0, 0, Descriptor.Size.X, Descriptor.Size.Y),
+            false,
+            Priority);
+    }
+    else
+    {
+        UploadQueue->CaptureSubmittedTicket(Entry);
+    }
+    return Entry;
+}
+
+FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishR32F(
+    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureDescriptor& Descriptor,
+    TArray<float>&& Pixels,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    if (Descriptor.PixelFormat != PF_R32_FLOAT || Pixels.Num() != Descriptor.Size.X * Descriptor.Size.Y)
+    {
+        return nullptr;
+    }
+
+    const FDWCEditorTextureHandle Entry = FindOrCreateEntry(Key, Descriptor, false);
+    if (!Entry.IsValid())
+    {
+        return nullptr;
+    }
+    Entry->R32FPixels = MoveTemp(Pixels);
+    Entry->BGRA8Pixels.Reset();
+    Entry->G8Pixels.Reset();
     Entry->WorkingNormalSurface = FDWCEditorNormalRasterSurface();
     if (!SyncEntryCPUReservation(Entry))
     {
@@ -953,6 +1082,174 @@ void FDWCEditorTextureWorkspace::TrimToBudget(const FDWCEditorTextureHandle& Pro
     }
 }
 
+uint64 FDWCEditorTextureWorkspace::GetReclaimableCPUBytes() const
+{
+    check(IsInGameThread());
+    uint64 ReclaimableBytes = 0;
+    for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
+    {
+        if (Pair.Value.IsValid() && Pair.Value->ActiveLeaseCount == 0)
+        {
+            ReclaimableBytes += Pair.Value->GetAllocatedSizeBytes();
+        }
+    }
+    return ReclaimableBytes;
+}
+
+uint64 FDWCEditorTextureWorkspace::GetReclaimableGPUBytes() const
+{
+    check(IsInGameThread());
+    uint64 ReclaimableBytes = 0;
+    for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
+    {
+        if (Pair.Value.IsValid() && Pair.Value->ActiveLeaseCount == 0 &&
+            Pair.Value->IsGPUResident())
+        {
+            ReclaimableBytes += Pair.Value->GetEstimatedGPUBytes();
+        }
+    }
+    return ReclaimableBytes;
+}
+
+uint64 FDWCEditorTextureWorkspace::ReclaimUnleasedCPUBytes(
+    const uint64 TargetBytes,
+    uint64* const OutRetiringGPUBytes)
+{
+    check(IsInGameThread());
+    if (OutRetiringGPUBytes != nullptr)
+    {
+        *OutRetiringGPUBytes = 0;
+    }
+
+    const uint64 BeforeBytes = CalculateCPUUsedBytes();
+    while (BeforeBytes >= CalculateCPUUsedBytes() &&
+           BeforeBytes - CalculateCPUUsedBytes() < TargetBytes)
+    {
+        const FDWCEditorTextureKey* OldestKey = nullptr;
+        uint64 OldestSerial = MAX_uint64;
+        for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
+        {
+            if (Pair.Value.IsValid() && Pair.Value->ActiveLeaseCount == 0 &&
+                Pair.Value->LastUsedSerial < OldestSerial)
+            {
+                OldestKey = &Pair.Key;
+                OldestSerial = Pair.Value->LastUsedSerial;
+            }
+        }
+        if (OldestKey == nullptr)
+        {
+            break;
+        }
+
+        const FDWCEditorTextureHandle Entry = Entries.FindRef(*OldestKey);
+        if (OutRetiringGPUBytes != nullptr && Entry.IsValid() && Entry->IsGPUResident())
+        {
+            *OutRetiringGPUBytes += Entry->GetEstimatedGPUBytes();
+        }
+        RemoveEntry(*OldestKey, true);
+    }
+    const uint64 AfterBytes = CalculateCPUUsedBytes();
+    return BeforeBytes >= AfterBytes ? BeforeBytes - AfterBytes : 0;
+}
+
+uint64 FDWCEditorTextureWorkspace::RetireUnleasedGPUBytes(const uint64 TargetBytes)
+{
+    check(IsInGameThread());
+    ProcessRetiredGPUResources();
+    uint64 RetiringBytes = 0;
+    while (RetiringBytes < TargetBytes)
+    {
+        FDWCEditorTextureHandle OldestEntry;
+        uint64 OldestSerial = MAX_uint64;
+        for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
+        {
+            if (Pair.Value.IsValid() && Pair.Value->ActiveLeaseCount == 0 &&
+                Pair.Value->IsGPUResident() && Pair.Value->LastUsedSerial < OldestSerial)
+            {
+                OldestEntry = Pair.Value;
+                OldestSerial = Pair.Value->LastUsedSerial;
+            }
+        }
+        if (!OldestEntry.IsValid())
+        {
+            break;
+        }
+
+        const uint64 EntryBytes = OldestEntry->GetEstimatedGPUBytes();
+        if (!BeginGPUResourceRetire(OldestEntry))
+        {
+            break;
+        }
+        RetiringBytes += EntryBytes;
+    }
+    return RetiringBytes;
+}
+
+uint64 FDWCEditorTextureWorkspace::RetireUnleasedPurposes(
+    const TConstArrayView<EDWCEditorTexturePurpose> Purposes)
+{
+    check(IsInGameThread());
+    ProcessRetiredGPUResources();
+    if (Purposes.IsEmpty())
+    {
+        return 0;
+    }
+
+    TSet<EDWCEditorTexturePurpose> PurposeSet;
+    PurposeSet.Reserve(Purposes.Num());
+    for (const EDWCEditorTexturePurpose Purpose : Purposes)
+    {
+        PurposeSet.Add(Purpose);
+    }
+
+    uint64 RetiringBytes = 0;
+    for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
+    {
+        const FDWCEditorTextureHandle& Entry = Pair.Value;
+        if (PurposeSet.Contains(Pair.Key.Purpose) && Entry.IsValid() &&
+            Entry->ActiveLeaseCount == 0 && Entry->IsGPUResident())
+        {
+            const uint64 EntryBytes = Entry->GetEstimatedGPUBytes();
+            if (BeginGPUResourceRetire(Entry))
+            {
+                RetiringBytes += EntryBytes;
+            }
+        }
+    }
+    return RetiringBytes;
+}
+
+void FDWCEditorTextureWorkspace::GetGPUResidencySnapshot(
+    TArray<FDWCEditorTextureGPUResidencyRecord>& OutRecords) const
+{
+    check(IsInGameThread());
+    OutRecords.Reset();
+    OutRecords.Reserve(Entries.Num() + RetiredEntries.Num());
+    const auto AddRecord = [&OutRecords](const FDWCEditorTextureHandle& Entry)
+    {
+        if (!Entry.IsValid())
+        {
+            return;
+        }
+        FDWCEditorTextureGPUResidencyRecord& Record = OutRecords.AddDefaulted_GetRef();
+        Record.Key = Entry->Key;
+        Record.Size = Entry->Descriptor.Size;
+        Record.PixelFormat = Entry->Descriptor.PixelFormat;
+        Record.State = Entry->GPUState;
+        Record.ResourceGeneration = Entry->ResourceGeneration;
+        Record.EstimatedGPUBytes = Entry->GetEstimatedGPUBytes();
+        Record.ActiveLeaseCount = Entry->ActiveLeaseCount;
+    };
+    for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
+    {
+        AddRecord(Pair.Value);
+    }
+    for (const FDWCEditorTextureHandle& Entry : RetiredEntries)
+    {
+        AddRecord(Entry);
+    }
+}
+
 bool FDWCEditorTextureWorkspace::EnsureTexture(
     const FDWCEditorTextureHandle& Entry,
     const bool bDeferLargeInitialUpload,
@@ -1041,6 +1338,15 @@ bool FDWCEditorTextureWorkspace::EnsureTexture(
                 InitialPixels[PixelIndex] = Entry->Descriptor.InitialBGRA8;
             }
         }
+        else if (Entry->Descriptor.PixelFormat == PF_R32_FLOAT)
+        {
+            float* InitialPixels = static_cast<float*>(MipData);
+            const int64 PixelCount = static_cast<int64>(Entry->Descriptor.Size.X) * Entry->Descriptor.Size.Y;
+            for (int64 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
+            {
+                InitialPixels[PixelIndex] = Entry->Descriptor.InitialR32F;
+            }
+        }
         else
         {
             FMemory::Memset(MipData, Entry->Descriptor.InitialG8, ExpectedBytes);
@@ -1070,6 +1376,10 @@ void FDWCEditorTextureWorkspace::InitializeBuffers(const FDWCEditorTextureHandle
     if (Entry->Descriptor.PixelFormat == PF_G8)
     {
         Entry->G8Pixels.Init(Entry->Descriptor.InitialG8, PixelCount);
+    }
+    else if (Entry->Descriptor.PixelFormat == PF_R32_FLOAT)
+    {
+        Entry->R32FPixels.Init(Entry->Descriptor.InitialR32F, PixelCount);
     }
     else
     {
@@ -1222,6 +1532,7 @@ void FDWCEditorTextureWorkspace::ReleaseEntryCPUStorage(const FDWCEditorTextureH
 
     Entry->BGRA8Pixels.Empty();
     Entry->G8Pixels.Empty();
+    Entry->R32FPixels.Empty();
     Entry->WorkingNormalSurface = FDWCEditorNormalRasterSurface();
     Entry->CPUResourceLease.Reset();
 }
@@ -1380,7 +1691,10 @@ void FDWCEditorTextureWorkspace::AppendDiagnosticMemoryBucket(
                          const uint64 BudgetBytes,
                          const int32 EntryCount,
                          const int32 ActiveLeaseCount,
-                         const int32 RetiredEntryCount)
+                         const int32 RetiredEntryCount,
+                         const EDWCEditorMemoryCategory GlobalCategory = EDWCEditorMemoryCategory::PersistentEditorCPU,
+                         const bool bIncludeInGlobalSnapshot = false,
+                         const TCHAR* GlobalOwnerSuffix = nullptr)
     {
         FDWCEditorPreviewMemoryBucket& Bucket = OutBuckets.AddDefaulted_GetRef();
         Bucket.Name = Name;
@@ -1392,6 +1706,15 @@ void FDWCEditorTextureWorkspace::AppendDiagnosticMemoryBucket(
         Bucket.HitCount = AcquireHitCount;
         Bucket.MissCount = AcquireMissCount;
         Bucket.EvictionCount = EvictionCount;
+        Bucket.GlobalCategory = GlobalCategory;
+        Bucket.bIncludeInGlobalSnapshot = bIncludeInGlobalSnapshot;
+        if (GlobalOwnerSuffix != nullptr)
+        {
+            Bucket.GlobalOwnerIdentifier = FString::Printf(
+                TEXT("TextureWorkspace/%p/%s"),
+                static_cast<const void*>(this),
+                GlobalOwnerSuffix);
+        }
     };
 
     const int32 TotalEntryCount = Entries.Num() + RetiredEntries.Num();
@@ -1424,8 +1747,26 @@ void FDWCEditorTextureWorkspace::AppendDiagnosticMemoryBucket(
         TotalEntryCount,
         TotalLeaseCount,
         RetiredEntries.Num());
-    AddBucket(TEXT("Editor texture workspace CPU"), CPUUsedBytes, CPUBudgetBytes, TotalEntryCount, TotalLeaseCount, RetiredEntries.Num());
-    AddBucket(TEXT("Editor texture workspace GPU"), GPUUsedBytes, GPUBudgetBytes, TotalEntryCount, TotalLeaseCount, GPUStats.RetiringEntryCount);
+    AddBucket(
+        TEXT("Editor texture workspace CPU"),
+        CPUUsedBytes,
+        CPUBudgetBytes,
+        TotalEntryCount,
+        TotalLeaseCount,
+        RetiredEntries.Num(),
+        EDWCEditorMemoryCategory::PersistentEditorCPU,
+        true,
+        TEXT("CPU"));
+    AddBucket(
+        TEXT("Editor texture workspace GPU"),
+        GPUUsedBytes,
+        GPUBudgetBytes,
+        TotalEntryCount,
+        TotalLeaseCount,
+        GPUStats.RetiringEntryCount,
+        EDWCEditorMemoryCategory::PreviewGPU,
+        true,
+        TEXT("GPU"));
     AddBucket(
         TEXT("Preview GPU resident resources"),
         GPUStats.ResidentBytes,

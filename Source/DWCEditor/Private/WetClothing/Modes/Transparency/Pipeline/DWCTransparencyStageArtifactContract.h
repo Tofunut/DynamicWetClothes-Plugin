@@ -15,6 +15,23 @@ enum class EDWCTransparencyArtifactDependency : uint8
     Reveal
 };
 
+/** Selects only the Stage 2 artifacts required by a downstream consumer. */
+struct FDWCTransparencySourceArtifactSelection
+{
+    bool bRequireRevealSurface = false;
+    bool bRequireOuterIslandID = true;
+    bool bRequireHitSource = false;
+    bool bRequireHitDistance = false;
+
+    static FDWCTransparencySourceArtifactSelection Canonical(
+        bool bRequiresRevealSurface);
+    static FDWCTransparencySourceArtifactSelection Stage4(
+        bool bRequiresRevealSurface,
+        bool bRequiresOuterIslandID);
+    static FDWCTransparencySourceArtifactSelection Diagnostics(
+        bool bRequiresRevealSurface);
+};
+
 struct FDWCTransparencyStageArtifactSpec
 {
     EDWCTransparencyTempArtifactKind Kind = EDWCTransparencyTempArtifactKind::BaseRevealColor;
@@ -23,15 +40,14 @@ struct FDWCTransparencyStageArtifactSpec
     const TCHAR* AssetToken = TEXT("Unknown");
     ETextureSourceFormat SourceFormat = TSF_Invalid;
     bool bSRGB = false;
-    bool bRequiredForAllSources = false;
-    bool bRequiredForProjectedSources = false;
 };
 
 /** Canonical schema, identity, and validation rules for editor-only stage artifacts. */
 class FDWCTransparencyStageArtifactContract
 {
   public:
-    static constexpr int32 ContractVersion = 1;
+    // v3 stores fractional target-surface coverage instead of a binary 0/1 mask.
+    static constexpr int32 ContractVersion = 3;
 
     static const FDWCTransparencyStageArtifactSpec* FindSpec(
         EDWCTransparencyTempArtifactKind Kind);
@@ -45,6 +61,10 @@ class FDWCTransparencyStageArtifactContract
 
     static void GetRequiredSourceArtifacts(
         bool bRequiresRevealSurface,
+        TArray<EDWCTransparencyTempArtifactKind>& OutKinds);
+
+    static void GetRequiredSourceArtifacts(
+        const FDWCTransparencySourceArtifactSelection& Selection,
         TArray<EDWCTransparencyTempArtifactKind>& OutKinds);
 
     static const FDWCTransparencyTempArtifactReference* FindReference(
@@ -64,6 +84,14 @@ class FDWCTransparencyStageArtifactContract
         const FWetClothingTransparencyLayerData& Layer,
         const FString& SourceSignature,
         FIntPoint ExpectedResolution,
+        bool bLoadTextures,
+        FString& OutError);
+
+    static bool InspectSourceArtifactSet(
+        const FWetClothingTransparencyLayerData& Layer,
+        const FString& SourceSignature,
+        FIntPoint ExpectedResolution,
+        const FDWCTransparencySourceArtifactSelection& Selection,
         bool bLoadTextures,
         FString& OutError);
 

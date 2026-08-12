@@ -8,6 +8,7 @@
 
 class UWetClothingAsset;
 class USkeletalMesh;
+class FDWCEditorResourceGovernor;
 
 enum class EDWCDataUVBuildState : uint8
 {
@@ -54,6 +55,15 @@ struct FDWCDataUVBuildOptions
      * topology instead of topology produced by a previous DWC UV build.
      */
     bool bRebuildPreparedLODsFromSource = false;
+
+    /** Shared WCA-session memory owner for MeshDescription snapshots and generator scratch. */
+    TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
+
+    /** Session identity used by resource diagnostics. */
+    FGuid ResourceSessionEpoch;
+
+    /** Bounds simultaneous per-slot MeshDescription copies. One is preferred for editor authoring. */
+    int32 MaxParallelMaterialSlots = 2;
 };
 
 struct FDWCDataUVBuildResult

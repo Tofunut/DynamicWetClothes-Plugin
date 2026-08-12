@@ -22,6 +22,7 @@ struct FDWCTransparencyAlphaDomainSnapshot
     FGuid LayerGuid;
     int32 MaterialSlotIndex = INDEX_NONE;
     FIntPoint Resolution = FIntPoint::ZeroValue;
+    FString OutputResolutionIdentity;
     FString SourceSignature;
     TArray<uint8> BaseAlpha;
     TArray<uint8> OuterCoverage;
@@ -30,7 +31,8 @@ struct FDWCTransparencyAlphaDomainSnapshot
 
     static TSharedPtr<const FDWCTransparencyAlphaDomainSnapshot> Create(
         const FDWCTransparencySourcePayload& SourcePayload,
-        FString* OutError = nullptr);
+        FString* OutError = nullptr,
+        bool bIncludeOuterIslandIDs = true);
 
     bool IsValid(FString* OutError = nullptr) const;
     uint64 GetAllocatedBytes() const;

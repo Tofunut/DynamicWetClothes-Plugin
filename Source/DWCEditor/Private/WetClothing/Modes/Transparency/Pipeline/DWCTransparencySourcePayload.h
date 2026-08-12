@@ -2,12 +2,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WetClothing/Foundation/Resources/DWCEditorAccountedMemory.h"
 
 struct FDWCTransparencySourceHitStats
 {
     int32 PriorityIndex = INDEX_NONE;
     int32 MaterialSlotIndex = INDEX_NONE;
     FName MaterialSlotName;
+    int32 SourceBakeResolution = 0;
     int32 HitCount = 0;
 };
 
@@ -92,7 +94,10 @@ struct FDWCTransparencySourcePayload
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 UVChannelIndex = 0;
     int32 LODIndex = 0;
+    /** Canonical target-space extent shared by Stages 2, 3, 4 and runtime outputs. */
     FIntPoint Resolution = FIntPoint::ZeroValue;
+    /** Resolver identity captured with Resolution at the request boundary. */
+    FString OutputResolutionIdentity;
     FString BuildSignature;
     int32 OuterSampleCount = 0;
     int32 ValidHitCount = 0;
@@ -101,6 +106,7 @@ struct FDWCTransparencySourcePayload
     TArray<FColor> InnerColorBuffer;
     FDWCTransparencyRevealSurfaceAuthoringPayload RevealSurfaceAuthoring;
     TArray<uint8> AutoAlphaBuffer;
+    /** Fractional target-surface texel coverage: 0 is outside, 255 is fully covered. */
     TArray<uint8> OuterCoverageBuffer;
     TArray<uint16> OuterIslandIDBuffer;
     TBitArray<> ValidHitBuffer;
@@ -115,10 +121,17 @@ struct FDWCTransparencySourcePayload
     int32 BaselineStrokeCount = 0;
     FGuid BaselineBakeGuid;
 
+    /**
+     * Attached after this payload becomes immutable. Every shared consumer
+     * then keeps the same PreviewWorkspaceCPU reservation alive.
+     */
+    TSharedPtr<FDWCEditorAccountedMemory, ESPMode::ThreadSafe> PersistentMemoryAccount;
+
     uint64 GetAllocatedBytes() const
     {
         return static_cast<uint64>(sizeof(FDWCTransparencySourcePayload)) +
             static_cast<uint64>(BuildSignature.GetAllocatedSize()) +
+            static_cast<uint64>(OutputResolutionIdentity.GetAllocatedSize()) +
             static_cast<uint64>(InnerColorBuffer.GetAllocatedSize()) +
             RevealSurfaceAuthoring.GetAllocatedBytes() +
             static_cast<uint64>(AutoAlphaBuffer.GetAllocatedSize()) +

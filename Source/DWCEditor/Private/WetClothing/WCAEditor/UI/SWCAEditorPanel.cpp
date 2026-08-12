@@ -12,8 +12,10 @@
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorRenderUploadQueue.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
+#include "WetClothing/Foundation/Preview/Residency/DWCEditorPreviewGPUResidencyManager.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionStore.h"
 #include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
+#include "WetClothing/Foundation/Resources/DWCEditorResourceBroker.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildOperationManager.h"
 #include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
@@ -26,17 +28,37 @@
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
+#include "WetClothing/Foundation/Build/DWCTransparencyBuildTargetResolver.h"
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleEditorPanel.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationSnapshot.h"
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SNullWidget.h"
 #include "UObject/Package.h"
+#include "HAL/PlatformTime.h"
 
 #define LOCTEXT_NAMESPACE "WCAEditorPanel"
 
+DEFINE_LOG_CATEGORY_STATIC(LogWCAEditorBuildBarrier, Log, All);
+
 namespace
 {
+    EDWCEditorPreviewGPUDomain ResolvePreviewGPUDomain(const EWCAEditorMode Mode)
+    {
+        switch (Mode)
+        {
+        case EWCAEditorMode::PartEdit:
+            return EDWCEditorPreviewGPUDomain::WetPart;
+        case EWCAEditorMode::WrinkleEdit:
+            return EDWCEditorPreviewGPUDomain::Wrinkle;
+        case EWCAEditorMode::TransparencyBake:
+            return EDWCEditorPreviewGPUDomain::Transparency;
+        default:
+            return EDWCEditorPreviewGPUDomain::None;
+        }
+    }
+
     FDWCEditorAuthoringIndex BuildAuthoringIndex(const UWetClothingAsset* Asset)
     {
         FDWCEditorAuthoringIndex Index;
@@ -84,70 +106,79 @@ namespace
         }
     }
 
-    EWCAEditorStatusSeverity ToEditorSeverity(const EWCAValidationSeverity Severity)
+    EWCAEditorStatusSeverity ToEditorSeverity(const EDWCEditorValidationSeverity Severity)
     {
         switch (Severity)
         {
-        case EWCAValidationSeverity::Error: return EWCAEditorStatusSeverity::Error;
-        case EWCAValidationSeverity::Warning: return EWCAEditorStatusSeverity::Warning;
+        case EDWCEditorValidationSeverity::Error: return EWCAEditorStatusSeverity::Error;
+        case EDWCEditorValidationSeverity::Warning: return EWCAEditorStatusSeverity::Warning;
         default: return EWCAEditorStatusSeverity::Info;
         }
     }
 
-    FString BuildIssueStatusMessage(const FWCAValidationIssue& Issue)
+    FString BuildIssueStatusMessage(const FDWCEditorValidationDiagnostic& Diagnostic)
     {
-        FString Message = Issue.Detail.IsEmpty() ? Issue.Title.ToString() : Issue.Detail.ToString();
-        if (!Issue.RequiredAction.IsEmpty())
+        FString Message = Diagnostic.Presentation.Detail.IsEmpty()
+            ? Diagnostic.Presentation.Title.ToString()
+            : Diagnostic.Presentation.Detail.ToString();
+        if (!Diagnostic.Presentation.RequiredAction.IsEmpty())
         {
-            Message += FString::Printf(TEXT(" %s"), *Issue.RequiredAction.ToString());
+            Message += FString::Printf(
+                TEXT(" %s"),
+                *Diagnostic.Presentation.RequiredAction.ToString());
         }
         return Message;
     }
 
-    void AddReportIssueToStatus(FWCAEditorIssueStatus& Status, const FWCAValidationIssue& Issue)
+    void AddDiagnosticToStatus(
+        FWCAEditorIssueStatus& Status,
+        const FDWCEditorValidationDiagnostic& Diagnostic)
     {
         ++Status.IssueCount;
-        RaiseIssueSeverity(Status, ToEditorSeverity(Issue.Severity));
+        RaiseIssueSeverity(Status, ToEditorSeverity(Diagnostic.Severity));
 
         TArray<FString>* TargetMessages = nullptr;
-        switch (Issue.Section)
+        switch (Diagnostic.Target.Domain)
         {
-        case EWCAValidationSection::DataUV:
+        case EDWCEditorValidationDomain::Asset:
+        case EDWCEditorValidationDomain::DataUV:
             Status.bGeneratedDataUVIssue = true;
             TargetMessages = &Status.GeneratedDataUVMessages;
             break;
-        case EWCAValidationSection::RuntimeData:
+        case EDWCEditorValidationDomain::RuntimeCPU:
+        case EDWCEditorValidationDomain::RuntimeGPU:
             Status.bRuntimeIssue = true;
             TargetMessages = &Status.RuntimeMessages;
             break;
-        case EWCAValidationSection::GeneratedMaterials:
+        case EDWCEditorValidationDomain::GeneratedMaterial:
             Status.bGeneratedMaterialsIssue = true;
             TargetMessages = &Status.GeneratedMaterialMessages;
             break;
-        case EWCAValidationSection::GPUSimulationMaps:
+        case EDWCEditorValidationDomain::GPUSimulationMap:
             Status.bGPUMapsIssue = true;
             TargetMessages = &Status.GPUMapMessages;
             break;
-        case EWCAValidationSection::RenderProfileData:
+        case EDWCEditorValidationDomain::WetPart:
+        case EDWCEditorValidationDomain::RenderProfile:
             Status.bRenderProfileIssue = true;
             TargetMessages = &Status.RenderProfileMessages;
             break;
-        case EWCAValidationSection::WrinkleMaps:
+        case EDWCEditorValidationDomain::Wrinkle:
             Status.bWrinkleMapsIssue = true;
             TargetMessages = &Status.WrinkleMapMessages;
             break;
-        case EWCAValidationSection::TransparencyMaps:
+        case EDWCEditorValidationDomain::Transparency:
             Status.bTransparencyMapsIssue = true;
             TargetMessages = &Status.TransparencyMapMessages;
             break;
-        case EWCAValidationSection::FailureDetails:
+        case EDWCEditorValidationDomain::Failure:
         default:
             Status.bFailure = true;
             TargetMessages = &Status.FailureMessages;
             break;
         }
 
-        TargetMessages->Add(BuildIssueStatusMessage(Issue));
+        TargetMessages->Add(BuildIssueStatusMessage(Diagnostic));
     }
 }
 
@@ -167,6 +198,8 @@ FString FWCAEditorIssueStatus::BuildSummary() const
 
 SWCAEditorPanel::~SWCAEditorPanel()
 {
+    PendingExclusiveBuildWork = nullptr;
+    ExclusiveBuildLease.Reset();
     if (PreBeginPIEHandle.IsValid())
     {
         FEditorDelegates::PreBeginPIE.Remove(PreBeginPIEHandle);
@@ -210,9 +243,16 @@ SWCAEditorPanel::~SWCAEditorPanel()
     {
         ModeContentBox->SetContent(SNullWidget::NullWidget);
     }
+    PartEditorPanel.Reset();
     WrinkleEditorPanel.Reset();
     TransparencyBakePanel.Reset();
     PreviewCommitCoordinator.Reset();
+    if (PreviewGPUResidencyManager.IsValid())
+    {
+        PreviewGPUResidencyManager->Shutdown();
+    }
+    PreviewGPUResidencyManager.Reset();
+    UnregisterResourceParticipants();
     if (RenderUploadQueue.IsValid())
     {
         RenderUploadQueue->Shutdown();
@@ -225,6 +265,12 @@ SWCAEditorPanel::~SWCAEditorPanel()
     SpatialQueryService.Reset();
     CacheStore.Reset();
     ResourceGovernor.Reset();
+    if (ResourceBroker.IsValid() && ResourceBrokerSessionId.IsValid())
+    {
+        ResourceBroker->CloseSession(ResourceBrokerSessionId);
+    }
+    ResourceBrokerSessionId.Invalidate();
+    ResourceBroker.Reset();
     if (AuthoringDocument.IsValid())
     {
         AuthoringDocument->OnChanged().RemoveAll(this);
@@ -239,8 +285,13 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
 {
     WetClothingAsset = InArgs._WetClothingAsset;
     AuthoringDocument = MakeShared<FDWCEditorAuthoringDocument>(WetClothingAsset.Get());
-    const FDWCEditorResourceBudgetConfig ResourceBudget;
-    ResourceGovernor = MakeShared<FDWCEditorResourceGovernor>(ResourceBudget);
+    ResourceBroker = FDWCEditorResourceBroker::Get();
+    ResourceBrokerSessionId = ResourceBroker->OpenSession(
+        WetClothingAsset.IsValid()
+            ? FString::Printf(TEXT("WCA Editor: %s"), *WetClothingAsset->GetName())
+            : TEXT("WCA Editor"));
+    const FDWCEditorResourceBudgetConfig& ResourceBudget = ResourceBroker->GetBudgetConfig();
+    ResourceGovernor = ResourceBroker->GetResourceGovernor();
     WorkerJobScheduler = MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(
         ResourceGovernor.ToSharedRef());
     const FGuid SessionEpoch = WorkerJobScheduler->GetSessionEpoch();
@@ -267,17 +318,64 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
         SessionEpoch,
         ResourceBudget.PreviewWorkspaceCPUBytes,
         ResourceBudget.PreviewGPUBytes);
+    PreviewGPUResidencyManager = MakeShared<FDWCEditorPreviewGPUResidencyManager>(
+        RenderUploadQueue.ToSharedRef(),
+        TextureWorkspace.ToSharedRef());
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
-        FDWCTransparencyMaterialColorBakeCache::ConfigureResourceGovernor(
+        FDWCTransparencyMaterialColorBakeCache::ConfigureCacheBudget(
             *Asset,
-            ResourceGovernor,
-            SessionEpoch,
             ResourceBudget.SharedCacheCPUBytes / 2);
     }
+    RegisterResourceParticipants();
     SessionStore = MakeShared<FDWCEditorSessionStore>();
     BuildOperationManager = MakeShared<FDWCEditorBuildOperationManager>(
         WorkerJobScheduler.ToSharedRef());
+    const TWeakPtr<FDWCEditorResourceBroker> WeakResourceBroker = ResourceBroker;
+    const FGuid BuildBarrierSessionId = ResourceBrokerSessionId;
+    WorkerJobScheduler->SetAdmissionBarrier(
+        [WeakResourceBroker, BuildBarrierSessionId](
+            const FDWCEditorWorkerJobDescriptor& Descriptor,
+            FString& OutReason)
+        {
+            const TSharedPtr<FDWCEditorResourceBroker> Broker = WeakResourceBroker.Pin();
+            return !Broker.IsValid() || Broker->CanAdmitWork(
+                BuildBarrierSessionId,
+                Descriptor.WorkClass,
+                Descriptor.ExclusiveBuildScopeId,
+                &OutReason);
+        });
+    BuildOperationManager->SetActionBarrier(
+        [WeakResourceBroker, BuildBarrierSessionId](
+            const EDWCEditorBuildAction,
+            FString& OutReason)
+        {
+            const TSharedPtr<FDWCEditorResourceBroker> Broker = WeakResourceBroker.Pin();
+            return !Broker.IsValid() || Broker->CanAdmitWork(
+                BuildBarrierSessionId,
+                EDWCEditorWorkClass::UserBuild,
+                FGuid(),
+                &OutReason);
+        });
+    const TWeakPtr<SWCAEditorPanel> WeakPanel = SharedThis(this);
+    const TWeakPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> WeakScheduler =
+        WorkerJobScheduler;
+    ResourceBroker->SetSessionBuildBarrierHooks(
+        ResourceBrokerSessionId,
+        [WeakPanel](const bool bActive)
+        {
+            if (const TSharedPtr<SWCAEditorPanel> Panel = WeakPanel.Pin())
+            {
+                Panel->HandleExclusiveBuildBarrierChanged(bActive);
+            }
+        },
+        [WeakScheduler]()
+        {
+            const TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler =
+                WeakScheduler.Pin();
+            return Scheduler.IsValid() &&
+                Scheduler->HasOutstandingWorkClass(EDWCEditorWorkClass::InteractivePreview);
+        });
     PreviewCommitCoordinator = MakeShared<FDWCEditorPreviewCommitCoordinator>(
         TextureWorkspace.ToSharedRef(),
         WorkerJobScheduler->GetSessionEpoch());
@@ -296,7 +394,8 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
         BuildOperationManager.ToSharedRef(),
         SpatialQueryService.ToSharedRef(),
         SurfacePatchProjectionCache.ToSharedRef(),
-        WrinkleSuppressionCoverageService);
+        WrinkleSuppressionCoverageService,
+        CacheStore);
     AuthoringDocument->OnChanged().AddSP(this, &SWCAEditorPanel::HandleAuthoringDocumentChanged);
     FDWCReconcileAuthoringAction InitialReconcile;
     InitialReconcile.AuthoringRevision = AuthoringDocument->GetRevision();
@@ -329,15 +428,171 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
         &SWCAEditorPanel::HandleEndPIE);
 }
 
+void SWCAEditorPanel::RegisterResourceParticipants()
+{
+    check(IsInGameThread());
+    if (!ResourceBroker.IsValid() || !ResourceBrokerSessionId.IsValid())
+    {
+        return;
+    }
+
+    UnregisterResourceParticipants();
+    const auto Register = [this](FDWCEditorReclaimParticipantDescriptor Descriptor)
+    {
+        Descriptor.SessionId = ResourceBrokerSessionId;
+        Descriptor.ReservationSessionEpoch = WorkerJobScheduler.IsValid()
+            ? WorkerJobScheduler->GetSessionEpoch()
+            : FGuid();
+        const uint64 ParticipantId = ResourceBroker->RegisterParticipant(MoveTemp(Descriptor));
+        if (ParticipantId != 0)
+        {
+            ResourceParticipantIds.Add(ParticipantId);
+        }
+    };
+
+    const TWeakPtr<FDWCEditorCacheStore> WeakCacheStore = CacheStore;
+    FDWCEditorReclaimParticipantDescriptor CacheDescriptor;
+    CacheDescriptor.Name = TEXT("WCA.SharedCache");
+    CacheDescriptor.ReservationOwnerNamespace = TEXT("DWC.SharedCache");
+    CacheDescriptor.Pool = EDWCEditorResourcePool::SharedCacheCPU;
+    CacheDescriptor.Priority = EDWCEditorReclaimPriority::SharedCache;
+    CacheDescriptor.QueryReclaimableBytes = [WeakCacheStore]
+    {
+        const TSharedPtr<FDWCEditorCacheStore> Store = WeakCacheStore.Pin();
+        return Store.IsValid() ? Store->GetReclaimableBytes() : 0;
+    };
+    CacheDescriptor.Reclaim = [WeakCacheStore](const FDWCEditorResourceReclaimRequest& Request)
+    {
+        FDWCEditorResourceReclaimResult Result;
+        if (const TSharedPtr<FDWCEditorCacheStore> Store = WeakCacheStore.Pin())
+        {
+            Result.ImmediateBytes = Store->ReclaimUnleasedBytes(Request.TargetBytes);
+        }
+        return Result;
+    };
+    Register(MoveTemp(CacheDescriptor));
+
+    const TWeakPtr<FDWCEditorSurfacePatchProjectionCacheService> WeakProjectionCache =
+        SurfacePatchProjectionCache;
+    FDWCEditorReclaimParticipantDescriptor ProjectionDescriptor;
+    ProjectionDescriptor.Name = TEXT("WCA.SurfaceProjectionCache");
+    ProjectionDescriptor.ReservationOwnerNamespace = TEXT("DWC.SurfacePatchProjectionCache");
+    ProjectionDescriptor.Pool = EDWCEditorResourcePool::SharedCacheCPU;
+    ProjectionDescriptor.Priority = EDWCEditorReclaimPriority::SharedCache;
+    ProjectionDescriptor.QueryReclaimableBytes = [WeakProjectionCache]
+    {
+        const TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService> Cache =
+            WeakProjectionCache.Pin();
+        return Cache.IsValid() ? Cache->GetReclaimableBytes() : 0;
+    };
+    ProjectionDescriptor.Reclaim =
+        [WeakProjectionCache](const FDWCEditorResourceReclaimRequest& Request)
+        {
+            FDWCEditorResourceReclaimResult Result;
+            if (const TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService> Cache =
+                    WeakProjectionCache.Pin())
+            {
+                Result.ImmediateBytes = Cache->ReclaimUnleasedBytes(Request.TargetBytes);
+            }
+            return Result;
+        };
+    Register(MoveTemp(ProjectionDescriptor));
+
+    const TWeakPtr<FDWCEditorTextureWorkspace> WeakWorkspace = TextureWorkspace;
+    FDWCEditorReclaimParticipantDescriptor WorkspaceCPUDescriptor;
+    WorkspaceCPUDescriptor.Name = TEXT("WCA.TextureWorkspaceCPU");
+    WorkspaceCPUDescriptor.ReservationOwnerNamespace = TEXT("DWC.TextureWorkspace.CPU");
+    WorkspaceCPUDescriptor.Pool = EDWCEditorResourcePool::PreviewWorkspaceCPU;
+    WorkspaceCPUDescriptor.Priority = EDWCEditorReclaimPriority::ActivePreview;
+    WorkspaceCPUDescriptor.QueryReclaimableBytes = [WeakWorkspace]
+    {
+        const TSharedPtr<FDWCEditorTextureWorkspace> Workspace = WeakWorkspace.Pin();
+        return Workspace.IsValid() ? Workspace->GetReclaimableCPUBytes() : 0;
+    };
+    WorkspaceCPUDescriptor.Reclaim =
+        [WeakWorkspace](const FDWCEditorResourceReclaimRequest& Request)
+        {
+            FDWCEditorResourceReclaimResult Result;
+            if (const TSharedPtr<FDWCEditorTextureWorkspace> Workspace = WeakWorkspace.Pin())
+            {
+                Result.ImmediateBytes = Workspace->ReclaimUnleasedCPUBytes(
+                    Request.TargetBytes, &Result.RetiringGPUBytes);
+            }
+            return Result;
+        };
+    Register(MoveTemp(WorkspaceCPUDescriptor));
+
+    FDWCEditorReclaimParticipantDescriptor WorkspaceGPUDescriptor;
+    WorkspaceGPUDescriptor.Name = TEXT("WCA.TextureWorkspaceGPU");
+    WorkspaceGPUDescriptor.ReservationOwnerNamespace = TEXT("DWC.TextureWorkspace.GPU");
+    WorkspaceGPUDescriptor.Pool = EDWCEditorResourcePool::PreviewGPU;
+    WorkspaceGPUDescriptor.Priority = EDWCEditorReclaimPriority::InactivePreview;
+    WorkspaceGPUDescriptor.QueryReclaimableBytes = [WeakWorkspace]
+    {
+        const TSharedPtr<FDWCEditorTextureWorkspace> Workspace = WeakWorkspace.Pin();
+        return Workspace.IsValid() ? Workspace->GetReclaimableGPUBytes() : 0;
+    };
+    WorkspaceGPUDescriptor.Reclaim =
+        [WeakWorkspace](const FDWCEditorResourceReclaimRequest& Request)
+        {
+            FDWCEditorResourceReclaimResult Result;
+            if (const TSharedPtr<FDWCEditorTextureWorkspace> Workspace = WeakWorkspace.Pin())
+            {
+                Result.RetiringGPUBytes = Workspace->RetireUnleasedGPUBytes(Request.TargetBytes);
+            }
+            return Result;
+        };
+    Register(MoveTemp(WorkspaceGPUDescriptor));
+
+    const TWeakObjectPtr<UWetClothingAsset> WeakAsset = WetClothingAsset;
+    FDWCEditorReclaimParticipantDescriptor MaterialCacheDescriptor;
+    MaterialCacheDescriptor.Name = TEXT("WCA.TransparencyMaterialCache");
+    MaterialCacheDescriptor.ReservationOwnerNamespace = TEXT("DWC.TransparencyMaterialColorCache");
+    MaterialCacheDescriptor.Pool = EDWCEditorResourcePool::SharedCacheCPU;
+    MaterialCacheDescriptor.Priority = EDWCEditorReclaimPriority::Background;
+    MaterialCacheDescriptor.QueryReclaimableBytes = [WeakAsset]
+    {
+        return FDWCTransparencyMaterialColorBakeCache::GetReclaimableBytes(WeakAsset.Get());
+    };
+    MaterialCacheDescriptor.Reclaim =
+        [WeakAsset](const FDWCEditorResourceReclaimRequest& Request)
+        {
+            FDWCEditorResourceReclaimResult Result;
+            Result.ImmediateBytes = FDWCTransparencyMaterialColorBakeCache::ReclaimUnleasedBytes(
+                WeakAsset.Get(), Request.TargetBytes);
+            return Result;
+        };
+    Register(MoveTemp(MaterialCacheDescriptor));
+}
+
+void SWCAEditorPanel::UnregisterResourceParticipants()
+{
+    if (ResourceBroker.IsValid())
+    {
+        for (const uint64 ParticipantId : ResourceParticipantIds)
+        {
+            ResourceBroker->UnregisterParticipant(ParticipantId);
+        }
+    }
+    ResourceParticipantIds.Reset();
+}
+
 EActiveTimerReturnType SWCAEditorPanel::HandleTextureUploadTimer(double, float)
 {
-    if (RenderUploadQueue.IsValid())
+    if (PreviewGPUResidencyManager.IsValid())
     {
-        RenderUploadQueue->Flush();
+        PreviewGPUResidencyManager->Tick();
     }
-    if (TextureWorkspace.IsValid())
+    else
     {
-        TextureWorkspace->ProcessRetiredGPUResources();
+        if (RenderUploadQueue.IsValid())
+        {
+            RenderUploadQueue->Flush();
+        }
+        if (TextureWorkspace.IsValid())
+        {
+            TextureWorkspace->ProcessRetiredGPUResources();
+        }
     }
     return EActiveTimerReturnType::Continue;
 }
@@ -351,6 +606,11 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
         {
             SAssignNew(PartEditorPanel, SWetClothingPartEditorPanel)
                 .WetClothingAsset(WetClothingAsset.Get())
+                .CacheStore(CacheStore)
+                .TextureWorkspace(TextureWorkspace)
+                .RenderUploadQueue(RenderUploadQueue)
+                .ResourceGovernor(ResourceGovernor)
+                .WorkerJobScheduler(WorkerJobScheduler)
                 .DetailsView(DetailsView);
         }
         return PartEditorPanel.ToSharedRef();
@@ -387,6 +647,7 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
                 .TextureWorkspace(TextureWorkspace)
                 .PreviewCommitCoordinator(PreviewCommitCoordinator)
                 .RenderUploadQueue(RenderUploadQueue)
+                .ResourceGovernor(ResourceGovernor)
                 .DetailsView(DetailsView);
         }
         return TransparencyBakePanel.ToSharedRef();
@@ -473,13 +734,13 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
         return Result;
     }
 
-    const FWCAValidationReport Report = BuildWCAValidationReport(
+    const FWCAEditorValidationSnapshot Snapshot = BuildWCAValidationSnapshot(
         *Asset,
         bRunDeepValidation ? EWCAValidationMode::Deep : EWCAValidationMode::Fast,
         bRefreshAssetState);
-    for (const FWCAValidationIssue& Issue : Report.Issues)
+    for (const FDWCEditorValidationDiagnostic& Diagnostic : Snapshot.Diagnostics)
     {
-        AddReportIssueToStatus(Result, Issue);
+        AddDiagnosticToStatus(Result, Diagnostic);
     }
     return Result;
 }
@@ -612,15 +873,20 @@ bool SWCAEditorPanel::RequestBakeAllTransparencyMaps(
     }
 
     TArray<FGuid> LayerGuids;
-    for (const FWetClothingTransparencyLayerData& Layer :
-         Asset->Authored.TransparencyData.TransparencyLayers)
+    const FDWCTransparencyBuildTargetSnapshot Targets =
+        FDWCTransparencyBuildTargetResolver::Resolve(*Asset, true);
+    Targets.CollectLayerGuids(
+        EDWCTransparencyBuildRequirement::FullBake,
+        LayerGuids);
+    if (LayerGuids.IsEmpty())
     {
-        const int32 MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
-        if (MaterialSlotIndex != INDEX_NONE &&
-            Asset->IsMaterialSlotWettable(MaterialSlotIndex))
+        if (OutError != nullptr)
         {
-            LayerGuids.Add(Layer.LayerGuid);
+            *OutError = Targets.HasEnabledLayers()
+                ? TEXT("No enabled Transparency Target Part requires a full bake.")
+                : TEXT("No enabled Transparency Target Parts require runtime output.");
         }
+        return false;
     }
     return BakeCoordinator->RequestTransparencyBake(
         MoveTemp(LayerGuids),
@@ -639,8 +905,27 @@ bool SWCAEditorPanel::RequestRebakeAffectedTransparencyMaps(
         if (OutError != nullptr) *OutError = TEXT("The asynchronous bake service is unavailable.");
         return false;
     }
+    const FDWCTransparencyBuildTargetSnapshot Targets =
+        FDWCTransparencyBuildTargetResolver::Resolve(*Asset, true);
+    TArray<int32> MaterialSlots;
+    for (const FDWCTransparencyBuildTarget& Target : Targets.Targets)
+    {
+        if (Target.Requirement == EDWCTransparencyBuildRequirement::AffectedStage4 &&
+            Target.IsBuildable())
+        {
+            MaterialSlots.AddUnique(Target.MaterialSlotIndex);
+        }
+    }
+    if (MaterialSlots.IsEmpty())
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = TEXT("No Transparency Stage 4 outputs require an affected wrinkle-only rebake.");
+        }
+        return false;
+    }
     return BakeCoordinator->RequestAffectedTransparencyStage4Rebake(
-        TArray<int32>(),
+        MoveTemp(MaterialSlots),
         true,
         MoveTemp(Completion),
         OutError);
@@ -663,6 +948,194 @@ TSet<EDWCEditorBuildAction> SWCAEditorPanel::GetRunningBuildActions() const
     return BuildOperationManager.IsValid()
         ? BuildOperationManager->GetRunningActions()
         : TSet<EDWCEditorBuildAction>();
+}
+
+bool SWCAEditorPanel::CanStartBuildAction(FString* OutReason) const
+{
+    if (OutReason != nullptr)
+    {
+        OutReason->Reset();
+    }
+    if (IsExclusiveBuildActive())
+    {
+        if (OutReason != nullptr)
+        {
+            *OutReason = TEXT("An exclusive WCA Build is already in progress.");
+        }
+        return false;
+    }
+    if (BuildOperationManager.IsValid() && !BuildOperationManager->GetRunningActions().IsEmpty())
+    {
+        if (OutReason != nullptr)
+        {
+            *OutReason = TEXT("A WCA Build action is already in progress.");
+        }
+        return false;
+    }
+    if (WorkerJobScheduler.IsValid() &&
+        WorkerJobScheduler->HasOutstandingWorkClass(EDWCEditorWorkClass::UserBuild))
+    {
+        if (OutReason != nullptr)
+        {
+            *OutReason = TEXT("A WCA Build worker job is already in progress.");
+        }
+        return false;
+    }
+    return !ResourceBroker.IsValid() || ResourceBroker->CanAdmitWork(
+        ResourceBrokerSessionId,
+        EDWCEditorWorkClass::UserBuild,
+        FGuid(),
+        OutReason);
+}
+
+bool SWCAEditorPanel::IsExclusiveBuildActive() const
+{
+    return ExclusiveBuildLease.IsValid() ||
+        static_cast<bool>(PendingExclusiveBuildWork) ||
+        bExclusiveBuildWorkExecuting;
+}
+
+bool SWCAEditorPanel::RequestExclusiveBuild(
+    const FString& DebugName,
+    TFunction<void()> Work,
+    FString* OutError)
+{
+    check(IsInGameThread());
+    if (OutError != nullptr)
+    {
+        OutError->Reset();
+    }
+    if (!Work)
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = TEXT("The exclusive Build has no work callback.");
+        }
+        return false;
+    }
+    if (!ResourceBroker.IsValid() || !ResourceBrokerSessionId.IsValid() ||
+        !WorkerJobScheduler.IsValid())
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = TEXT("The WCA editor Build resource services are unavailable.");
+        }
+        return false;
+    }
+    if (!CanStartBuildAction(OutError))
+    {
+        return false;
+    }
+
+    FDWCEditorExclusiveBuildRequest Request;
+    Request.SessionId = ResourceBrokerSessionId;
+    Request.AssetPath = WetClothingAsset.IsValid()
+        ? WetClothingAsset->GetPathName()
+        : FString(TEXT("None"));
+    Request.DebugName = DebugName;
+    TUniquePtr<FDWCEditorExclusiveBuildLease> Lease =
+        ResourceBroker->TryBeginExclusiveBuild(Request, OutError);
+    if (!Lease.IsValid())
+    {
+        return false;
+    }
+
+    ExclusiveBuildLease = MoveTemp(Lease);
+    PendingExclusiveBuildWork = MoveTemp(Work);
+    ExclusiveBuildDrainStartedSeconds = FPlatformTime::Seconds();
+    RegisterActiveTimer(
+        0.0,
+        FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleExclusiveBuildTimer));
+    if (OnStatusChanged.IsBound())
+    {
+        OnStatusChanged.Execute();
+    }
+    return true;
+}
+
+EActiveTimerReturnType SWCAEditorPanel::HandleExclusiveBuildTimer(double, float)
+{
+    check(IsInGameThread());
+    if (!ExclusiveBuildLease.IsValid() || !PendingExclusiveBuildWork)
+    {
+        FinishExclusiveBuild();
+        return EActiveTimerReturnType::Stop;
+    }
+    if (PreviewGPUResidencyManager.IsValid())
+    {
+        PreviewGPUResidencyManager->Tick();
+    }
+    if (bPIEActive ||
+        (ResourceBroker.IsValid() && ResourceBroker->HasOutstandingInteractiveWork()))
+    {
+        const double DrainSeconds = FPlatformTime::Seconds() - ExclusiveBuildDrainStartedSeconds;
+        if (DrainSeconds >= 2.0)
+        {
+            UE_LOG(
+                LogWCAEditorBuildBarrier,
+                Display,
+                TEXT("Exclusive Build is waiting for preview work to retire: queued=%d active=%d reserved=%.2f MiB PIE=%s."),
+                WorkerJobScheduler.IsValid() ? WorkerJobScheduler->GetQueuedJobCount() : 0,
+                WorkerJobScheduler.IsValid() ? WorkerJobScheduler->GetActiveJobCount() : 0,
+                WorkerJobScheduler.IsValid()
+                    ? static_cast<double>(WorkerJobScheduler->GetReservedBytes()) / (1024.0 * 1024.0)
+                    : 0.0,
+                bPIEActive ? TEXT("true") : TEXT("false"));
+            ExclusiveBuildDrainStartedSeconds = FPlatformTime::Seconds();
+        }
+        return EActiveTimerReturnType::Continue;
+    }
+
+    ResourceBroker->SetExclusiveBuildState(
+        ExclusiveBuildLease->GetScopeId(),
+        EDWCEditorExclusiveBuildState::Active);
+    TFunction<void()> Work = MoveTemp(PendingExclusiveBuildWork);
+    bExclusiveBuildWorkExecuting = true;
+    Work();
+    bExclusiveBuildWorkExecuting = false;
+    FinishExclusiveBuild();
+    return EActiveTimerReturnType::Stop;
+}
+
+void SWCAEditorPanel::FinishExclusiveBuild()
+{
+    check(IsInGameThread());
+    PendingExclusiveBuildWork = nullptr;
+    if (ExclusiveBuildLease.IsValid() && ResourceBroker.IsValid())
+    {
+        ResourceBroker->SetExclusiveBuildState(
+            ExclusiveBuildLease->GetScopeId(),
+            EDWCEditorExclusiveBuildState::Retiring);
+    }
+    ExclusiveBuildLease.Reset();
+    bExclusiveBuildWorkExecuting = false;
+    if (OnStatusChanged.IsBound())
+    {
+        OnStatusChanged.Execute();
+    }
+}
+
+void SWCAEditorPanel::HandleExclusiveBuildBarrierChanged(const bool bActive)
+{
+    check(IsInGameThread());
+    if (bActive)
+    {
+        SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason::ExclusiveBuild);
+        if (WorkerJobScheduler.IsValid())
+        {
+            WorkerJobScheduler->CancelWorkClass(EDWCEditorWorkClass::InteractivePreview);
+        }
+        if (TextureWorkspace.IsValid())
+        {
+            TextureWorkspace->ReclaimUnleasedCPUBytes(MAX_uint64);
+            TextureWorkspace->RetireUnleasedGPUBytes(MAX_uint64);
+        }
+        return;
+    }
+    if (!bPIEActive && bHasActiveEditorMode)
+    {
+        ResumePreviewModeIfNeeded(ActiveEditorMode);
+    }
 }
 
 FReply SWCAEditorPanel::BakeSelectedWrinkleNormalMap()
@@ -688,6 +1161,10 @@ bool SWCAEditorPanel::SaveBakedVisualAssets() const
 
 void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)
 {
+    if (IsExclusiveBuildActive())
+    {
+        return;
+    }
     if (bHasActiveEditorMode && ActiveEditorMode != NewMode)
     {
         SuspendPreviewMode(ActiveEditorMode, EDWCEditorPreviewSuspendReason::ModeSwitch);
@@ -742,6 +1219,12 @@ void SWCAEditorPanel::SuspendPreviewMode(
 {
     switch (Mode)
     {
+    case EWCAEditorMode::PartEdit:
+        if (PartEditorPanel.IsValid())
+        {
+            PartEditorPanel->SuspendPreview(Reason);
+        }
+        break;
     case EWCAEditorMode::WrinkleEdit:
         if (WrinkleEditorPanel.IsValid())
         {
@@ -754,16 +1237,29 @@ void SWCAEditorPanel::SuspendPreviewMode(
             TransparencyBakePanel->SuspendPreview(Reason);
         }
         break;
-    case EWCAEditorMode::PartEdit:
     default:
         break;
+    }
+    if (PreviewGPUResidencyManager.IsValid())
+    {
+        PreviewGPUResidencyManager->SuspendDomain(ResolvePreviewGPUDomain(Mode));
     }
 }
 
 void SWCAEditorPanel::ResumePreviewModeIfNeeded(const EWCAEditorMode Mode)
 {
+    if (PreviewGPUResidencyManager.IsValid())
+    {
+        PreviewGPUResidencyManager->SetActiveDomain(ResolvePreviewGPUDomain(Mode));
+    }
     switch (Mode)
     {
+    case EWCAEditorMode::PartEdit:
+        if (PartEditorPanel.IsValid())
+        {
+            PartEditorPanel->ResumePreviewIfNeeded();
+        }
+        break;
     case EWCAEditorMode::WrinkleEdit:
         if (WrinkleEditorPanel.IsValid())
         {
@@ -776,7 +1272,6 @@ void SWCAEditorPanel::ResumePreviewModeIfNeeded(const EWCAEditorMode Mode)
             TransparencyBakePanel->ResumePreviewIfNeeded();
         }
         break;
-    case EWCAEditorMode::PartEdit:
     default:
         break;
     }
@@ -784,17 +1279,32 @@ void SWCAEditorPanel::ResumePreviewModeIfNeeded(const EWCAEditorMode Mode)
 
 void SWCAEditorPanel::SuspendAllPreviewModes(const EDWCEditorPreviewSuspendReason Reason)
 {
+    SuspendPreviewMode(EWCAEditorMode::PartEdit, Reason);
     SuspendPreviewMode(EWCAEditorMode::WrinkleEdit, Reason);
     SuspendPreviewMode(EWCAEditorMode::TransparencyBake, Reason);
+    if (PreviewGPUResidencyManager.IsValid())
+    {
+        PreviewGPUResidencyManager->SuspendAll();
+    }
 }
 
 void SWCAEditorPanel::HandlePreBeginPIE(const bool)
 {
+    bPIEActive = true;
+    if (ResourceBroker.IsValid())
+    {
+        ResourceBroker->SetSessionActive(ResourceBrokerSessionId, false);
+    }
     SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason::BeginPIE);
 }
 
 void SWCAEditorPanel::HandleEndPIE(const bool)
 {
+    bPIEActive = false;
+    if (ResourceBroker.IsValid())
+    {
+        ResourceBroker->SetSessionActive(ResourceBrokerSessionId, true);
+    }
     // Do not rebuild preview textures on PIE exit. The active editor mode
     // resumes lazily through its mode button or the next editing action.
 }

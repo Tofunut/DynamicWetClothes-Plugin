@@ -231,4 +231,38 @@ bool FDWCEditorBuildOperationShutdownTest::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorBuildOperationActionBarrierTest,
+    "DWC.Editor.Foundation.Build.Operation.ActionBarrier",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorBuildOperationActionBarrierTest::RunTest(const FString&)
+{
+    TSharedRef<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler =
+        MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(1, 1024, 1024);
+    TSharedRef<FDWCEditorBuildOperationManager> Manager =
+        MakeShared<FDWCEditorBuildOperationManager>(Scheduler);
+    Manager->SetActionBarrier(
+        [](const EDWCEditorBuildAction, FString& OutReason)
+        {
+            OutReason = TEXT("Exclusive Build owns editor resources.");
+            return false;
+        });
+
+    FString Error;
+    const TSharedPtr<FDWCEditorBuildOperation> Operation = Manager->BeginOperation(
+        EDWCEditorBuildAction::BakeTransparencyTextures,
+        EDWCEditorAsyncRequestPolicy::Singleton,
+        [](const FDWCEditorBuildOperationResult&) {},
+        &Error);
+    TestFalse(TEXT("The action barrier rejects a new Build operation"), Operation.IsValid());
+    TestTrue(TEXT("The action barrier reason is preserved"), Error.Contains(TEXT("Exclusive Build")));
+    TestTrue(TEXT("Rejected actions do not retain logical ownership"), Manager->GetSnapshots().IsEmpty());
+
+    Manager->BeginShutdown();
+    Scheduler->Shutdown();
+    Manager->CompleteShutdown();
+    return true;
+}
+
 #endif

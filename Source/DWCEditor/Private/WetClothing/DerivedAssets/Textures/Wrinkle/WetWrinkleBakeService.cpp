@@ -8,53 +8,93 @@
 
 namespace
 {
+    FWetWrinkleAuthoredSlotState& FindOrAddSlotState(
+        TMap<int32, FWetWrinkleAuthoredSlotState>& States,
+        const UWetClothingAsset& Asset,
+        const int32 MaterialSlotIndex)
+    {
+        FWetWrinkleAuthoredSlotState& State = States.FindOrAdd(MaterialSlotIndex);
+        State.MaterialSlotIndex = MaterialSlotIndex;
+        State.bWettable = MaterialSlotIndex != INDEX_NONE &&
+            Asset.IsMaterialSlotWettable(MaterialSlotIndex);
+        State.bUsesCustomNormal = MaterialSlotIndex != INDEX_NONE &&
+            Asset.Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(MaterialSlotIndex);
+        return State;
+    }
+
     void CollectAuthoredWrinkleMaterialSlots(const UWetClothingAsset& Asset, TSet<int32>& OutMaterialSlots)
     {
         OutMaterialSlots.Reset();
-
-        const FWetClothingWrinkleData& WrinkleData = Asset.Authored.WrinkleData;
-        for (const FWetWrinklePatchPlacement& Patch : WrinkleData.EditablePatches)
+        TArray<FWetWrinkleAuthoredSlotState> States;
+        FWetWrinkleBakeService::CollectAuthoredSlotStates(Asset, States);
+        for (const FWetWrinkleAuthoredSlotState& State : States)
         {
-            if ((!Patch.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
-                Patch.MaterialSlotIndex == INDEX_NONE ||
-                !Asset.IsMaterialSlotWettable(Patch.MaterialSlotIndex))
+            if (State.MaterialSlotIndex != INDEX_NONE && State.bWettable &&
+                !State.bUsesCustomNormal && State.HasBakeableContent())
             {
-                continue;
+                OutMaterialSlots.Add(State.MaterialSlotIndex);
             }
-
-            if (WrinkleData.IsUsingCustomWrinkleNormalMap(Patch.MaterialSlotIndex))
-            {
-                continue;
-            }
-
-            OutMaterialSlots.Add(Patch.MaterialSlotIndex);
-        }
-
-        for (const FWetProceduralRidgeStroke& Stroke : WrinkleData.EditableProceduralRidgeStrokes)
-        {
-            if ((!Stroke.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
-                Stroke.MaterialSlotIndex == INDEX_NONE ||
-                Stroke.Points.Num() < 2 ||
-                !Asset.IsMaterialSlotWettable(Stroke.MaterialSlotIndex))
-            {
-                continue;
-            }
-
-            if (WrinkleData.IsUsingCustomWrinkleNormalMap(Stroke.MaterialSlotIndex))
-            {
-                continue;
-            }
-
-            OutMaterialSlots.Add(Stroke.MaterialSlotIndex);
         }
     }
+}
 
-    bool HasExactBakedWrinkleMap(const UWetClothingAsset& Asset, const int32 MaterialSlotIndex)
+void FWetWrinkleBakeService::CollectAuthoredSlotStates(
+    const UWetClothingAsset& WetClothingAsset,
+    TArray<FWetWrinkleAuthoredSlotState>& OutStates)
+{
+    TMap<int32, FWetWrinkleAuthoredSlotState> States;
+    const FWetClothingWrinkleData& WrinkleData = WetClothingAsset.Authored.WrinkleData;
+
+    for (const FWetWrinklePatchPlacement& Patch : WrinkleData.EditablePatches)
     {
-        return FWetWrinkleNormalMapBaker::IsMaterialSlotBakeCurrent(
-            &Asset,
-            MaterialSlotIndex);
+        if (!Patch.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches)
+        {
+            continue;
+        }
+        FWetWrinkleAuthoredSlotState& State = FindOrAddSlotState(
+            States, WetClothingAsset, Patch.MaterialSlotIndex);
+        ++State.PatchCount;
+        if (Patch.WrinkleNormalTexture == nullptr)
+        {
+            ++State.MissingPatchTextureCount;
+        }
+        else if (!Patch.HasValidSurfaceAnchor() || !Patch.HasValidSurfaceFrame() ||
+                 !Patch.HasValidSurfaceFootprint())
+        {
+            ++State.InvalidPatchPlacementCount;
+        }
+        else
+        {
+            ++State.ValidPatchCount;
+        }
     }
+
+    for (const FWetProceduralRidgeStroke& Stroke : WrinkleData.EditableProceduralRidgeStrokes)
+    {
+        if (!Stroke.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches)
+        {
+            continue;
+        }
+        FWetWrinkleAuthoredSlotState& State = FindOrAddSlotState(
+            States, WetClothingAsset, Stroke.MaterialSlotIndex);
+        ++State.RidgeStrokeCount;
+        if (Stroke.Points.Num() >= 2 && Stroke.WidthUV > 0.0f && Stroke.Strength > 0.0f)
+        {
+            ++State.ValidRidgeStrokeCount;
+        }
+        else
+        {
+            ++State.InvalidRidgeStrokeCount;
+        }
+    }
+
+    OutStates.Reset(States.Num());
+    States.GenerateValueArray(OutStates);
+    OutStates.Sort([](const FWetWrinkleAuthoredSlotState& Left,
+                      const FWetWrinkleAuthoredSlotState& Right)
+    {
+        return Left.MaterialSlotIndex < Right.MaterialSlotIndex;
+    });
 }
 
 void FWetWrinkleBakeService::CollectBakeMaterialSlots(
@@ -93,7 +133,8 @@ void FWetWrinkleBakeService::RefreshBakeStatusFromCurrentOutputs(
     int32 CompletedSlotCount = 0;
     for (const int32 MaterialSlotIndex : AuthoredMaterialSlots)
     {
-        CompletedSlotCount += HasExactBakedWrinkleMap(*WetClothingAsset, MaterialSlotIndex) ? 1 : 0;
+        CompletedSlotCount += FWetWrinkleNormalMapBaker::IsMaterialSlotBakeCurrent(
+            WetClothingAsset, MaterialSlotIndex) ? 1 : 0;
     }
 
     if (CompletedSlotCount == AuthoredMaterialSlots.Num())

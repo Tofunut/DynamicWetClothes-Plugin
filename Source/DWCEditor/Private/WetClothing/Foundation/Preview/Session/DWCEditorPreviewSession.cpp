@@ -686,20 +686,12 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
     int32 BuiltMIDCount = 0;
     int32 PendingMaterialCount = 0;
     int32 FailedMaterialCount = 0;
-    uint64 SessionContainerBytes =
-        static_cast<uint64>(SlotCollection.Slots.GetAllocatedSize()) +
-        static_cast<uint64>(SlotCollection.ReadyWettableSlotIndices.GetAllocatedSize()) +
-        static_cast<uint64>(RuntimeSlots.GetAllocatedSize()) +
-        static_cast<uint64>(ResourceBindingMIDs.GetAllocatedSize()) +
-        static_cast<uint64>(SourceParameterRevisions.GetAllocatedSize());
+    const uint64 SessionContainerBytes = CalculateSessionContainerBytes();
     for (const FDWCEditorPreviewSessionSlot& Slot : RuntimeSlots)
     {
         BuiltMIDCount += Slot.PreviewMID.IsValid() ? 1 : 0;
         PendingMaterialCount += Slot.bMaterialBuildPending ? 1 : 0;
         FailedMaterialCount += Slot.bMaterialBuildFailed ? 1 : 0;
-        SessionContainerBytes += static_cast<uint64>(Slot.MaterialBuildError.GetAllocatedSize());
-        SessionContainerBytes += Slot.DesiredLayerParameters.GetAllocatedSize();
-        SessionContainerBytes += Slot.AppliedLayerParameters.GetAllocatedSize();
     }
 
     const FDWCEditorPreviewMaterialCacheStats CacheStats = MaterialCache.GetStats();
@@ -843,6 +835,104 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
                 Counter.Count,
                 *BytesText);
         }
+    }
+}
+
+uint64 FDWCEditorPreviewSession::CalculateSessionContainerBytes() const
+{
+    uint64 Bytes =
+        static_cast<uint64>(SlotCollection.Slots.GetAllocatedSize()) +
+        static_cast<uint64>(SlotCollection.ReadyWettableSlotIndices.GetAllocatedSize()) +
+        static_cast<uint64>(RuntimeSlots.GetAllocatedSize()) +
+        static_cast<uint64>(ResourceBindingMIDs.GetAllocatedSize()) +
+        static_cast<uint64>(SourceParameterRevisions.GetAllocatedSize());
+    for (const FDWCEditorPreviewSessionSlot& Slot : RuntimeSlots)
+    {
+        Bytes += static_cast<uint64>(Slot.MaterialBuildError.GetAllocatedSize());
+        Bytes += Slot.DesiredLayerParameters.GetAllocatedSize();
+        Bytes += Slot.AppliedLayerParameters.GetAllocatedSize();
+    }
+    return Bytes;
+}
+
+void FDWCEditorPreviewSession::AppendGlobalMemoryOwners(
+    const int32 SessionIndex,
+    TSet<FString>& SeenOwnerIdentifiers,
+    TArray<FDWCEditorMemoryOwnerRecord>& OutOwners) const
+{
+    const FString Label = SessionConfig.DiagnosticLabel.IsEmpty()
+        ? TEXT("Unnamed")
+        : SessionConfig.DiagnosticLabel;
+    const FString SessionIdentifier = FString::Printf(
+        TEXT("PreviewSession/%p"),
+        static_cast<const void*>(this));
+    const FString Context = FString::Printf(
+        TEXT("session=%d label='%s' WCA='%s'"),
+        SessionIndex,
+        *Label,
+        *GetNameSafe(WetClothingAsset.Get()));
+
+    auto AddOwner = [&OutOwners, &SeenOwnerIdentifiers](FDWCEditorMemoryOwnerRecord&& Owner)
+    {
+        if (!SeenOwnerIdentifiers.Contains(Owner.Identifier))
+        {
+            SeenOwnerIdentifiers.Add(Owner.Identifier);
+            OutOwners.Add(MoveTemp(Owner));
+        }
+    };
+
+    FDWCEditorMemoryOwnerRecord SessionOwner;
+    SessionOwner.Identifier = SessionIdentifier + TEXT("/Container");
+    SessionOwner.Subsystem = TEXT("PreviewSession");
+    SessionOwner.Resource = TEXT("SessionContainer");
+    SessionOwner.Category = EDWCEditorMemoryCategory::PersistentEditorCPU;
+    SessionOwner.CurrentBytes = CalculateSessionContainerBytes();
+    SessionOwner.EntryCount = RuntimeSlots.Num();
+    SessionOwner.Context = Context;
+    AddOwner(MoveTemp(SessionOwner));
+
+    const FDWCEditorPreviewMaterialCacheStats CacheStats = MaterialCache.GetStats();
+    FDWCEditorMemoryOwnerRecord MaterialOwner;
+    MaterialOwner.Identifier = SessionIdentifier + TEXT("/MaterialCache");
+    MaterialOwner.Subsystem = TEXT("PreviewSession");
+    MaterialOwner.Resource = TEXT("MaterialCacheContainer");
+    MaterialOwner.Category = EDWCEditorMemoryCategory::SharedCacheCPU;
+    MaterialOwner.CurrentBytes = CacheStats.EstimatedContainerBytes;
+    MaterialOwner.EntryCount =
+        CacheStats.GraphEntryCount + CacheStats.ParentEntryCount + CacheStats.SlotMIDEntryCount;
+    MaterialOwner.Context = Context;
+    AddOwner(MoveTemp(MaterialOwner));
+
+    if (!SessionConfig.CollectMemoryStats)
+    {
+        return;
+    }
+
+    TArray<FDWCEditorPreviewMemoryBucket> Buckets;
+    SessionConfig.CollectMemoryStats(Buckets);
+    for (const FDWCEditorPreviewMemoryBucket& Bucket : Buckets)
+    {
+        if (!Bucket.bIncludeInGlobalSnapshot)
+        {
+            continue;
+        }
+
+        FDWCEditorMemoryOwnerRecord Owner;
+        Owner.Identifier = Bucket.GlobalOwnerIdentifier.IsEmpty()
+            ? SessionIdentifier + TEXT("/") + Bucket.Name
+            : Bucket.GlobalOwnerIdentifier;
+        Owner.Subsystem = FName(*Label);
+        Owner.Resource = FName(*Bucket.Name);
+        Owner.Category = Bucket.GlobalCategory;
+        Owner.CurrentBytes = Bucket.UsedBytes;
+        Owner.EntryCount = Bucket.EntryCount;
+        Owner.Context = FString::Printf(
+            TEXT("%s leases=%d retired=%d budget=%llu"),
+            *Context,
+            Bucket.ActiveLeaseCount,
+            Bucket.RetiredEntryCount,
+            Bucket.BudgetBytes);
+        AddOwner(MoveTemp(Owner));
     }
 }
 

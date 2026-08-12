@@ -7,6 +7,7 @@ class UTexture;
 class UTexture2D;
 class UWetClothingAsset;
 class FDWCEditorCancellationToken;
+class FDWCEditorCacheStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorSurfacePatchProjectionCacheService;
 
@@ -34,6 +35,53 @@ struct FWetWrinkleNormalMapBakeResult
     TArray<FWetWrinkleInvalidatedTransparencyOutput> InvalidatedTransparencyOutputs;
 };
 
+/** Peak ownership estimates for the worker and game-thread commit phases. */
+struct FWetWrinkleNormalMapBakeMemoryPlan
+{
+    uint64 SnapshotBytes = 0;
+    uint64 RasterBytes = 0;
+    uint64 PostProcessBytes = 0;
+    uint64 OutputBytes = 0;
+    uint64 CommitMetadataBytes = 0;
+
+    uint64 GetWorkerBytes() const
+    {
+        return SnapshotBytes + RasterBytes + PostProcessBytes + OutputBytes;
+    }
+
+    uint64 GetCommitBytes() const
+    {
+        return CommitMetadataBytes + OutputBytes;
+    }
+};
+
+enum class EWetWrinkleBakeCurrentnessIssue : uint8
+{
+    None,
+    InvalidTarget,
+    NoBakeableContent,
+    NormalMissing,
+    CoverageMissing,
+    ResolutionMismatch,
+    PaddingMismatch,
+    SignatureMismatch
+};
+
+/** Structured exact-output state shared by validation and editor dependencies. */
+struct FWetWrinkleMaterialSlotBakeState
+{
+    EWetWrinkleBakeCurrentnessIssue Issue = EWetWrinkleBakeCurrentnessIssue::InvalidTarget;
+    bool bHasBakeableContent = false;
+    bool bNormalExists = false;
+    bool bCoverageMaskExists = false;
+    bool bResolutionMatches = false;
+    bool bPaddingMatches = false;
+    bool bSignatureMatches = false;
+    FString Detail;
+
+    bool IsCurrent() const { return Issue == EWetWrinkleBakeCurrentnessIssue::None; }
+};
+
 /** Immutable, UObject-free input captured on the game thread for a wrinkle bake. */
 class FWetWrinkleNormalMapBakeSnapshot
 {
@@ -53,6 +101,11 @@ class FWetWrinkleNormalMapBakeSnapshot
     uint64 GetEstimatedSnapshotBytes() const;
     uint64 GetEstimatedWorkingBytes() const;
     uint64 GetEstimatedResultBytes() const;
+    uint64 GetEstimatedCommitBytes() const;
+    FWetWrinkleNormalMapBakeMemoryPlan GetMemoryPlan() const;
+
+    /** Drops worker-only topology, source, and raster inputs after ComputeSnapshot returns. */
+    void ReleaseWorkerResources();
 
   private:
     TUniquePtr<FImpl> Impl;
@@ -80,7 +133,8 @@ class FWetWrinkleNormalMapBakeSession
 
     explicit FWetWrinkleNormalMapBakeSession(
         TSharedRef<FDWCEditorSpatialQueryService> InSpatialQueryService,
-        TSharedRef<FDWCEditorSurfacePatchProjectionCacheService> InSurfacePatchProjectionCache);
+        TSharedRef<FDWCEditorSurfacePatchProjectionCacheService> InSurfacePatchProjectionCache,
+        TSharedPtr<FDWCEditorCacheStore> InCacheStore = nullptr);
     ~FWetWrinkleNormalMapBakeSession();
 
     FWetWrinkleNormalMapBakeSession(FWetWrinkleNormalMapBakeSession&&);
@@ -129,6 +183,11 @@ class FWetWrinkleNormalMapBaker
         const UWetClothingAsset* WetClothingAsset,
         int32                    MaterialSlotIndex);
 
+    static FWetWrinkleMaterialSlotBakeState EvaluateMaterialSlotBakeState(
+        const UWetClothingAsset* WetClothingAsset,
+        int32 MaterialSlotIndex,
+        bool bExactSignature = true);
+
   private:
     struct FBakeGroup;
 
@@ -146,23 +205,5 @@ class FWetWrinkleNormalMapBaker
         int32                    Width,
         int32                    Height,
         const FWetWrinkleNormalMapBakeSettings& Settings);
-
-    static UTexture2D* CreateOrUpdateNormalTextureAsset(
-        UWetClothingAsset&    WetClothingAsset,
-        const FString&        ObjectSuffix,
-        int32                 Width,
-        int32                 Height,
-        const TArray<FColor>& Pixels,
-        UTexture2D*           ExistingTexture,
-        FString&              OutErrorMessage);
-
-    static UTexture2D* CreateOrUpdateMaskTextureAsset(
-        UWetClothingAsset&    WetClothingAsset,
-        const FString&        ObjectSuffix,
-        int32                 Width,
-        int32                 Height,
-        const TArray<uint8>&  Pixels,
-        UTexture2D*           ExistingTexture,
-        FString&              OutErrorMessage);
 
 };

@@ -21,6 +21,7 @@ class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorRenderUploadQueue;
 class FDWCEditorPreviewCommitCoordinator;
+class FDWCEditorResourceGovernor;
 class FDWCEditorTextureWorkspace;
 class FDWCEditorWorkerJobScheduler;
 using FDWCEditorWorkerJobSchedulerPtr = TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>;
@@ -99,6 +100,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorResourceGovernor>, ResourceGovernor)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
     SLATE_END_ARGS()
 
@@ -163,6 +165,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     DWCTransparencyWorkflow::FDWCTransparencyLayerWorkflowState ResolveSelectedLayerWorkflowState() const;
     EDWCTransparencyEditorStage ResolveStageForLayer(const FWetClothingTransparencyLayerData* Layer) const;
     void SelectTransparencyLayerWithResolvedStage(
+        int32 MaterialSlotIndex,
         const FGuid& LayerGuid,
         EDWCTransparencyEditorStage Stage);
     bool RefreshModelState();
@@ -196,6 +199,9 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     // Stage 2 source result.
     bool EnsureFinalEditingWorkingMap();
     bool EnsureRevealEditingWorkingMap();
+    bool EnsureSourcePayloadAccounted(
+        const TSharedPtr<FDWCTransparencySourcePayload>& Payload,
+        FString& OutError) const;
     bool RestoreCanonicalWorkingMap(FString& OutError);
     bool HasRestorableCanonicalSource() const;
     bool LoadBakedMapAsWorkingResult(
@@ -287,7 +293,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void UpdateInnerSourceStatus();
 
     bool RefreshOptionItems();
-    void RepairInvalidLayerIdentities();
     void RefreshLayerItems();
     void RefreshViewportContext();
     FWetClothingTransparencyLayerData* GetSelectedLayer();
@@ -330,6 +335,8 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
         const TSharedRef<STableViewBase>& OwnerTable);
     void HandleLayerSelectionChanged(FLayerItemPtr Item, ESelectInfo::Type SelectInfo);
     FReply HandleRemoveLayerClicked();
+    FReply HandleCreateLayerClicked();
+    bool CanCreateLayerForSelectedSlot() const;
     bool CanRemoveSelectedLayer() const;
 
     TSharedRef<SWidget> GenerateUVChannelComboItem(TSharedPtr<int32> Item) const;
@@ -428,6 +435,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
     TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
+    TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
     TSharedPtr<IDetailsView> DetailsView;
     TSharedPtr<class SBox> ControlPanelContainer;
     TSharedPtr<class SWidgetSwitcher> StageContentSwitcher;
@@ -452,6 +460,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     FString StatusMessage;
     EDWCTransparencyPanelStatus PanelStatus = EDWCTransparencyPanelStatus::Info;
     FString InnerSourceStatusMessage;
+    int32 SelectedMaterialSlotIndex = INDEX_NONE;
     FGuid SelectedLayerGuid;
     TArray<FLayerItemPtr> LayerItems;
     TSharedPtr<class SListView<FLayerItemPtr>> LayerListView;

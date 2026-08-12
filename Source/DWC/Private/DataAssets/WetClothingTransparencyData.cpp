@@ -3,6 +3,7 @@
 
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "Misc/Crc.h"
 
 namespace
 {
@@ -21,6 +22,51 @@ bool DoesStoredSlotNameMatch(const USkeletalMesh& TargetMesh, int32 MaterialSlot
     return StoredSlotName.IsNone() ||
            TargetMesh.GetMaterials()[MaterialSlotIndex].MaterialSlotName == StoredSlotName;
 }
+
+#if WITH_EDITORONLY_DATA
+bool HasLegacyAuthoringEvidence(const FWetClothingTransparencyLayerData& Layer)
+{
+    return Layer.Intent != EDWCTransparencyLayerIntent::Enabled ||
+           Layer.bSourceTypeConfigured ||
+           Layer.SourceType != EDWCTransparencySourceType::SameMeshMaterialSlots ||
+           !Layer.SameMeshSource.InnerSlotPriority.IsEmpty() ||
+           !Layer.BlueprintSource.BlueprintClass.IsNull() ||
+           Layer.BlueprintSource.TargetComponent.IsBound() ||
+           !Layer.BlueprintSource.SourcePriority.IsEmpty() ||
+           !Layer.ExternalMeshSource.SourcePriority.IsEmpty() ||
+           Layer.ExternalMeshSource.SkeletalMesh != nullptr ||
+           !Layer.ExternalMeshSource.SourceSlotPriority.IsEmpty() ||
+           !Layer.EditableStrokes.IsEmpty() ||
+           !Layer.RevealColorPaintStrokes.IsEmpty() ||
+           Layer.AutoBakeMetadata.AutoBakeGuid.IsValid() ||
+           !Layer.AutoBakeMetadata.BuildSignature.IsEmpty() ||
+           !Layer.BakedMaps.IsEmpty() ||
+           Layer.EditorStageCache.bSourceGenerated ||
+           Layer.EditorStageCache.bRevealReviewed ||
+           !Layer.EditorStageCache.SourceSignature.IsEmpty() ||
+           !Layer.EditorStageCache.RevealSignature.IsEmpty() ||
+           !Layer.EditorStageCache.Artifacts.IsEmpty();
+}
+
+FGuid BuildStableLegacyLayerGuid(
+    const FString& AssetIdentity,
+    const int32 MaterialSlotIndex,
+    const int32 LayerIndex,
+    const int32 Salt)
+{
+    const FString Identity = FString::Printf(
+        TEXT("%s|Transparency|%d|%d|%d"),
+        *AssetIdentity,
+        MaterialSlotIndex,
+        LayerIndex,
+        Salt);
+    return FGuid(
+        FCrc::StrCrc32(*(Identity + TEXT("|A"))),
+        FCrc::StrCrc32(*(Identity + TEXT("|B"))),
+        FCrc::StrCrc32(*(Identity + TEXT("|C"))),
+        FCrc::StrCrc32(*(Identity + TEXT("|D"))));
+}
+#endif
 } // namespace
 
 void FDWCTransparencyEditorStageCacheMetadata::MarkRevealStale()
@@ -111,7 +157,7 @@ const FWetClothingBakedTransparencyMap* FWetClothingTransparencyData::FindRuntim
     }
 
     const FWetClothingTransparencyLayerData* Layer = FindTransparencyLayer(MaterialSlotIndex);
-    if (Layer == nullptr)
+    if (Layer == nullptr || !Layer->IsRuntimeEnabled())
     {
         return nullptr;
     }
@@ -130,6 +176,51 @@ UTexture2D* FWetClothingTransparencyData::ResolveBakedTransparencyMap(int32 Mate
     const FWetClothingBakedTransparencyMap* Match = FindBakedTransparencyMap(MaterialSlotIndex);
     return Match != nullptr ? Match->TransparencyMap.Get() : nullptr;
 }
+
+#if WITH_EDITORONLY_DATA
+bool FWetClothingTransparencyData::NormalizeLegacyLayerIntents(
+    const FString& AssetIdentity,
+    int32& OutDraftCount,
+    int32& OutRepairedIdentityCount)
+{
+    OutDraftCount = 0;
+    OutRepairedIdentityCount = 0;
+    if (DataVersion >= LayerIntentDataVersion)
+    {
+        return false;
+    }
+
+    TSet<FGuid> UsedLayerGuids;
+    for (int32 LayerIndex = 0; LayerIndex < TransparencyLayers.Num(); ++LayerIndex)
+    {
+        FWetClothingTransparencyLayerData& Layer = TransparencyLayers[LayerIndex];
+        if (Layer.Intent == EDWCTransparencyLayerIntent::Enabled &&
+            !HasLegacyAuthoringEvidence(Layer))
+        {
+            Layer.Intent = EDWCTransparencyLayerIntent::Draft;
+            ++OutDraftCount;
+        }
+
+        if (!Layer.LayerGuid.IsValid() || UsedLayerGuids.Contains(Layer.LayerGuid))
+        {
+            int32 Salt = 0;
+            do
+            {
+                Layer.LayerGuid = BuildStableLegacyLayerGuid(
+                    AssetIdentity,
+                    Layer.TargetSurface.OuterMaterialSlotIndex,
+                    LayerIndex,
+                    Salt++);
+            }
+            while (!Layer.LayerGuid.IsValid() || UsedLayerGuids.Contains(Layer.LayerGuid));
+            ++OutRepairedIdentityCount;
+        }
+        UsedLayerGuids.Add(Layer.LayerGuid);
+    }
+    DataVersion = LayerIntentDataVersion;
+    return true;
+}
+#endif
 
 bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
     const USkeletalMesh* TargetMesh,

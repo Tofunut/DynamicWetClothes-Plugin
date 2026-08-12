@@ -44,6 +44,13 @@ enum class EDWCEditorBuildSurfaceMode : uint8
     Transparency
 };
 
+enum class EDWCEditorBuildPlanPolicy : uint8
+{
+    AllRequired,
+    ValidationSuggested,
+    ExplicitActions
+};
+
 struct FDWCEditorBuildActionDependency
 {
     EDWCEditorBuildAction Action = EDWCEditorBuildAction::SaveAsset;
@@ -101,6 +108,8 @@ struct FDWCEditorBuildEvaluationInput
     bool bGPUBackendEnabled = false;
     bool bHasWrinkleContent = false;
     bool bHasTransparencyContent = false;
+    bool bWrinkleTargetStateProvided = false;
+    bool bTransparencyTargetStateProvided = false;
 
     EDWCEditorBuildActionState DataUVState = EDWCEditorBuildActionState::Unavailable;
     EDWCEditorBuildActionState CPURuntimeDataState = EDWCEditorBuildActionState::Unavailable;
@@ -115,12 +124,17 @@ struct FDWCEditorBuildEvaluationInput
     EDWCEditorBuildActionState AffectedTransparencyState = EDWCEditorBuildActionState::Unavailable;
     FString RenderProfileReason;
     FString GeneratedMaterialsReason;
+    FString WrinkleTexturesReason;
+    FString TransparencyTexturesReason;
     FString AffectedTransparencyReason;
 
     EDWCEditorBuildSurfaceMode SurfaceMode = EDWCEditorBuildSurfaceMode::Any;
     TSet<EDWCEditorBuildAction> RunningActions;
     TArray<int32> AffectedMaterialSlotIndices;
     TArray<FGuid> AffectedLayerGuids;
+    TArray<int32> TransparencyMaterialSlotIndices;
+    TArray<FGuid> TransparencyLayerGuids;
+    TArray<int32> WrinkleMaterialSlotIndices;
 };
 
 struct FDWCEditorBuildStatusSnapshot
@@ -136,6 +150,10 @@ struct FDWCEditorBuildStatusSnapshot
 struct FDWCEditorBuildPlanStep
 {
     EDWCEditorBuildAction Action = EDWCEditorBuildAction::SaveAsset;
+    TArray<int32> MaterialSlotIndices;
+    TArray<FGuid> LayerGuids;
+    TArray<FName> SourceDiagnosticCodes;
+    bool bExplicitlyRequested = false;
 };
 
 struct FDWCEditorBuildPlan
@@ -143,6 +161,8 @@ struct FDWCEditorBuildPlan
     TArray<FDWCEditorBuildPlanStep> Steps;
     TArray<EDWCEditorBuildAction> BlockedActions;
     TArray<FString> Diagnostics;
+    TArray<FName> ManualDiagnosticCodes;
+    EDWCEditorBuildPlanPolicy Policy = EDWCEditorBuildPlanPolicy::AllRequired;
 
     bool IsExecutable() const
     {

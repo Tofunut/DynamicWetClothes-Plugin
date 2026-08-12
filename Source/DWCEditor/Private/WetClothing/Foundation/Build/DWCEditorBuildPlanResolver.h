@@ -4,6 +4,8 @@
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
 
+struct FWCAEditorValidationSnapshot;
+
 class FDWCEditorBuildPlanResolver
 {
   public:
@@ -11,5 +13,7 @@ class FDWCEditorBuildPlanResolver
     static FDWCEditorBuildPlan ResolveActions(
         const FDWCEditorBuildStatusSnapshot& Snapshot,
         TConstArrayView<EDWCEditorBuildAction> RequestedActions);
+    static FDWCEditorBuildPlan ResolveValidationSuggested(
+        const FDWCEditorBuildStatusSnapshot& BuildSnapshot,
+        const FWCAEditorValidationSnapshot& ValidationSnapshot);
 };
-

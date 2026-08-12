@@ -9,6 +9,12 @@ FDWCEditorBuildOperationManager::FDWCEditorBuildOperationManager(
 {
 }
 
+void FDWCEditorBuildOperationManager::SetActionBarrier(FActionBarrier InBarrier)
+{
+    check(IsInGameThread());
+    ActionBarrier = MoveTemp(InBarrier);
+}
+
 TSharedPtr<FDWCEditorBuildOperation> FDWCEditorBuildOperationManager::BeginOperation(
     const EDWCEditorBuildAction Action,
     const EDWCEditorAsyncRequestPolicy RequestPolicy,
@@ -24,6 +30,20 @@ TSharedPtr<FDWCEditorBuildOperation> FDWCEditorBuildOperationManager::BeginOpera
     {
         if (OutError != nullptr) *OutError = TEXT("The editor build operation manager is shutting down.");
         return nullptr;
+    }
+    if (ActionBarrier)
+    {
+        FString BarrierError;
+        if (!ActionBarrier(Action, BarrierError))
+        {
+            if (OutError != nullptr)
+            {
+                *OutError = BarrierError.IsEmpty()
+                    ? TEXT("The build action is blocked by an exclusive Build.")
+                    : MoveTemp(BarrierError);
+            }
+            return nullptr;
+        }
     }
 
     // All operations managed here can mutate the same WCA and generated assets.

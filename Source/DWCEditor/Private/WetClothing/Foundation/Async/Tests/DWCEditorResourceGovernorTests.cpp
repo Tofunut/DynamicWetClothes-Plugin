@@ -264,4 +264,77 @@ bool FDWCEditorResourceGovernorCrossPoolBudgetTest::RunTest(const FString&)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorResourceGovernorDefaultBudgetPolicyTest,
+    "DWC.Editor.Foundation.Async.ResourceGovernor.DefaultBudgetPolicy",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorResourceGovernorDefaultBudgetPolicyTest::RunTest(const FString&)
+{
+    const FDWCEditorResourceBudgetConfig Config;
+    TestEqual(
+        TEXT("The process-wide editor CPU budget permits large authoring builds"),
+        Config.GlobalEditorCPUBytes,
+        1536ull * FDWCEditorResourceBudgetConfig::MiB);
+    TestEqual(
+        TEXT("Preview workspace retention has bounded headroom"),
+        Config.PreviewWorkspaceCPUBytes,
+        768ull * FDWCEditorResourceBudgetConfig::MiB);
+    TestEqual(
+        TEXT("Shared cache retention remains bounded"),
+        Config.SharedCacheCPUBytes,
+        256ull * FDWCEditorResourceBudgetConfig::MiB);
+    TestEqual(
+        TEXT("Worker private memory remains capped independently"),
+        Config.WorkerPrivateCPUBytes,
+        512ull * FDWCEditorResourceBudgetConfig::MiB);
+    TestEqual(
+        TEXT("Preview GPU residency is not expanded by the CPU policy change"),
+        Config.PreviewGPUBytes,
+        384ull * FDWCEditorResourceBudgetConfig::MiB);
+    TestFalse(
+        TEXT("Standalone governors do not emit process-wide admission snapshots"),
+        Config.bEnableAdmissionFailureDiagnostics);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorResourceGovernorLeaseBundleTest,
+    "DWC.Editor.Foundation.Async.ResourceGovernor.LeaseBundleAtomicity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorResourceGovernorLeaseBundleTest::RunTest(const FString&)
+{
+    FDWCEditorResourceGovernor Governor(MakeSmallBudgetConfig());
+    const FDWCEditorAsyncOperationIdentity Owner = MakeGovernorTestIdentity(40);
+
+    TArray<FDWCEditorResourceReservationRequest> Requests;
+    FDWCEditorResourceReservationRequest& Worker = Requests.AddDefaulted_GetRef();
+    Worker.Pool = EDWCEditorResourcePool::WorkerPrivateCPU;
+    Worker.Bytes = 40;
+    Worker.Owner = Owner;
+    Worker.DebugName = TEXT("Bundle worker");
+    FDWCEditorResourceReservationRequest& Cache = Requests.AddDefaulted_GetRef();
+    Cache.Pool = EDWCEditorResourcePool::SharedCacheCPU;
+    Cache.Bytes = 30;
+    Cache.Owner = Owner;
+    Cache.DebugName = TEXT("Bundle cache");
+
+    EDWCEditorResourceAdmissionResult Admission = EDWCEditorResourceAdmissionResult::InvalidRequest;
+    FDWCEditorMemoryLeaseSet Bundle = Governor.TryAcquireBundleForAdmission(Requests, Admission);
+    TestTrue(TEXT("A cross-pool bundle is admitted as one operation"), Bundle.IsValid());
+    TestEqual(TEXT("The bundle owns one merged lease per pool"), Bundle.Num(), 2);
+    TestEqual(TEXT("The bundle reports its complete ownership"), Bundle.GetReservedBytes(), 70ull);
+    Bundle.Reset();
+
+    FDWCEditorMemoryLease Blocker = Governor.TryAcquire(
+        MakeRequest(EDWCEditorResourcePool::SharedCacheCPU, 90, 41));
+    TestTrue(TEXT("A cache blocker is admitted"), Blocker.IsValid());
+    Bundle = Governor.TryAcquireBundleForAdmission(Requests, Admission);
+    TestFalse(TEXT("A partially satisfiable bundle is rejected"), Bundle.IsValid());
+    TestEqual(TEXT("Failed bundle admission rolls back its earlier pool lease"),
+        Governor.GetDiagnostics().GlobalCPUUsedBytes, 90ull);
+    return true;
+}
+
 #endif

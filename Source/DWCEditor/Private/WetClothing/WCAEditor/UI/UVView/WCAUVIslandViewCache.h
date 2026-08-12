@@ -32,6 +32,15 @@ class FWCAUVIslandViewCache
         TArray<TSharedPtr<FWetClothingAssetUVIsland>>& OutIslands,
         FString*                                       OutErrorMessage = nullptr);
 
+    /** Builds one immutable authoring snapshot without retaining it in this legacy view cache. */
+    static bool BuildMaterialSlotUVIslandsUncached(
+        const UWetClothingAsset*                       WetClothingAsset,
+        int32                                          LODIndex,
+        int32                                          UVChannelIndex,
+        int32                                          MaterialSlotIndex,
+        TArray<TSharedPtr<FWetClothingAssetUVIsland>>& OutIslands,
+        FString*                                       OutErrorMessage = nullptr);
+
     static bool BuildMaterialSlotPreviewTriangles(
         const USkeletalMesh*                 SkeletalMesh,
         int32                                MaterialSlotIndex,

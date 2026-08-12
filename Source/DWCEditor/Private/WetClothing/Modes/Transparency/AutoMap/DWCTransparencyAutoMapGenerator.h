@@ -87,7 +87,8 @@ class FDWCTransparencyAutoMapGenerator
         const FWetClothingTransparencyLayerData& Layer,
         FDWCTransparencySourcePayload& OutResult,
         FString& OutSummary,
-        TArray<FString>& OutWarnings);
+        TArray<FString>& OutWarnings,
+        const FDWCEditorCancellationToken* CancellationToken = nullptr);
 
     static bool GenerateBaseRevealColorMap(
         const UWetClothingAsset& WetClothingAsset,
@@ -104,4 +105,17 @@ class FDWCTransparencyAutoMapGenerator
         int32 MaterialSlotIndex,
         const FLinearColor& BaseRevealColor,
         TArray<FColor>& InOutRevealColorBuffer);
+
+  private:
+    static bool BuildProjectionSnapshotInternal(
+        UWetClothingAsset& WetClothingAsset,
+        const FWetClothingTransparencyLayerData& Layer,
+        bool bResolveMaterialSurfaces,
+        FDWCTransparencyAutoMapSnapshot& OutSnapshot,
+        FString& OutErrorMessage);
+
+    static FDWCTransparencyAutoMapComputedResult ComputeStreamingProjection(
+        UWetClothingAsset& WetClothingAsset,
+        FDWCTransparencyAutoMapSnapshot& Snapshot,
+        const FDWCEditorCancellationToken* CancellationToken = nullptr);
 };

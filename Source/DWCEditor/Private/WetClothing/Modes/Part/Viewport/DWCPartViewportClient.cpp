@@ -3,14 +3,15 @@
 #include "DWCPartViewportClient.h"
 
 #include "AdvancedPreviewScene.h"
-#include "Algo/Sort.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "InputCoreTypes.h"
 #include "SceneView.h"
 #include "SEditorViewport.h"
 #include "SDWCPartViewport.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorMemoryDiagnostics.h"
 #include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
+#include "WetClothing/Modes/Part/Topology/DWCPartTopologyCache.h"
 
 FDWCPartViewportClient::FDWCPartViewportClient(
     FAdvancedPreviewScene*              InPreviewScene,
@@ -82,7 +83,10 @@ void FDWCPartViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitProxy,
     }
 
     const USkeletalMeshComponent* MeshComponent = PreviewMeshComponent.Get();
-    if (MeshComponent == nullptr || PickTriangles.IsEmpty() || PickBVHNodes.IsEmpty())
+    const FDWCPartTopologyCacheValue* Topology =
+        ActivePickTopologyLease.GetAs<FDWCPartTopologyCacheValue>();
+    if (MeshComponent == nullptr || Topology == nullptr ||
+        Topology->PickTriangles.IsEmpty() || Topology->PickBVHNodes.IsEmpty())
     {
         return;
     }
@@ -105,15 +109,16 @@ void FDWCPartViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitProxy,
     while (!NodeStack.IsEmpty())
     {
         const int32 NodeIndex = NodeStack.Pop(EAllowShrinking::No);
-        if (!PickBVHNodes.IsValidIndex(NodeIndex))
+        if (!Topology->PickBVHNodes.IsValidIndex(NodeIndex))
         {
             continue;
         }
 
-        const FPickBVHNode& Node = PickBVHNodes[NodeIndex];
+        const FDWCPartPickBVHNode& Node = Topology->PickBVHNodes[NodeIndex];
+        const FBox NodeBounds(FVector(Node.Bounds.Min), FVector(Node.Bounds.Max));
         if (!Node.Bounds.IsValid ||
             !FMath::LineBoxIntersection(
-                Node.Bounds,
+                NodeBounds,
                 LocalRayOrigin,
                 LocalRayEnd,
                 LocalRayDirection))
@@ -137,25 +142,25 @@ void FDWCPartViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitProxy,
         const int32 EndTriangle = Node.FirstTriangle + Node.TriangleCount;
         for (int32 OrderedIndex = Node.FirstTriangle; OrderedIndex < EndTriangle; ++OrderedIndex)
         {
-            if (!PickTriangleIndices.IsValidIndex(OrderedIndex))
+            if (!Topology->PickTriangleIndices.IsValidIndex(OrderedIndex))
             {
                 continue;
             }
-            const int32 TriangleIndex = PickTriangleIndices[OrderedIndex];
-            if (!PickTriangles.IsValidIndex(TriangleIndex))
+            const int32 TriangleIndex = Topology->PickTriangleIndices[OrderedIndex];
+            if (!Topology->PickTriangles.IsValidIndex(TriangleIndex))
             {
                 continue;
             }
 
-            const FPickTriangle& Triangle = PickTriangles[TriangleIndex];
+            const FDWCPartPickTriangle& Triangle = Topology->PickTriangles[TriangleIndex];
             FVector              LocalIntersectionPoint = FVector::ZeroVector;
             FVector              TriangleNormal = FVector::ZeroVector;
             if (!FMath::SegmentTriangleIntersection(
                     LocalRayOrigin,
                     LocalRayEnd,
-                    Triangle.Positions[0],
-                    Triangle.Positions[1],
-                    Triangle.Positions[2],
+                    FVector(Triangle.Positions[0]),
+                    FVector(Triangle.Positions[1]),
+                    FVector(Triangle.Positions[2]),
                     LocalIntersectionPoint,
                     TriangleNormal))
             {
@@ -230,156 +235,44 @@ void FDWCPartViewportClient::SetPreviewMeshComponent(const USkeletalMeshComponen
     PreviewMeshComponent = InPreviewMeshComponent;
 }
 
-int32 FDWCPartViewportClient::BuildPickBVHNode(
-    const int32 FirstTriangle,
-    const int32 TriangleCount)
+void FDWCPartViewportClient::SetPickableTopology(FDWCEditorCacheLease&& InTopologyLease)
 {
-    const int32   NodeIndex = PickBVHNodes.AddDefaulted();
-    FPickBVHNode& Node = PickBVHNodes[NodeIndex];
-    Node.FirstTriangle = FirstTriangle;
-    Node.TriangleCount = TriangleCount;
-
-    FBox Bounds(ForceInit);
-    FBox CentroidBounds(ForceInit);
-    for (int32 OrderedIndex = FirstTriangle; OrderedIndex < FirstTriangle + TriangleCount; ++OrderedIndex)
-    {
-        const FPickTriangle& Triangle = PickTriangles[PickTriangleIndices[OrderedIndex]];
-        Bounds += Triangle.Bounds;
-        CentroidBounds += Triangle.Centroid;
-    }
-    Node.Bounds = Bounds;
-
-    constexpr int32 MaxTrianglesPerLeaf = 12;
-    if (TriangleCount <= MaxTrianglesPerLeaf || !CentroidBounds.IsValid)
-    {
-        return NodeIndex;
-    }
-
-    const FVector Extent = CentroidBounds.GetExtent();
-    int32         SplitAxis = 0;
-    if (Extent.Y > Extent.X && Extent.Y >= Extent.Z)
-    {
-        SplitAxis = 1;
-    }
-    else if (Extent.Z > Extent.X && Extent.Z > Extent.Y)
-    {
-        SplitAxis = 2;
-    }
-
-    TArrayView<int32> OrderedView(
-        PickTriangleIndices.GetData() + FirstTriangle,
-        TriangleCount);
-    Algo::Sort(
-        OrderedView,
-        [this, SplitAxis](const int32 A, const int32 B)
-        {
-            return PickTriangles[A].Centroid[SplitAxis] < PickTriangles[B].Centroid[SplitAxis];
-        });
-
-    const int32 LeftCount = TriangleCount / 2;
-    const int32 RightCount = TriangleCount - LeftCount;
-    if (LeftCount <= 0 || RightCount <= 0)
-    {
-        return NodeIndex;
-    }
-
-    const int32 LeftChild = BuildPickBVHNode(FirstTriangle, LeftCount);
-    const int32 RightChild = BuildPickBVHNode(FirstTriangle + LeftCount, RightCount);
-    PickBVHNodes[NodeIndex].LeftChild = LeftChild;
-    PickBVHNodes[NodeIndex].RightChild = RightChild;
-    PickBVHNodes[NodeIndex].TriangleCount = 0;
-    return NodeIndex;
-}
-
-void FDWCPartViewportClient::RebuildPickBVH(
-    const TArray<FWetClothingAssetUVIsland>& InIslands)
-{
-    PickTriangles.Reset();
-    PickTriangleIndices.Reset();
-    PickBVHNodes.Reset();
-
-    int32 TriangleReserveCount = 0;
-    for (const FWetClothingAssetUVIsland& Island : InIslands)
-    {
-        TriangleReserveCount += Island.UVTriangles.Num();
-    }
-    PickTriangles.Reserve(TriangleReserveCount);
-
-    for (const FWetClothingAssetUVIsland& Island : InIslands)
-    {
-        for (const FWetClothingAssetUVTriangle& SourceTriangle : Island.UVTriangles)
-        {
-            FPickTriangle& Triangle = PickTriangles.AddDefaulted_GetRef();
-            Triangle.UVIslandID = Island.UVIslandID;
-            Triangle.Bounds = FBox(ForceInit);
-            for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
-            {
-                Triangle.Positions[CornerIndex] = SourceTriangle.LocalPositions[CornerIndex];
-                Triangle.Bounds += Triangle.Positions[CornerIndex];
-            }
-            Triangle.Centroid =
-                (Triangle.Positions[0] + Triangle.Positions[1] + Triangle.Positions[2]) / 3.0;
-        }
-    }
-
-    PickTriangleIndices.Reserve(PickTriangles.Num());
-    for (int32 TriangleIndex = 0; TriangleIndex < PickTriangles.Num(); ++TriangleIndex)
-    {
-        PickTriangleIndices.Add(TriangleIndex);
-    }
-    if (!PickTriangles.IsEmpty())
-    {
-        BuildPickBVHNode(0, PickTriangles.Num());
-    }
-}
-
-void FDWCPartViewportClient::SetPickableIslands(
-    const TArray<FWetClothingAssetUVIsland>& InIslands,
-    const uint32                             TopologyCacheKey)
-{
-    if (TopologyCacheKey != 0 && ActivePickTopologyCacheKey == TopologyCacheKey)
-    {
-        return;
-    }
-
-    if (TopologyCacheKey != 0)
-    {
-        if (const FPickBVHCacheEntry* Cached = PickBVHCache.Find(TopologyCacheKey))
-        {
-            PickTriangles = Cached->Triangles;
-            PickTriangleIndices = Cached->TriangleIndices;
-            PickBVHNodes = Cached->Nodes;
-            ActivePickTopologyCacheKey = TopologyCacheKey;
-            return;
-        }
-    }
-
-    RebuildPickBVH(InIslands);
-    ActivePickTopologyCacheKey = TopologyCacheKey;
-
-    if (TopologyCacheKey != 0)
-    {
-        if (PickBVHCache.Num() >= 8)
-        {
-            PickBVHCache.Reset();
-        }
-        FPickBVHCacheEntry& Cached = PickBVHCache.FindOrAdd(TopologyCacheKey);
-        Cached.Triangles = PickTriangles;
-        Cached.TriangleIndices = PickTriangleIndices;
-        Cached.Nodes = PickBVHNodes;
-    }
+    ActivePickTopologyLease = MoveTemp(InTopologyLease);
 }
 
 void FDWCPartViewportClient::ClearPickableIslandCache()
 {
-    PickBVHCache.Reset();
-    ActivePickTopologyCacheKey = 0;
-    PickTriangles.Reset();
-    PickTriangleIndices.Reset();
-    PickBVHNodes.Reset();
+    ActivePickTopologyLease.Reset();
 }
 
 void FDWCPartViewportClient::SetPreviewPaused(const bool bInPaused)
 {
     bPreviewPaused = bInPaused;
+}
+
+void FDWCPartViewportClient::CollectMemoryDiagnostics(
+    TArray<FDWCEditorMemoryOwnerRecord>& OutOwners) const
+{
+    const FDWCPartTopologyCacheValue* Topology =
+        ActivePickTopologyLease.GetAs<FDWCPartTopologyCacheValue>();
+    const uint64 Bytes = ActivePickTopologyLease.GetAllocatedSizeBytes();
+    const int32 TriangleCount = Topology != nullptr ? Topology->PickTriangles.Num() : 0;
+    const int32 NodeCount = Topology != nullptr ? Topology->PickBVHNodes.Num() : 0;
+
+    FDWCEditorMemoryOwnerRecord& Owner = OutOwners.AddDefaulted_GetRef();
+    Owner.Identifier = FString::Printf(TEXT("WetPartViewportClient.%p.PickBVH"), this);
+    Owner.Subsystem = TEXT("WetPart");
+    Owner.Resource = TEXT("PickBVH");
+    Owner.Category = EDWCEditorMemoryCategory::SharedCacheCPU;
+    Owner.Accounting = EDWCEditorMemoryAccounting::Resident;
+    // The shared cache store owns and reports the retained bytes. The viewport only
+    // reports that it currently holds a lease so global diagnostics do not double-count.
+    Owner.CurrentBytes = 0;
+    Owner.EntryCount = ActivePickTopologyLease.IsValid() ? 1 : 0;
+    Owner.Context = FString::Printf(
+        TEXT("leasedTriangles=%d; leasedNodes=%d; leasedBytes=%.2f MiB; activeLeases=%u"),
+        TriangleCount,
+        NodeCount,
+        static_cast<double>(Bytes) / (1024.0 * 1024.0),
+        ActivePickTopologyLease.GetActiveLeaseCount());
 }

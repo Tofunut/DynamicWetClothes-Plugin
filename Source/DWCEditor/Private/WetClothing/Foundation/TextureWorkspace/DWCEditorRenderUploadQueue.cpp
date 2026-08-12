@@ -425,39 +425,43 @@ void FDWCEditorRenderUploadQueue::CancelOwner(const UObject* Owner)
 void FDWCEditorRenderUploadQueue::Flush()
 {
     check(IsInGameThread());
-    if (bShuttingDown || PendingUploads.IsEmpty())
+    if (bShuttingDown)
     {
         return;
     }
 
-    TArray<FDWCEditorTextureKey> Keys;
-    PendingUploads.GenerateKeyArray(Keys);
-    Keys.Sort(
-        [this](const FDWCEditorTextureKey& A, const FDWCEditorTextureKey& B)
-        {
-            const FPendingUpload& UploadA = PendingUploads.FindChecked(A);
-            const FPendingUpload& UploadB = PendingUploads.FindChecked(B);
-            if (UploadA.Priority != UploadB.Priority)
-            {
-                return static_cast<uint8>(UploadA.Priority) > static_cast<uint8>(UploadB.Priority);
-            }
-            return UploadA.QueuedSerial < UploadB.QueuedSerial;
-        });
-
-    uint64 SubmittedThisFlush = 0;
-    for (const FDWCEditorTextureKey& Key : Keys)
+    if (!PendingUploads.IsEmpty())
     {
-        if (SubmittedThisFlush >= PerFlushBudgetBytes)
+        TArray<FDWCEditorTextureKey> Keys;
+        PendingUploads.GenerateKeyArray(Keys);
+        Keys.Sort(
+            [this](const FDWCEditorTextureKey& A, const FDWCEditorTextureKey& B)
+            {
+                const FPendingUpload& UploadA = PendingUploads.FindChecked(A);
+                const FPendingUpload& UploadB = PendingUploads.FindChecked(B);
+                if (UploadA.Priority != UploadB.Priority)
+                {
+                    return static_cast<uint8>(UploadA.Priority) > static_cast<uint8>(UploadB.Priority);
+                }
+                return UploadA.QueuedSerial < UploadB.QueuedSerial;
+            });
+
+        uint64 SubmittedThisFlush = 0;
+        for (const FDWCEditorTextureKey& Key : Keys)
         {
-            break;
+            if (SubmittedThisFlush >= PerFlushBudgetBytes)
+            {
+                break;
+            }
+            ProcessPendingUpload(
+                Key,
+                SubmittedThisFlush,
+                PerFlushBudgetBytes,
+                0.0,
+                static_cast<uint32>(PendingUploads.Num()));
         }
-        ProcessPendingUpload(
-            Key,
-            SubmittedThisFlush,
-            PerFlushBudgetBytes,
-            0.0,
-            static_cast<uint32>(PendingUploads.Num()));
     }
+    PromoteCompletedUploads();
     DispatchNotifications();
 }
 
@@ -497,10 +501,12 @@ EDWCEditorTextureUploadStatus FDWCEditorRenderUploadQueue::TrySubmitInteractive(
         EffectiveByteBudget,
         DeadlineSeconds,
         static_cast<uint32>(PendingUploads.Num()));
+    PromoteCompletedUploads();
     DispatchNotifications();
 
     const EDWCEditorTextureUploadStatus Status = GetStatus(Ticket);
-    if (Status == EDWCEditorTextureUploadStatus::RenderEnqueued)
+    if (Status == EDWCEditorTextureUploadStatus::RenderEnqueued ||
+        Status == EDWCEditorTextureUploadStatus::Completed)
     {
         ++ImmediateInteractiveSubmitCount;
     }
@@ -787,7 +793,7 @@ FDWCEditorTextureUploadTicket FDWCEditorRenderUploadQueue::CaptureSubmittedTicke
     {
         Ticket.State = MakeShared<FDWCEditorTextureUploadState, ESPMode::ThreadSafe>();
     }
-    Ticket.State->Status = EDWCEditorTextureUploadStatus::RenderEnqueued;
+    Ticket.State->Status = EDWCEditorTextureUploadStatus::Completed;
     Submitted.Telemetry = Ticket.Telemetry;
     Submitted.State = Ticket.State;
     return Ticket;
@@ -821,7 +827,7 @@ EDWCEditorTextureUploadStatus FDWCEditorRenderUploadQueue::GetStatus(
         return EDWCEditorTextureUploadStatus::Stale;
     }
     const EDWCEditorTextureUploadStatus Status = Ticket.State->Status;
-    if (Status == EDWCEditorTextureUploadStatus::RenderEnqueued && Ticket.Telemetry.IsValid())
+    if (Status == EDWCEditorTextureUploadStatus::Completed && Ticket.Telemetry.IsValid())
     {
         Ticket.Telemetry->MarkObserved();
     }
@@ -839,7 +845,8 @@ FDWCEditorTextureUploadObserverHandle FDWCEditorRenderUploadQueue::Observe(
         return Handle;
     }
 
-    if (Ticket.State->Status != EDWCEditorTextureUploadStatus::Queued)
+    if (Ticket.State->Status == EDWCEditorTextureUploadStatus::Completed ||
+        Ticket.State->Status == EDWCEditorTextureUploadStatus::Stale)
     {
         ++ObserverNotificationCount;
         Observer(Ticket.State->Status);
@@ -871,7 +878,7 @@ void FDWCEditorRenderUploadQueue::TransitionState(
         return;
     }
     State->Status = NewStatus;
-    if (NewStatus != EDWCEditorTextureUploadStatus::RenderEnqueued &&
+    if (NewStatus != EDWCEditorTextureUploadStatus::Completed &&
         NewStatus != EDWCEditorTextureUploadStatus::Stale)
     {
         return;
@@ -887,6 +894,28 @@ void FDWCEditorRenderUploadQueue::TransitionState(
             });
     }
     State->Observers.Reset();
+}
+
+void FDWCEditorRenderUploadQueue::PromoteCompletedUploads()
+{
+    check(IsInGameThread());
+    for (TPair<FDWCEditorTextureKey, FRenderEnqueuedRevision>& Pair : RenderEnqueuedRevisions)
+    {
+        FRenderEnqueuedRevision& Revision = Pair.Value;
+        if (!Revision.State.IsValid() ||
+            Revision.State->Status != EDWCEditorTextureUploadStatus::RenderEnqueued ||
+            !Revision.Telemetry.IsValid())
+        {
+            continue;
+        }
+
+        const FDWCEditorTextureUploadTiming Timing = Revision.Telemetry->Snapshot();
+        if (Timing.SubmittedRegionCount > 0 &&
+            Timing.CompletedRegionCount >= Timing.SubmittedRegionCount)
+        {
+            TransitionState(Revision.State, EDWCEditorTextureUploadStatus::Completed);
+        }
+    }
 }
 
 void FDWCEditorRenderUploadQueue::DispatchNotifications()
@@ -1121,6 +1150,11 @@ void FDWCEditorRenderUploadQueue::AppendDiagnosticMemoryBucket(
     Bucket.UsedBytes = StagingState->InFlightBytes.Load();
     Bucket.BudgetBytes = StagingBudgetBytes;
     Bucket.EntryCount = PendingUploads.Num();
+    Bucket.GlobalOwnerIdentifier = FString::Printf(
+        TEXT("RenderUploadQueue/%p"),
+        static_cast<const void*>(this));
+    Bucket.GlobalCategory = EDWCEditorMemoryCategory::UploadStagingCPU;
+    Bucket.bIncludeInGlobalSnapshot = true;
 }
 
 void FDWCEditorRenderUploadQueue::AppendDiagnosticOperationCounters(

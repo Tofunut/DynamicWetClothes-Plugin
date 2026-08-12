@@ -33,6 +33,25 @@ enum class EDWCTransparencyUVAddressMode : uint8
     Wrap
 };
 
+/** Persisted authoring intent. Selection alone never creates or enables a layer. */
+UENUM(BlueprintType)
+enum class EDWCTransparencyLayerIntent : uint8
+{
+    Draft,
+    Enabled,
+    Disabled
+};
+
+/** Determines how a target slot chooses the square Transparency authoring resolution. */
+UENUM(BlueprintType)
+enum class EDWCTransparencyOutputResolutionMode : uint8
+{
+    /** Resolve from the original target material's effective Base Color texture chain. */
+    Auto,
+    /** Use the explicitly authored per-layer resolution. */
+    Override
+};
+
 UENUM(BlueprintType)
 enum class EDWCTransparencyBrushMode : uint8
 {
@@ -96,6 +115,7 @@ struct DWC_API FDWCTransparencyTempArtifactReference
     UPROPERTY()
     FGuid TextureSourceId;
 
+    /** Serialized resolved target-output extent for this editor artifact. */
     UPROPERTY()
     FIntPoint Resolution = FIntPoint::ZeroValue;
 
@@ -137,9 +157,9 @@ struct DWC_API FDWCTransparencyMaterialColorCacheReference
     UPROPERTY()
     int32 SourceUVChannel = 0;
 
+    /** Requested source material evaluation resolution, independent of the target output. */
     UPROPERTY()
-    /** Requested Stage 2 resolution. This remains the cache's logical sampling resolution. */
-    int32 Resolution = 0;
+    int32 SourceBakeResolution = 0;
 
     /** Actual dimensions stored in Texture. Uniform material output may be represented as 1x1. */
     UPROPERTY()
@@ -530,6 +550,7 @@ struct DWC_API FWetClothingTransparencyAutoBakeMetadata
     UPROPERTY(VisibleAnywhere, Category = "Transparency Auto Bake")
     FString BuildSignature;
 
+    /** Resolved per-slot target-output resolution used by the Stage 2 payload. */
     UPROPERTY(VisibleAnywhere, Category = "Transparency Auto Bake")
     int32 Resolution = 1024;
 
@@ -589,6 +610,7 @@ struct DWC_API FWetClothingBakedTransparencyMap
     bool bContainsRevealSurfaceCoverageAlpha = false;
 #endif
 
+    /** Resolved per-slot runtime output resolution shared by both runtime textures. */
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     int32 Resolution = 1024;
 
@@ -687,6 +709,15 @@ struct DWC_API FWetClothingTransparencyLayerData
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     FGuid LayerGuid;
 
+    /**
+     * Draft layers are explicit editor work but do not require runtime output.
+     * Enabled layers participate in validation, build and runtime lookup.
+     * Disabled layers preserve authored data while opting out of runtime output.
+     * The Enabled default preserves the behavior of assets serialized before this field existed.
+     */
+    UPROPERTY(EditAnywhere, Category = "Transparency Layer")
+    EDWCTransparencyLayerIntent Intent = EDWCTransparencyLayerIntent::Enabled;
+
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     FWetClothingTransparencyTargetSurface TargetSurface;
 
@@ -700,6 +731,14 @@ struct DWC_API FWetClothingTransparencyLayerData
 
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     FWetClothingTransparencyRaySettings RaySettings;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Layer|Resolution")
+    EDWCTransparencyOutputResolutionMode OutputResolutionMode =
+        EDWCTransparencyOutputResolutionMode::Auto;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Layer|Resolution",
+        meta = (ClampMin = "256", ClampMax = "4096", UIMin = "256", UIMax = "4096"))
+    int32 OutputResolutionOverride = 2048;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     FWetClothingTransparencySameMeshSource SameMeshSource;
@@ -753,6 +792,11 @@ struct DWC_API FWetClothingTransparencyLayerData
     {
         return RequiresRevealSurface() && bEnableRevealNormal;
     }
+
+    bool IsRuntimeEnabled() const
+    {
+        return Intent == EDWCTransparencyLayerIntent::Enabled;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -760,8 +804,9 @@ struct DWC_API FWetClothingTransparencyData
 {
     GENERATED_BODY()
 
-    // Editor-only cache metadata is additive and does not require authoring-data migration.
-    static constexpr int32 CurrentDataVersion = 12;
+    static constexpr int32 PerLayerResolutionDataVersion = 13;
+    static constexpr int32 LayerIntentDataVersion = 14;
+    static constexpr int32 CurrentDataVersion = LayerIntentDataVersion;
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency")
     int32 DataVersion = CurrentDataVersion;
@@ -783,7 +828,9 @@ struct DWC_API FWetClothingTransparencyData
     UPROPERTY()
     bool bCharacterStructureTypeConfigured = false;
 
-    UPROPERTY(EditAnywhere, Category = "Transparency", meta = (ClampMin = "16", UIMin = "128", UIMax = "4096"))
+    /** Legacy WCA-wide value retained only to migrate pre-v13 layers without changing their output. */
+    UPROPERTY(meta = (DeprecatedProperty,
+        DeprecationMessage = "Transparency resolution is authored per target layer."))
     int32 TransparencyBakeResolution = 1024;
 
     UPROPERTY(EditAnywhere, Category = "Transparency", meta = (ClampMin = "0", ClampMax = "64"))
@@ -836,6 +883,14 @@ struct DWC_API FWetClothingTransparencyData
     const FWetClothingBakedTransparencyMap* FindRuntimeBakedTransparencyMap(int32 MaterialSlotIndex) const;
 
     UTexture2D* ResolveBakedTransparencyMap(int32 MaterialSlotIndex) const;
+
+#if WITH_EDITORONLY_DATA
+    /** Upgrades pre-intent layers without loading or deleting referenced assets. */
+    bool NormalizeLegacyLayerIntents(
+        const FString& AssetIdentity,
+        int32& OutDraftCount,
+        int32& OutRepairedIdentityCount);
+#endif
 };
 
 class DWC_API FWetClothingTransparencyDataHelpers

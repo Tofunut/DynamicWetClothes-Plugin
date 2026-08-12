@@ -135,6 +135,7 @@ class FDWCEditorRenderUploadQueue final
     void TransitionState(
         const TSharedPtr<FDWCEditorTextureUploadState, ESPMode::ThreadSafe>& State,
         EDWCEditorTextureUploadStatus NewStatus);
+    void PromoteCompletedUploads();
     void DispatchNotifications();
 
     bool SubmitRegion(

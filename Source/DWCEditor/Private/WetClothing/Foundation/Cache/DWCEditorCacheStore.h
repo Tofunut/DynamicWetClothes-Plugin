@@ -152,7 +152,8 @@ class FDWCEditorCacheLease final
 
 /**
  * WCA editor-instance cache with one byte budget and LRU policy.
- * Values are immutable after insertion and may remain alive through client handles after eviction.
+ * Values are immutable after insertion and remain alive after eviction only
+ * while a client retains the corresponding FDWCEditorCacheLease.
  */
 class FDWCEditorCacheStore final
 {
@@ -165,8 +166,9 @@ class FDWCEditorCacheStore final
         const FGuid& InSessionEpoch,
         uint64 InBudgetBytes = DefaultBudgetBytes);
 
+    /** Non-owning presence query. Payload access always requires FindLease(). */
     template <typename TValue>
-    TSharedPtr<const TValue, ESPMode::ThreadSafe> Find(const FDWCEditorCacheKey& Key)
+    bool Contains(const FDWCEditorCacheKey& Key)
     {
         check(IsInGameThread());
         CleanupRetiredEntries();
@@ -177,12 +179,12 @@ class FDWCEditorCacheStore final
             (*EntryPtr)->Value->GetCacheTypeName() != TValue::StaticCacheTypeName())
         {
             ++MissCount;
-            return nullptr;
+            return false;
         }
 
         ++HitCount;
         (*EntryPtr)->LastUsedSerial = ++UseSerial;
-        return StaticCastSharedPtr<const TValue>((*EntryPtr)->Value);
+        return true;
     }
 
     /** Acquires an active lifetime lease for an existing cache entry. */
@@ -210,6 +212,8 @@ class FDWCEditorCacheStore final
     void InvalidateNamespace(FName Namespace);
     void Reset();
     void TrimToBudget();
+    uint64 GetReclaimableBytes() const;
+    uint64 ReclaimUnleasedBytes(uint64 TargetBytes);
 
     /** Tracked cache memory, including active retired entries held by leases. */
     uint64 GetUsedBytes() const { return UsedBytes + GetRetiredBytes(); }
@@ -218,13 +222,14 @@ class FDWCEditorCacheStore final
     int32 GetEntryCount() const { return Entries.Num(); }
     int32 GetRetiredEntryCount() const;
     int32 GetActiveLeaseCount() const;
+    uint64 GetAdmissionRejectCount() const { return AdmissionRejectCount; }
     void AppendDiagnosticMemoryBucket(TArray<FDWCEditorPreviewMemoryBucket>& OutBuckets) const;
     void ResetDiagnosticCounters();
 
   private:
     void CleanupRetiredEntries();
     void TrackRetiredEntry(const TSharedPtr<FDWCEditorCacheEntry>& Entry);
-    bool EvictOldestUnleased();
+    bool EvictOldestUnleased(const FDWCEditorCacheKey* ExcludedKey = nullptr);
     uint64 GetTrackedBytes() const { return UsedBytes + GetRetiredBytes(); }
     void RemoveEntry(const FDWCEditorCacheKey& Key, bool bCountEviction);
 

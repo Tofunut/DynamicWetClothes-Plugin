@@ -84,5 +84,6 @@ class FDWCTransparencyAffectedStage4Rebake
         const FWetClothingTransparencyLayerData& Layer,
         const FDWCTransparencySourcePayload& Identity,
         FDWCTransparencySourcePayload& OutResult,
-        FString& OutError);
+        FString& OutError,
+        bool bRequireOuterIslandID = true);
 };

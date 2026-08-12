@@ -4,6 +4,8 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "Engine/SkeletalMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "WetClothing/Modes/Transparency/MaterialBake/DWCTransparencyMaterialBakeResolutionResolver.h"
 #include "WetClothing/Modes/Transparency/MaterialBake/DWCTransparencyMaterialColorBakeCache.h"
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurface.h"
 
@@ -18,17 +20,9 @@ namespace
 uint64 FDWCTransparencyType1SourceBindings::GetAllocatedBytes() const
 {
     uint64 Bytes = SurfacesBySourceLayerId.GetAllocatedSize() + Warnings.GetAllocatedSize();
-    // Pixel payloads are shared cache residents. Account them once in the job
-    // estimate so scheduler admission reflects the memory held by this snapshot.
-    TSet<const FDWCTransparencyMaterialColorBakeResult*> UniqueResults;
-    for (const TPair<FName, TSharedPtr<const FDWCTransparencyMaterialColorBakeResult>>& Pair : SurfacesBySourceLayerId)
-    {
-        if (Pair.Value.IsValid() && !UniqueResults.Contains(Pair.Value.Get()))
-        {
-            UniqueResults.Add(Pair.Value.Get());
-            Bytes += Pair.Value->AllocatedBytes;
-        }
-    }
+    // Surface pixels are immutable SharedCacheCPU residents and retain their
+    // own accountable lease. A worker snapshot owns only this map of handles;
+    // charging the pixels here would reserve the same memory twice.
     return Bytes;
 }
 
@@ -83,13 +77,25 @@ bool FDWCTransparencyType1SourceProvider::AddValidatedBinding(
         return false;
     }
 
-    const int32 Resolution = FMath::Clamp(
-        Asset.Authored.TransparencyData.TransparencyBakeResolution, 16, 4096);
+    UMaterialInterface* EffectiveMaterial =
+        SourceMesh->GetMaterials().IsValidIndex(InnerSlot.MaterialSlotIndex)
+        ? SourceMesh->GetMaterials()[InnerSlot.MaterialSlotIndex].MaterialInterface
+        : nullptr;
+    if (EffectiveMaterial == nullptr)
+    {
+        OutError = FString::Printf(
+            TEXT("Inner Source Part '%s' has no effective source material."),
+            *InnerSlot.MaterialSlotName.ToString());
+        return false;
+    }
+
+    const FDWCTransparencyResolvedMaterialBakeResolution SourceBakeResolution =
+        FDWCTransparencyMaterialBakeResolutionResolver::Resolve(EffectiveMaterial);
     FString BakeError;
     TSharedPtr<const FDWCTransparencyMaterialColorBakeResult> Result =
         FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
             Asset, *SourceMesh, InnerSlot.MaterialSlotIndex, InnerSlot.SourceUVChannel,
-            Resolution, BakeError);
+            SourceBakeResolution.Resolution, BakeError);
     if (!Result.IsValid())
     {
         OutError = FString::Printf(

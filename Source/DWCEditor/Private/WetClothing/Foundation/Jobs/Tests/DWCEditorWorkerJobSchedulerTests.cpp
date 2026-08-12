@@ -108,7 +108,10 @@ bool FDWCEditorWorkerMemoryEstimateTest::RunTest(const FString& Parameters)
 
     FDWCEditorWorkerJobDescriptor Descriptor;
     Descriptor.MemoryEstimate = Estimate;
-    TestEqual(TEXT("A categorized descriptor reserves its category total"), Descriptor.GetReservedBytes(), 31ull);
+    TestEqual(
+        TEXT("A descriptor reserves only operation-private memory."),
+        Descriptor.GetReservedBytes(),
+        30ull);
     const FDWCEditorMemoryBreakdown Breakdown = Estimate.ToMemoryBreakdown();
     TestEqual(TEXT("Canonical memory preserves shared bytes"), Breakdown.SharedResidentBytes, 1ull);
     TestEqual(TEXT("Canonical memory preserves snapshot bytes"), Breakdown.SnapshotBytes, 2ull);
@@ -1185,6 +1188,107 @@ bool FDWCEditorWorkerDetachedLeaseRetirementTest::RunTest(const FString& Paramet
     TestEqual(TEXT("Detached completion is reported exactly once"), FinishedCount, 1);
     FPlatformProcess::ReturnSynchEventToPool(ReleaseWork);
     FPlatformProcess::ReturnSynchEventToPool(WorkStarted);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorWorkerCommitLeaseShrinkTest,
+    "DWC.Editor.Authoring.Worker.CommitLeaseShrink",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorWorkerCommitLeaseShrinkTest::RunTest(const FString&)
+{
+    TSharedRef<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler =
+        MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(1, 256, 256);
+    FDWCEditorWorkerJobDescriptor Descriptor;
+    Descriptor.MemoryEstimate.WorkingBytes = 192;
+    Descriptor.DebugName = TEXT("Commit lease shrink");
+    uint64 ReservedDuringApply = 0;
+    int32 AppliedCount = 0;
+
+    SubmitPreparedWork(
+        Scheduler,
+        Descriptor,
+        [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+        {
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> Result =
+                MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
+            Result->CommitMemoryEstimate.OutputBytes = 32;
+            return Result;
+        },
+        [&Scheduler, &ReservedDuringApply, &AppliedCount](
+            const FDWCEditorWorkerJobTicket&,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>)
+        {
+            ReservedDuringApply = Scheduler->GetReservedBytes();
+            ++AppliedCount;
+        });
+
+    TestTrue(TEXT("The job reaches commit"),
+        PumpWorkerCompletionsUntil([&AppliedCount]() { return AppliedCount == 1; }));
+    TestEqual(TEXT("Commit owns only the declared retained result"), ReservedDuringApply, 32ull);
+    TestEqual(TEXT("Retirement releases the commit lease"), Scheduler->GetReservedBytes(), 0ull);
+    Scheduler->Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorWorkerAdmissionBarrierTest,
+    "DWC.Editor.Authoring.Worker.AdmissionBarrier",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorWorkerAdmissionBarrierTest::RunTest(const FString&)
+{
+    TSharedRef<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler =
+        MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(1, 1024, 1024);
+    Scheduler->SetAdmissionBarrier(
+        [](const FDWCEditorWorkerJobDescriptor& Descriptor, FString& OutReason)
+        {
+            if (Descriptor.WorkClass == EDWCEditorWorkClass::InteractivePreview)
+            {
+                OutReason = TEXT("Exclusive Build owns editor resources.");
+                return false;
+            }
+            return true;
+        });
+
+    FDWCEditorWorkerJobDescriptor PreviewDescriptor;
+    PreviewDescriptor.WorkClass = EDWCEditorWorkClass::InteractivePreview;
+    PreviewDescriptor.MemoryEstimate.SnapshotBytes = 1;
+    FString Error;
+    const FDWCEditorWorkerJobTicket PreviewTicket = SubmitPreparedWork(
+        Scheduler,
+        PreviewDescriptor,
+        [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+        {
+            return MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
+        },
+        [](const FDWCEditorWorkerJobTicket&,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>) {},
+        &Error);
+    TestFalse(TEXT("The barrier rejects interactive preview before preparation"), PreviewTicket.IsValid());
+    TestTrue(TEXT("The barrier rejection is returned to the caller"), Error.Contains(TEXT("Exclusive Build")));
+
+    FDWCEditorWorkerJobDescriptor BuildDescriptor;
+    BuildDescriptor.WorkClass = EDWCEditorWorkClass::UserBuild;
+    BuildDescriptor.MemoryEstimate.SnapshotBytes = 1;
+    int32 AppliedCount = 0;
+    const FDWCEditorWorkerJobTicket BuildTicket = SubmitPreparedWork(
+        Scheduler,
+        BuildDescriptor,
+        [](const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe>&)
+        {
+            return MakeShared<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>();
+        },
+        [&AppliedCount](const FDWCEditorWorkerJobTicket&,
+            TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>)
+        {
+            ++AppliedCount;
+        });
+    TestTrue(TEXT("An unrelated work class remains admissible"), BuildTicket.IsValid());
+    TestTrue(TEXT("The admitted Build job applies"),
+        PumpWorkerCompletionsUntil([&AppliedCount]() { return AppliedCount == 1; }));
+    Scheduler->Shutdown();
     return true;
 }
 

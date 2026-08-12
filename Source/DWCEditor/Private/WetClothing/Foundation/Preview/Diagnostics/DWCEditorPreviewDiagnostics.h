@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorMemoryDiagnostics.h"
 
 class FDWCEditorPreviewSession;
 class FDWCEditorPreviewCommitCoordinator;
@@ -14,6 +15,8 @@ DECLARE_LOG_CATEGORY_EXTERN(LogDWCEditorPreview, Log, All);
 struct FDWCEditorPreviewMemoryBucket
 {
     FString Name;
+    /** Stable identity used to avoid counting a shared service once per preview session. */
+    FString GlobalOwnerIdentifier;
     uint64  UsedBytes = 0;
     uint64  BudgetBytes = 0;
     int32   EntryCount = 0;
@@ -22,6 +25,9 @@ struct FDWCEditorPreviewMemoryBucket
     uint64  EvictionCount = 0;
     int32   ActiveLeaseCount = 0;
     int32   RetiredEntryCount = 0;
+    EDWCEditorMemoryCategory GlobalCategory = EDWCEditorMemoryCategory::PersistentEditorCPU;
+    /** Aggregate/detail diagnostic buckets stay visible in session dumps but are not double-counted globally. */
+    bool bIncludeInGlobalSnapshot = false;
 };
 
 struct FDWCEditorPreviewOperationCounter
@@ -51,9 +57,12 @@ class FDWCEditorPreviewDiagnostics final
     static void RegisterCommitCoordinator(FDWCEditorPreviewCommitCoordinator* Coordinator);
     static void UnregisterCommitCoordinator(FDWCEditorPreviewCommitCoordinator* Coordinator);
     static void DumpAllSessions();
+    static void AppendGlobalMemoryOwners(TArray<FDWCEditorMemoryOwnerRecord>& OutOwners);
     static void ResetAllCounters();
 
     /** CPU source plus estimated resident resource bytes; intended for diagnostics only. */
     static uint64  EstimateTextureBytes(const UTexture2D* Texture);
+    static uint64  EstimateTextureCPUBytes(const UTexture2D* Texture);
+    static uint64  EstimateTextureGPUBytes(const UTexture2D* Texture);
     static FString FormatBytes(uint64 Bytes);
 };

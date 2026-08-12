@@ -28,6 +28,7 @@ struct FDWCTransparencyStageIdentity
     int32 DataUVChannelIndex = INDEX_NONE;
     int32 LODIndex = 0;
     FIntPoint Resolution = FIntPoint::ZeroValue;
+    FString OutputResolutionIdentity;
     uint64 Revision = 0;
 
     bool IsValid() const;

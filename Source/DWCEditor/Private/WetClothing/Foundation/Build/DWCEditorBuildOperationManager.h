@@ -11,6 +11,8 @@ class FDWCEditorBuildOperationManager final
     : public TSharedFromThis<FDWCEditorBuildOperationManager>
 {
   public:
+    using FActionBarrier = TFunction<bool(EDWCEditorBuildAction, FString&)>;
+
     explicit FDWCEditorBuildOperationManager(
         TSharedRef<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> InScheduler);
 
@@ -19,6 +21,7 @@ class FDWCEditorBuildOperationManager final
         EDWCEditorAsyncRequestPolicy RequestPolicy,
         FDWCEditorBuildOperation::FCompletion Completion,
         FString* OutError = nullptr);
+    void SetActionBarrier(FActionBarrier InBarrier);
 
     void CancelOperation(
         const TSharedRef<FDWCEditorBuildOperation>& Operation,
@@ -35,9 +38,9 @@ class FDWCEditorBuildOperationManager final
     void HandleOperationCompleted(uint64 OperationId);
 
     TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> Scheduler;
+    FActionBarrier ActionBarrier;
     TMap<uint64, TSharedPtr<FDWCEditorBuildOperation>> Operations;
     TMap<EDWCEditorBuildAction, uint64> CurrentOperationByAction;
     uint64 NextOperationId = 1;
     bool bShuttingDown = false;
 };
-

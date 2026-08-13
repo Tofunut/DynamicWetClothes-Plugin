@@ -43,10 +43,16 @@ namespace
 
 FDWCEditorPreviewGPUResidencyManager::FDWCEditorPreviewGPUResidencyManager(
     TSharedRef<FDWCEditorRenderUploadQueue> InUploadQueue,
-    TSharedRef<FDWCEditorTextureWorkspace> InTextureWorkspace)
+    TSharedRef<FDWCEditorTextureWorkspace> InTextureWorkspace,
+    FDWCEditorPreviewResidencyPolicy InPolicy)
     : UploadQueue(MoveTemp(InUploadQueue))
     , TextureWorkspace(MoveTemp(InTextureWorkspace))
+    , Policy(InPolicy)
 {
+    Policy.HostInactiveGPUGraceSeconds = FMath::Max(0.0, Policy.HostInactiveGPUGraceSeconds);
+    Policy.HostInactiveCPUGraceSeconds = FMath::Max(
+        Policy.HostInactiveGPUGraceSeconds,
+        Policy.HostInactiveCPUGraceSeconds);
 }
 
 void FDWCEditorPreviewGPUResidencyManager::SetActiveDomain(
@@ -59,24 +65,56 @@ void FDWCEditorPreviewGPUResidencyManager::SetActiveDomain(
     }
     ActiveDomain = Domain;
     bAllSuspended = false;
+    if (Domain != EDWCEditorPreviewGPUDomain::None)
+    {
+        GetPendingRelease(Domain).Reset();
+    }
 }
 
 void FDWCEditorPreviewGPUResidencyManager::SuspendDomain(
-    const EDWCEditorPreviewGPUDomain Domain)
+    const EDWCEditorPreviewGPUDomain Domain,
+    const EDWCEditorPreviewResourceReleasePolicy ReleasePolicy,
+    const double CurrentTimeSeconds)
 {
     check(IsInGameThread());
     if (Domain == EDWCEditorPreviewGPUDomain::None)
     {
         return;
     }
-    RetireDomainResources(Domain);
+    FPendingDomainRelease& Pending = GetPendingRelease(Domain);
+    Pending.Reset();
+    switch (ReleasePolicy)
+    {
+    case EDWCEditorPreviewResourceReleasePolicy::ModeSwitch:
+        RetiringGPUBytes += RetireDomainResources(Domain);
+        ++ModeSwitchReleaseCount;
+        break;
+    case EDWCEditorPreviewResourceReleasePolicy::DeferredHostInactive:
+    {
+        const double Now = ResolveTimeSeconds(CurrentTimeSeconds);
+        Pending.GPUDeadlineSeconds = Now + Policy.HostInactiveGPUGraceSeconds;
+        Pending.CPUDeadlineSeconds = Now + Policy.HostInactiveCPUGraceSeconds;
+        Pending.bGPUReleasePending = true;
+        Pending.bCPUReleasePending = true;
+        ++DeferredReleaseCount;
+        break;
+    }
+    case EDWCEditorPreviewResourceReleasePolicy::Immediate:
+    default:
+        ReclaimedCPUBytes += ReclaimDomainCPUResources(Domain);
+        RetiringGPUBytes += RetireDomainResources(Domain);
+        ++ImmediateReleaseCount;
+        break;
+    }
     if (ActiveDomain == Domain)
     {
         ActiveDomain = EDWCEditorPreviewGPUDomain::None;
     }
 }
 
-void FDWCEditorPreviewGPUResidencyManager::SuspendAll()
+void FDWCEditorPreviewGPUResidencyManager::SuspendAll(
+    const EDWCEditorPreviewResourceReleasePolicy ReleasePolicy,
+    const double CurrentTimeSeconds)
 {
     check(IsInGameThread());
     for (const EDWCEditorPreviewGPUDomain Domain : {
@@ -84,19 +122,20 @@ void FDWCEditorPreviewGPUResidencyManager::SuspendAll()
              EDWCEditorPreviewGPUDomain::Wrinkle,
              EDWCEditorPreviewGPUDomain::Transparency})
     {
-        RetireDomainResources(Domain);
+        SuspendDomain(Domain, ReleasePolicy, CurrentTimeSeconds);
     }
     ActiveDomain = EDWCEditorPreviewGPUDomain::None;
     bAllSuspended = true;
 }
 
-void FDWCEditorPreviewGPUResidencyManager::Tick()
+void FDWCEditorPreviewGPUResidencyManager::Tick(const double CurrentTimeSeconds)
 {
     check(IsInGameThread());
     if (bShuttingDown)
     {
         return;
     }
+    ApplyDueReleases(ResolveTimeSeconds(CurrentTimeSeconds));
     UploadQueue->Flush();
     TextureWorkspace->ProcessRetiredGPUResources();
 }
@@ -108,8 +147,38 @@ void FDWCEditorPreviewGPUResidencyManager::Shutdown()
     {
         return;
     }
-    SuspendAll();
+    SuspendAll(EDWCEditorPreviewResourceReleasePolicy::Immediate);
     bShuttingDown = true;
+}
+
+bool FDWCEditorPreviewGPUResidencyManager::HasPendingMaintenance() const
+{
+    check(IsInGameThread());
+    for (const FPendingDomainRelease& Pending : PendingReleases)
+    {
+        if (Pending.bGPUReleasePending || Pending.bCPUReleasePending)
+        {
+            return true;
+        }
+    }
+    return TextureWorkspace->HasRetiringGPUResources();
+}
+
+FDWCEditorPreviewResidencyDiagnostics FDWCEditorPreviewGPUResidencyManager::GetDiagnostics() const
+{
+    check(IsInGameThread());
+    FDWCEditorPreviewResidencyDiagnostics Result;
+    Result.RetiringGPUBytes = RetiringGPUBytes;
+    Result.ReclaimedCPUBytes = ReclaimedCPUBytes;
+    Result.ModeSwitchReleaseCount = ModeSwitchReleaseCount;
+    Result.DeferredReleaseCount = DeferredReleaseCount;
+    Result.ImmediateReleaseCount = ImmediateReleaseCount;
+    for (const FPendingDomainRelease& Pending : PendingReleases)
+    {
+        Result.PendingGPUReleaseCount += Pending.bGPUReleasePending ? 1 : 0;
+        Result.PendingCPUReleaseCount += Pending.bCPUReleasePending ? 1 : 0;
+    }
+    return Result;
 }
 
 EDWCEditorPreviewGPUDomain FDWCEditorPreviewGPUResidencyManager::GetDomainForPurpose(
@@ -141,4 +210,55 @@ uint64 FDWCEditorPreviewGPUResidencyManager::RetireDomainResources(
     const EDWCEditorPreviewGPUDomain Domain)
 {
     return TextureWorkspace->RetireUnleasedPurposes(GetPurposesForDomain(Domain));
+}
+
+double FDWCEditorPreviewGPUResidencyManager::ResolveTimeSeconds(const double CurrentTimeSeconds)
+{
+    return CurrentTimeSeconds >= 0.0 ? CurrentTimeSeconds : FPlatformTime::Seconds();
+}
+
+FDWCEditorPreviewGPUResidencyManager::FPendingDomainRelease&
+FDWCEditorPreviewGPUResidencyManager::GetPendingRelease(const EDWCEditorPreviewGPUDomain Domain)
+{
+    return PendingReleases[static_cast<uint8>(Domain)];
+}
+
+const FDWCEditorPreviewGPUResidencyManager::FPendingDomainRelease&
+FDWCEditorPreviewGPUResidencyManager::GetPendingRelease(const EDWCEditorPreviewGPUDomain Domain) const
+{
+    return PendingReleases[static_cast<uint8>(Domain)];
+}
+
+uint64 FDWCEditorPreviewGPUResidencyManager::ReclaimDomainCPUResources(
+    const EDWCEditorPreviewGPUDomain Domain)
+{
+    uint64 NewlyRetiringGPUBytes = 0;
+    const uint64 Bytes = TextureWorkspace->ReclaimUnleasedCPUBytesForPurposes(
+        GetPurposesForDomain(Domain),
+        MAX_uint64,
+        &NewlyRetiringGPUBytes);
+    RetiringGPUBytes += NewlyRetiringGPUBytes;
+    return Bytes;
+}
+
+void FDWCEditorPreviewGPUResidencyManager::ApplyDueReleases(const double CurrentTimeSeconds)
+{
+    for (const EDWCEditorPreviewGPUDomain Domain : {
+             EDWCEditorPreviewGPUDomain::WetPart,
+             EDWCEditorPreviewGPUDomain::Wrinkle,
+             EDWCEditorPreviewGPUDomain::Transparency})
+    {
+        FPendingDomainRelease& Pending = GetPendingRelease(Domain);
+        if (Pending.bGPUReleasePending && CurrentTimeSeconds >= Pending.GPUDeadlineSeconds)
+        {
+            RetiringGPUBytes += RetireDomainResources(Domain);
+            Pending.bGPUReleasePending = false;
+        }
+        if (Pending.bCPUReleasePending && CurrentTimeSeconds >= Pending.CPUDeadlineSeconds)
+        {
+            ReclaimedCPUBytes += ReclaimDomainCPUResources(Domain);
+            RetiringGPUBytes += RetireDomainResources(Domain);
+            Pending.bCPUReleasePending = false;
+        }
+    }
 }

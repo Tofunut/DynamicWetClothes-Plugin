@@ -17,10 +17,12 @@ class FDWCEditorAuthoringDocument;
 class FDWCEditorBakeCoordinator;
 class FDWCWrinkleSuppressionCoverageService;
 class FDWCTransparencyAuthoringController;
+class FDWCTransparencyBlueprintHierarchySession;
 class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorRenderUploadQueue;
 class FDWCEditorPreviewCommitCoordinator;
+class FDWCEditorPreviewModeLifetime;
 class FDWCEditorResourceGovernor;
 class FDWCEditorTextureWorkspace;
 class FDWCEditorWorkerJobScheduler;
@@ -99,6 +101,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSpatialQueryService>, SpatialQueryService)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewModeLifetime>, PreviewModeLifetime)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorResourceGovernor>, ResourceGovernor)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
@@ -164,9 +167,8 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void EnsureStageForSelectedLayer();
     DWCTransparencyWorkflow::FDWCTransparencyLayerWorkflowState ResolveSelectedLayerWorkflowState() const;
     EDWCTransparencyEditorStage ResolveStageForLayer(const FWetClothingTransparencyLayerData* Layer) const;
-    void SelectTransparencyLayerWithResolvedStage(
+    void SelectTransparencyTargetSlotWithResolvedStage(
         int32 MaterialSlotIndex,
-        const FGuid& LayerGuid,
         EDWCTransparencyEditorStage Stage);
     bool RefreshModelState();
     void RefreshStageContent();
@@ -174,11 +176,18 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void RefreshRevealEditingContent();
     void RefreshFinalEditingContent();
     void RefreshInnerSourceSlotItems();
-    void RefreshBlueprintHierarchy(bool bAllowAutoTarget = true);
+    void RefreshBlueprintHierarchy(bool bForceRefresh = false);
+    void HandleBlueprintHierarchySessionChanged();
+    void SyncBlueprintHierarchyItemsFromSession();
+    void PushBlueprintHierarchySnapshotToPreview();
+    FString GetBlueprintHierarchyError() const;
+    void RefreshType2PreviewAfterStructureChange();
+    void SyncType2PreviewSourcesAfterSelectionChange();
     void RefreshBlueprintSourcePriorityItems();
     void RefreshExternalSourcePriorityItems();
     bool IsBlueprintHierarchyCurrent() const;
     bool IsBlueprintTargetCandidate(const FDWCTransparencyBlueprintMeshComponent& Component) const;
+    bool HasBlueprintTargetCandidate() const;
     int32 GetBlueprintHierarchyDepth(const FDWCTransparencyBlueprintMeshComponent& Component) const;
     FReply HandleRefreshBlueprintHierarchyClicked();
     void HandleBlueprintTargetComponentChanged(ECheckBoxState NewState, FName ComponentName);
@@ -287,6 +296,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
         EDWCTransparencyEditorStage Stage);
     ECheckBoxState IsPreviewModeChecked(EWetClothingTransparencyPreviewMode Mode) const;
     void HandlePreviewModeChanged(ECheckBoxState NewState, EWetClothingTransparencyPreviewMode Mode);
+    FString GetGenerateDisabledReason() const;
     bool IsGenerateEnabled() const;
     bool IsBakeEditedEnabled() const;
     bool CanUseFullBlueprintPreview() const;
@@ -297,12 +307,13 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void RefreshViewportContext();
     FWetClothingTransparencyLayerData* GetSelectedLayer();
     const FWetClothingTransparencyLayerData* GetSelectedLayer() const;
+    FGuid GetSelectedLayerGuid() const;
     FMaterialSlotItemPtr FindMaterialSlotItem(int32 SlotIndex) const;
     const FDWCEditorPreviewSlotState* FindPreviewSlotState(int32 SlotIndex) const;
     int32 GetTransparencyDataUVChannel() const;
     bool HasUsableTransparencyDataUV() const;
     TSharedPtr<int32> FindUVChannelItem(int32 UVChannelIndex) const;
-    void EditSelectedLayer(const FText& TransactionText, TFunctionRef<void(FWetClothingTransparencyLayerData&)> Edit, bool bRebuildLayout);
+    bool EditSelectedLayer(const FText& TransactionText, TFunctionRef<void(FWetClothingTransparencyLayerData&)> Edit, bool bRebuildLayout);
     bool EditSelectedLayerFinal(
         const FText& TransactionText,
         const FGuid& ElementGuid,
@@ -427,6 +438,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TSharedPtr<FDWCEditorAuthoringDocument> AuthoringDocument;
     TSharedPtr<FDWCTransparencyAuthoringController> AuthoringController;
+    TSharedPtr<FDWCTransparencyBlueprintHierarchySession> BlueprintHierarchySession;
     TSharedPtr<FDWCEditorSessionStore> SessionStore;
     FDWCEditorWorkerJobSchedulerPtr WorkerJobScheduler;
     TSharedPtr<FDWCEditorBakeCoordinator> BakeCoordinator;
@@ -434,6 +446,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
     TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
+    TSharedPtr<FDWCEditorPreviewModeLifetime> PreviewModeLifetime;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
     TSharedPtr<IDetailsView> DetailsView;
@@ -461,21 +474,18 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     EDWCTransparencyPanelStatus PanelStatus = EDWCTransparencyPanelStatus::Info;
     FString InnerSourceStatusMessage;
     int32 SelectedMaterialSlotIndex = INDEX_NONE;
-    FGuid SelectedLayerGuid;
     TArray<FLayerItemPtr> LayerItems;
     TSharedPtr<class SListView<FLayerItemPtr>> LayerListView;
     TArray<TSharedPtr<int32>> InnerSourceSlotItems;
     TSharedPtr<class SListView<TSharedPtr<int32>>> InnerSourceListView;
     TArray<TSharedPtr<FDWCTransparencyBlueprintMeshComponent>> BlueprintHierarchyItems;
+    uint64 BlueprintHierarchyItemsRevision = MAX_uint64;
     TSharedPtr<class SListView<TSharedPtr<FDWCTransparencyBlueprintMeshComponent>>> BlueprintHierarchyListView;
     TArray<TSharedPtr<int32>> BlueprintSourcePriorityItems;
     TSharedPtr<class SListView<TSharedPtr<int32>>> BlueprintSourcePriorityListView;
     TArray<TSharedPtr<int32>> ExternalSourcePriorityItems;
     TSharedPtr<class SListView<TSharedPtr<int32>>> ExternalSourcePriorityListView;
     TArray<TSharedPtr<EDWCTransparencyBlueprintSourceRole>> BlueprintSourceRoleItems;
-    FGuid BlueprintHierarchyLayerGuid;
-    FString BlueprintHierarchyClassPath;
-    FString BlueprintHierarchyError;
     TSoftObjectPtr<USkeletalMesh> PendingExternalSourceMesh;
     FGuid SelectedExternalSourceGuid;
     // Inner source slots remain unrestricted. Target slots are limited to Wettable slots.

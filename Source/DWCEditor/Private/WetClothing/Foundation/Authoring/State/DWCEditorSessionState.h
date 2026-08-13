@@ -157,6 +157,7 @@ struct FDWCEditorAuthoringIndex
     TSet<int32> WrinkleMaterialSlots;
     TSet<FGuid> WrinkleElementGuids;
     TSet<FGuid> TransparencyLayerGuids;
+    TMap<int32, FGuid> TransparencyLayerByMaterialSlot;
 };
 
 struct FDWCEditorWrinkleSessionState
@@ -198,7 +199,6 @@ struct FDWCEditorTransparencySessionState
 
     /** Selected target slot exists independently from an authored transparency layer. */
     int32 SelectedMaterialSlotIndex = INDEX_NONE;
-    FGuid SelectedLayerGuid;
     FDWCTransparencyEditContext EditContext;
     TMap<FGuid, EDWCTransparencyEditorStage> StageByLayer;
     EDWCTransparencySourceType SavedCharacterType =

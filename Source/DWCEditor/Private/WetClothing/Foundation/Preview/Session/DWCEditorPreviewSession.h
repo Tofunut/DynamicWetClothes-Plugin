@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/ObjectKey.h"
+#include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorPreviewModeLifetime.h"
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialCache.h"
 #include "WetClothing/Foundation/Preview/Session/DWCEditorPreviewSessionTypes.h"
 
@@ -16,6 +17,7 @@ class UWorld;
 enum class EDWCEditorPreviewSuspendReason : uint8
 {
     ModeSwitch,
+    HostInactive,
     BeginPIE,
     ExclusiveBuild,
     EditorClosing
@@ -45,6 +47,10 @@ class FDWCEditorPreviewSession final
 
     bool IsInitialized() const;
     bool IsSuspended() const { return bSuspended; }
+    uint64 GetLifecycleGeneration() const { return LifecycleGeneration; }
+    EDWCEditorPreviewSuspendReason GetLastSuspendReason() const { return LastSuspendReason; }
+    void BindModeLifetime(const TSharedPtr<FDWCEditorPreviewModeLifetime>& InModeLifetime);
+    FDWCEditorPreviewRunToken CaptureRunToken() const;
 
     /** Releases transient preview materials while retaining slot eligibility and authored state. */
     void Suspend(EDWCEditorPreviewSuspendReason Reason);
@@ -105,6 +111,7 @@ class FDWCEditorPreviewSession final
 
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TWeakObjectPtr<UWorld> PreviewWorld;
+    TWeakPtr<FDWCEditorPreviewModeLifetime> ModeLifetime;
     FDWCEditorPreviewSessionConfig SessionConfig;
     FDWCEditorPreviewSlotCollection SlotCollection;
     TArray<FDWCEditorPreviewSessionSlot> RuntimeSlots;
@@ -119,6 +126,8 @@ class FDWCEditorPreviewSession final
     float PreviewWetness = 1.0f;
     bool bInitialized = false;
     bool bSuspended = false;
+    EDWCEditorPreviewSuspendReason LastSuspendReason = EDWCEditorPreviewSuspendReason::ModeSwitch;
+    uint64 LifecycleGeneration = 1;
     bool bRenderResourcesDirty = false;
     uint64 SlotRefreshCount = 0;
     uint64 SlotStateChangeCount = 0;

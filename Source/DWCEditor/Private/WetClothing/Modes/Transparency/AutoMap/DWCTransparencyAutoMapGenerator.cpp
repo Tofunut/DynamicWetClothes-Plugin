@@ -20,6 +20,43 @@
 
 namespace
 {
+    void ReportGenerationProgress(
+        const FDWCTransparencyGenerationProgressCallback* ProgressCallback,
+        const EDWCTransparencyGenerationPhase Phase,
+        const double OverallFraction,
+        const int32 CompletedItems = 0,
+        const int32 TotalItems = 0,
+        const FName SourceName = NAME_None,
+        const int32 MaterialSlotIndex = INDEX_NONE)
+    {
+        if (ProgressCallback == nullptr)
+        {
+            return;
+        }
+
+        FDWCTransparencyGenerationProgress Progress;
+        Progress.Phase = Phase;
+        Progress.OverallFraction = FMath::Clamp(OverallFraction, 0.0, 1.0);
+        Progress.CompletedItems = FMath::Max(0, CompletedItems);
+        Progress.TotalItems = FMath::Max(0, TotalItems);
+        Progress.SourceName = SourceName;
+        Progress.MaterialSlotIndex = MaterialSlotIndex;
+        (*ProgressCallback)(Progress);
+    }
+
+    bool AbortCanceledGeneration(
+        const FDWCEditorCancellationToken* CancellationToken,
+        FString& OutErrorMessage)
+    {
+        if (CancellationToken == nullptr || !CancellationToken->IsCanceled())
+        {
+            return false;
+        }
+
+        OutErrorMessage = TEXT("Transparency ray projection was canceled.");
+        return true;
+    }
+
     FDWCBakeResolvedLayer MakeResolvedLayer(
         USkeletalMesh* Mesh,
         const FName LayerId,
@@ -971,7 +1008,9 @@ bool FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
     FDWCTransparencySourcePayload& OutResult,
     FString& OutSummary,
     TArray<FString>& OutWarnings,
-    const FDWCEditorCancellationToken* CancellationToken)
+    const FDWCEditorCancellationToken* CancellationToken,
+    const FDWCTransparencyBlueprintHierarchy* BlueprintHierarchy,
+    const FDWCTransparencyGenerationProgressCallback* ProgressCallback)
 {
     OutResult = FDWCTransparencySourcePayload();
     OutSummary.Reset();
@@ -984,14 +1023,18 @@ bool FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
             Layer,
             false,
             Snapshot,
-            SnapshotError))
+            SnapshotError,
+            BlueprintHierarchy,
+            CancellationToken,
+            ProgressCallback))
     {
         OutSummary = MoveTemp(SnapshotError);
         return false;
     }
 
     FDWCTransparencyAutoMapComputedResult Computed =
-        ComputeStreamingProjection(WetClothingAsset, Snapshot, CancellationToken);
+        ComputeStreamingProjection(
+            WetClothingAsset, Snapshot, CancellationToken, ProgressCallback);
     OutWarnings = MoveTemp(Computed.Warnings);
     if (!Computed.bSucceeded)
     {
@@ -1003,6 +1046,10 @@ bool FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
 
     OutResult = MoveTemp(Computed.SourcePayload);
     OutSummary = MoveTemp(Computed.Summary);
+    ReportGenerationProgress(
+        ProgressCallback,
+        EDWCTransparencyGenerationPhase::CommittingResult,
+        1.0);
     return true;
 }
 
@@ -1092,6 +1139,7 @@ struct FDWCTransparencyAutoMapSnapshot::FImpl
     TMap<FName, int32> StatsIndexBySourceLayerId;
     TMap<FName, TSharedPtr<const FDWCTransparencyMaterialColorBakeResult>> SourceSurfacesByLayerId;
     TMap<FName, FMaterialSourceDescriptor> MaterialSourceDescriptorsByLayerId;
+    TSharedPtr<FDWCTransparencyProjectionObjectLease> ProjectionObjectLease;
     FDWCTransparencySourcePayload SeedResult;
     TArray<FString> Warnings;
     uint64 EstimatedBytes = 0;
@@ -1160,9 +1208,18 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
     const FWetClothingTransparencyLayerData& Layer,
     const bool bResolveMaterialSurfaces,
     FDWCTransparencyAutoMapSnapshot& OutSnapshot,
-    FString& OutErrorMessage)
+    FString& OutErrorMessage,
+    const FDWCTransparencyBlueprintHierarchy* BlueprintHierarchy,
+    const FDWCEditorCancellationToken* CancellationToken,
+    const FDWCTransparencyGenerationProgressCallback* ProgressCallback)
 {
     check(IsInGameThread());
+    ReportGenerationProgress(
+        ProgressCallback, EDWCTransparencyGenerationPhase::PreparingTarget, 0.0);
+    if (AbortCanceledGeneration(CancellationToken, OutErrorMessage))
+    {
+        return false;
+    }
     OutSnapshot = FDWCTransparencyAutoMapSnapshot();
     FDWCTransparencyAutoMapSnapshot::FImpl& Snapshot = *OutSnapshot.Impl;
     OutErrorMessage.Reset();
@@ -1201,8 +1258,19 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
     FDWCTransparencyProjectionSourceSet ProviderSources;
     if (Layer.SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents)
     {
-        if (!FDWCTransparencyProjectionSourceProvider::BuildBlueprintSources(
-                WetClothingAsset, Layer, ProviderSources, OutErrorMessage))
+        const bool bBuiltSources = BlueprintHierarchy != nullptr
+            ? FDWCTransparencyProjectionSourceProvider::BuildBlueprintSources(
+                WetClothingAsset,
+                Layer,
+                *BlueprintHierarchy,
+                ProviderSources,
+                OutErrorMessage)
+            : FDWCTransparencyProjectionSourceProvider::BuildBlueprintSources(
+                WetClothingAsset,
+                Layer,
+                ProviderSources,
+                OutErrorMessage);
+        if (!bBuiltSources)
         {
             return false;
         }
@@ -1218,6 +1286,15 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
     else if (Layer.SourceType != EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
         OutErrorMessage = TEXT("This transparency source type does not use ray projection.");
+        return false;
+    }
+    Snapshot.ProjectionObjectLease = ProviderSources.ObjectLease;
+    ReportGenerationProgress(
+        ProgressCallback,
+        EDWCTransparencyGenerationPhase::PreparingTarget,
+        0.04);
+    if (AbortCanceledGeneration(CancellationToken, OutErrorMessage))
+    {
         return false;
     }
 
@@ -1245,6 +1322,14 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
         Snapshot.OuterSurface,
         TEXT("Transparency target surface"),
         Snapshot.Warnings);
+    ReportGenerationProgress(
+        ProgressCallback,
+        EDWCTransparencyGenerationPhase::RasterizingTarget,
+        0.08);
+    if (AbortCanceledGeneration(CancellationToken, OutErrorMessage))
+    {
+        return false;
+    }
 
     FDWCRevealBakeTexelSamplingSettings SamplingSettings;
     SamplingSettings.Resolution = BakeResolution;
@@ -1285,6 +1370,18 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
             Layer.TargetSurface.OuterMaterialSlotIndex);
         return false;
     }
+    ReportGenerationProgress(
+        ProgressCallback,
+        EDWCTransparencyGenerationPhase::PreparingSources,
+        0.18,
+        0,
+        Layer.SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots
+            ? Layer.SameMeshSource.InnerSlotPriority.Num()
+            : ProviderSources.Sources.Num());
+    if (AbortCanceledGeneration(CancellationToken, OutErrorMessage))
+    {
+        return false;
+    }
 
     if (Layer.SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
@@ -1292,6 +1389,10 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
         Snapshot.SourceSurfaces.Reserve(Layer.SameMeshSource.InnerSlotPriority.Num());
         for (int32 PriorityIndex = 0; PriorityIndex < Layer.SameMeshSource.InnerSlotPriority.Num(); ++PriorityIndex)
         {
+            if (AbortCanceledGeneration(CancellationToken, OutErrorMessage))
+            {
+                return false;
+            }
             const FWetClothingTransparencyInnerSlot& InnerSlot =
                 Layer.SameMeshSource.InnerSlotPriority[PriorityIndex];
             if (InnerSlot.MaterialSlotIndex == INDEX_NONE ||
@@ -1394,6 +1495,10 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
         Snapshot.SourceSurfaces.Reserve(ProviderSources.Sources.Num());
         for (const FDWCTransparencyProjectionSource& Source : ProviderSources.Sources)
         {
+            if (AbortCanceledGeneration(CancellationToken, OutErrorMessage))
+            {
+                return false;
+            }
             FDWCRevealBakeSurface SourceSurface;
             if (!BuildResolvedSlotSurface(
                     Source.Layer, LODIndex, Source.Layer.SourceUVChannel,
@@ -1586,13 +1691,20 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
     // owns only shared references, so their pixel bytes must not be charged to
     // WorkerPrivateCPU a second time.
     Snapshot.bValid = true;
+    ReportGenerationProgress(
+        ProgressCallback,
+        EDWCTransparencyGenerationPhase::PreparingSources,
+        0.25,
+        Snapshot.SourceSurfaces.Num(),
+        Snapshot.SourceSurfaces.Num());
     return true;
 }
 
 FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeStreamingProjection(
     UWetClothingAsset& WetClothingAsset,
     FDWCTransparencyAutoMapSnapshot& SnapshotHandle,
-    const FDWCEditorCancellationToken* CancellationToken)
+    const FDWCEditorCancellationToken* CancellationToken,
+    const FDWCTransparencyGenerationProgressCallback* ProgressCallback)
 {
     check(IsInGameThread());
     FDWCTransparencyAutoMapComputedResult Result;
@@ -1638,6 +1750,9 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
         BlockerDistanceByPixel.Init(-1.0f, PixelCount);
     }
 
+    const int32 TotalSourceCount = Snapshot.SourceSurfaces.Num();
+    int32 ProcessedSourceCount = 0;
+
     const auto ResetCandidatePixel =
         [&SourcePayload, &BlockerDistanceByPixel](const int32 PixelIndex)
     {
@@ -1678,13 +1793,33 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
         {
             const FDWCRevealBakeSurface& SourceSurface =
                 Snapshot.SourceSurfaces[SurfaceIndex];
+            const double SourceStartFraction = 0.25 +
+                0.65 * static_cast<double>(ProcessedSourceCount) /
+                    FMath::Max(1, TotalSourceCount);
+            const double SourceEndFraction = 0.25 +
+                0.65 * static_cast<double>(ProcessedSourceCount + 1) /
+                    FMath::Max(1, TotalSourceCount);
+            const double SourceFractionRange = SourceEndFraction - SourceStartFraction;
+            const FDWCTransparencyAutoMapSnapshot::FImpl::FMaterialSourceDescriptor*
+                Descriptor = Snapshot.MaterialSourceDescriptorsByLayerId.Find(SourceSurface.LayerId);
+            const FName SourceDisplayName = Descriptor != nullptr
+                ? Descriptor->ComponentDisplayName
+                : SourceSurface.LayerId;
+            const int32 SourceMaterialSlotIndex = Descriptor != nullptr
+                ? Descriptor->MaterialSlotIndex
+                : INDEX_NONE;
             TSharedPtr<const FDWCTransparencyMaterialColorBakeResult> MaterialSurface;
             uint64 MaterialSurfaceBytes = 0;
             if (SourceSurface.bCanBeRevealSource)
             {
-                const FDWCTransparencyAutoMapSnapshot::FImpl::FMaterialSourceDescriptor*
-                    Descriptor = Snapshot.MaterialSourceDescriptorsByLayerId.Find(
-                        SourceSurface.LayerId);
+                ReportGenerationProgress(
+                    ProgressCallback,
+                    EDWCTransparencyGenerationPhase::BakingSourceMaterial,
+                    SourceStartFraction,
+                    ProcessedSourceCount,
+                    TotalSourceCount,
+                    SourceDisplayName,
+                    SourceMaterialSlotIndex);
                 if (Descriptor == nullptr || Descriptor->SourceMesh == nullptr ||
                     Descriptor->EffectiveMaterial == nullptr)
                 {
@@ -1729,6 +1864,15 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
                 }
                 MaterialSurfaceBytes = MaterialSurface->AllocatedBytes;
             }
+
+            ReportGenerationProgress(
+                ProgressCallback,
+                EDWCTransparencyGenerationPhase::ProjectingSamples,
+                SourceStartFraction + SourceFractionRange * 0.35,
+                0,
+                UnresolvedSampleIndices.Num(),
+                SourceDisplayName,
+                SourceMaterialSlotIndex);
 
             TMap<int32, const FDWCRevealBakeSurfaceTriangle*> SourceTrianglesByID;
             BuildTriangleLookup(SourceSurface, SourceTrianglesByID);
@@ -1793,6 +1937,25 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
             };
 
             FString ProjectionError;
+            const FDWCRevealBakeProjectionProgressCallback ProjectionProgress =
+                [ProgressCallback,
+                 SourceStartFraction,
+                 SourceFractionRange,
+                 SourceDisplayName,
+                 SourceMaterialSlotIndex](const int32 CompletedSamples, const int32 TotalSamples)
+            {
+                const double SampleFraction = TotalSamples > 0
+                    ? static_cast<double>(CompletedSamples) / TotalSamples
+                    : 1.0;
+                ReportGenerationProgress(
+                    ProgressCallback,
+                    EDWCTransparencyGenerationPhase::ProjectingSamples,
+                    SourceStartFraction + SourceFractionRange * (0.35 + 0.65 * SampleFraction),
+                    CompletedSamples,
+                    TotalSamples,
+                    SourceDisplayName,
+                    SourceMaterialSlotIndex);
+            };
             if (!FDWCRevealBakeRayProjector::ProjectSamplesToSources(
                     Snapshot.OuterSurface,
                     MakeArrayView(&SourceSurface, 1),
@@ -1801,7 +1964,8 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
                     ConsumeSourceHit,
                     &ProjectionError,
                     CancellationToken,
-                    UnresolvedSampleIndices))
+                    UnresolvedSampleIndices,
+                    ProgressCallback != nullptr ? &ProjectionProgress : nullptr))
             {
                 MaterialSurface.Reset();
                 if (MaterialSurfaceBytes > 0)
@@ -1820,6 +1984,7 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
                 FDWCTransparencyMaterialColorBakeCache::ReclaimUnleasedBytes(
                     &WetClothingAsset, MaterialSurfaceBytes);
             }
+            ++ProcessedSourceCount;
         }
 
         NextUnresolvedSampleIndices.Reset();
@@ -1883,6 +2048,12 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
     SourcePayload.NoHitCount = FMath::Max(
         0,
         SourcePayload.OuterSampleCount - SourcePayload.ValidHitCount);
+    ReportGenerationProgress(
+        ProgressCallback,
+        EDWCTransparencyGenerationPhase::ComposingResult,
+        0.97,
+        SourcePayload.OuterSampleCount,
+        SourcePayload.OuterSampleCount);
     Result.Summary = FString::Printf(
         TEXT("Generated %d outer samples: %d valid hit(s), %d no-hit sample(s), with source material surfaces streamed by priority layer."),
         SourcePayload.OuterSampleCount,

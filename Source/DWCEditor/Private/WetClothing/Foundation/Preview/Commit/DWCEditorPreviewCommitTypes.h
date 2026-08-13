@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorPreviewModeLifetime.h"
 
 enum class EDWCEditorPreviewConsumerState : uint8
 {
@@ -79,6 +80,7 @@ class FDWCEditorPreviewConsumerLifetime final
 struct FDWCEditorPreviewCommitContext
 {
     FDWCEditorPreviewConsumerToken ConsumerToken;
+    FDWCEditorPreviewRunToken PreviewRunToken;
     FGuid ProducerSessionEpoch;
     TFunction<bool()> IsCurrent;
     FString DebugName;

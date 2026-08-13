@@ -7,6 +7,8 @@
 
 class FDWCEditorCancellationToken;
 
+using FDWCRevealBakeProjectionProgressCallback = TFunction<void(int32, int32)>;
+
 struct FDWCRevealBakeTexelSample
 {
     FIntPoint Pixel = FIntPoint::ZeroValue;
@@ -123,7 +125,8 @@ class FDWCRevealBakeRayProjector
         FString*                                        OutErrorMessage = nullptr,
         const FDWCEditorCancellationToken*              CancellationToken = nullptr,
         /** Empty means every sample; otherwise only these sample indices are projected. */
-        TConstArrayView<int32>                           SampleIndices = {});
+        TConstArrayView<int32>                           SampleIndices = {},
+        const FDWCRevealBakeProjectionProgressCallback* ProgressCallback = nullptr);
 
   private:
     static constexpr double RayIntersectionEpsilon = 1.0e-8;

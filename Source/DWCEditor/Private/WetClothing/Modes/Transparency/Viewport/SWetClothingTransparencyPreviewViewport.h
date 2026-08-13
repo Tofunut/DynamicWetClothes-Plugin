@@ -19,7 +19,6 @@
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyRevealColorTileStore.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCWrinkleSuppressionCoverageService.h"
 
-class AActor;
 class FAdvancedPreviewScene;
 class FDWCTransparencyAuthoringController;
 class FDWCTransparencyLiveStrokeLayer;
@@ -39,6 +38,8 @@ class UTexture2D;
 class USkeletalMeshComponent;
 class UWetClothingAsset;
 struct FDWCTransparencySourcePayload;
+struct FDWCTransparencyBlueprintHierarchy;
+struct FDWCTransparencyBlueprintHierarchySnapshot;
 struct FDWCTransparencyAlphaComposeTileSnapshot;
 struct FDWCTransparencyRevealColorComposeTileSnapshot;
 struct FDWCTransparencyRevealCommitJobInput;
@@ -67,6 +68,7 @@ class SWetClothingTransparencyPreviewViewport
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSpatialQueryService>, SpatialQueryService)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewModeLifetime>, PreviewModeLifetime)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_END_ARGS()
 
@@ -83,8 +85,13 @@ class SWetClothingTransparencyPreviewViewport
     void FocusOnPreviewMesh(bool bInstant = false);
     void SetPreviewMode(EWetClothingTransparencyPreviewMode NewMode);
     EWetClothingTransparencyPreviewMode GetPreviewMode() const { return PreviewMode; }
-    /** Rebuilds the visible Type 2/3 source layout when its component set changes. */
+    /** Rebuilds a canonical Type 2 assembly or the Type 3 source layout. */
     void InvalidateFullSourceLayout();
+    /** Replaces the immutable Blueprint assembly used by the Type 2 preview. */
+    void SetType2BlueprintHierarchySnapshot(
+        const FDWCTransparencyBlueprintHierarchySnapshot& Snapshot);
+    /** Adds/removes only the Type 2 source components whose hierarchy check state changed. */
+    void SyncType2SelectedSourceComponents();
     void SetExternalSourcePlacementSelection(const FGuid& SourceGuid);
     void SetExternalSourceTransformCommittedDelegate(
         FDWCTransparencyExternalSourceTransformCommitted InDelegate);
@@ -155,6 +162,7 @@ class SWetClothingTransparencyPreviewViewport
     void ClearPreview();
     void BuildTargetMeshPreview();
     void BuildFullBlueprintPreview();
+    void BuildType2BlueprintAssemblyPreview();
     void BuildFullExternalMeshPreview();
 
   public:
@@ -172,6 +180,10 @@ class SWetClothingTransparencyPreviewViewport
 
   private:
     void ConfigurePreviewMeshComponent(USkeletalMeshComponent* MeshComponent);
+    USkeletalMeshComponent* CreateType2PreviewComponent(
+        const FName& ComponentName,
+        bool bTargetComponent);
+    bool ResolveType2AssemblyBounds(FBoxSphereBounds& OutBounds) const;
     void InitializePreviewSession();
     void HandlePreviewSessionSlotsChanged();
     void HandlePreviewSessionMaterialReady(int32 MaterialSlotIndex, UMaterialInstanceDynamic* PreviewMID);
@@ -261,13 +273,18 @@ class SWetClothingTransparencyPreviewViewport
     TUniquePtr<FDWCEditorInteractiveToolsHost> InputToolsHost;
     TSharedPtr<FEditorViewportClient> ViewportClient;
     TObjectPtr<USkeletalMeshComponent> TargetMeshPreviewComponent = nullptr;
-    TObjectPtr<AActor> PreviewActor = nullptr;
     TArray<TObjectPtr<USkeletalMeshComponent>> PreviewMeshComponents;
+    TMap<FName, TObjectPtr<USkeletalMeshComponent>> BlueprintSourcePreviewComponents;
     TMap<FGuid, TObjectPtr<USkeletalMeshComponent>> ExternalSourcePreviewComponents;
+    TSharedPtr<const FDWCTransparencyBlueprintHierarchy> Type2BlueprintHierarchy;
+    FGuid Type2BlueprintHierarchyLayerGuid;
+    FSoftObjectPath Type2BlueprintClassPath;
+    uint64 Type2BlueprintHierarchyRevision = 0;
     FGuid SelectedExternalSourceGuid;
     bool bExternalSourceTransformInteractionActive = false;
     FDWCTransparencyExternalSourceTransformCommitted ExternalSourceTransformCommitted;
     TUniquePtr<FDWCEditorPreviewSession> PreviewSession;
+    TSharedPtr<FDWCEditorPreviewModeLifetime> PreviewModeLifetime;
     TUniquePtr<FDWCEditorPreviewOrchestrator> PreviewOrchestrator;
     FDWCEditorTextureLease TransparencyPreviewHandle;
     FDWCEditorTextureLease HoverBaselinePreviewHandle;

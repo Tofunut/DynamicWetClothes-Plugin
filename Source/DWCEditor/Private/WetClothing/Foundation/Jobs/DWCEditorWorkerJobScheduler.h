@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobTypes.h"
+#include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorPreviewModeLifetime.h"
 
 class FDWCEditorResourceGovernor;
 
@@ -46,6 +47,8 @@ class FDWCEditorWorkerJobScheduler final
     using FAdmissionBarrier = TFunction<bool(
         const FDWCEditorWorkerJobDescriptor&,
         FString&)>;
+    using FPreviewLifecycleProvider =
+        TFunction<FDWCEditorPreviewRunToken(const FDWCEditorWorkerJobDescriptor&)>;
 
     static constexpr int32 DefaultMaxActiveJobs = 2;
     // Pending requests retain only lightweight prepare closures. Prepared jobs
@@ -72,6 +75,7 @@ class FDWCEditorWorkerJobScheduler final
 
     void SetDomainRevisionProvider(FDomainRevisionProvider InProvider);
     void SetAdmissionBarrier(FAdmissionBarrier InBarrier);
+    void SetPreviewLifecycleProvider(FPreviewLifecycleProvider InProvider);
     FDWCEditorWorkerJobTicket SubmitPrepared(
         const FDWCEditorWorkerJobDescriptor& Descriptor,
         FPrepare Prepare,
@@ -83,6 +87,7 @@ class FDWCEditorWorkerJobScheduler final
     bool CancelTicket(const FDWCEditorWorkerJobTicket& Ticket);
     void CancelDomain(EDWCEditorAuthoringDomain Domain);
     void CancelWorkClass(EDWCEditorWorkClass WorkClass);
+    void CancelPreviewMode(EDWCEditorPreviewMode Mode);
     bool HasOutstandingWorkClass(EDWCEditorWorkClass WorkClass) const;
     void Shutdown();
 
@@ -115,6 +120,7 @@ class FDWCEditorWorkerJobScheduler final
         const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job,
         TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe>& Result);
     bool IsCurrentGeneration(const FDWCEditorWorkerJobTicket& Ticket) const;
+    bool IsPreviewLifecycleCurrent(const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job) const;
     bool HasOutstandingJobForKey(const FDWCEditorWorkerJobKey& Key) const;
     bool HasOlderFIFOJob(const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job) const;
     bool HasActiveJobForKey(const FDWCEditorWorkerJobKey& Key) const;
@@ -154,6 +160,7 @@ class FDWCEditorWorkerJobScheduler final
     TMap<FDWCEditorWorkerJobKey, uint64> GenerationByKey;
     FDomainRevisionProvider DomainRevisionProvider;
     FAdmissionBarrier AdmissionBarrier;
+    FPreviewLifecycleProvider PreviewLifecycleProvider;
     TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
     FGuid SessionEpoch;
     uint64 NextJobId = 1;
@@ -168,6 +175,8 @@ class FDWCEditorWorkerJobScheduler final
     uint64 AdmissionDeferredCount = 0;
     uint64 PhaseAdmissionDeferredCount = 0;
     uint64 SingletonRejectionCount = 0;
+    uint64 PreviewLifecycleRejectionCount = 0;
+    uint64 PreviewLifecycleStaleCount = 0;
     uint64 CompletedJobCount = 0;
     double TotalQueueSeconds = 0.0;
     double TotalWorkerSeconds = 0.0;

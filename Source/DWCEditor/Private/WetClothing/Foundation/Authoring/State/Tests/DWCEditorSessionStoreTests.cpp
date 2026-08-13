@@ -124,7 +124,9 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         EDWCTransparencyVisualizationMode::CorrectionDifference);
 
     const FGuid LayerGuid = FGuid::NewGuid();
-    FDWCEditorSessionReducer::Reduce(State, FDWCSelectTransparencyLayerAction{LayerGuid, 6});
+    State.AuthoringIndex.TransparencyLayerGuids.Add(LayerGuid);
+    State.AuthoringIndex.TransparencyLayerByMaterialSlot.Add(6, LayerGuid);
+    FDWCEditorSessionReducer::Reduce(State, FDWCSelectTransparencyTargetSlotAction{6});
     FDWCReconcileAuthoringAction Reconcile;
     Reconcile.AuthoringRevision = 7;
     Reconcile.Domain = EDWCEditorAuthoringDomain::Transparency;
@@ -135,8 +137,8 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         FDWCEditorSessionReducer::Reduce(State, Reconcile);
 
     TestFalse(
-        TEXT("A removed transparency layer is no longer selected"),
-        State.Transparency.SelectedLayerGuid.IsValid());
+        TEXT("A removed transparency layer is no longer resolved from the selected slot"),
+        State.AuthoringIndex.TransparencyLayerByMaterialSlot.Contains(6));
     TestEqual(
         TEXT("Removing a layer preserves the inspected material slot"),
         State.Transparency.SelectedMaterialSlotIndex,
@@ -155,6 +157,26 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         State.Transparency.PreviewSettings.WrinkleSuppressionStrength,
         5.0f);
 
+    const FGuid ReplacementLayerGuid = FGuid::NewGuid();
+    FDWCReconcileAuthoringAction ReplaceSelectedSlotLayer;
+    ReplaceSelectedSlotLayer.AuthoringRevision = 8;
+    ReplaceSelectedSlotLayer.Domain = EDWCEditorAuthoringDomain::Transparency;
+    ReplaceSelectedSlotLayer.Index.TransparencyLayerGuids.Add(ReplacementLayerGuid);
+    ReplaceSelectedSlotLayer.Index.TransparencyLayerByMaterialSlot.Add(6, ReplacementLayerGuid);
+    const EDWCEditorSessionEffect ReplacementEffects =
+        FDWCEditorSessionReducer::Reduce(State, ReplaceSelectedSlotLayer);
+    TestEqual(
+        TEXT("Replacing a layer keeps the material slot selected"),
+        State.Transparency.SelectedMaterialSlotIndex,
+        6);
+    TestEqual(
+        TEXT("The selected slot resolves the replacement layer identity"),
+        State.AuthoringIndex.TransparencyLayerByMaterialSlot.FindRef(6),
+        ReplacementLayerGuid);
+    TestTrue(
+        TEXT("Replacing the selected slot layer rebuilds preview content"),
+        EnumHasAnyFlags(ReplacementEffects, EDWCEditorSessionEffect::RebuildPreviewContent));
+
     const FGuid WrinkleElementGuid = FGuid::NewGuid();
     const EDWCEditorSessionEffect SelectionEffects = FDWCEditorSessionReducer::Reduce(
         State,
@@ -169,7 +191,7 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         TEXT("Selecting a wrinkle does not resend unchanged brush preview settings"),
         EnumHasAnyFlags(SelectionEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
     FDWCReconcileAuthoringAction PreserveWrinkleSelection;
-    PreserveWrinkleSelection.AuthoringRevision = 8;
+    PreserveWrinkleSelection.AuthoringRevision = 9;
     PreserveWrinkleSelection.Domain = EDWCEditorAuthoringDomain::Wrinkle;
     PreserveWrinkleSelection.Index.WrinkleElementGuids.Add(WrinkleElementGuid);
     FDWCEditorSessionReducer::Reduce(State, PreserveWrinkleSelection);
@@ -179,7 +201,7 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         WrinkleElementGuid);
 
     FDWCReconcileAuthoringAction RemoveWrinkleSelection;
-    RemoveWrinkleSelection.AuthoringRevision = 9;
+    RemoveWrinkleSelection.AuthoringRevision = 10;
     RemoveWrinkleSelection.Domain = EDWCEditorAuthoringDomain::Wrinkle;
     const EDWCEditorSessionEffect RemovedSelectionEffects =
         FDWCEditorSessionReducer::Reduce(State, RemoveWrinkleSelection);
@@ -195,7 +217,7 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
         EnumHasAnyFlags(RemovedSelectionEffects, EDWCEditorSessionEffect::SyncSelection));
 
     FDWCReconcileAuthoringAction IncrementalReconcile;
-    IncrementalReconcile.AuthoringRevision = 10;
+    IncrementalReconcile.AuthoringRevision = 11;
     IncrementalReconcile.Domain = EDWCEditorAuthoringDomain::Wrinkle;
     IncrementalReconcile.Impact = EDWCEditorAuthoringImpact::ElementList |
         EDWCEditorAuthoringImpact::PreviewIncremental;

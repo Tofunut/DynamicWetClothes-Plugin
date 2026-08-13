@@ -57,6 +57,13 @@ bool FDWCEditorPreviewCommitLifetimeTest::RunTest(const FString&)
     { return true; };
     Context.DebugName = TEXT("Commit lifetime test");
 
+    TSharedRef<FDWCEditorPreviewModeLifetime> ModeLifetime =
+        MakeShared<FDWCEditorPreviewModeLifetime>(
+            EDWCEditorPreviewMode::Transparency,
+            ProducerSessionEpoch);
+    ModeLifetime->Activate(1);
+    Context.PreviewRunToken = ModeLifetime->CaptureToken();
+
     FDWCEditorTextureLease Lease;
     TestEqual(
         TEXT("An active current consumer accepts the result"),
@@ -68,6 +75,21 @@ bool FDWCEditorPreviewCommitLifetimeTest::RunTest(const FString&)
             Lease),
         EDWCEditorPreviewCommitResult::Applied);
     TestTrue(TEXT("An applied result transfers an active workspace lease"), Lease.IsValid());
+
+    ModeLifetime->Suspend(2);
+    FDWCEditorTextureLease PreviousModeLease;
+    TestEqual(
+        TEXT("A result from the previous preview-mode generation is rejected"),
+        Coordinator.CommitBGRA8(
+            Context,
+            Key,
+            Descriptor,
+            MakeCommitTestPixels(Descriptor),
+            PreviousModeLease),
+        EDWCEditorPreviewCommitResult::StaleRequest);
+    TestFalse(TEXT("A stale preview-mode result does not acquire a lease"), PreviousModeLease.IsValid());
+    ModeLifetime->Activate(3);
+    Context.PreviewRunToken = ModeLifetime->CaptureToken();
 
     Lifetime.Suspend();
     Context.ConsumerToken = Lifetime.CaptureToken();
@@ -127,7 +149,7 @@ bool FDWCEditorPreviewCommitLifetimeTest::RunTest(const FString&)
 
     const FDWCEditorPreviewCommitDiagnostics Diagnostics = Coordinator.GetDiagnostics();
     TestEqual(TEXT("Applied commits are counted"), Diagnostics.AppliedCount, 1ull);
-    TestEqual(TEXT("Stale commits are counted"), Diagnostics.StaleRequestCount, 2ull);
+    TestEqual(TEXT("Stale commits are counted"), Diagnostics.StaleRequestCount, 3ull);
     TestEqual(TEXT("Consumer rejections are counted"), Diagnostics.ConsumerRejectedCount, 1ull);
     TestEqual(TEXT("Shutdown rejections are counted"), Diagnostics.ShutdownRejectedCount, 1ull);
 

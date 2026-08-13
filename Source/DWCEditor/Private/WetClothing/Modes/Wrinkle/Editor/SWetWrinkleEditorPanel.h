@@ -28,6 +28,7 @@ class FDWCEditorSpatialQueryService;
 class FDWCEditorSurfacePatchProjectionCacheService;
 class FDWCEditorRenderUploadQueue;
 class FDWCEditorPreviewCommitCoordinator;
+class FDWCEditorPreviewModeLifetime;
 class FDWCEditorTextureWorkspace;
 class FDWCEditorWorkerJobScheduler;
 class FWetWrinkleAuthoringController;
@@ -62,6 +63,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService>, SurfacePatchProjectionCache)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewModeLifetime>, PreviewModeLifetime)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
     SLATE_END_ARGS()
@@ -304,6 +306,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService> SurfacePatchProjectionCache;
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
     TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
+    TSharedPtr<FDWCEditorPreviewModeLifetime> PreviewModeLifetime;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     TSharedPtr<IDetailsView> DetailsView;
     TSharedPtr<SWetWrinkleViewport> PreviewViewport;

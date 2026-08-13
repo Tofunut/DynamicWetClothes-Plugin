@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
+#include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorPreviewModeLifetime.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
 
 struct FDWCEditorPreviewMemoryBucket;
@@ -18,6 +19,7 @@ class FDWCEditorRenderUploadQueue final
     static constexpr double DefaultInteractiveSubmitTimeBudgetMs = 2.0;
 
     using FUploadStateObserver = TFunction<void(EDWCEditorTextureUploadStatus)>;
+    using FWorkAvailableCallback = TFunction<void()>;
 
     explicit FDWCEditorRenderUploadQueue(
         uint64 InStagingBudgetBytes = DefaultStagingBudgetBytes,
@@ -39,7 +41,10 @@ class FDWCEditorRenderUploadQueue final
         EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Interactive);
     void Cancel(const FDWCEditorTextureKey& Key);
     void CancelOwner(const UObject* Owner);
+    void CancelPreviewMode(const UObject* Owner, EDWCEditorPreviewMode Mode);
     void Flush();
+    bool HasPendingWork() const;
+    void SetWorkAvailableCallback(FWorkAvailableCallback Callback);
     EDWCEditorTextureUploadStatus TrySubmitInteractive(
         const FDWCEditorTextureUploadTicket& Ticket,
         uint64 ByteBudget = DefaultInteractiveSubmitBudgetBytes,
@@ -137,6 +142,7 @@ class FDWCEditorRenderUploadQueue final
         EDWCEditorTextureUploadStatus NewStatus);
     void PromoteCompletedUploads();
     void DispatchNotifications();
+    void NotifyWorkAvailable();
 
     bool SubmitRegion(
         const FDWCEditorTextureHandle& Entry,
@@ -185,4 +191,5 @@ class FDWCEditorRenderUploadQueue final
     uint64 NextObserverId = 1;
     bool bDispatchingNotifications = false;
     bool bShuttingDown = false;
+    FWorkAvailableCallback WorkAvailableCallback;
 };

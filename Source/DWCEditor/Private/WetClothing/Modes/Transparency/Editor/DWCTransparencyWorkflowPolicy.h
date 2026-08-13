@@ -188,6 +188,12 @@ namespace DWCTransparencyWorkflow
         {
             Context.PreviewMode = EWetClothingTransparencyPreviewMode::TargetMeshOnly;
         }
+        else if (Stage == EDWCTransparencyEditorStage::MapGeneration &&
+            (SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents ||
+                SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh))
+        {
+            Context.PreviewMode = EWetClothingTransparencyPreviewMode::FullBlueprint;
+        }
 
         return Context;
     }

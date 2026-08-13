@@ -146,6 +146,9 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     FDWCEditorSessionState& State,
     const FDWCReconcileAuthoringAction& Action)
 {
+    const FGuid PreviousSelectedLayerGuid =
+        State.AuthoringIndex.TransparencyLayerByMaterialSlot.FindRef(
+            State.Transparency.SelectedMaterialSlotIndex);
     State.AuthoringRevision = Action.AuthoringRevision;
     switch (Action.Domain)
     {
@@ -161,6 +164,9 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
         break;
     }
     State.AuthoringIndex = Action.Index;
+    const FGuid ReconciledSelectedLayerGuid =
+        State.AuthoringIndex.TransparencyLayerByMaterialSlot.FindRef(
+            State.Transparency.SelectedMaterialSlotIndex);
     for (auto It = State.Transparency.StageByLayer.CreateIterator(); It; ++It)
     {
         if (It.Key().IsValid() && !State.AuthoringIndex.TransparencyLayerGuids.Contains(It.Key()))
@@ -184,12 +190,11 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
         State.Wrinkle.SelectedRidgePointIndex = INDEX_NONE;
         Effects |= EDWCEditorSessionEffect::SyncSelection;
     }
-    if (State.Transparency.SelectedLayerGuid.IsValid() &&
-        !State.AuthoringIndex.TransparencyLayerGuids.Contains(State.Transparency.SelectedLayerGuid))
+    if (PreviousSelectedLayerGuid != ReconciledSelectedLayerGuid)
     {
-        State.Transparency.SelectedLayerGuid.Invalidate();
         Effects |= EDWCEditorSessionEffect::SyncSelection |
-            EDWCEditorSessionEffect::RefreshStageContent;
+            EDWCEditorSessionEffect::RefreshStageContent |
+            EDWCEditorSessionEffect::RebuildPreviewContent;
     }
     return Effects;
 }
@@ -291,36 +296,38 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     FDWCEditorSessionState& State,
-    const FDWCSelectTransparencyLayerAction& Action)
+    const FDWCSelectTransparencyTargetSlotAction& Action)
 {
-    if (State.Transparency.SelectedLayerGuid == Action.LayerGuid &&
-        State.Transparency.SelectedMaterialSlotIndex == Action.MaterialSlotIndex)
+    if (State.Transparency.SelectedMaterialSlotIndex == Action.MaterialSlotIndex)
     {
         return EDWCEditorSessionEffect::None;
     }
-    State.Transparency.SelectedLayerGuid = Action.LayerGuid;
     State.Transparency.SelectedMaterialSlotIndex = Action.MaterialSlotIndex;
     return EDWCEditorSessionEffect::SyncSelection |
+        EDWCEditorSessionEffect::RefreshStageContent |
         EDWCEditorSessionEffect::RebuildPreviewContent;
 }
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     FDWCEditorSessionState& State,
-    const FDWCSelectTransparencyLayerAndStageAction& Action)
+    const FDWCSelectTransparencyTargetSlotAndStageAction& Action)
 {
     FDWCEditorTransparencySessionState& Transparency = State.Transparency;
+    const FGuid LayerGuid = State.AuthoringIndex.TransparencyLayerByMaterialSlot.FindRef(
+        Action.MaterialSlotIndex);
     const EDWCTransparencyEditorStage* ExistingStage =
-        Transparency.StageByLayer.Find(Action.LayerGuid);
-    if (Transparency.SelectedLayerGuid == Action.LayerGuid &&
-        Transparency.SelectedMaterialSlotIndex == Action.MaterialSlotIndex &&
-        ExistingStage != nullptr && *ExistingStage == Action.Stage)
+        LayerGuid.IsValid() ? Transparency.StageByLayer.Find(LayerGuid) : nullptr;
+    if (Transparency.SelectedMaterialSlotIndex == Action.MaterialSlotIndex &&
+        (!LayerGuid.IsValid() || (ExistingStage != nullptr && *ExistingStage == Action.Stage)))
     {
         return EDWCEditorSessionEffect::None;
     }
 
-    Transparency.SelectedLayerGuid = Action.LayerGuid;
     Transparency.SelectedMaterialSlotIndex = Action.MaterialSlotIndex;
-    Transparency.StageByLayer.FindOrAdd(Action.LayerGuid) = Action.Stage;
+    if (LayerGuid.IsValid())
+    {
+        Transparency.StageByLayer.FindOrAdd(LayerGuid) = Action.Stage;
+    }
     return EDWCEditorSessionEffect::SyncControls |
         EDWCEditorSessionEffect::SyncSelection |
         EDWCEditorSessionEffect::RefreshStageContent |

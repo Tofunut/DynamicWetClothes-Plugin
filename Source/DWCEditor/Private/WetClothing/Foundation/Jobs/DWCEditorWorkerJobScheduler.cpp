@@ -59,6 +59,7 @@ struct FDWCEditorWorkerJobScheduler::FQueuedJob
 {
     FDWCEditorWorkerJobDescriptor Descriptor;
     FDWCEditorWorkerJobTicket Ticket;
+    FDWCEditorPreviewRunToken PreviewRunToken;
     TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> CancellationToken =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
     FPrepare Prepare;
@@ -139,6 +140,14 @@ void FDWCEditorWorkerJobScheduler::SetAdmissionBarrier(FAdmissionBarrier InBarri
     PumpAdmissions();
 }
 
+void FDWCEditorWorkerJobScheduler::SetPreviewLifecycleProvider(
+    FPreviewLifecycleProvider InProvider)
+{
+    check(IsInGameThread());
+    PreviewLifecycleProvider = MoveTemp(InProvider);
+    PumpAdmissions();
+}
+
 FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitPrepared(
     const FDWCEditorWorkerJobDescriptor& Descriptor,
     FPrepare Prepare,
@@ -175,6 +184,21 @@ FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitInternal(
     {
         if (OutError != nullptr) *OutError = TEXT("The editor worker job is missing its prepare or apply callback.");
         return {};
+    }
+
+    FDWCEditorPreviewRunToken PreviewRunToken;
+    if (Descriptor.WorkClass == EDWCEditorWorkClass::InteractivePreview && PreviewLifecycleProvider)
+    {
+        PreviewRunToken = PreviewLifecycleProvider(Descriptor);
+        if (!PreviewRunToken.IsCurrent())
+        {
+            ++PreviewLifecycleRejectionCount;
+            if (OutError != nullptr)
+            {
+                *OutError = TEXT("The owning editor preview mode is not interactive.");
+            }
+            return {};
+        }
     }
     if (AdmissionBarrier)
     {
@@ -231,6 +255,7 @@ FDWCEditorWorkerJobTicket FDWCEditorWorkerJobScheduler::SubmitInternal(
     GenerationByKey.Add(Descriptor.Key, Generation);
     TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job = MakeShared<FQueuedJob, ESPMode::ThreadSafe>();
     Job->Descriptor = Descriptor;
+    Job->PreviewRunToken = MoveTemp(PreviewRunToken);
     Job->Ticket.Key = Descriptor.Key;
     Job->Ticket.SessionEpoch = SessionEpoch;
     Job->Ticket.JobId = NextJobId++;
@@ -316,16 +341,23 @@ void FDWCEditorWorkerJobScheduler::PumpAdmissions()
             {
                 continue;
             }
-            if (Job->CancellationToken->IsCanceled() ||
-                (Job->Descriptor.GetRequestPolicy() == EDWCEditorAsyncRequestPolicy::LatestWins &&
-                 !IsCurrentGeneration(Job->Ticket)))
+            if (Job->CancellationToken->IsCanceled())
             {
-                FinalizeNonRunningJob(
-                    Job,
-                    IsCurrentGeneration(Job->Ticket)
-                        ? EDWCEditorWorkerJobCompletion::Canceled
-                        : EDWCEditorWorkerJobCompletion::Superseded,
-                    FString());
+                FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Canceled, FString());
+                bMadeProgress = true;
+                continue;
+            }
+            if (!IsPreviewLifecycleCurrent(Job))
+            {
+                ++PreviewLifecycleStaleCount;
+                FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Stale, FString());
+                bMadeProgress = true;
+                continue;
+            }
+            if (Job->Descriptor.GetRequestPolicy() == EDWCEditorAsyncRequestPolicy::LatestWins &&
+                !IsCurrentGeneration(Job->Ticket))
+            {
+                FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Superseded, FString());
                 bMadeProgress = true;
                 continue;
             }
@@ -345,6 +377,13 @@ void FDWCEditorWorkerJobScheduler::PumpAdmissions()
             if (Job->CancellationToken->IsCanceled())
             {
                 FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Canceled, FString());
+                bMadeProgress = true;
+                continue;
+            }
+            if (!IsPreviewLifecycleCurrent(Job))
+            {
+                ++PreviewLifecycleStaleCount;
+                FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Stale, FString());
                 bMadeProgress = true;
                 continue;
             }
@@ -455,10 +494,12 @@ bool FDWCEditorWorkerJobScheduler::TryAdmitPendingJob(
     const bool bLatestStillCurrent =
         Job->Descriptor.GetRequestPolicy() != EDWCEditorAsyncRequestPolicy::LatestWins ||
         IsCurrentGeneration(Job->Ticket);
-    if (!bPrepared || !Prepared.Work || Job->CancellationToken->IsCanceled() || !bLatestStillCurrent)
+    const bool bPreviewStillCurrent = IsPreviewLifecycleCurrent(Job);
+    if (!bPrepared || !Prepared.Work || Job->CancellationToken->IsCanceled() ||
+        !bLatestStillCurrent || !bPreviewStillCurrent)
     {
         EDWCEditorWorkerJobCompletion Completion = EDWCEditorWorkerJobCompletion::Failed;
-        if (!bLatestStillCurrent)
+        if (!bLatestStillCurrent || !bPreviewStillCurrent)
         {
             Completion = EDWCEditorWorkerJobCompletion::Superseded;
         }
@@ -739,6 +780,51 @@ void FDWCEditorWorkerJobScheduler::CancelWorkClass(const EDWCEditorWorkClass Wor
     PumpAdmissions();
 }
 
+void FDWCEditorWorkerJobScheduler::CancelPreviewMode(const EDWCEditorPreviewMode Mode)
+{
+    check(IsInGameThread());
+    const auto Matches = [Mode](const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job)
+    {
+        return Job->Descriptor.WorkClass == EDWCEditorWorkClass::InteractivePreview &&
+            Job->PreviewRunToken.Mode == Mode;
+    };
+    const auto CancelNonRunning = [this, &Matches](
+        TArray<TSharedRef<FQueuedJob, ESPMode::ThreadSafe>>& Jobs)
+    {
+        for (int32 Index = Jobs.Num() - 1; Index >= 0; --Index)
+        {
+            const TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Job = Jobs[Index];
+            if (Matches(Job))
+            {
+                GenerationByKey.FindOrAdd(Job->Descriptor.Key) += 1;
+                RequestJobCancellation(Job);
+                FinalizeNonRunningJob(Job, EDWCEditorWorkerJobCompletion::Canceled, FString());
+            }
+        }
+    };
+
+    CancelNonRunning(PendingAdmissionJobs);
+    CancelNonRunning(PendingPhaseAdmissionJobs);
+    CancelNonRunning(ReadyJobs);
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : PreparingJobs)
+    {
+        if (Matches(Job))
+        {
+            GenerationByKey.FindOrAdd(Job->Descriptor.Key) += 1;
+            RequestJobCancellation(Job);
+        }
+    }
+    for (const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job : ActiveJobs)
+    {
+        if (Matches(Job))
+        {
+            GenerationByKey.FindOrAdd(Job->Descriptor.Key) += 1;
+            RequestJobCancellation(Job);
+        }
+    }
+    PumpAdmissions();
+}
+
 bool FDWCEditorWorkerJobScheduler::HasOutstandingWorkClass(
     const EDWCEditorWorkClass WorkClass) const
 {
@@ -789,6 +875,8 @@ void FDWCEditorWorkerJobScheduler::Shutdown()
         RequestJobCancellation(Job);
     }
     DomainRevisionProvider = nullptr;
+    AdmissionBarrier = nullptr;
+    PreviewLifecycleProvider = nullptr;
 }
 
 int32 FDWCEditorWorkerJobScheduler::GetQueuedJobCount() const
@@ -849,6 +937,8 @@ FDWCEditorWorkerSchedulerDiagnostics FDWCEditorWorkerJobScheduler::GetDiagnostic
     Diagnostics.AdmissionDeferredCount = AdmissionDeferredCount;
     Diagnostics.PhaseAdmissionDeferredCount = PhaseAdmissionDeferredCount;
     Diagnostics.SingletonRejectionCount = SingletonRejectionCount;
+    Diagnostics.PreviewLifecycleRejectionCount = PreviewLifecycleRejectionCount;
+    Diagnostics.PreviewLifecycleStaleCount = PreviewLifecycleStaleCount;
     Diagnostics.CompletedJobCount = CompletedJobCount;
     Diagnostics.TotalQueueSeconds = TotalQueueSeconds;
     Diagnostics.TotalWorkerSeconds = TotalWorkerSeconds;
@@ -906,6 +996,8 @@ void FDWCEditorWorkerJobScheduler::ResetDiagnosticCounters()
     AdmissionDeferredCount = 0;
     PhaseAdmissionDeferredCount = 0;
     SingletonRejectionCount = 0;
+    PreviewLifecycleRejectionCount = 0;
+    PreviewLifecycleStaleCount = 0;
     CompletedJobCount = 0;
     TotalQueueSeconds = 0.0;
     TotalWorkerSeconds = 0.0;
@@ -922,6 +1014,23 @@ void FDWCEditorWorkerJobScheduler::StartEligibleJobs()
     check(IsInGameThread());
     while (!bShuttingDown && ActiveJobs.Num() < MaxActiveJobs && !ReadyJobs.IsEmpty())
     {
+        for (int32 Index = ReadyJobs.Num() - 1; Index >= 0; --Index)
+        {
+            const TSharedRef<FQueuedJob, ESPMode::ThreadSafe> Candidate = ReadyJobs[Index];
+            if (!IsPreviewLifecycleCurrent(Candidate))
+            {
+                ++PreviewLifecycleStaleCount;
+                FinalizeNonRunningJob(
+                    Candidate,
+                    EDWCEditorWorkerJobCompletion::Stale,
+                    FString());
+            }
+        }
+        if (ReadyJobs.IsEmpty())
+        {
+            break;
+        }
+
         int32 EligibleIndex = INDEX_NONE;
         for (int32 Index = 0; Index < ReadyJobs.Num(); ++Index)
         {
@@ -1061,6 +1170,7 @@ void FDWCEditorWorkerJobScheduler::HandleWorkerFinished(
         DomainRevisionProvider(Job->Ticket.Domain) == Job->Ticket.DomainRevision;
     const bool bGenerationCurrent = Job->Descriptor.GetRequestPolicy() != EDWCEditorAsyncRequestPolicy::LatestWins ||
         IsCurrentGeneration(Job->Ticket);
+    const bool bPreviewLifecycleCurrent = IsPreviewLifecycleCurrent(Job);
 
     EDWCEditorWorkerJobCompletion Completion = EDWCEditorWorkerJobCompletion::Failed;
     if (bShuttingDown)
@@ -1077,6 +1187,11 @@ void FDWCEditorWorkerJobScheduler::HandleWorkerFinished(
     }
     else if (!bDomainRevisionCurrent)
     {
+        Completion = EDWCEditorWorkerJobCompletion::Stale;
+    }
+    else if (!bPreviewLifecycleCurrent)
+    {
+        ++PreviewLifecycleStaleCount;
         Completion = EDWCEditorWorkerJobCompletion::Stale;
     }
     else if (Result.IsValid() && Result->bSucceeded)
@@ -1145,12 +1260,19 @@ bool FDWCEditorWorkerJobScheduler::HandleWorkerContinuation(
     const bool bDomainCurrent = Job->Ticket.Domain == EDWCEditorAuthoringDomain::None ||
         !DomainRevisionProvider ||
         DomainRevisionProvider(Job->Ticket.Domain) == Job->Ticket.DomainRevision;
-    if (bShuttingDown || Job->CancellationToken->IsCanceled() || !bGenerationCurrent || !bDomainCurrent)
+    const bool bPreviewLifecycleCurrent = IsPreviewLifecycleCurrent(Job);
+    if (bShuttingDown || Job->CancellationToken->IsCanceled() || !bGenerationCurrent ||
+        !bDomainCurrent || !bPreviewLifecycleCurrent)
     {
+        if (!bPreviewLifecycleCurrent)
+        {
+            ++PreviewLifecycleStaleCount;
+        }
         const EDWCEditorWorkerJobCompletion Completion = !bGenerationCurrent
             ? EDWCEditorWorkerJobCompletion::Superseded
             : (!bDomainCurrent ? EDWCEditorWorkerJobCompletion::Stale
-                               : EDWCEditorWorkerJobCompletion::Canceled);
+                               : (!bPreviewLifecycleCurrent ? EDWCEditorWorkerJobCompletion::Stale
+                                                           : EDWCEditorWorkerJobCompletion::Canceled));
         FinalizeNonRunningJob(Job, Completion, FString());
         return true;
     }
@@ -1225,6 +1347,12 @@ bool FDWCEditorWorkerJobScheduler::IsCurrentGeneration(const FDWCEditorWorkerJob
 {
     const uint64* CurrentGeneration = GenerationByKey.Find(Ticket.Key);
     return CurrentGeneration != nullptr && *CurrentGeneration == Ticket.Generation;
+}
+
+bool FDWCEditorWorkerJobScheduler::IsPreviewLifecycleCurrent(
+    const TSharedRef<FQueuedJob, ESPMode::ThreadSafe>& Job) const
+{
+    return !Job->PreviewRunToken.IsValid() || Job->PreviewRunToken.IsCurrent();
 }
 
 bool FDWCEditorWorkerJobScheduler::HasOutstandingJobForKey(

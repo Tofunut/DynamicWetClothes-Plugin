@@ -3,6 +3,8 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
+#include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorHostLifecycle.h"
+#include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorPreviewModeLifetime.h"
 #include "WetClothing/Foundation/Resources/DWCEditorResourceBroker.h"
 #include "WetClothing/WCAEditor/WCAEditorMode.h"
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
@@ -28,9 +30,12 @@ class SWetClothingPartEditorPanel;
 class SWetClothingTransparencyBakePanel;
 class SWetWrinkleEditorPanel;
 class UWetClothingAsset;
+class FActiveTimerHandle;
 struct FDWCEditorAuthoringChange;
 struct FDWCEditorBakeBatchResult;
+struct FDWCEditorWorkerJobDescriptor;
 enum class EDWCEditorPreviewSuspendReason : uint8;
+enum class EDWCEditorPreviewResourceReleasePolicy : uint8;
 enum class EDWCEditorTransparencyBakeKind : uint8;
 
 enum class EWCAEditorStatusSeverity : uint8
@@ -110,17 +115,31 @@ public:
     bool SaveBakedVisualAssets() const;
     bool SaveTransparencySetupAssets() const;
     void SetEditorMode(EWCAEditorMode NewMode);
+    void SetHostVisibilitySnapshot(const FDWCEditorHostVisibilitySnapshot& Visibility);
 
 private:
     TSharedRef<SWidget> EnsureModeWidget(EWCAEditorMode Mode);
     EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleDeferredStatusRefresh(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleTextureUploadTimer(double CurrentTime, float DeltaTime);
+    void EnsureTextureUploadTimer();
     EActiveTimerReturnType HandleExclusiveBuildTimer(double CurrentTime, float DeltaTime);
     void RequestStatusRefresh();
     void UpdateCachedStatus();
     void HandleAuthoringDocumentChanged(const FDWCEditorAuthoringChange& Change);
-    void SuspendPreviewMode(EWCAEditorMode Mode, EDWCEditorPreviewSuspendReason Reason);
+    void SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker Blocker, bool bEnabled);
+    void ApplyHostLifecycleTransition(const FDWCEditorHostLifecycleTransition& Transition);
+    bool CanRunInteractivePreview() const;
+    EDWCEditorPreviewSuspendReason ResolveHostSuspendReason() const;
+    EDWCEditorPreviewResourceReleasePolicy ResolveResourceReleasePolicy(
+        EDWCEditorPreviewSuspendReason Reason) const;
+    TSharedPtr<FDWCEditorPreviewModeLifetime> FindPreviewModeLifetime(EWCAEditorMode Mode) const;
+    FDWCEditorPreviewRunToken CapturePreviewRunToken(
+        const FDWCEditorWorkerJobDescriptor& Descriptor) const;
+    void SuspendPreviewMode(
+        EWCAEditorMode Mode,
+        EDWCEditorPreviewSuspendReason Reason,
+        bool bManageResidency = true);
     void ResumePreviewModeIfNeeded(EWCAEditorMode Mode);
     void SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason Reason);
     void HandlePreBeginPIE(bool bIsSimulating);
@@ -153,7 +172,10 @@ private:
     TFunction<void()> PendingExclusiveBuildWork;
     double ExclusiveBuildDrainStartedSeconds = 0.0;
     bool bExclusiveBuildWorkExecuting = false;
-    bool bPIEActive = false;
+    FDWCEditorHostLifecycleReducer HostLifecycle { EDWCEditorHostLifecycleBlocker::HostUnavailable };
+    TSharedPtr<FDWCEditorPreviewModeLifetime> PartPreviewLifetime;
+    TSharedPtr<FDWCEditorPreviewModeLifetime> WrinklePreviewLifetime;
+    TSharedPtr<FDWCEditorPreviewModeLifetime> TransparencyPreviewLifetime;
     TSharedPtr<IDetailsView> DetailsView;
     FSimpleDelegate OnStatusChanged;
     TSharedPtr<SBox> ModeContentBox;
@@ -170,4 +192,5 @@ private:
     EWCAEditorStatusSeverity CachedStatusSeverity = EWCAEditorStatusSeverity::Info;
     FDelegateHandle PreBeginPIEHandle;
     FDelegateHandle EndPIEHandle;
+    TWeakPtr<FActiveTimerHandle> TextureUploadTimerHandle;
 };

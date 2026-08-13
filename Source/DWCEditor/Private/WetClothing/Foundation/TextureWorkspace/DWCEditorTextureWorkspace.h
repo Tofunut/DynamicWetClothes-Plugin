@@ -14,6 +14,8 @@ struct FDWCEditorPreviewOperationCounter;
 class FDWCEditorTextureWorkspace final : public FGCObject
 {
   public:
+    using FMaintenanceRequiredCallback = TFunction<void()>;
+
     // CPU data covers pixels, normal working surfaces, and retained scratch.
     // GPU data is a separate transient texture residency budget.
     static constexpr uint64 DefaultCPUBudgetBytes = 640ull * 1024ull * 1024ull;
@@ -140,10 +142,18 @@ class FDWCEditorTextureWorkspace final : public FGCObject
     void Reset();
     void TrimToBudget();
     uint64 GetReclaimableCPUBytes() const;
+    uint64 GetReclaimableCPUBytesForPurposes(
+        TConstArrayView<EDWCEditorTexturePurpose> Purposes) const;
     uint64 GetReclaimableGPUBytes() const;
     uint64 ReclaimUnleasedCPUBytes(uint64 TargetBytes, uint64* OutRetiringGPUBytes = nullptr);
+    uint64 ReclaimUnleasedCPUBytesForPurposes(
+        TConstArrayView<EDWCEditorTexturePurpose> Purposes,
+        uint64 TargetBytes,
+        uint64* OutRetiringGPUBytes = nullptr);
     uint64 RetireUnleasedGPUBytes(uint64 TargetBytes);
     uint64 RetireUnleasedPurposes(TConstArrayView<EDWCEditorTexturePurpose> Purposes);
+    bool HasRetiringGPUResources() const;
+    void SetMaintenanceRequiredCallback(FMaintenanceRequiredCallback Callback);
     void GetGPUResidencySnapshot(TArray<FDWCEditorTextureGPUResidencyRecord>& OutRecords) const;
     /** Polls render fences and releases transient UTexture2D references after GPU retire completes. */
     void ProcessRetiredGPUResources();
@@ -205,6 +215,7 @@ class FDWCEditorTextureWorkspace final : public FGCObject
     uint64 CalculateGPUUsedBytes() const;
     FGPUResidencyStats CollectGPUResidencyStats() const;
     void UpdateGPUHighWaterMark();
+    void NotifyMaintenanceRequired();
 
     TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue;
     TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
@@ -217,6 +228,7 @@ class FDWCEditorTextureWorkspace final : public FGCObject
     uint64 GPUBudgetBytes = DefaultGPUBudgetBytes;
     uint64 UseSerial = 0;
     uint64 NextLeaseId = 1;
+    FMaintenanceRequiredCallback MaintenanceRequiredCallback;
     uint64 AcquireHitCount = 0;
     uint64 AcquireMissCount = 0;
     uint64 EvictionCount = 0;

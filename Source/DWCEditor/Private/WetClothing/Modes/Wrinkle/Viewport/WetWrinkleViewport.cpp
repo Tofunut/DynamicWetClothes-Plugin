@@ -329,6 +329,7 @@ void SWetWrinkleViewport::Construct(const FArguments& InArgs)
     SurfacePatchProjectionCache = InArgs._SurfacePatchProjectionCache;
     TextureWorkspace = InArgs._TextureWorkspace;
     PreviewCommitCoordinator = InArgs._PreviewCommitCoordinator;
+    PreviewModeLifetime = InArgs._PreviewModeLifetime;
     RenderUploadQueue = InArgs._RenderUploadQueue;
     OnSurfaceHitChanged = InArgs._OnSurfaceHitChanged;
     PreviewScene = MakeShared<FAdvancedPreviewScene>(FPreviewScene::ConstructionValues());
@@ -512,6 +513,7 @@ void SWetWrinkleViewport::InitializePreviewSession()
         WetClothingAsset.Get(),
         PreviewScene.IsValid() ? PreviewScene->GetWorld() : nullptr,
         Config);
+    PreviewSession->BindModeLifetime(PreviewModeLifetime);
     PreviewOrchestrator = MakeUnique<FDWCEditorPreviewOrchestrator>();
     PreviewOrchestrator->Initialize(
         WetClothingAsset.Get(),
@@ -2226,6 +2228,9 @@ bool SWetWrinkleViewport::EnsureTransientProceduralPreviewState(
     }
     FDWCEditorPreviewCommitContext CommitContext;
     CommitContext.ConsumerToken = PreviewCommitLifetime.CaptureToken();
+    CommitContext.PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     CommitContext.DebugName = TEXT("Transient procedural wrinkle preview");
     CommitContext.IsCurrent = [this]() { return !bPreviewSuspended; };
     const EDWCEditorPreviewCommitResult CommitResult = PreviewCommitCoordinator.IsValid()
@@ -2452,6 +2457,9 @@ bool SWetWrinkleViewport::EnsurePatchHoverPreviewState(
 
     FDWCEditorPreviewCommitContext CommitContext;
     CommitContext.ConsumerToken = PreviewCommitLifetime.CaptureToken();
+    CommitContext.PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     CommitContext.DebugName = TEXT("Projected wrinkle patch hover");
     CommitContext.IsCurrent = [this]() { return !bPreviewSuspended; };
     const auto InitializeBuffer = [this, &CommitContext, MaterialSlotIndex, TextureSize, WorkingTextureSize](
@@ -2579,6 +2587,9 @@ bool SWetWrinkleViewport::SchedulePatchHoverPreview()
     }
 
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewRunToken PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     TWeakPtr<SWetWrinkleViewport> WeakThis = SharedThis(this);
     FString SubmitError;
     const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitPrepared(
@@ -2628,7 +2639,8 @@ bool SWetWrinkleViewport::SchedulePatchHoverPreview()
             };
             return true;
         },
-        [WeakThis, MaterialSlotIndex, UVChannelIndex, RequestSerial, PatchDescriptor, CommitToken](
+        [WeakThis, MaterialSlotIndex, UVChannelIndex, RequestSerial, PatchDescriptor,
+         CommitToken, PreviewRunToken](
             const FDWCEditorWorkerJobTicket& CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult) mutable
         {
@@ -2660,6 +2672,7 @@ bool SWetWrinkleViewport::SchedulePatchHoverPreview()
             }
             FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
+            CommitContext.PreviewRunToken = PreviewRunToken;
             CommitContext.ProducerSessionEpoch = CompletedTicket.SessionEpoch;
             CommitContext.DebugName = TEXT("Projected wrinkle patch hover");
             CommitContext.IsCurrent = [Viewport, MaterialSlotIndex, UVChannelIndex,
@@ -2924,6 +2937,9 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
         LastSequence);
 
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewRunToken PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     TWeakPtr<SWetWrinkleViewport> WeakThis = SharedThis(this);
     FString SubmitError;
     const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitPrepared(
@@ -3003,7 +3019,7 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
             return true;
         },
         [WeakThis, MaterialSlotIndex, UVChannelIndex, IncrementalGeneration,
-         BatchCommandCount, FirstSequence, LastSequence, CommitToken](
+         BatchCommandCount, FirstSequence, LastSequence, CommitToken, PreviewRunToken](
             const FDWCEditorWorkerJobTicket& CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
@@ -3027,6 +3043,7 @@ bool SWetWrinkleViewport::ScheduleAccumulatedIncrementalPreview(
 
             FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
+            CommitContext.PreviewRunToken = PreviewRunToken;
             CommitContext.ProducerSessionEpoch = CompletedTicket.SessionEpoch;
             CommitContext.DebugName = FString::Printf(
                 TEXT("Wrinkle incremental preview slot %d"),
@@ -3315,6 +3332,9 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
     Descriptor.DebugName = FString::Printf(TEXT("Wrinkle transient preview slot %d"), MaterialSlotIndex);
 
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewRunToken PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     TWeakPtr<SWetWrinkleViewport> WeakThis = SharedThis(this);
     FString SubmitError;
     const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitPrepared(
@@ -3377,7 +3397,8 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
             };
             return true;
         },
-        [WeakThis, MaterialSlotIndex, DataUVChannelIndex, RequestSerial, Stroke, CommitToken](
+        [WeakThis, MaterialSlotIndex, DataUVChannelIndex, RequestSerial, Stroke,
+         CommitToken, PreviewRunToken](
             const FDWCEditorWorkerJobTicket& CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
@@ -3391,6 +3412,7 @@ bool SWetWrinkleViewport::ScheduleTransientProceduralPreview(
             FWetProceduralRidgeTransientPreviewState& State = Viewport->TransientProceduralPreviewState;
             FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
+            CommitContext.PreviewRunToken = PreviewRunToken;
             CommitContext.ProducerSessionEpoch = CompletedTicket.SessionEpoch;
             CommitContext.DebugName = FString::Printf(
                 TEXT("Wrinkle transient preview slot %d"),
@@ -3640,6 +3662,9 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
     const FIntPoint WorkingTextureSize = PreviewState.WorkingTextureSize;
     const uint64 SnapshotContentRevision = PreviewState.ContentRevision;
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewRunToken PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     FDWCEditorWorkerJobDescriptor Descriptor;
     Descriptor.Key.Kind = EDWCEditorWorkerJobKind::WrinkleAccumulatedPreview;
     Descriptor.Key.MaterialSlotIndex = MaterialSlotIndex;
@@ -3767,7 +3792,8 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
             };
             return true;
         },
-        [WeakThis, MaterialSlotIndex, UVChannelIndex, SnapshotContentRevision, CommitToken](
+        [WeakThis, MaterialSlotIndex, UVChannelIndex, SnapshotContentRevision,
+         CommitToken, PreviewRunToken](
             const FDWCEditorWorkerJobTicket& Ticket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
@@ -3791,6 +3817,7 @@ bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulate
 
             FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
+            CommitContext.PreviewRunToken = PreviewRunToken;
             CommitContext.ProducerSessionEpoch = Ticket.SessionEpoch;
             CommitContext.DebugName = FString::Printf(
                 TEXT("Wrinkle accumulated preview slot %d"),

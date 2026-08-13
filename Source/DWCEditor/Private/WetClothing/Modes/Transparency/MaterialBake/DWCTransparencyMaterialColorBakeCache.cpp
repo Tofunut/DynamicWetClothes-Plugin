@@ -9,6 +9,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Modules/ModuleManager.h"
 #include "StaticMeshAttributes.h"
+#include "UObject/StrongObjectPtr.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 #include "WetClothing/Modes/Transparency/Temp/DWCTransparencyTempAssetStore.h"
 
@@ -319,6 +320,17 @@ namespace
     {
         check(IsInGameThread());
         OutPayload = FBakedMaterialSurfacePayload();
+        if (!IsValid(&SourceMesh) || !IsValid(&Material))
+        {
+            OutError = TEXT("The source mesh or effective material expired before material surface baking began.");
+            return false;
+        }
+
+        // MaterialBaking pumps game-thread tasks while render commands are in
+        // flight. Keep both UObject resources alive for that entire nested
+        // lifecycle, independent of the editor hierarchy that supplied them.
+        TStrongObjectPtr<USkeletalMesh> SourceMeshGuard(&SourceMesh);
+        TStrongObjectPtr<UMaterialInterface> MaterialGuard(&Material);
         FMeshDescription* MeshDescription = SourceMesh.GetMeshDescription(0);
         if (MeshDescription == nullptr)
         {

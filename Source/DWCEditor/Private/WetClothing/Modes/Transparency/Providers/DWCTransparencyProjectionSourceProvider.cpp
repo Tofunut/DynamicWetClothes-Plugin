@@ -7,11 +7,72 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstance.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Misc/AutomationTest.h"
 #include "PreviewScene.h"
 
 namespace
 {
+    bool RequiresDurableMaterialSnapshot(const UMaterialInterface& Material)
+    {
+        return Material.IsA<UMaterialInstanceDynamic>() ||
+            Material.HasAnyFlags(RF_Transient) ||
+            Material.GetOutermost() == GetTransientPackage();
+    }
+
+    UMaterialInterface* MakeDurableMaterialSnapshot(
+        UMaterialInterface* SourceMaterial,
+        const TSharedRef<FDWCTransparencyProjectionObjectLease>& ObjectLease,
+        FString& OutError)
+    {
+        if (SourceMaterial == nullptr || !RequiresDurableMaterialSnapshot(*SourceMaterial))
+        {
+            return SourceMaterial;
+        }
+
+        UMaterial* BaseMaterial = SourceMaterial->GetMaterial();
+        if (BaseMaterial == nullptr || BaseMaterial->GetOutermost() == GetTransientPackage())
+        {
+            OutError = FString::Printf(
+                TEXT("Transient Blueprint material '%s' has no durable base material for source baking."),
+                *GetPathNameSafe(SourceMaterial));
+            return nullptr;
+        }
+
+        UMaterialInstanceConstant* SnapshotMaterial = NewObject<UMaterialInstanceConstant>(
+            GetTransientPackage(),
+            MakeUniqueObjectName(
+                GetTransientPackage(),
+                UMaterialInstanceConstant::StaticClass(),
+                TEXT("DWC_TransparencySourceMaterialSnapshot")),
+            RF_Transient);
+        if (SnapshotMaterial == nullptr)
+        {
+            OutError = FString::Printf(
+                TEXT("Could not snapshot transient Blueprint material '%s'."),
+                *GetPathNameSafe(SourceMaterial));
+            return nullptr;
+        }
+
+        SnapshotMaterial->SetParentEditorOnly(BaseMaterial, false);
+        SnapshotMaterial->CopyMaterialUniformParametersEditorOnly(SourceMaterial, true);
+        if (const UMaterialInstance* SourceInstance = Cast<UMaterialInstance>(SourceMaterial))
+        {
+            FMaterialInstanceBasePropertyOverrides BasePropertyOverrides =
+                SourceInstance->BasePropertyOverrides;
+            SnapshotMaterial->UpdateStaticPermutation(
+                SourceInstance->GetStaticParameters(),
+                BasePropertyOverrides);
+        }
+        SnapshotMaterial->PostEditChange();
+        ObjectLease->Retain(SnapshotMaterial);
+        return SnapshotMaterial;
+    }
+
     FString MakeBlueprintHierarchySignature(
         const TSubclassOf<AActor> BlueprintClass,
         const TArray<FDWCTransparencyBlueprintMeshComponent>& Components)
@@ -32,12 +93,16 @@ namespace
                 TEXT(":Path=%s:Depth=%d"),
                 *Component.DisplayPath,
                 Component.HierarchyDepth);
-            for (const UMaterialInterface* Material : Component.Materials)
+            for (int32 MaterialIndex = 0; MaterialIndex < Component.Materials.Num(); ++MaterialIndex)
             {
+                const UMaterialInterface* Material = Component.Materials[MaterialIndex];
+                const FGuid LightingGuid = Component.MaterialLightingGuids.IsValidIndex(MaterialIndex)
+                    ? Component.MaterialLightingGuids[MaterialIndex]
+                    : (Material != nullptr ? Material->GetLightingGuid() : FGuid());
                 Signature += FString::Printf(
                     TEXT(":Material=%s"),
-                    Material != nullptr
-                        ? *Material->GetLightingGuid().ToString(EGuidFormats::Digits)
+                    LightingGuid.IsValid()
+                        ? *LightingGuid.ToString(EGuidFormats::Digits)
                         : TEXT("None"));
             }
             const FTransform& Transform = Component.BakeTransform;
@@ -154,6 +219,72 @@ namespace
     }
 }
 
+void FDWCTransparencyProjectionObjectLease::Retain(UObject* Object)
+{
+    if (Object != nullptr)
+    {
+        Objects.AddUnique(Object);
+    }
+}
+
+void FDWCTransparencyProjectionObjectLease::AddReferencedObjects(
+    FReferenceCollector& Collector)
+{
+    Collector.AddReferencedObjects(Objects);
+}
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyBlueprintMaterialSnapshotLifetimeTest,
+    "DWC.Editor.Transparency.Type2.BlueprintMaterialSnapshotLifetime",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyBlueprintMaterialSnapshotLifetimeTest::RunTest(const FString&)
+{
+    UMaterialInterface* DefaultMaterial = LoadObject<UMaterialInterface>(
+        nullptr,
+        TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"));
+    TestNotNull(TEXT("The engine default material is available."), DefaultMaterial);
+    if (DefaultMaterial == nullptr)
+    {
+        return false;
+    }
+
+    UMaterialInstanceDynamic* ComponentMaterial = UMaterialInstanceDynamic::Create(
+        DefaultMaterial,
+        GetTransientPackage());
+    TestNotNull(TEXT("A transient component MID can be created."), ComponentMaterial);
+    if (ComponentMaterial == nullptr)
+    {
+        return false;
+    }
+
+    TSharedPtr<FDWCTransparencyProjectionObjectLease> Lease =
+        MakeShared<FDWCTransparencyProjectionObjectLease>();
+    FString Error;
+    UMaterialInterface* SnapshotMaterial = MakeDurableMaterialSnapshot(
+        ComponentMaterial,
+        Lease.ToSharedRef(),
+        Error);
+    TestNotNull(TEXT("A transient component material produces a durable bake snapshot."), SnapshotMaterial);
+    TestTrue(TEXT("The bake snapshot is independent from the component MID."),
+        SnapshotMaterial != ComponentMaterial);
+    TestTrue(TEXT("Snapshot creation reports no error."), Error.IsEmpty());
+    if (SnapshotMaterial == nullptr)
+    {
+        return false;
+    }
+
+    TWeakObjectPtr<UMaterialInterface> SnapshotWeak(SnapshotMaterial);
+    CollectGarbage(RF_NoFlags);
+    TestTrue(TEXT("The projection lease keeps the material snapshot alive across GC."),
+        SnapshotWeak.IsValid());
+    TestTrue(TEXT("The snapshot resolves the same durable base material."),
+        SnapshotWeak.IsValid() && SnapshotWeak->GetMaterial() == DefaultMaterial->GetMaterial());
+    return true;
+}
+#endif
+
 bool FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchy(
     const TSubclassOf<AActor> BlueprintClass,
     FDWCTransparencyBlueprintHierarchy& OutHierarchy,
@@ -161,6 +292,7 @@ bool FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchy(
 {
     check(IsInGameThread());
     OutHierarchy = FDWCTransparencyBlueprintHierarchy();
+    OutHierarchy.ObjectLease = MakeShared<FDWCTransparencyProjectionObjectLease>();
     OutError.Reset();
     if (BlueprintClass == nullptr ||
         BlueprintClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
@@ -223,13 +355,27 @@ bool FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchy(
         }
         Component.DisplayPath = FString::Join(HierarchyNames, TEXT(" / "));
         Component.SkeletalMesh = MeshComponent->GetSkeletalMeshAsset();
+        OutHierarchy.ObjectLease->Retain(Component.SkeletalMesh);
         Component.BakeTransform = MeshComponent->GetComponentTransform().GetRelativeTransform(
             PreviewActor->GetActorTransform());
         const int32 MaterialCount = MeshComponent->GetNumMaterials();
         Component.Materials.Reserve(MaterialCount);
+        Component.MaterialLightingGuids.Reserve(MaterialCount);
         for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
         {
-            Component.Materials.Add(MeshComponent->GetMaterial(MaterialIndex));
+            UMaterialInterface* EffectiveMaterial = MeshComponent->GetMaterial(MaterialIndex);
+            Component.MaterialLightingGuids.Add(
+                EffectiveMaterial != nullptr ? EffectiveMaterial->GetLightingGuid() : FGuid());
+            UMaterialInterface* DurableMaterial = MakeDurableMaterialSnapshot(
+                EffectiveMaterial,
+                OutHierarchy.ObjectLease.ToSharedRef(),
+                OutError);
+            if (EffectiveMaterial != nullptr && DurableMaterial == nullptr)
+            {
+                return false;
+            }
+            Component.Materials.Add(DurableMaterial);
+            OutHierarchy.ObjectLease->Retain(DurableMaterial);
         }
     }
     OutHierarchy.MeshComponents.Sort(
@@ -329,6 +475,22 @@ bool FDWCTransparencyProjectionSourceProvider::BuildBlueprintSources(
         return false;
     }
 
+    return BuildBlueprintSources(Asset, Layer, Hierarchy, OutSources, OutError);
+}
+
+bool FDWCTransparencyProjectionSourceProvider::BuildBlueprintSources(
+    const UWetClothingAsset& Asset,
+    const FWetClothingTransparencyLayerData& Layer,
+    const FDWCTransparencyBlueprintHierarchy& Hierarchy,
+    FDWCTransparencyProjectionSourceSet& OutSources,
+    FString& OutError)
+{
+    check(IsInGameThread());
+    OutSources = FDWCTransparencyProjectionSourceSet();
+    OutError.Reset();
+    OutSources.ObjectLease = Hierarchy.ObjectLease;
+
+    const FWetClothingTransparencyBlueprintSource& Config = Layer.BlueprintSource;
     USkeletalMesh* RuntimeMesh = Asset.GetRuntimeSkeletalMesh();
     USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
     const FDWCTransparencyBlueprintMeshComponent* OuterComponent =

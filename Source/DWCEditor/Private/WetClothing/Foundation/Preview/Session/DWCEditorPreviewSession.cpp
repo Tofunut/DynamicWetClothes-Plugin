@@ -96,6 +96,8 @@ void FDWCEditorPreviewSession::Initialize(
     PreviewMaterialScope = EDWCEditorPreviewMaterialScope::AllWettableSlots;
     bInitialized = WetClothingAssetIn != nullptr;
     bSuspended = false;
+    LastSuspendReason = EDWCEditorPreviewSuspendReason::ModeSwitch;
+    ++LifecycleGeneration;
 
     if (!bInitialized)
     {
@@ -135,6 +137,7 @@ void FDWCEditorPreviewSession::Shutdown()
     SourceParameterRevisions.Reset();
     WetClothingAsset.Reset();
     PreviewWorld.Reset();
+    ModeLifetime.Reset();
     SessionConfig = FDWCEditorPreviewSessionConfig();
     SelectedMaterialSlotIndex = AllWettableSlots;
     PreviewMaterialScope = EDWCEditorPreviewMaterialScope::AllWettableSlots;
@@ -142,6 +145,8 @@ void FDWCEditorPreviewSession::Shutdown()
     PreviewWetness = 1.0f;
     bInitialized = false;
     bSuspended = false;
+    LastSuspendReason = EDWCEditorPreviewSuspendReason::EditorClosing;
+    ++LifecycleGeneration;
     bRenderResourcesDirty = false;
     SlotRefreshCount = 0;
     SlotStateChangeCount = 0;
@@ -162,9 +167,24 @@ bool FDWCEditorPreviewSession::IsInitialized() const
     return bInitialized && WetClothingAsset.IsValid();
 }
 
+void FDWCEditorPreviewSession::BindModeLifetime(
+    const TSharedPtr<FDWCEditorPreviewModeLifetime>& InModeLifetime)
+{
+    check(IsInGameThread());
+    ModeLifetime = InModeLifetime;
+}
+
+FDWCEditorPreviewRunToken FDWCEditorPreviewSession::CaptureRunToken() const
+{
+    check(IsInGameThread());
+    const TSharedPtr<FDWCEditorPreviewModeLifetime> Lifetime = ModeLifetime.Pin();
+    return !bSuspended && Lifetime.IsValid()
+        ? Lifetime->CaptureToken()
+        : FDWCEditorPreviewRunToken();
+}
+
 void FDWCEditorPreviewSession::Suspend(const EDWCEditorPreviewSuspendReason Reason)
 {
-    (void)Reason;
     if (!IsInitialized() || bSuspended)
     {
         return;
@@ -175,7 +195,9 @@ void FDWCEditorPreviewSession::Suspend(const EDWCEditorPreviewSuspendReason Reas
     ClearBuiltMaterials();
     MaterialCache.Reset();
     FlushRenderResourceBindings();
+    LastSuspendReason = Reason;
     bSuspended = true;
+    ++LifecycleGeneration;
 }
 
 void FDWCEditorPreviewSession::Resume()
@@ -186,6 +208,7 @@ void FDWCEditorPreviewSession::Resume()
     }
 
     bSuspended = false;
+    ++LifecycleGeneration;
 }
 
 bool FDWCEditorPreviewSession::RefreshSlotStates()
@@ -705,7 +728,7 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
     UE_LOG(
         LogDWCEditorPreview,
         Display,
-        TEXT("[%d] %s: WCA='%s', selected=%s, wetness=%.3f, ready=%d, active=%d, builtMIDs=%d, pending=%d, failed=%d."),
+        TEXT("[%d] %s: WCA='%s', selected=%s, wetness=%.3f, ready=%d, active=%d, builtMIDs=%d, pending=%d, failed=%d, suspended=%s, lifecycle=%llu."),
         SessionIndex,
         *Label,
         *GetNameSafe(WetClothingAsset.Get()),
@@ -715,7 +738,9 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
         ActivePreviewMaterialSlots.Num(),
         BuiltMIDCount,
         PendingMaterialCount,
-        FailedMaterialCount);
+        FailedMaterialCount,
+        bSuspended ? TEXT("true") : TEXT("false"),
+        LifecycleGeneration);
     UE_LOG(
         LogDWCEditorPreview,
         Display,

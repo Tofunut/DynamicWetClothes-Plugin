@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 
+#include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeProjection.h"
 
@@ -294,6 +295,93 @@ bool FDWCTransparencyProjectionBlockerResultTest::RunTest(const FString&)
     TestTrue(TEXT("The terminal blocker state is explicit."), ResultHit.bBlocked);
     TestTrue(TEXT("The blocker distance is retained for same-priority comparison."),
         FMath::IsNearlyEqual(ResultHit.Distance, 0.5f));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyProjectionProgressAndCancellationTest,
+    "DWC.Transparency.RevealBake.ProjectionProgressAndCancellation",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyProjectionProgressAndCancellationTest::RunTest(const FString&)
+{
+    FDWCRevealBakeSurface OuterSurface;
+    OuterSurface.MaxRevealDistance = 5.0f;
+    OuterSurface.LayerOrder = 100;
+    TArray<FDWCRevealBakeSurface> Sources;
+    Sources.Add(MakeProjectionSurface(TEXT("Reveal"), -1.0f, true, false));
+
+    constexpr int32 SampleCount = 4097;
+    TArray<FDWCRevealBakeTexelSample> Samples;
+    Samples.SetNum(SampleCount);
+    for (int32 SampleIndex = 0; SampleIndex < SampleCount; ++SampleIndex)
+    {
+        Samples[SampleIndex].Pixel = FIntPoint(SampleIndex, 0);
+        Samples[SampleIndex].Position = FVector::ZeroVector;
+        Samples[SampleIndex].Normal = FVector::UpVector;
+    }
+
+    FDWCRevealBakeRayProjectionSettings Settings;
+    Settings.RayStartOffset = 0.0f;
+    TArray<int32> ReportedCompletedSamples;
+    const FDWCRevealBakeProjectionProgressCallback ProgressCallback =
+        [&ReportedCompletedSamples](const int32 CompletedSamples, const int32 TotalSamples)
+    {
+        check(TotalSamples == SampleCount);
+        ReportedCompletedSamples.Add(CompletedSamples);
+    };
+    FString Error;
+    TestTrue(
+        TEXT("Projection succeeds while reporting bounded progress."),
+        FDWCRevealBakeRayProjector::ProjectSamplesToSources(
+            OuterSurface,
+            Sources,
+            Samples,
+            Settings,
+            [](const FDWCRevealBakeRayHit&) {},
+            &Error,
+            nullptr,
+            {},
+            &ProgressCallback));
+    TestTrue(TEXT("Projection reports at least its start and completion."),
+        ReportedCompletedSamples.Num() >= 2);
+    if (!ReportedCompletedSamples.IsEmpty())
+    {
+        TestEqual(TEXT("Projection progress starts at zero."),
+            ReportedCompletedSamples[0], 0);
+        TestEqual(TEXT("Projection progress ends at the exact sample count."),
+            ReportedCompletedSamples.Last(), SampleCount);
+        for (int32 Index = 1; Index < ReportedCompletedSamples.Num(); ++Index)
+        {
+            TestTrue(TEXT("Projection progress never moves backwards."),
+                ReportedCompletedSamples[Index] >= ReportedCompletedSamples[Index - 1]);
+        }
+    }
+
+    FDWCEditorCancellationToken CancellationToken;
+    const FDWCRevealBakeProjectionProgressCallback CancelingProgressCallback =
+        [&CancellationToken](const int32 CompletedSamples, const int32)
+    {
+        if (CompletedSamples >= 2048)
+        {
+            CancellationToken.Cancel();
+        }
+    };
+    Error.Reset();
+    TestFalse(
+        TEXT("Projection stops after the progress consumer requests cancellation."),
+        FDWCRevealBakeRayProjector::ProjectSamplesToSources(
+            OuterSurface,
+            Sources,
+            Samples,
+            Settings,
+            [](const FDWCRevealBakeRayHit&) {},
+            &Error,
+            &CancellationToken,
+            {},
+            &CancelingProgressCallback));
+    TestTrue(TEXT("Canceled projection returns an explicit cancellation error."),
+        Error.Contains(TEXT("canceled")));
     return true;
 }
 

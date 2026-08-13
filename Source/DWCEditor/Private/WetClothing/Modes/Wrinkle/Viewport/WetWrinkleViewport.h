@@ -149,6 +149,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService>, SurfacePatchProjectionCache)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewModeLifetime>, PreviewModeLifetime)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_EVENT(FOnWetWrinkleSurfaceHitChanged, OnSurfaceHitChanged)
     SLATE_END_ARGS()
@@ -331,6 +332,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     int32 GeneratedNormalPreviewUVChannelIndex = INDEX_NONE;
     bool bGeneratedNormalPreviewOverrideActive = false;
     TUniquePtr<FDWCEditorPreviewSession> PreviewSession;
+    TSharedPtr<FDWCEditorPreviewModeLifetime> PreviewModeLifetime;
     TUniquePtr<FDWCEditorPreviewOrchestrator> PreviewOrchestrator;
     TArray<FWetWrinkleAccumulatedPreviewState> AccumulatedPreviewStates;
     uint64 AccumulatedPreviewUseSerial = 0;

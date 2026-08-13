@@ -41,9 +41,21 @@
 #define LOCTEXT_NAMESPACE "WCAEditorPanel"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWCAEditorBuildBarrier, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogWCAEditorLifecycle, Log, All);
 
 namespace
 {
+    EDWCEditorPreviewMode ResolvePreviewMode(const EWCAEditorMode Mode)
+    {
+        switch (Mode)
+        {
+        case EWCAEditorMode::PartEdit: return EDWCEditorPreviewMode::WetPart;
+        case EWCAEditorMode::WrinkleEdit: return EDWCEditorPreviewMode::Wrinkle;
+        case EWCAEditorMode::TransparencyBake: return EDWCEditorPreviewMode::Transparency;
+        default: return EDWCEditorPreviewMode::None;
+        }
+    }
+
     EDWCEditorPreviewGPUDomain ResolvePreviewGPUDomain(const EWCAEditorMode Mode)
     {
         switch (Mode)
@@ -85,7 +97,13 @@ namespace
         }
         for (const FWetClothingTransparencyLayerData& Layer : Asset->Authored.TransparencyData.TransparencyLayers)
         {
-            Index.TransparencyLayerGuids.Add(Layer.LayerGuid);
+            if (Layer.LayerGuid.IsValid())
+            {
+                Index.TransparencyLayerGuids.Add(Layer.LayerGuid);
+                Index.TransparencyLayerByMaterialSlot.FindOrAdd(
+                    Layer.TargetSurface.OuterMaterialSlotIndex,
+                    Layer.LayerGuid);
+            }
         }
         return Index;
     }
@@ -198,6 +216,14 @@ FString FWCAEditorIssueStatus::BuildSummary() const
 
 SWCAEditorPanel::~SWCAEditorPanel()
 {
+    if (RenderUploadQueue.IsValid())
+    {
+        RenderUploadQueue->SetWorkAvailableCallback(nullptr);
+    }
+    if (TextureWorkspace.IsValid())
+    {
+        TextureWorkspace->SetMaintenanceRequiredCallback(nullptr);
+    }
     PendingExclusiveBuildWork = nullptr;
     ExclusiveBuildLease.Reset();
     if (PreBeginPIEHandle.IsValid())
@@ -210,7 +236,7 @@ SWCAEditorPanel::~SWCAEditorPanel()
         FEditorDelegates::EndPIE.Remove(EndPIEHandle);
         EndPIEHandle.Reset();
     }
-    SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason::EditorClosing);
+    SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::EditorClosing, true);
     if (PreviewCommitCoordinator.IsValid())
     {
         FDWCEditorPreviewDiagnostics::UnregisterCommitCoordinator(PreviewCommitCoordinator.Get());
@@ -236,6 +262,9 @@ SWCAEditorPanel::~SWCAEditorPanel()
     BakeCoordinator.Reset();
     BuildOperationManager.Reset();
     WorkerJobScheduler.Reset();
+    PartPreviewLifetime.Reset();
+    WrinklePreviewLifetime.Reset();
+    TransparencyPreviewLifetime.Reset();
 
     // Release viewport-owned texture leases before shutting down the upload
     // queue and workspace that service them.
@@ -291,11 +320,23 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
         WetClothingAsset.IsValid()
             ? FString::Printf(TEXT("WCA Editor: %s"), *WetClothingAsset->GetName())
             : TEXT("WCA Editor"));
+    ResourceBroker->SetSessionActive(
+        ResourceBrokerSessionId,
+        HostLifecycle.CanRunInteractivePreview());
     const FDWCEditorResourceBudgetConfig& ResourceBudget = ResourceBroker->GetBudgetConfig();
     ResourceGovernor = ResourceBroker->GetResourceGovernor();
     WorkerJobScheduler = MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(
         ResourceGovernor.ToSharedRef());
     const FGuid SessionEpoch = WorkerJobScheduler->GetSessionEpoch();
+    PartPreviewLifetime = MakeShared<FDWCEditorPreviewModeLifetime>(
+        EDWCEditorPreviewMode::WetPart,
+        SessionEpoch);
+    WrinklePreviewLifetime = MakeShared<FDWCEditorPreviewModeLifetime>(
+        EDWCEditorPreviewMode::Wrinkle,
+        SessionEpoch);
+    TransparencyPreviewLifetime = MakeShared<FDWCEditorPreviewModeLifetime>(
+        EDWCEditorPreviewMode::Transparency,
+        SessionEpoch);
     CacheStore = MakeShared<FDWCEditorCacheStore>(
         ResourceGovernor.ToSharedRef(),
         SessionEpoch,
@@ -359,6 +400,29 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
                 &OutReason);
         });
     const TWeakPtr<SWCAEditorPanel> WeakPanel = SharedThis(this);
+    RenderUploadQueue->SetWorkAvailableCallback(
+        [WeakPanel]()
+        {
+            if (const TSharedPtr<SWCAEditorPanel> Panel = WeakPanel.Pin())
+            {
+                Panel->EnsureTextureUploadTimer();
+            }
+        });
+    TextureWorkspace->SetMaintenanceRequiredCallback(
+        [WeakPanel]()
+        {
+            if (const TSharedPtr<SWCAEditorPanel> Panel = WeakPanel.Pin())
+            {
+                Panel->EnsureTextureUploadTimer();
+            }
+        });
+    WorkerJobScheduler->SetPreviewLifecycleProvider(
+        [WeakPanel](const FDWCEditorWorkerJobDescriptor& Descriptor)
+        {
+            const TSharedPtr<SWCAEditorPanel> Panel = WeakPanel.Pin();
+            return Panel.IsValid() ? Panel->CapturePreviewRunToken(Descriptor)
+                                   : FDWCEditorPreviewRunToken();
+        });
     const TWeakPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> WeakScheduler =
         WorkerJobScheduler;
     ResourceBroker->SetSessionBuildBarrierHooks(
@@ -414,9 +478,7 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
         TGuardValue<bool> SuppressStatusChangedNotification(bSuppressStatusChangedNotification, true);
         SetEditorMode(EWCAEditorMode::PartEdit);
     }
-    RegisterActiveTimer(
-        0.0,
-        FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleTextureUploadTimer));
+    EnsureTextureUploadTimer();
 
     PreBeginPIEHandle = FEditorDelegates::PreBeginPIE.AddSP(
         this,
@@ -598,7 +660,21 @@ void SWCAEditorPanel::UnregisterResourceParticipants()
     ResourceParticipantIds.Reset();
 }
 
-EActiveTimerReturnType SWCAEditorPanel::HandleTextureUploadTimer(double, float)
+void SWCAEditorPanel::EnsureTextureUploadTimer()
+{
+    check(IsInGameThread());
+    if (TextureUploadTimerHandle.IsValid())
+    {
+        return;
+    }
+    TextureUploadTimerHandle = RegisterActiveTimer(
+        0.0,
+        FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleTextureUploadTimer));
+}
+
+EActiveTimerReturnType SWCAEditorPanel::HandleTextureUploadTimer(
+    double,
+    float)
 {
     if (PreviewGPUResidencyManager.IsValid())
     {
@@ -615,7 +691,17 @@ EActiveTimerReturnType SWCAEditorPanel::HandleTextureUploadTimer(double, float)
             TextureWorkspace->ProcessRetiredGPUResources();
         }
     }
-    return EActiveTimerReturnType::Continue;
+
+    const bool bHasUploadWork = RenderUploadQueue.IsValid() && RenderUploadQueue->HasPendingWork();
+    const bool bHasResidencyWork = PreviewGPUResidencyManager.IsValid() &&
+        PreviewGPUResidencyManager->HasPendingMaintenance();
+    if (bHasUploadWork || bHasResidencyWork)
+    {
+        return EActiveTimerReturnType::Continue;
+    }
+
+    TextureUploadTimerHandle.Reset();
+    return EActiveTimerReturnType::Stop;
 }
 
 TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
@@ -649,6 +735,7 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
                 .SurfacePatchProjectionCache(SurfacePatchProjectionCache)
                 .TextureWorkspace(TextureWorkspace)
                 .PreviewCommitCoordinator(PreviewCommitCoordinator)
+                .PreviewModeLifetime(WrinklePreviewLifetime)
                 .RenderUploadQueue(RenderUploadQueue)
                 .DetailsView(DetailsView);
         }
@@ -667,6 +754,7 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
                 .SpatialQueryService(SpatialQueryService)
                 .TextureWorkspace(TextureWorkspace)
                 .PreviewCommitCoordinator(PreviewCommitCoordinator)
+                .PreviewModeLifetime(TransparencyPreviewLifetime)
                 .RenderUploadQueue(RenderUploadQueue)
                 .ResourceGovernor(ResourceGovernor)
                 .DetailsView(DetailsView);
@@ -1101,7 +1189,7 @@ EActiveTimerReturnType SWCAEditorPanel::HandleExclusiveBuildTimer(double, float)
     {
         PreviewGPUResidencyManager->Tick();
     }
-    if (bPIEActive ||
+    if (HostLifecycle.HasBlocker(EDWCEditorHostLifecycleBlocker::PIE) ||
         (ResourceBroker.IsValid() && ResourceBroker->HasOutstandingInteractiveWork()))
     {
         const double DrainSeconds = FPlatformTime::Seconds() - ExclusiveBuildDrainStartedSeconds;
@@ -1116,7 +1204,9 @@ EActiveTimerReturnType SWCAEditorPanel::HandleExclusiveBuildTimer(double, float)
                 WorkerJobScheduler.IsValid()
                     ? static_cast<double>(WorkerJobScheduler->GetReservedBytes()) / (1024.0 * 1024.0)
                     : 0.0,
-                bPIEActive ? TEXT("true") : TEXT("false"));
+                HostLifecycle.HasBlocker(EDWCEditorHostLifecycleBlocker::PIE)
+                    ? TEXT("true")
+                    : TEXT("false"));
             ExclusiveBuildDrainStartedSeconds = FPlatformTime::Seconds();
         }
         return EActiveTimerReturnType::Continue;
@@ -1154,24 +1244,7 @@ void SWCAEditorPanel::FinishExclusiveBuild()
 void SWCAEditorPanel::HandleExclusiveBuildBarrierChanged(const bool bActive)
 {
     check(IsInGameThread());
-    if (bActive)
-    {
-        SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason::ExclusiveBuild);
-        if (WorkerJobScheduler.IsValid())
-        {
-            WorkerJobScheduler->CancelWorkClass(EDWCEditorWorkClass::InteractivePreview);
-        }
-        if (TextureWorkspace.IsValid())
-        {
-            TextureWorkspace->ReclaimUnleasedCPUBytes(MAX_uint64);
-            TextureWorkspace->RetireUnleasedGPUBytes(MAX_uint64);
-        }
-        return;
-    }
-    if (!bPIEActive && bHasActiveEditorMode)
-    {
-        ResumePreviewModeIfNeeded(ActiveEditorMode);
-    }
+    SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::ExclusiveBuild, bActive);
 }
 
 FReply SWCAEditorPanel::BakeSelectedWrinkleNormalMap()
@@ -1214,14 +1287,33 @@ void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)
         (NewMode == EWCAEditorMode::WrinkleEdit && WrinkleEditorPanel.IsValid()) ||
         (NewMode == EWCAEditorMode::TransparencyBake && TransparencyBakePanel.IsValid());
 
+    ActiveEditorMode = NewMode;
+    bHasActiveEditorMode = true;
+    if (const TSharedPtr<FDWCEditorPreviewModeLifetime> Lifetime = FindPreviewModeLifetime(NewMode))
+    {
+        if (CanRunInteractivePreview())
+        {
+            Lifetime->Activate(HostLifecycle.GetSnapshot().InteractiveGeneration);
+        }
+        else
+        {
+            Lifetime->Suspend(HostLifecycle.GetSnapshot().InteractiveGeneration);
+        }
+    }
+
     if (ModeContentBox.IsValid())
     {
         ModeContentBox->SetContent(EnsureModeWidget(NewMode));
     }
 
-    ActiveEditorMode = NewMode;
-    bHasActiveEditorMode = true;
-    ResumePreviewModeIfNeeded(NewMode);
+    if (CanRunInteractivePreview())
+    {
+        ResumePreviewModeIfNeeded(NewMode);
+    }
+    else
+    {
+        SuspendPreviewMode(NewMode, ResolveHostSuspendReason());
+    }
 
     if (bHadModeWidget)
     {
@@ -1254,10 +1346,225 @@ void SWCAEditorPanel::HandleAuthoringDocumentChanged(const FDWCEditorAuthoringCh
     }
 }
 
+void SWCAEditorPanel::SetHostLifecycleBlocker(
+    const EDWCEditorHostLifecycleBlocker Blocker,
+    const bool bEnabled)
+{
+    check(IsInGameThread());
+    ApplyHostLifecycleTransition(HostLifecycle.SetBlocker(Blocker, bEnabled));
+}
+
+void SWCAEditorPanel::SetHostVisibilitySnapshot(
+    const FDWCEditorHostVisibilitySnapshot& Visibility)
+{
+    check(IsInGameThread());
+    ApplyHostLifecycleTransition(HostLifecycle.SetVisibilitySnapshot(Visibility));
+}
+
+void SWCAEditorPanel::ApplyHostLifecycleTransition(
+    const FDWCEditorHostLifecycleTransition& Transition)
+{
+    check(IsInGameThread());
+    if (!Transition.bBlockersChanged)
+    {
+        return;
+    }
+
+    UE_LOG(
+        LogWCAEditorLifecycle,
+        Verbose,
+        TEXT("WCA host lifecycle: state=%s blockers=%s revision=%llu generation=%llu."),
+        LexToString(Transition.Current.RunState),
+        *LexToString(Transition.Current.Blockers),
+        Transition.Current.StateRevision,
+        Transition.Current.InteractiveGeneration);
+
+    if (ResourceBroker.IsValid() && ResourceBrokerSessionId.IsValid())
+    {
+        ResourceBroker->SetSessionActive(
+            ResourceBrokerSessionId,
+            Transition.Current.CanRunInteractivePreview());
+    }
+
+    if (Transition.bBecameClosing)
+    {
+        SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason::EditorClosing);
+    }
+    else if (Transition.bBecameSuspended)
+    {
+        SuspendAllPreviewModes(ResolveHostSuspendReason());
+    }
+    else if (!Transition.Current.CanRunInteractivePreview() && PreviewGPUResidencyManager.IsValid())
+    {
+        const EDWCEditorPreviewSuspendReason Reason = ResolveHostSuspendReason();
+        const EDWCEditorPreviewResourceReleasePolicy ReleasePolicy =
+            ResolveResourceReleasePolicy(Reason);
+        if (ReleasePolicy == EDWCEditorPreviewResourceReleasePolicy::Immediate)
+        {
+            PreviewGPUResidencyManager->SuspendAll(ReleasePolicy);
+            EnsureTextureUploadTimer();
+        }
+    }
+    else if (Transition.bBecameInteractive && bHasActiveEditorMode)
+    {
+        ResumePreviewModeIfNeeded(ActiveEditorMode);
+    }
+}
+
+bool SWCAEditorPanel::CanRunInteractivePreview() const
+{
+    return HostLifecycle.CanRunInteractivePreview();
+}
+
+EDWCEditorPreviewSuspendReason SWCAEditorPanel::ResolveHostSuspendReason() const
+{
+    if (HostLifecycle.HasBlocker(EDWCEditorHostLifecycleBlocker::EditorClosing))
+    {
+        return EDWCEditorPreviewSuspendReason::EditorClosing;
+    }
+    if (HostLifecycle.HasBlocker(EDWCEditorHostLifecycleBlocker::ExclusiveBuild))
+    {
+        return EDWCEditorPreviewSuspendReason::ExclusiveBuild;
+    }
+    if (HostLifecycle.HasBlocker(EDWCEditorHostLifecycleBlocker::PIE))
+    {
+        return EDWCEditorPreviewSuspendReason::BeginPIE;
+    }
+    return EDWCEditorPreviewSuspendReason::HostInactive;
+}
+
+EDWCEditorPreviewResourceReleasePolicy SWCAEditorPanel::ResolveResourceReleasePolicy(
+    const EDWCEditorPreviewSuspendReason Reason) const
+{
+    if (Reason == EDWCEditorPreviewSuspendReason::ModeSwitch)
+    {
+        return EDWCEditorPreviewResourceReleasePolicy::ModeSwitch;
+    }
+    if (Reason != EDWCEditorPreviewSuspendReason::HostInactive)
+    {
+        return EDWCEditorPreviewResourceReleasePolicy::Immediate;
+    }
+
+    return RequiresImmediatePreviewResourceRelease(HostLifecycle.GetSnapshot().Blockers)
+        ? EDWCEditorPreviewResourceReleasePolicy::Immediate
+        : EDWCEditorPreviewResourceReleasePolicy::DeferredHostInactive;
+}
+
+TSharedPtr<FDWCEditorPreviewModeLifetime> SWCAEditorPanel::FindPreviewModeLifetime(
+    const EWCAEditorMode Mode) const
+{
+    switch (Mode)
+    {
+    case EWCAEditorMode::PartEdit: return PartPreviewLifetime;
+    case EWCAEditorMode::WrinkleEdit: return WrinklePreviewLifetime;
+    case EWCAEditorMode::TransparencyBake: return TransparencyPreviewLifetime;
+    default: return nullptr;
+    }
+}
+
+FDWCEditorPreviewRunToken SWCAEditorPanel::CapturePreviewRunToken(
+    const FDWCEditorWorkerJobDescriptor& Descriptor) const
+{
+    if (Descriptor.WorkClass != EDWCEditorWorkClass::InteractivePreview)
+    {
+        return {};
+    }
+
+    EDWCEditorPreviewMode Mode = EDWCEditorPreviewMode::None;
+    switch (Descriptor.Domain)
+    {
+    case EDWCEditorAuthoringDomain::Wrinkle:
+        Mode = EDWCEditorPreviewMode::Wrinkle;
+        break;
+    case EDWCEditorAuthoringDomain::Transparency:
+        Mode = EDWCEditorPreviewMode::Transparency;
+        break;
+    default:
+        break;
+    }
+    if (Mode == EDWCEditorPreviewMode::None)
+    {
+        switch (Descriptor.Key.Kind)
+        {
+        case EDWCEditorWorkerJobKind::WrinkleAccumulatedPreview:
+        case EDWCEditorWorkerJobKind::WrinkleIncrementalPreview:
+        case EDWCEditorWorkerJobKind::WrinkleTransientPreview:
+        case EDWCEditorWorkerJobKind::WrinkleHoverPreview:
+            Mode = EDWCEditorPreviewMode::Wrinkle;
+            break;
+        case EDWCEditorWorkerJobKind::TransparencyVisualization:
+        case EDWCEditorWorkerJobKind::TransparencyAlphaIncremental:
+        case EDWCEditorWorkerJobKind::TransparencyRevealColorIncremental:
+        case EDWCEditorWorkerJobKind::TransparencyAlphaDirtyReplay:
+        case EDWCEditorWorkerJobKind::TransparencyRevealColorDirtyReplay:
+        case EDWCEditorWorkerJobKind::TransparencyRevealColorCommit:
+            Mode = EDWCEditorPreviewMode::Transparency;
+            break;
+        default:
+            break;
+        }
+    }
+
+    EWCAEditorMode EditorMode = EWCAEditorMode::PartEdit;
+    if (Mode == EDWCEditorPreviewMode::Wrinkle)
+    {
+        EditorMode = EWCAEditorMode::WrinkleEdit;
+    }
+    else if (Mode == EDWCEditorPreviewMode::Transparency)
+    {
+        EditorMode = EWCAEditorMode::TransparencyBake;
+    }
+    if (Mode == EDWCEditorPreviewMode::None || !bHasActiveEditorMode || ActiveEditorMode != EditorMode)
+    {
+        return {};
+    }
+
+    const TSharedPtr<FDWCEditorPreviewModeLifetime> Lifetime = FindPreviewModeLifetime(EditorMode);
+    return Lifetime.IsValid() ? Lifetime->CaptureToken() : FDWCEditorPreviewRunToken();
+}
+
 void SWCAEditorPanel::SuspendPreviewMode(
     const EWCAEditorMode Mode,
-    const EDWCEditorPreviewSuspendReason Reason)
+    const EDWCEditorPreviewSuspendReason Reason,
+    const bool bManageResidency)
 {
+    const EDWCEditorPreviewMode PreviewMode = ResolvePreviewMode(Mode);
+    if (const TSharedPtr<FDWCEditorPreviewModeLifetime> Lifetime = FindPreviewModeLifetime(Mode))
+    {
+        const uint64 HostGeneration = HostLifecycle.GetSnapshot().InteractiveGeneration;
+        if (Reason == EDWCEditorPreviewSuspendReason::EditorClosing)
+        {
+            Lifetime->Revoke(HostGeneration);
+        }
+        else if (Reason == EDWCEditorPreviewSuspendReason::ModeSwitch)
+        {
+            Lifetime->Deactivate(HostGeneration);
+        }
+        else
+        {
+            Lifetime->Suspend(HostGeneration);
+        }
+    }
+    if (WorkerJobScheduler.IsValid())
+    {
+        WorkerJobScheduler->CancelPreviewMode(PreviewMode);
+    }
+    if (RenderUploadQueue.IsValid())
+    {
+        RenderUploadQueue->CancelPreviewMode(WetClothingAsset.Get(), PreviewMode);
+    }
+    if (const TSharedPtr<FDWCEditorPreviewModeLifetime> Lifetime = FindPreviewModeLifetime(Mode))
+    {
+        UE_LOG(
+            LogWCAEditorLifecycle,
+            Verbose,
+            TEXT("WCA preview mode: mode=%s state=%s generation=%llu reason=%d."),
+            LexToString(PreviewMode),
+            LexToString(Lifetime->GetRunState()),
+            Lifetime->GetGeneration(),
+            static_cast<int32>(Reason));
+    }
+
     switch (Mode)
     {
     case EWCAEditorMode::PartEdit:
@@ -1281,14 +1588,32 @@ void SWCAEditorPanel::SuspendPreviewMode(
     default:
         break;
     }
-    if (PreviewGPUResidencyManager.IsValid())
+    if (bManageResidency && PreviewGPUResidencyManager.IsValid())
     {
-        PreviewGPUResidencyManager->SuspendDomain(ResolvePreviewGPUDomain(Mode));
+        PreviewGPUResidencyManager->SuspendDomain(
+            ResolvePreviewGPUDomain(Mode),
+            ResolveResourceReleasePolicy(Reason));
+        EnsureTextureUploadTimer();
     }
 }
 
 void SWCAEditorPanel::ResumePreviewModeIfNeeded(const EWCAEditorMode Mode)
 {
+    if (!CanRunInteractivePreview() || !bHasActiveEditorMode || ActiveEditorMode != Mode)
+    {
+        return;
+    }
+    if (const TSharedPtr<FDWCEditorPreviewModeLifetime> Lifetime = FindPreviewModeLifetime(Mode))
+    {
+        Lifetime->Activate(HostLifecycle.GetSnapshot().InteractiveGeneration);
+        UE_LOG(
+            LogWCAEditorLifecycle,
+            Verbose,
+            TEXT("WCA preview mode: mode=%s state=%s generation=%llu."),
+            LexToString(ResolvePreviewMode(Mode)),
+            LexToString(Lifetime->GetRunState()),
+            Lifetime->GetGeneration());
+    }
     if (PreviewGPUResidencyManager.IsValid())
     {
         PreviewGPUResidencyManager->SetActiveDomain(ResolvePreviewGPUDomain(Mode));
@@ -1320,34 +1645,24 @@ void SWCAEditorPanel::ResumePreviewModeIfNeeded(const EWCAEditorMode Mode)
 
 void SWCAEditorPanel::SuspendAllPreviewModes(const EDWCEditorPreviewSuspendReason Reason)
 {
-    SuspendPreviewMode(EWCAEditorMode::PartEdit, Reason);
-    SuspendPreviewMode(EWCAEditorMode::WrinkleEdit, Reason);
-    SuspendPreviewMode(EWCAEditorMode::TransparencyBake, Reason);
+    SuspendPreviewMode(EWCAEditorMode::PartEdit, Reason, false);
+    SuspendPreviewMode(EWCAEditorMode::WrinkleEdit, Reason, false);
+    SuspendPreviewMode(EWCAEditorMode::TransparencyBake, Reason, false);
     if (PreviewGPUResidencyManager.IsValid())
     {
-        PreviewGPUResidencyManager->SuspendAll();
+        PreviewGPUResidencyManager->SuspendAll(ResolveResourceReleasePolicy(Reason));
+        EnsureTextureUploadTimer();
     }
 }
 
 void SWCAEditorPanel::HandlePreBeginPIE(const bool)
 {
-    bPIEActive = true;
-    if (ResourceBroker.IsValid())
-    {
-        ResourceBroker->SetSessionActive(ResourceBrokerSessionId, false);
-    }
-    SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason::BeginPIE);
+    SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::PIE, true);
 }
 
 void SWCAEditorPanel::HandleEndPIE(const bool)
 {
-    bPIEActive = false;
-    if (ResourceBroker.IsValid())
-    {
-        ResourceBroker->SetSessionActive(ResourceBrokerSessionId, true);
-    }
-    // Do not rebuild preview textures on PIE exit. The active editor mode
-    // resumes lazily through its mode button or the next editing action.
+    SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::PIE, false);
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -8,7 +8,6 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralMeshComponent.h"
@@ -33,6 +32,7 @@
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyBrushRasterizer.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyLiveStrokeLayer.h"
 #include "WetClothing/Modes/Transparency/Authoring/DWCTransparencyAuthoringController.h"
+#include "WetClothing/Modes/Transparency/Editor/DWCTransparencyBlueprintHierarchySession.h"
 #include "WetClothing/Modes/Transparency/Material/WetTransparencyPreviewGraphExtension.h"
 #include "WetClothing/Modes/Transparency/Material/WetTransparencyPreviewMaterialParameters.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
@@ -52,6 +52,24 @@ DEFINE_LOG_CATEGORY_STATIC(LogWetTransparencyPreviewViewport, Log, All);
 namespace
 {
     constexpr int32 TransparencyViewportForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
+
+    void ConfigureStaticTransparencyPreviewPose(USkeletalMeshComponent* MeshComponent)
+    {
+        if (MeshComponent == nullptr)
+        {
+            return;
+        }
+
+        MeshComponent->SetForcedLOD(TransparencyViewportForceRenderLOD0);
+        MeshComponent->SetEnableAnimation(false);
+        MeshComponent->SetUpdateAnimationInEditor(false);
+        MeshComponent->SetDisablePostProcessBlueprint(true);
+        MeshComponent->SetUpdateClothInEditor(false);
+        MeshComponent->SetForceRefPose(true);
+        MeshComponent->SetComponentTickEnabled(false);
+        MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        MeshComponent->SetSimulatePhysics(false);
+    }
     // Keep normal 4K brush sizes interactive through region raster/upload.
     // Bigger strokes compose once at interaction end instead of snapshotting
     // the complete preview for every pointer sample.
@@ -362,7 +380,13 @@ namespace
                 return;
             }
 
-            const FBoxSphereBounds Bounds = MeshComponent->CalcBounds(MeshComponent->GetComponentTransform());
+            FocusOnBounds(
+                MeshComponent->CalcBounds(MeshComponent->GetComponentTransform()),
+                bInstant);
+        }
+
+        void FocusOnBounds(const FBoxSphereBounds& Bounds, bool bInstant)
+        {
             float Radius = FMath::Max3(
                 static_cast<float>(Bounds.BoxExtent.X),
                 static_cast<float>(Bounds.BoxExtent.Y),
@@ -420,6 +444,7 @@ void SWetClothingTransparencyPreviewViewport::Construct(const FArguments& InArgs
     SpatialQueryService = InArgs._SpatialQueryService;
     TextureWorkspace = InArgs._TextureWorkspace;
     PreviewCommitCoordinator = InArgs._PreviewCommitCoordinator;
+    PreviewModeLifetime = InArgs._PreviewModeLifetime;
     RenderUploadQueue = InArgs._RenderUploadQueue;
     PreviewScene = MakeShared<FAdvancedPreviewScene>(FPreviewScene::ConstructionValues());
     InputToolsHost = MakeUnique<FDWCEditorInteractiveToolsHost>(PreviewScene.Get(), this);
@@ -474,8 +499,11 @@ SWetClothingTransparencyPreviewViewport::~SWetClothingTransparencyPreviewViewpor
 void SWetClothingTransparencyPreviewViewport::AddReferencedObjects(FReferenceCollector& Collector)
 {
     Collector.AddReferencedObject(TargetMeshPreviewComponent);
-    Collector.AddReferencedObject(PreviewActor);
     Collector.AddReferencedObjects(PreviewMeshComponents);
+    for (TPair<FName, TObjectPtr<USkeletalMeshComponent>>& Pair : BlueprintSourcePreviewComponents)
+    {
+        Collector.AddReferencedObject(Pair.Value);
+    }
     for (TPair<FGuid, TObjectPtr<USkeletalMeshComponent>>& Pair : ExternalSourcePreviewComponents)
     {
         Collector.AddReferencedObject(Pair.Value);
@@ -672,6 +700,13 @@ void SWetClothingTransparencyPreviewViewport::FocusOnPreviewMesh(bool bInstant)
 {
     if (FDWCTransparencyPreviewViewportClient* PreviewClient = static_cast<FDWCTransparencyPreviewViewportClient*>(ViewportClient.Get()))
     {
+        FBoxSphereBounds AssemblyBounds;
+        if (PreviewMode == EWetClothingTransparencyPreviewMode::FullBlueprint &&
+            ResolveType2AssemblyBounds(AssemblyBounds))
+        {
+            PreviewClient->FocusOnBounds(AssemblyBounds, bInstant);
+            return;
+        }
         PreviewClient->FocusOnMesh(FindFocusMeshComponent(), bInstant);
     }
 }
@@ -703,13 +738,92 @@ void SWetClothingTransparencyPreviewViewport::SetPreviewMode(const EWetClothingT
 
 void SWetClothingTransparencyPreviewViewport::InvalidateFullSourceLayout()
 {
-    // Source component selection is structural scene state. Parameter refreshes
-    // intentionally do not rebuild FullBlueprint preview, so make that boundary
-    // explicit for Type 2/3 source add, remove, and target changes.
+    // Blueprint/target changes rebuild the canonical Type 2 assembly. Type 3
+    // placement changes still rebuild its source layout. Type 2 source check
+    // changes use SyncType2SelectedSourceComponents instead.
     if (!bPreviewSuspended && PreviewMode == EWetClothingTransparencyPreviewMode::FullBlueprint)
     {
         RefreshPreview();
     }
+}
+
+void SWetClothingTransparencyPreviewViewport::SetType2BlueprintHierarchySnapshot(
+    const FDWCTransparencyBlueprintHierarchySnapshot& Snapshot)
+{
+    if (Snapshot.State != EDWCTransparencyBlueprintHierarchyState::Ready)
+    {
+        Type2BlueprintHierarchy.Reset();
+        Type2BlueprintHierarchyLayerGuid.Invalidate();
+        Type2BlueprintClassPath.Reset();
+        Type2BlueprintHierarchyRevision = Snapshot.Revision;
+        return;
+    }
+
+    if (Type2BlueprintHierarchy.IsValid() &&
+        Type2BlueprintHierarchyRevision == Snapshot.Revision &&
+        Type2BlueprintHierarchyLayerGuid == Snapshot.LayerGuid &&
+        Type2BlueprintClassPath == Snapshot.BlueprintClassPath)
+    {
+        return;
+    }
+
+    Type2BlueprintHierarchy = MakeShared<FDWCTransparencyBlueprintHierarchy>(Snapshot.Hierarchy);
+    Type2BlueprintHierarchyLayerGuid = Snapshot.LayerGuid;
+    Type2BlueprintClassPath = Snapshot.BlueprintClassPath;
+    Type2BlueprintHierarchyRevision = Snapshot.Revision;
+}
+
+void SWetClothingTransparencyPreviewViewport::SyncType2SelectedSourceComponents()
+{
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    if (bPreviewSuspended || PreviewMode != EWetClothingTransparencyPreviewMode::FullBlueprint ||
+        Layer == nullptr || Layer->SourceType != EDWCTransparencySourceType::OtherSkeletalMeshComponents ||
+        !Type2BlueprintHierarchy.IsValid() ||
+        Type2BlueprintHierarchyLayerGuid != Layer->LayerGuid)
+    {
+        return;
+    }
+
+    TSet<FName> DesiredComponents;
+    for (const FWetClothingTransparencyBlueprintComponentBinding& Binding :
+         Layer->BlueprintSource.SourcePriority)
+    {
+        if (Binding.IsBound() &&
+            Binding.ComponentName != Layer->BlueprintSource.TargetComponent.ComponentName)
+        {
+            DesiredComponents.Add(Binding.ComponentName);
+        }
+    }
+
+    TArray<FName> ComponentsToRemove;
+    for (const TPair<FName, TObjectPtr<USkeletalMeshComponent>>& Pair :
+         BlueprintSourcePreviewComponents)
+    {
+        if (!DesiredComponents.Contains(Pair.Key))
+        {
+            ComponentsToRemove.Add(Pair.Key);
+        }
+    }
+    for (const FName ComponentName : ComponentsToRemove)
+    {
+        USkeletalMeshComponent* Component = BlueprintSourcePreviewComponents.FindRef(ComponentName);
+        if (Component != nullptr && PreviewScene.IsValid())
+        {
+            PreviewScene->RemoveComponent(Component);
+            PreviewMeshComponents.Remove(Component);
+        }
+        BlueprintSourcePreviewComponents.Remove(ComponentName);
+    }
+
+    for (const FName ComponentName : DesiredComponents)
+    {
+        if (!BlueprintSourcePreviewComponents.Contains(ComponentName))
+        {
+            CreateType2PreviewComponent(ComponentName, false);
+        }
+    }
+
+    InvalidatePreviewViewport();
 }
 
 void SWetClothingTransparencyPreviewViewport::SetExternalSourcePlacementSelection(const FGuid& SourceGuid)
@@ -1063,7 +1177,8 @@ void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
     }
     if (bMaterialSlotChanged || bUVChannelChanged)
     {
-        if (PreviewMode == EWetClothingTransparencyPreviewMode::FullBlueprint && PreviewActor != nullptr)
+        if (PreviewMode == EWetClothingTransparencyPreviewMode::FullBlueprint &&
+            TargetMeshPreviewComponent != nullptr)
         {
             RefreshExistingFullBlueprintPreviewMaterials();
             RebuildHitTriangles();
@@ -1475,15 +1590,19 @@ void SWetClothingTransparencyPreviewViewport::ClearPreview()
                 PreviewScene->RemoveComponent(Pair.Value);
             }
         }
-        if (PreviewActor != nullptr && PreviewScene->GetWorld() != nullptr)
+        for (const TPair<FName, TObjectPtr<USkeletalMeshComponent>>& Pair :
+             BlueprintSourcePreviewComponents)
         {
-            PreviewScene->GetWorld()->DestroyActor(PreviewActor);
+            if (Pair.Value != nullptr)
+            {
+                PreviewScene->RemoveComponent(Pair.Value);
+            }
         }
     }
 
     TargetMeshPreviewComponent = nullptr;
-    PreviewActor = nullptr;
     PreviewMeshComponents.Reset();
+    BlueprintSourcePreviewComponents.Reset();
     ExternalSourcePreviewComponents.Reset();
     bExternalSourceTransformInteractionActive = false;
     BrushCursorComponent = nullptr;
@@ -1519,6 +1638,7 @@ void SWetClothingTransparencyPreviewViewport::InitializePreviewSession()
         WetClothingAsset.Get(),
         PreviewScene.IsValid() ? PreviewScene->GetWorld() : nullptr,
         Config);
+    PreviewSession->BindModeLifetime(PreviewModeLifetime);
     PreviewOrchestrator = MakeUnique<FDWCEditorPreviewOrchestrator>();
     PreviewOrchestrator->Initialize(
         WetClothingAsset.Get(),
@@ -1640,77 +1760,30 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
         return;
     }
 
-    const FWetClothingTransparencyBlueprintSource& BlueprintSource = Layer->BlueprintSource;
-    TSubclassOf<AActor> BlueprintClass = BlueprintSource.BlueprintClass.LoadSynchronous();
-    if (BlueprintClass == nullptr || !BlueprintSource.TargetComponent.IsBound())
+    BuildType2BlueprintAssemblyPreview();
+}
+
+void SWetClothingTransparencyPreviewViewport::BuildType2BlueprintAssemblyPreview()
+{
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    if (Layer == nullptr || !Type2BlueprintHierarchy.IsValid() ||
+        Type2BlueprintHierarchyLayerGuid != Layer->LayerGuid ||
+        !Layer->BlueprintSource.TargetComponent.IsBound())
     {
         BuildTargetMeshPreview();
         return;
     }
 
-    FActorSpawnParameters SpawnParameters;
-    SpawnParameters.Name = MakeUniqueObjectName(PreviewScene->GetWorld(), BlueprintClass.Get(), TEXT("DWC_TransparencyPreviewActor"));
-    SpawnParameters.ObjectFlags = RF_Transient;
-    SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    SpawnParameters.bTemporaryEditorActor = true;
-
-    PreviewActor = PreviewScene->GetWorld()->SpawnActor<AActor>(BlueprintClass, FTransform::Identity, SpawnParameters);
-    if (PreviewActor == nullptr)
-    {
-        BuildTargetMeshPreview();
-        return;
-    }
-
-    TSet<FName> VisibleSourceComponents;
-    for (const FWetClothingTransparencyBlueprintComponentBinding& Source : BlueprintSource.SourcePriority)
-    {
-        if (Source.IsBound())
-        {
-            VisibleSourceComponents.Add(Source.ComponentName);
-        }
-    }
-
-    TArray<USkeletalMeshComponent*> MeshComponents;
-    PreviewActor->GetComponents<USkeletalMeshComponent>(MeshComponents);
-    for (USkeletalMeshComponent* MeshComponent : MeshComponents)
-    {
-        if (MeshComponent == nullptr)
-        {
-            continue;
-        }
-
-        const FName ComponentName = MeshComponent->GetFName();
-        const bool bIsTarget = ComponentName == BlueprintSource.TargetComponent.ComponentName;
-        const bool bIsSelectedSource = VisibleSourceComponents.Contains(ComponentName);
-        if (!bIsTarget && !bIsSelectedSource)
-        {
-            MeshComponent->SetVisibility(false, true);
-            continue;
-        }
-
-        MeshComponent->SetVisibility(true, true);
-        MeshComponent->SetForcedLOD(TransparencyViewportForceRenderLOD0);
-        if (bIsTarget)
-        {
-            TargetMeshPreviewComponent = MeshComponent;
-            if (Asset->GetDWCSkeletalMesh() != nullptr &&
-                MeshComponent->GetSkeletalMeshAsset() != Asset->GetDWCSkeletalMesh())
-            {
-                MeshComponent->SetSkeletalMeshAsset(Asset->GetDWCSkeletalMesh());
-            }
-            ConfigurePreviewMeshComponent(MeshComponent);
-        }
-        else
-        {
-            PreviewMeshComponents.AddUnique(MeshComponent);
-        }
-    }
-
+    TargetMeshPreviewComponent = CreateType2PreviewComponent(
+        Layer->BlueprintSource.TargetComponent.ComponentName,
+        true);
     if (TargetMeshPreviewComponent == nullptr)
     {
         BuildTargetMeshPreview();
         return;
     }
+
+    SyncType2SelectedSourceComponents();
 
     BrushCursorComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
     BrushCursorComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -1722,11 +1795,93 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
     RebuildHitTriangles();
     ApplyRevealColorPaintTargetVisibility();
 
-    if (USkeletalMeshComponent* FocusMesh = FindFocusMeshComponent())
+    FBoxSphereBounds AssemblyBounds;
+    if (ResolveType2AssemblyBounds(AssemblyBounds))
     {
-        const FBoxSphereBounds Bounds = FocusMesh->CalcBounds(FocusMesh->GetComponentTransform());
-        PreviewScene->SetFloorOffset(-Bounds.Origin.Z + Bounds.BoxExtent.Z);
+        PreviewScene->SetFloorOffset(-AssemblyBounds.Origin.Z + AssemblyBounds.BoxExtent.Z);
     }
+}
+
+USkeletalMeshComponent* SWetClothingTransparencyPreviewViewport::CreateType2PreviewComponent(
+    const FName& ComponentName,
+    const bool bTargetComponent)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !PreviewScene.IsValid() || !Type2BlueprintHierarchy.IsValid())
+    {
+        return nullptr;
+    }
+
+    const FDWCTransparencyBlueprintMeshComponent* SnapshotComponent =
+        Type2BlueprintHierarchy->MeshComponents.FindByPredicate(
+            [ComponentName](const FDWCTransparencyBlueprintMeshComponent& Candidate)
+            {
+                return Candidate.ComponentName == ComponentName;
+            });
+    USkeletalMesh* Mesh = bTargetComponent
+        ? Asset->GetDWCSkeletalMesh()
+        : (SnapshotComponent != nullptr ? SnapshotComponent->SkeletalMesh.Get() : nullptr);
+    if (SnapshotComponent == nullptr || Mesh == nullptr)
+    {
+        return nullptr;
+    }
+
+    USkeletalMeshComponent* PreviewComponent = NewObject<USkeletalMeshComponent>(
+        GetTransientPackage(), NAME_None, RF_Transient);
+    PreviewComponent->SetMobility(EComponentMobility::Movable);
+    ConfigureStaticTransparencyPreviewPose(PreviewComponent);
+    PreviewComponent->SetSkeletalMeshAsset(Mesh);
+    PreviewComponent->SetCastShadow(false);
+    if (!bTargetComponent)
+    {
+        for (int32 MaterialIndex = 0; MaterialIndex < SnapshotComponent->Materials.Num(); ++MaterialIndex)
+        {
+            PreviewComponent->SetMaterial(MaterialIndex, SnapshotComponent->Materials[MaterialIndex]);
+        }
+    }
+    PreviewScene->AddComponent(PreviewComponent, SnapshotComponent->BakeTransform);
+    PreviewMeshComponents.AddUnique(PreviewComponent);
+
+    if (bTargetComponent)
+    {
+        ConfigurePreviewMeshComponent(PreviewComponent);
+    }
+    else
+    {
+        BlueprintSourcePreviewComponents.Add(ComponentName, PreviewComponent);
+    }
+    return PreviewComponent;
+}
+
+bool SWetClothingTransparencyPreviewViewport::ResolveType2AssemblyBounds(
+    FBoxSphereBounds& OutBounds) const
+{
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    if (Layer == nullptr || Layer->SourceType != EDWCTransparencySourceType::OtherSkeletalMeshComponents ||
+        !Type2BlueprintHierarchy.IsValid() || Type2BlueprintHierarchyLayerGuid != Layer->LayerGuid)
+    {
+        return false;
+    }
+
+    FBox CombinedBounds(ForceInit);
+    for (const FDWCTransparencyBlueprintMeshComponent& Component :
+         Type2BlueprintHierarchy->MeshComponents)
+    {
+        if (Component.SkeletalMesh == nullptr || Component.BakeTransform.ContainsNaN())
+        {
+            continue;
+        }
+        const FBoxSphereBounds ComponentBounds =
+            Component.SkeletalMesh->GetBounds().TransformBy(Component.BakeTransform);
+        CombinedBounds += FBox::BuildAABB(ComponentBounds.Origin, ComponentBounds.BoxExtent);
+    }
+    if (!CombinedBounds.IsValid)
+    {
+        return false;
+    }
+
+    OutBounds = FBoxSphereBounds(CombinedBounds);
+    return true;
 }
 
 void SWetClothingTransparencyPreviewViewport::BuildFullExternalMeshPreview()
@@ -2957,6 +3112,9 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
         DirtyTiles.Num());
 
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewRunToken PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     TWeakPtr<SWetClothingTransparencyPreviewViewport> WeakThis = SharedThis(this);
     FString SubmitError;
     PendingTicket = WorkerJobScheduler->SubmitPrepared(
@@ -3035,7 +3193,8 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
             };
             return true;
         },
-        [WeakThis, Target, ExpectedSlot, ExpectedLayer, ExpectedEpoch, CommitToken, RequestRegions](
+        [WeakThis, Target, ExpectedSlot, ExpectedLayer, ExpectedEpoch,
+         CommitToken, PreviewRunToken, RequestRegions](
             const FDWCEditorWorkerJobTicket& CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
@@ -3061,6 +3220,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
 
             FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
+            CommitContext.PreviewRunToken = PreviewRunToken;
             CommitContext.ProducerSessionEpoch = CompletedTicket.SessionEpoch;
             CommitContext.DebugName = TEXT("Transparency dirty-tile history replay");
             CommitContext.IsCurrent = [Viewport, Target, ExpectedSlot, ExpectedLayer, ExpectedEpoch, CompletedTicket]()
@@ -3375,6 +3535,9 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
         LastSequence);
 
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewRunToken PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     TWeakPtr<SWetClothingTransparencyPreviewViewport> WeakThis = SharedThis(this);
     FString SubmitError;
     const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitPrepared(
@@ -3446,7 +3609,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
             return true;
         },
         [WeakThis, ExpectedSlot, ExpectedLayer, ExpectedEpoch, BatchCount,
-         FirstSequence, LastSequence, CommitToken](
+         FirstSequence, LastSequence, CommitToken, PreviewRunToken](
             const FDWCEditorWorkerJobTicket& CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
@@ -3466,6 +3629,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleAlphaIncrementalJob()
 
             FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
+            CommitContext.PreviewRunToken = PreviewRunToken;
             CommitContext.ProducerSessionEpoch = CompletedTicket.SessionEpoch;
             CommitContext.DebugName = FString::Printf(
                 TEXT("Transparency alpha incremental slot %d"),
@@ -3749,6 +3913,9 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
         LastSequence);
 
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewRunToken PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     TWeakPtr<SWetClothingTransparencyPreviewViewport> WeakThis = SharedThis(this);
     FString SubmitError;
     const FDWCEditorWorkerJobTicket Ticket = WorkerJobScheduler->SubmitPrepared(
@@ -3833,7 +4000,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
             return true;
         },
         [WeakThis, ExpectedSlot, ExpectedLayer, ExpectedEpoch, BatchCount,
-         FirstSequence, LastSequence, CommitToken](
+         FirstSequence, LastSequence, CommitToken, PreviewRunToken](
             const FDWCEditorWorkerJobTicket& CompletedTicket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
@@ -3853,6 +4020,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleRevealColorIncrementalJob(
 
             FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
+            CommitContext.PreviewRunToken = PreviewRunToken;
             CommitContext.ProducerSessionEpoch = CompletedTicket.SessionEpoch;
             CommitContext.DebugName = FString::Printf(
                 TEXT("Transparency reveal color incremental slot %d"),
@@ -4164,6 +4332,9 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
 
     const uint64 SnapshotContentRevision = PreviewContentRevision;
     const FDWCEditorPreviewConsumerToken CommitToken = PreviewCommitLifetime.CaptureToken();
+    const FDWCEditorPreviewRunToken PreviewRunToken = PreviewSession
+        ? PreviewSession->CaptureRunToken()
+        : FDWCEditorPreviewRunToken();
     if (PendingPreviewTicket.IsValid() && PendingPreviewContentRevision == SnapshotContentRevision)
     {
         // Multiple UI refresh requests can target the same immutable state in
@@ -4323,7 +4494,8 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
             };
             return true;
         },
-        [WeakThis, ExpectedLayerGuid, ExpectedSlotIndex, AddressMode, SnapshotContentRevision, CommitToken](
+        [WeakThis, ExpectedLayerGuid, ExpectedSlotIndex, AddressMode, SnapshotContentRevision,
+         CommitToken, PreviewRunToken](
             const FDWCEditorWorkerJobTicket& Ticket,
             TSharedPtr<FDWCEditorWorkerJobResult, ESPMode::ThreadSafe> BaseResult)
         {
@@ -4339,6 +4511,7 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
             const TextureAddress Address = AddressMode == EDWCTransparencyUVAddressMode::Wrap ? TA_Wrap : TA_Clamp;
             FDWCEditorPreviewCommitContext CommitContext;
             CommitContext.ConsumerToken = CommitToken;
+            CommitContext.PreviewRunToken = PreviewRunToken;
             CommitContext.ProducerSessionEpoch = Ticket.SessionEpoch;
             CommitContext.DebugName = FString::Printf(
                 TEXT("Transparency visualization slot %d"),

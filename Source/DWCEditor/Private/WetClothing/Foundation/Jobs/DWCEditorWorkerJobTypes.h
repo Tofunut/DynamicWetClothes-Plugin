@@ -302,6 +302,8 @@ struct FDWCEditorWorkerSchedulerDiagnostics
     uint64 AdmissionDeferredCount = 0;
     uint64 PhaseAdmissionDeferredCount = 0;
     uint64 SingletonRejectionCount = 0;
+    uint64 PreviewLifecycleRejectionCount = 0;
+    uint64 PreviewLifecycleStaleCount = 0;
     uint64 CompletedJobCount = 0;
     double TotalQueueSeconds = 0.0;
     double TotalWorkerSeconds = 0.0;

@@ -20,6 +20,7 @@
 #include "WetClothing/Foundation/Validation/DWCEditorValidationFixConvergence.h"
 #include "WetClothing/Foundation/Diagnostics/DWCEditorMemoryDiagnostics.h"
 #include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
+#include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorSlateHostVisibilityAdapter.h"
 #include "WetClothing/WCAEditor/Build/WCAEditorCanonicalStateProvider.h"
 #include "WetClothing/WCAEditor/Build/WCAEditorBuildStatusProvider.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
@@ -2855,6 +2856,13 @@ const FName FWCAEditor::MainTabId(TEXT("WCAEditor_Main"));
 
 FWCAEditor::~FWCAEditor()
 {
+    if (HostVisibilityAdapter.IsValid())
+    {
+        HostVisibilityAdapter->Shutdown();
+        HostVisibilityAdapter.Reset();
+    }
+    MainDockTab.Reset();
+
     if (ObjectPropertyChangedHandle.IsValid())
     {
         FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(ObjectPropertyChangedHandle);
@@ -3106,12 +3114,33 @@ TSharedRef<SDockTab> FWCAEditor::SpawnMainTab(const FSpawnTabArgs& Args)
 {
     check(Args.GetTabId().TabType == MainTabId);
 
-    return SNew(SDockTab)
+    if (HostVisibilityAdapter.IsValid())
+    {
+        HostVisibilityAdapter->Shutdown();
+        HostVisibilityAdapter.Reset();
+    }
+
+    TSharedRef<SDockTab> NewMainTab = SNew(SDockTab)
         .Label(LOCTEXT("MainTabLabel", "Wet Clothing Asset Editor"))
             [SAssignNew(EditorPanel, SWCAEditorPanel)
                  .DetailsView(DetailsView)
                  .WetClothingAsset(WetClothingAsset.Get())
                  .OnStatusChanged(FSimpleDelegate::CreateSP(this, &FWCAEditor::HandleEditorPanelStatusChanged))];
+
+    MainDockTab = NewMainTab;
+    HostVisibilityAdapter = MakeShared<FDWCEditorSlateHostVisibilityAdapter>();
+    const TWeakPtr<SWCAEditorPanel> WeakEditorPanel = EditorPanel;
+    HostVisibilityAdapter->Initialize(
+        NewMainTab,
+        TabManager,
+        [WeakEditorPanel](const FDWCEditorHostVisibilitySnapshot& Visibility)
+        {
+            if (const TSharedPtr<SWCAEditorPanel> PinnedEditorPanel = WeakEditorPanel.Pin())
+            {
+                PinnedEditorPanel->SetHostVisibilitySnapshot(Visibility);
+            }
+        });
+    return NewMainTab;
 }
 
 void FWCAEditor::PostRegenerateMenusAndToolbars()

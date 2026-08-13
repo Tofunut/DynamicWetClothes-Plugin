@@ -6,8 +6,33 @@
 
 class UWetClothingAsset;
 class FDWCEditorCancellationToken;
+struct FDWCTransparencyBlueprintHierarchy;
 struct FWetClothingTransparencyLayerData;
 struct FWetClothingTransparencyTargetSurface;
+
+enum class EDWCTransparencyGenerationPhase : uint8
+{
+    PreparingTarget,
+    RasterizingTarget,
+    PreparingSources,
+    BakingSourceMaterial,
+    ProjectingSamples,
+    ComposingResult,
+    CommittingResult
+};
+
+struct FDWCTransparencyGenerationProgress
+{
+    EDWCTransparencyGenerationPhase Phase = EDWCTransparencyGenerationPhase::PreparingTarget;
+    double OverallFraction = 0.0;
+    int32 CompletedItems = 0;
+    int32 TotalItems = 0;
+    FName SourceName = NAME_None;
+    int32 MaterialSlotIndex = INDEX_NONE;
+};
+
+using FDWCTransparencyGenerationProgressCallback =
+    TFunction<void(const FDWCTransparencyGenerationProgress&)>;
 
 /** Game-thread capture for same-mesh projection. Worker code only reads copied geometry and texture pixels. */
 class FDWCTransparencyAutoMapSnapshot
@@ -88,7 +113,9 @@ class FDWCTransparencyAutoMapGenerator
         FDWCTransparencySourcePayload& OutResult,
         FString& OutSummary,
         TArray<FString>& OutWarnings,
-        const FDWCEditorCancellationToken* CancellationToken = nullptr);
+        const FDWCEditorCancellationToken* CancellationToken = nullptr,
+        const FDWCTransparencyBlueprintHierarchy* BlueprintHierarchy = nullptr,
+        const FDWCTransparencyGenerationProgressCallback* ProgressCallback = nullptr);
 
     static bool GenerateBaseRevealColorMap(
         const UWetClothingAsset& WetClothingAsset,
@@ -112,10 +139,14 @@ class FDWCTransparencyAutoMapGenerator
         const FWetClothingTransparencyLayerData& Layer,
         bool bResolveMaterialSurfaces,
         FDWCTransparencyAutoMapSnapshot& OutSnapshot,
-        FString& OutErrorMessage);
+        FString& OutErrorMessage,
+        const FDWCTransparencyBlueprintHierarchy* BlueprintHierarchy = nullptr,
+        const FDWCEditorCancellationToken* CancellationToken = nullptr,
+        const FDWCTransparencyGenerationProgressCallback* ProgressCallback = nullptr);
 
     static FDWCTransparencyAutoMapComputedResult ComputeStreamingProjection(
         UWetClothingAsset& WetClothingAsset,
         FDWCTransparencyAutoMapSnapshot& Snapshot,
-        const FDWCEditorCancellationToken* CancellationToken = nullptr);
+        const FDWCEditorCancellationToken* CancellationToken = nullptr,
+        const FDWCTransparencyGenerationProgressCallback* ProgressCallback = nullptr);
 };

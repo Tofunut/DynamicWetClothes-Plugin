@@ -261,6 +261,7 @@ void FDWCEditorRenderUploadQueue::Enqueue(
             false);
         Pending.Telemetry->MarkFullTextureUpload();
     }
+    NotifyWorkAvailable();
     DispatchNotifications();
 }
 
@@ -361,6 +362,7 @@ bool FDWCEditorRenderUploadQueue::EnqueuePreparedBGRA8(
 
     ++PreparedPayloadCount;
     PreparedPayloadBytes += TotalBytes;
+    NotifyWorkAvailable();
     DispatchNotifications();
     return true;
 }
@@ -422,6 +424,73 @@ void FDWCEditorRenderUploadQueue::CancelOwner(const UObject* Owner)
     DispatchNotifications();
 }
 
+void FDWCEditorRenderUploadQueue::CancelPreviewMode(
+    const UObject* Owner,
+    const EDWCEditorPreviewMode Mode)
+{
+    check(IsInGameThread());
+    if (Owner == nullptr || Mode == EDWCEditorPreviewMode::None)
+    {
+        return;
+    }
+
+    const FObjectKey OwnerKey(Owner);
+    const auto MatchesMode = [OwnerKey, Mode](const FDWCEditorTextureKey& Key)
+    {
+        if (Key.Owner != OwnerKey)
+        {
+            return false;
+        }
+        switch (Mode)
+        {
+        case EDWCEditorPreviewMode::WetPart:
+            return Key.Purpose == EDWCEditorTexturePurpose::WetPartColor ||
+                Key.Purpose == EDWCEditorTexturePurpose::WetPartSelection ||
+                Key.Purpose == EDWCEditorTexturePurpose::WetPartSurfaceData ||
+                Key.Purpose == EDWCEditorTexturePurpose::WetPartSurfaceWetness ||
+                Key.Purpose == EDWCEditorTexturePurpose::WetPartSurfaceDroplet ||
+                Key.Purpose == EDWCEditorTexturePurpose::WetPartSurfaceFlowDroplet;
+        case EDWCEditorPreviewMode::Wrinkle:
+            return Key.Purpose == EDWCEditorTexturePurpose::WrinkleAccumulated ||
+                Key.Purpose == EDWCEditorTexturePurpose::WrinkleProcedural ||
+                Key.Purpose == EDWCEditorTexturePurpose::WrinkleHover;
+        case EDWCEditorPreviewMode::Transparency:
+            return Key.Purpose == EDWCEditorTexturePurpose::TransparencyVisualization ||
+                Key.Purpose == EDWCEditorTexturePurpose::TransparencyHoverBaseline ||
+                Key.Purpose == EDWCEditorTexturePurpose::TransparencyHoverIslandMask;
+        default:
+            return false;
+        }
+    };
+
+    for (auto It = PendingUploads.CreateIterator(); It; ++It)
+    {
+        if (MatchesMode(It.Key()))
+        {
+            if (It.Value().Telemetry.IsValid())
+            {
+                It.Value().Telemetry->MarkStale(true);
+            }
+            TransitionState(It.Value().State, EDWCEditorTextureUploadStatus::Stale);
+            RenderEnqueuedRevisions.Remove(It.Key());
+            It.RemoveCurrent();
+        }
+    }
+    for (auto It = RenderEnqueuedRevisions.CreateIterator(); It; ++It)
+    {
+        if (MatchesMode(It.Key()))
+        {
+            if (It.Value().Telemetry.IsValid())
+            {
+                It.Value().Telemetry->MarkStale(true);
+            }
+            TransitionState(It.Value().State, EDWCEditorTextureUploadStatus::Stale);
+            It.RemoveCurrent();
+        }
+    }
+    DispatchNotifications();
+}
+
 void FDWCEditorRenderUploadQueue::Flush()
 {
     check(IsInGameThread());
@@ -463,6 +532,35 @@ void FDWCEditorRenderUploadQueue::Flush()
     }
     PromoteCompletedUploads();
     DispatchNotifications();
+}
+
+bool FDWCEditorRenderUploadQueue::HasPendingWork() const
+{
+    check(IsInGameThread());
+    if (bShuttingDown || !PendingUploads.IsEmpty())
+    {
+        return !bShuttingDown && !PendingUploads.IsEmpty();
+    }
+
+    for (const TPair<FDWCEditorTextureKey, FRenderEnqueuedRevision>& Pair : RenderEnqueuedRevisions)
+    {
+        if (Pair.Value.State.IsValid() &&
+            Pair.Value.State->Status == EDWCEditorTextureUploadStatus::RenderEnqueued)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void FDWCEditorRenderUploadQueue::SetWorkAvailableCallback(FWorkAvailableCallback Callback)
+{
+    check(IsInGameThread());
+    WorkAvailableCallback = MoveTemp(Callback);
+    if (HasPendingWork())
+    {
+        NotifyWorkAvailable();
+    }
 }
 
 EDWCEditorTextureUploadStatus FDWCEditorRenderUploadQueue::TrySubmitInteractive(
@@ -718,6 +816,7 @@ void FDWCEditorRenderUploadQueue::Shutdown()
 {
     check(IsInGameThread());
     bShuttingDown = true;
+    WorkAvailableCallback = nullptr;
     for (const TPair<FDWCEditorTextureKey, FPendingUpload>& Pair : PendingUploads)
     {
         if (Pair.Value.Telemetry.IsValid())
@@ -737,6 +836,14 @@ void FDWCEditorRenderUploadQueue::Shutdown()
     PendingUploads.Reset();
     RenderEnqueuedRevisions.Reset();
     DispatchNotifications();
+}
+
+void FDWCEditorRenderUploadQueue::NotifyWorkAvailable()
+{
+    if (!bShuttingDown && WorkAvailableCallback)
+    {
+        WorkAvailableCallback();
+    }
 }
 
 FDWCEditorTextureUploadTicket FDWCEditorRenderUploadQueue::CaptureTicket(

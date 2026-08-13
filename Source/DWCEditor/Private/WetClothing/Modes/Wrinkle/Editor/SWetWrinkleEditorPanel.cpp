@@ -130,6 +130,7 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
     SurfacePatchProjectionCache = InArgs._SurfacePatchProjectionCache;
     TextureWorkspace = InArgs._TextureWorkspace;
     PreviewCommitCoordinator = InArgs._PreviewCommitCoordinator;
+    PreviewModeLifetime = InArgs._PreviewModeLifetime;
     RenderUploadQueue = InArgs._RenderUploadQueue;
     if (!RenderUploadQueue.IsValid())
     {
@@ -347,9 +348,10 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                                                      .SessionStore(SessionStore)
                                                      .SpatialQueryService(SpatialQueryService)
                                                      .SurfacePatchProjectionCache(SurfacePatchProjectionCache)
-                                                     .TextureWorkspace(TextureWorkspace)
-                                                     .PreviewCommitCoordinator(PreviewCommitCoordinator)
-                                                     .RenderUploadQueue(RenderUploadQueue)
+                                                   .TextureWorkspace(TextureWorkspace)
+                                                   .PreviewCommitCoordinator(PreviewCommitCoordinator)
+                                                   .PreviewModeLifetime(PreviewModeLifetime)
+                                                   .RenderUploadQueue(RenderUploadQueue)
                                                      .OnSurfaceHitChanged(FOnWetWrinkleSurfaceHitChanged::CreateSP(this, &SWetWrinkleEditorPanel::HandleSurfaceHitChanged))]
 
                                       + SSplitter::Slot()

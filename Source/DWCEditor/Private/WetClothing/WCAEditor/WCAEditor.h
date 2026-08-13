@@ -11,6 +11,7 @@ struct FPropertyChangedEvent;
 struct FSlateColor;
 struct FSlateBrush;
 class FExtender;
+class FDWCEditorSlateHostVisibilityAdapter;
 class FToolBarBuilder;
 class IDetailsView;
 class SDockTab;
@@ -103,6 +104,8 @@ class FWCAEditor : public FAssetEditorToolkit
     TWeakObjectPtr<UWetClothingAsset>        WetClothingAsset;
     TSharedPtr<IDetailsView>                 DetailsView;
     TSharedPtr<SWCAEditorPanel> EditorPanel;
+    TWeakPtr<SDockTab>                       MainDockTab;
+    TSharedPtr<FDWCEditorSlateHostVisibilityAdapter> HostVisibilityAdapter;
     TSharedPtr<FWorkspaceItem>               WorkspaceMenuCategory;
     FDelegateHandle                          ObjectPropertyChangedHandle;
     FDelegateHandle                          AssetSavedHandle;

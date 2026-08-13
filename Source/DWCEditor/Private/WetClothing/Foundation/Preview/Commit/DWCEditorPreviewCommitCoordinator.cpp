@@ -82,6 +82,10 @@ EDWCEditorPreviewCommitResult FDWCEditorPreviewCommitCoordinator::Validate(
     {
         return EDWCEditorPreviewCommitResult::StaleRequest;
     }
+    if (Context.PreviewRunToken.IsValid() && !Context.PreviewRunToken.IsCurrent())
+    {
+        return EDWCEditorPreviewCommitResult::StaleRequest;
+    }
 
     const TSharedPtr<FDWCEditorPreviewConsumerLifetimeState> ConsumerState = Context.ConsumerToken.State.Pin();
     if (!ConsumerState.IsValid() ||

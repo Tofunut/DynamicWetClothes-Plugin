@@ -45,18 +45,16 @@ struct FDWCSetWrinkleCrossPreviewAction
     bool bShowBakedTransparency = true;
 };
 
-struct FDWCSelectTransparencyLayerAction
+struct FDWCSelectTransparencyTargetSlotAction
 {
-    FGuid LayerGuid;
     int32 MaterialSlotIndex = INDEX_NONE;
 };
 
 /** Selects a target part and its resolver-derived stage atomically. */
-struct FDWCSelectTransparencyLayerAndStageAction
+struct FDWCSelectTransparencyTargetSlotAndStageAction
 {
-    FGuid LayerGuid;
-    EDWCTransparencyEditorStage Stage = EDWCTransparencyEditorStage::StructureSetup;
     int32 MaterialSlotIndex = INDEX_NONE;
+    EDWCTransparencyEditorStage Stage = EDWCTransparencyEditorStage::StructureSetup;
 };
 
 struct FDWCSetTransparencyStageAction

@@ -563,7 +563,8 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
     TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
     FString*                                        OutErrorMessage,
     const FDWCEditorCancellationToken*              CancellationToken,
-    const TConstArrayView<int32>                    SampleIndices)
+    const TConstArrayView<int32>                    SampleIndices,
+    const FDWCRevealBakeProjectionProgressCallback* ProgressCallback)
 {
     if (Samples.Num() == 0)
     {
@@ -594,6 +595,10 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
     const int32 ProjectionSampleCount = SampleIndices.IsEmpty()
         ? Samples.Num()
         : SampleIndices.Num();
+    if (ProgressCallback != nullptr)
+    {
+        (*ProgressCallback)(0, ProjectionSampleCount);
+    }
     for (int32 ProjectionSampleIndex = 0; ProjectionSampleIndex < ProjectionSampleCount;
          ++ProjectionSampleIndex)
     {
@@ -603,6 +608,12 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
         {
             SetError(OutErrorMessage, TEXT("Transparency ray projection was canceled."));
             return false;
+        }
+        if (ProgressCallback != nullptr &&
+            ProjectionSampleIndex > 0 &&
+            (ProjectionSampleIndex & 2047) == 0)
+        {
+            (*ProgressCallback)(ProjectionSampleIndex, ProjectionSampleCount);
         }
         const int32 SampleIndex = SampleIndices.IsEmpty()
             ? ProjectionSampleIndex
@@ -726,6 +737,11 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
         }
 
         ConsumeHit(SelectedHit);
+    }
+
+    if (ProgressCallback != nullptr)
+    {
+        (*ProgressCallback)(ProjectionSampleCount, ProjectionSampleCount);
     }
 
     SetError(OutErrorMessage, TEXT(""));

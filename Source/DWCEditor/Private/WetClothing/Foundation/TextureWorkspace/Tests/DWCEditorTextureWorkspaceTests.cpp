@@ -172,6 +172,49 @@ bool FDWCEditorTextureWorkspaceReuseTest::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorTextureWorkspacePurposeScopedReclaimTest,
+    "DWC.Editor.Foundation.TextureWorkspace.PurposeScopedReclaim",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorTextureWorkspacePurposeScopedReclaimTest::RunTest(const FString&)
+{
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>();
+    FDWCEditorTextureWorkspace Workspace(UploadQueue);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(8, 8));
+    const FDWCEditorTextureKey WrinkleKey = MakeTextureKey(
+        Owner,
+        EDWCEditorTexturePurpose::WrinkleAccumulated,
+        1);
+    const FDWCEditorTextureKey TransparencyKey = MakeTextureKey(
+        Owner,
+        EDWCEditorTexturePurpose::TransparencyVisualization,
+        2);
+    Workspace.PublishBGRA8(WrinkleKey, Descriptor, MakeFlatNormalPixels(Descriptor));
+    Workspace.PublishBGRA8(TransparencyKey, Descriptor, MakeFlatNormalPixels(Descriptor));
+
+    const EDWCEditorTexturePurpose WrinklePurpose =
+        EDWCEditorTexturePurpose::WrinkleAccumulated;
+    TestTrue(
+        TEXT("Only the requested purpose reports reclaimable CPU storage"),
+        Workspace.GetReclaimableCPUBytesForPurposes(MakeArrayView(&WrinklePurpose, 1)) > 0);
+    const uint64 Reclaimed = Workspace.ReclaimUnleasedCPUBytesForPurposes(
+        MakeArrayView(&WrinklePurpose, 1),
+        MAX_uint64);
+    TestTrue(TEXT("Purpose-scoped reclaim releases the wrinkle entry"), Reclaimed > 0);
+    TestFalse(
+        TEXT("The reclaimed wrinkle entry is no longer retained"),
+        Workspace.AcquireExistingLease(WrinkleKey, Descriptor).IsValid());
+    TestTrue(
+        TEXT("A transparency entry in another domain remains retained"),
+        Workspace.AcquireExistingLease(TransparencyKey, Descriptor).IsValid());
+
+    ShutdownWorkspaceAfterRenderFence(Workspace, UploadQueue);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorTextureWorkspaceLeaseTest,
     "DWC.Editor.Foundation.TextureWorkspace.Lease",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -826,6 +869,15 @@ bool FDWCEditorRenderUploadQueueSubmissionTicketTest::RunTest(const FString&)
 
     Workspace.MarkDirty(Handle, FIntRect(0, 0, 8, 8), false,
         EDWCEditorTextureUploadPriority::Interactive);
+    const FDWCEditorTextureUploadTicket ModeCanceledTicket =
+        UploadQueue->CaptureTicket(Handle);
+    UploadQueue->CancelPreviewMode(Owner, EDWCEditorPreviewMode::Wrinkle);
+    TestEqual(TEXT("Suspending the wrinkle mode invalidates its pending upload"),
+        UploadQueue->GetStatus(ModeCanceledTicket),
+        EDWCEditorTextureUploadStatus::Stale);
+
+    Workspace.MarkDirty(Handle, FIntRect(0, 0, 8, 8), false,
+        EDWCEditorTextureUploadPriority::Interactive);
     const FDWCEditorTextureUploadTicket RemovedObserverTicket =
         UploadQueue->CaptureTicket(Handle);
     int32 RemovedObserverNotifications = 0;
@@ -1370,6 +1422,73 @@ bool FDWCEditorTextureWorkspaceGovernorResidencyLifetimeTest::RunTest(const FStr
     }
     TestEqual(TEXT("No governor reservation survives workspace teardown"),
         Diagnostics.Reservations.Num(), 0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorVisibilityMaintenanceWakeupTest,
+    "DWC.Editor.Lifecycle.Visibility.MaintenanceWakeup",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorVisibilityMaintenanceWakeupTest::RunTest(const FString&)
+{
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>();
+    const TSharedRef<FDWCEditorTextureWorkspace> Workspace =
+        MakeShared<FDWCEditorTextureWorkspace>(
+            UploadQueue,
+            1024ull * 1024ull,
+            1024ull * 1024ull);
+
+    int32 UploadWakeups = 0;
+    int32 MaintenanceWakeups = 0;
+    UploadQueue->SetWorkAvailableCallback(
+        [&UploadWakeups]
+        {
+            ++UploadWakeups;
+        });
+    Workspace->SetMaintenanceRequiredCallback(
+        [&MaintenanceWakeups]
+        {
+            ++MaintenanceWakeups;
+        });
+
+    UTexture2D* Owner = NewObject<UTexture2D>(GetTransientPackage());
+    const FDWCEditorTextureKey Key = MakeTextureKey(
+        Owner,
+        EDWCEditorTexturePurpose::WrinkleHover,
+        5);
+    const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
+    FDWCEditorTextureHandle Handle = Workspace->PublishBGRA8(
+        Key,
+        Descriptor,
+        MakeFlatNormalPixels(Descriptor));
+    TestTrue(TEXT("The published texture is valid"), Handle.IsValid());
+    UploadQueue->Enqueue(
+        Handle,
+        FIntRect(FIntPoint::ZeroValue, Descriptor.Size),
+        false,
+        EDWCEditorTextureUploadPriority::Interactive);
+    TestTrue(TEXT("Queued preview upload wakes the event-driven upload pump"),
+        UploadWakeups > 0);
+
+    const EDWCEditorTexturePurpose Purpose = Key.Purpose;
+    Workspace->RetireUnleasedPurposes(MakeArrayView(&Purpose, 1));
+    TestTrue(TEXT("Starting GPU retirement wakes fence maintenance"),
+        MaintenanceWakeups > 0);
+    TestTrue(TEXT("Retirement is visible as pending maintenance"),
+        Workspace->HasRetiringGPUResources());
+
+    const int32 WakeupsBeforeShutdown = UploadWakeups + MaintenanceWakeups;
+    UploadQueue->SetWorkAvailableCallback(nullptr);
+    Workspace->SetMaintenanceRequiredCallback(nullptr);
+    Handle.Reset();
+    UploadQueue->Shutdown();
+    FlushRenderingCommands();
+    Workspace->ProcessRetiredGPUResources();
+    Workspace->Reset();
+    TestEqual(TEXT("Cleared callbacks do not fire during teardown"),
+        UploadWakeups + MaintenanceWakeups, WakeupsBeforeShutdown);
     return true;
 }
 

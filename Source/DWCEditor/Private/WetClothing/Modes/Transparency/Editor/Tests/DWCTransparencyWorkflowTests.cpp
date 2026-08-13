@@ -10,7 +10,10 @@
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 #include "WetClothing/Modes/Transparency/Editor/DWCTransparencyWorkflowPolicy.h"
 #include "WetClothing/Modes/Transparency/Editor/DWCTransparencyWorkflowStateResolver.h"
+#include "WetClothing/Modes/Transparency/Editor/DWCTransparencyBlueprintHierarchySession.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
+#include "Engine/SkeletalMesh.h"
+#include "GameFramework/Actor.h"
 
 namespace
 {
@@ -143,19 +146,23 @@ bool FDWCTransparencyWorkflowStageResolutionTest::RunTest(const FString& Paramet
     FDWCEditorSessionState SessionState;
     const FGuid FirstLayerGuid = FGuid::NewGuid();
     const FGuid SecondLayerGuid = FGuid::NewGuid();
+    SessionState.AuthoringIndex.TransparencyLayerGuids.Add(FirstLayerGuid);
+    SessionState.AuthoringIndex.TransparencyLayerGuids.Add(SecondLayerGuid);
+    SessionState.AuthoringIndex.TransparencyLayerByMaterialSlot.Add(3, FirstLayerGuid);
+    SessionState.AuthoringIndex.TransparencyLayerByMaterialSlot.Add(7, SecondLayerGuid);
     FDWCEditorSessionReducer::Reduce(
         SessionState,
-        FDWCSelectTransparencyLayerAndStageAction{
-            FirstLayerGuid,
+        FDWCSelectTransparencyTargetSlotAndStageAction{
+            3,
             EDWCTransparencyEditorStage::MapGeneration});
     const EDWCEditorSessionEffect SelectionEffects = FDWCEditorSessionReducer::Reduce(
         SessionState,
-        FDWCSelectTransparencyLayerAndStageAction{
-            SecondLayerGuid,
+        FDWCSelectTransparencyTargetSlotAndStageAction{
+            7,
             EDWCTransparencyEditorStage::FinalEditing});
     TestEqual(TEXT("Atomic selection switches to the new target part"),
-        SessionState.Transparency.SelectedLayerGuid,
-        SecondLayerGuid);
+        SessionState.Transparency.SelectedMaterialSlotIndex,
+        7);
     TestEqual(TEXT("Atomic selection uses the new layer's resolved Stage instead of copying Stage 2"),
         SessionState.Transparency.StageByLayer.FindRef(SecondLayerGuid),
         EDWCTransparencyEditorStage::FinalEditing);
@@ -307,6 +314,19 @@ bool FDWCTransparencyWorkflowInputRoutingTest::RunTest(const FString& Parameters
         RevealContext.bUseRevealWorkingMap);
     TestTrue(TEXT("A valid Stage 2 source map enables Stage 3 reveal painting"),
         RevealContext.bEnableRevealColorPainting);
+
+    const DWCTransparencyWorkflow::FDWCTransparencyPreviewContext Type2GenerationContext =
+        DWCTransparencyWorkflow::ResolvePreviewContext(
+            EDWCTransparencyEditorStage::MapGeneration,
+            EDWCTransparencySourceType::OtherSkeletalMeshComponents,
+            EDWCTransparencyVisualizationMode::Final,
+            EWetClothingTransparencyPreviewMode::TargetMeshOnly,
+            true,
+            false,
+            false);
+    TestEqual(TEXT("Type 2 Stage 2 always exposes selected Blueprint source meshes"),
+        Type2GenerationContext.PreviewMode,
+        EWetClothingTransparencyPreviewMode::FullBlueprint);
 
     const DWCTransparencyWorkflow::FDWCTransparencyPreviewContext DifferenceContext =
         DWCTransparencyWorkflow::ResolvePreviewContext(
@@ -671,6 +691,129 @@ bool FDWCTransparencyRevealNormalSettingsContractTest::RunTest(const FString&)
     TestEqual(TEXT("Session owns the requested Reveal Normal preview source"),
         State.Transparency.PreviewSettings.RevealNormalSource,
         EDWCTransparencyRevealNormalPreviewSource::Baked);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyBlueprintHierarchyReadinessTest,
+    "DWC.Editor.Transparency.Type2.BlueprintHierarchyReadiness",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyBlueprintHierarchyReadinessTest::RunTest(const FString&)
+{
+    USkeletalMesh* TargetMesh = NewObject<USkeletalMesh>(GetTransientPackage());
+    USkeletalMesh* SourceMesh = NewObject<USkeletalMesh>(GetTransientPackage());
+
+    FWetClothingTransparencyLayerData Layer;
+    Layer.LayerGuid = FGuid::NewGuid();
+    Layer.SourceType = EDWCTransparencySourceType::OtherSkeletalMeshComponents;
+    Layer.BlueprintSource.BlueprintClass = AActor::StaticClass();
+
+    FDWCTransparencyBlueprintHierarchySnapshot Snapshot;
+    Snapshot.LayerGuid = Layer.LayerGuid;
+    Snapshot.BlueprintClassPath = Layer.BlueprintSource.BlueprintClass.ToSoftObjectPath();
+    Snapshot.State = EDWCTransparencyBlueprintHierarchyState::Loading;
+
+    FDWCTransparencyType2Readiness Readiness =
+        FDWCTransparencyBlueprintHierarchySession::EvaluateReadiness(
+            TargetMesh, TargetMesh, Layer, Snapshot);
+    TestFalse(TEXT("Type 2 stays disabled while the hierarchy is loading"), Readiness.bReady);
+    TestTrue(TEXT("Loading state has an actionable reason"),
+        Readiness.DisabledReason.Contains(TEXT("Loading")));
+
+    Snapshot.State = EDWCTransparencyBlueprintHierarchyState::Ready;
+    const FName TargetComponentName(TEXT("TargetMesh"));
+    const FName SourceComponentName(TEXT("InnerMesh"));
+    FDWCTransparencyBlueprintMeshComponent& Target =
+        Snapshot.Hierarchy.MeshComponents.AddDefaulted_GetRef();
+    Target.ComponentName = TargetComponentName;
+    Target.SkeletalMesh = TargetMesh;
+    FDWCTransparencyBlueprintMeshComponent& Source =
+        Snapshot.Hierarchy.MeshComponents.AddDefaulted_GetRef();
+    Source.ComponentName = SourceComponentName;
+    Source.SkeletalMesh = SourceMesh;
+
+    Readiness = FDWCTransparencyBlueprintHierarchySession::EvaluateReadiness(
+        TargetMesh, TargetMesh, Layer, Snapshot);
+    TestFalse(TEXT("A ready hierarchy still requires an explicit target binding"), Readiness.bReady);
+    TestFalse(TEXT("The target is unresolved before binding"), Readiness.bTargetResolved);
+
+    Layer.BlueprintSource.TargetComponent.ComponentName = TargetComponentName;
+    Layer.BlueprintSource.TargetComponent.ExpectedSkeletalMesh = TargetMesh;
+    Readiness = FDWCTransparencyBlueprintHierarchySession::EvaluateReadiness(
+        TargetMesh, TargetMesh, Layer, Snapshot);
+    TestFalse(TEXT("A resolved target still requires a raycast source"), Readiness.bReady);
+    TestTrue(TEXT("The target readiness is reported independently"), Readiness.bTargetResolved);
+
+    FWetClothingTransparencyBlueprintComponentBinding& SourceBinding =
+        Layer.BlueprintSource.SourcePriority.AddDefaulted_GetRef();
+    SourceBinding.ComponentName = SourceComponentName;
+    SourceBinding.ExpectedSkeletalMesh = SourceMesh;
+    SourceBinding.Role = EDWCTransparencyBlueprintSourceRole::RevealSource;
+    Readiness = FDWCTransparencyBlueprintHierarchySession::EvaluateReadiness(
+        TargetMesh, TargetMesh, Layer, Snapshot);
+    TestTrue(TEXT("A current hierarchy with target and reveal source is ready"), Readiness.bReady);
+    TestTrue(TEXT("Ready state has no disabled reason"), Readiness.DisabledReason.IsEmpty());
+
+    Layer.BlueprintSource.TargetComponent.ComponentName = TEXT("RemovedTarget");
+    Layer.BlueprintSource.TargetComponent.ExpectedSkeletalMesh = TargetMesh;
+    FWetClothingTransparencyBlueprintSource ReconciledSource = Layer.BlueprintSource;
+    const FDWCTransparencyType2BindingReconcileResult ReconcileResult =
+        FDWCTransparencyBlueprintHierarchySession::ReconcileBindings(
+            TargetMesh,
+            TargetMesh,
+            Layer,
+            Snapshot,
+            ReconciledSource);
+    TestTrue(TEXT("A stale target binding is repaired when the hierarchy has one target"),
+        ReconcileResult.bChanged && ReconcileResult.bTargetResolved);
+    TestEqual(TEXT("The repaired target uses the current Blueprint component"),
+        ReconciledSource.TargetComponent.ComponentName,
+        TargetComponentName);
+    TestTrue(TEXT("A preselected raycast source survives target reconciliation"),
+        ReconciledSource.SourcePriority.ContainsByPredicate(
+            [SourceComponentName](
+                const FWetClothingTransparencyBlueprintComponentBinding& Binding)
+            {
+                return Binding.ComponentName == SourceComponentName;
+            }));
+    Layer.BlueprintSource = MoveTemp(ReconciledSource);
+    Readiness = FDWCTransparencyBlueprintHierarchySession::EvaluateReadiness(
+        TargetMesh, TargetMesh, Layer, Snapshot);
+    TestTrue(TEXT("Reconciled bindings enable Type 2 generation"), Readiness.bReady);
+
+    FDWCTransparencyBlueprintHierarchySnapshot MissingTargetSnapshot = Snapshot;
+    MissingTargetSnapshot.LayerGuid = Layer.LayerGuid;
+    MissingTargetSnapshot.Hierarchy.MeshComponents.RemoveAll(
+        [TargetMesh](const FDWCTransparencyBlueprintMeshComponent& Component)
+        {
+            return Component.SkeletalMesh == TargetMesh;
+        });
+    Readiness = FDWCTransparencyBlueprintHierarchySession::EvaluateReadiness(
+        TargetMesh, TargetMesh, Layer, MissingTargetSnapshot);
+    TestFalse(TEXT("Type 2 generation is blocked when the Blueprint target mesh is missing"),
+        Readiness.bReady);
+    TestTrue(TEXT("A missing Blueprint target mesh reports the actual blocking condition"),
+        Readiness.DisabledReason.Contains(TEXT("does not contain")));
+    FWetClothingTransparencyBlueprintSource MissingTargetSource = Layer.BlueprintSource;
+    const FName PreservedTargetName = MissingTargetSource.TargetComponent.ComponentName;
+    const FDWCTransparencyType2BindingReconcileResult MissingTargetReconcile =
+        FDWCTransparencyBlueprintHierarchySession::ReconcileBindings(
+            TargetMesh,
+            TargetMesh,
+            Layer,
+            MissingTargetSnapshot,
+            MissingTargetSource);
+    TestFalse(TEXT("Inspecting an invalid Blueprint does not mutate authored target bindings"),
+        MissingTargetReconcile.bChanged);
+    TestEqual(TEXT("The authored target binding is preserved while the Blueprint is invalid"),
+        MissingTargetSource.TargetComponent.ComponentName,
+        PreservedTargetName);
+
+    Snapshot.LayerGuid = FGuid::NewGuid();
+    Readiness = FDWCTransparencyBlueprintHierarchySession::EvaluateReadiness(
+        TargetMesh, TargetMesh, Layer, Snapshot);
+    TestFalse(TEXT("A snapshot from another layer cannot enable generation"), Readiness.bReady);
     return true;
 }
 

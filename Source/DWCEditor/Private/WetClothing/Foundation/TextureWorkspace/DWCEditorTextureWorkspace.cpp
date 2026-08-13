@@ -1096,6 +1096,34 @@ uint64 FDWCEditorTextureWorkspace::GetReclaimableCPUBytes() const
     return ReclaimableBytes;
 }
 
+uint64 FDWCEditorTextureWorkspace::GetReclaimableCPUBytesForPurposes(
+    const TConstArrayView<EDWCEditorTexturePurpose> Purposes) const
+{
+    check(IsInGameThread());
+    if (Purposes.IsEmpty())
+    {
+        return 0;
+    }
+
+    TSet<EDWCEditorTexturePurpose> PurposeSet;
+    PurposeSet.Reserve(Purposes.Num());
+    for (const EDWCEditorTexturePurpose Purpose : Purposes)
+    {
+        PurposeSet.Add(Purpose);
+    }
+
+    uint64 ReclaimableBytes = 0;
+    for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
+    {
+        if (PurposeSet.Contains(Pair.Key.Purpose) && Pair.Value.IsValid() &&
+            Pair.Value->ActiveLeaseCount == 0)
+        {
+            ReclaimableBytes += Pair.Value->GetAllocatedSizeBytes();
+        }
+    }
+    return ReclaimableBytes;
+}
+
 uint64 FDWCEditorTextureWorkspace::GetReclaimableGPUBytes() const
 {
     check(IsInGameThread());
@@ -1150,6 +1178,62 @@ uint64 FDWCEditorTextureWorkspace::ReclaimUnleasedCPUBytes(
     }
     const uint64 AfterBytes = CalculateCPUUsedBytes();
     return BeforeBytes >= AfterBytes ? BeforeBytes - AfterBytes : 0;
+}
+
+uint64 FDWCEditorTextureWorkspace::ReclaimUnleasedCPUBytesForPurposes(
+    const TConstArrayView<EDWCEditorTexturePurpose> Purposes,
+    const uint64 TargetBytes,
+    uint64* const OutRetiringGPUBytes)
+{
+    check(IsInGameThread());
+    if (OutRetiringGPUBytes != nullptr)
+    {
+        *OutRetiringGPUBytes = 0;
+    }
+    if (Purposes.IsEmpty() || TargetBytes == 0)
+    {
+        return 0;
+    }
+
+    TSet<EDWCEditorTexturePurpose> PurposeSet;
+    PurposeSet.Reserve(Purposes.Num());
+    for (const EDWCEditorTexturePurpose Purpose : Purposes)
+    {
+        PurposeSet.Add(Purpose);
+    }
+
+    uint64 ReclaimedBytes = 0;
+    while (ReclaimedBytes < TargetBytes)
+    {
+        const FDWCEditorTextureKey* OldestKey = nullptr;
+        FDWCEditorTextureHandle OldestEntry;
+        uint64 OldestSerial = MAX_uint64;
+        for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
+        {
+            if (PurposeSet.Contains(Pair.Key.Purpose) && Pair.Value.IsValid() &&
+                Pair.Value->ActiveLeaseCount == 0 && Pair.Value->LastUsedSerial < OldestSerial)
+            {
+                OldestKey = &Pair.Key;
+                OldestEntry = Pair.Value;
+                OldestSerial = Pair.Value->LastUsedSerial;
+            }
+        }
+        if (OldestKey == nullptr || !OldestEntry.IsValid())
+        {
+            break;
+        }
+
+        const uint64 EntryCPUBytes = OldestEntry->GetAllocatedSizeBytes();
+        if (OutRetiringGPUBytes != nullptr && OldestEntry->IsGPUResident())
+        {
+            *OutRetiringGPUBytes += OldestEntry->GetEstimatedGPUBytes();
+        }
+        RemoveEntry(*OldestKey, true);
+        ReclaimedBytes = ReclaimedBytes <= MAX_uint64 - EntryCPUBytes
+            ? ReclaimedBytes + EntryCPUBytes
+            : MAX_uint64;
+    }
+    return ReclaimedBytes;
 }
 
 uint64 FDWCEditorTextureWorkspace::RetireUnleasedGPUBytes(const uint64 TargetBytes)
@@ -1217,6 +1301,37 @@ uint64 FDWCEditorTextureWorkspace::RetireUnleasedPurposes(
         }
     }
     return RetiringBytes;
+}
+
+bool FDWCEditorTextureWorkspace::HasRetiringGPUResources() const
+{
+    check(IsInGameThread());
+    for (const TPair<FDWCEditorTextureKey, FDWCEditorTextureHandle>& Pair : Entries)
+    {
+        if (Pair.Value.IsValid() && Pair.Value->IsGPURetiring())
+        {
+            return true;
+        }
+    }
+    for (const FDWCEditorTextureHandle& Entry : RetiredEntries)
+    {
+        if (Entry.IsValid() && Entry->IsGPURetiring())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void FDWCEditorTextureWorkspace::SetMaintenanceRequiredCallback(
+    FMaintenanceRequiredCallback Callback)
+{
+    check(IsInGameThread());
+    MaintenanceRequiredCallback = MoveTemp(Callback);
+    if (HasRetiringGPUResources())
+    {
+        NotifyMaintenanceRequired();
+    }
 }
 
 void FDWCEditorTextureWorkspace::GetGPUResidencySnapshot(
@@ -1520,7 +1635,16 @@ bool FDWCEditorTextureWorkspace::BeginGPUResourceRetire(const FDWCEditorTextureH
     Entry->Texture->ReleaseResource();
     Entry->GPUReleaseFence->BeginFence();
     ++GPUResourceRetireCount;
+    NotifyMaintenanceRequired();
     return true;
+}
+
+void FDWCEditorTextureWorkspace::NotifyMaintenanceRequired()
+{
+    if (MaintenanceRequiredCallback)
+    {
+        MaintenanceRequiredCallback();
+    }
 }
 
 void FDWCEditorTextureWorkspace::ReleaseEntryCPUStorage(const FDWCEditorTextureHandle& Entry)

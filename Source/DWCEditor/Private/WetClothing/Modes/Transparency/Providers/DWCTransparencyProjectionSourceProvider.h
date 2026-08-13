@@ -3,12 +3,32 @@
 
 #include "CoreMinimal.h"
 #include "DataAssets/DWCBakeLayer.h"
+#include "UObject/GCObject.h"
 
 class UMaterialInterface;
 class USkeletalMesh;
 class UWetClothingAsset;
 class AActor;
 struct FWetClothingTransparencyLayerData;
+
+/**
+ * Keeps transient Blueprint material snapshots alive until every consumer of a
+ * hierarchy/projection snapshot has finished using their render resources.
+ */
+class FDWCTransparencyProjectionObjectLease final : public FGCObject
+{
+  public:
+    void Retain(UObject* Object);
+
+    virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
+    virtual FString GetReferencerName() const override
+    {
+        return TEXT("FDWCTransparencyProjectionObjectLease");
+    }
+
+  private:
+    TArray<TObjectPtr<UObject>> Objects;
+};
 
 struct FDWCTransparencyProjectionSource
 {
@@ -28,6 +48,8 @@ struct FDWCTransparencyBlueprintMeshComponent
     int32 HierarchyDepth = 0;
     TObjectPtr<USkeletalMesh> SkeletalMesh = nullptr;
     TArray<TObjectPtr<UMaterialInterface>> Materials;
+    /** Captured before transient component materials are converted to durable bake snapshots. */
+    TArray<FGuid> MaterialLightingGuids;
     FTransform BakeTransform = FTransform::Identity;
 };
 
@@ -36,6 +58,7 @@ struct FDWCTransparencyBlueprintHierarchy
 {
     TArray<FDWCTransparencyBlueprintMeshComponent> MeshComponents;
     FString BuildSignature;
+    TSharedPtr<FDWCTransparencyProjectionObjectLease> ObjectLease;
 };
 
 /** Game-thread provider output shared by every ray-projected transparency source type. */
@@ -45,6 +68,7 @@ struct FDWCTransparencyProjectionSourceSet
     TArray<FDWCTransparencyProjectionSource> Sources;
     TArray<FString> Warnings;
     FString ProviderSignature;
+    TSharedPtr<FDWCTransparencyProjectionObjectLease> ObjectLease;
 };
 
 class FDWCTransparencyProjectionSourceProvider
@@ -58,6 +82,12 @@ class FDWCTransparencyProjectionSourceProvider
     static bool BuildBlueprintSources(
         const UWetClothingAsset& Asset,
         const FWetClothingTransparencyLayerData& Layer,
+        FDWCTransparencyProjectionSourceSet& OutSources,
+        FString& OutError);
+    static bool BuildBlueprintSources(
+        const UWetClothingAsset& Asset,
+        const FWetClothingTransparencyLayerData& Layer,
+        const FDWCTransparencyBlueprintHierarchy& Hierarchy,
         FDWCTransparencyProjectionSourceSet& OutSources,
         FString& OutError);
 

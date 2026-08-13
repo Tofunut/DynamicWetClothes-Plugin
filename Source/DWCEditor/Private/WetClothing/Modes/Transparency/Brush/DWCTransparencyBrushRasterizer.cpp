@@ -640,7 +640,7 @@ void FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
         const FDWCTransparencyBrushStroke& Stroke = Strokes[StrokeIndex];
         if (Stroke.bEnabled &&
             Stroke.MaterialSlotIndex == MaterialSlotIndex &&
-            !Stroke.Samples.IsEmpty())
+            Stroke.HasSamples())
         {
             bHasRelevantStrokeSamples = true;
             break;
@@ -662,10 +662,17 @@ void FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
             continue;
         }
 
-        for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
-        {
-            ApplySample(AlphaContext, Stroke, Sample, OutManualPremultipliedBuffer, OutManualWeightBuffer);
-        }
+        Stroke.ForEachSample(
+            [&AlphaContext, &Stroke, &OutManualPremultipliedBuffer, &OutManualWeightBuffer](
+                const FDWCTransparencyBrushSample& Sample)
+            {
+                ApplySample(
+                    AlphaContext,
+                    Stroke,
+                    Sample,
+                    OutManualPremultipliedBuffer,
+                    OutManualWeightBuffer);
+            });
     }
 }
 

@@ -48,7 +48,31 @@ void FDWCGeneratedMaterialValidationEvaluator::AppendToSnapshot(
         return;
     }
 
-    if (Context.RuntimeMesh == nullptr || !Context.bDataUVReady)
+    if (Context.RuntimeMesh == nullptr)
+    {
+        FDWCEditorValidationNode& Node =
+            DWCEditorValidation::FindOrAddNode(InOutSnapshot, GlobalKey);
+        Node.Dependency = EDWCEditorValidationDependencyState::Blocked;
+        Node.Artifact = EDWCEditorValidationArtifactState::Missing;
+        DWCEditorValidation::SetActionState(
+            InOutSnapshot,
+            EDWCEditorBuildAction::GenerateMaterials,
+            EDWCEditorBuildActionState::Blocked,
+            &Node.Key);
+        DWCEditorValidation::AddDiagnostic(
+            InOutSnapshot,
+            Node,
+            TEXT("GeneratedMaterialRuntimeMeshMissing"),
+            EDWCEditorValidationSeverity::Error,
+            NSLOCTEXT("DWCGeneratedMaterialValidation", "SetupTitle", "Generated Material Setup"),
+            NSLOCTEXT("DWCGeneratedMaterialValidation", "Blocked", "Blocked"),
+            NSLOCTEXT("DWCGeneratedMaterialValidation", "RuntimeMeshDetail", "Generated materials require a runtime mesh."),
+            NSLOCTEXT("DWCGeneratedMaterialValidation", "RuntimeMeshAction", "Assign or generate the DWC runtime mesh first."),
+            EDWCEditorValidationRemediation::Manual);
+        return;
+    }
+
+    if (!Context.bDataUVReady)
     {
         FDWCEditorValidationNode& Node =
             DWCEditorValidation::FindOrAddNode(InOutSnapshot, GlobalKey);
@@ -58,18 +82,18 @@ void FDWCGeneratedMaterialValidationEvaluator::AppendToSnapshot(
         DWCEditorValidation::SetActionState(
             InOutSnapshot,
             EDWCEditorBuildAction::GenerateMaterials,
-            EDWCEditorBuildActionState::Blocked,
+            EDWCEditorBuildActionState::Required,
             &Node.Key,
             MakeArrayView(&BlockingAction, 1));
         DWCEditorValidation::AddDiagnostic(
             InOutSnapshot,
             Node,
-            TEXT("GeneratedMaterialPrerequisite"),
+            TEXT("GeneratedMaterialDataUVPrerequisite"),
             EDWCEditorValidationSeverity::Warning,
             NSLOCTEXT("DWCGeneratedMaterialValidation", "SetupTitle", "Generated Material Setup"),
-            NSLOCTEXT("DWCGeneratedMaterialValidation", "Blocked", "Blocked"),
-            NSLOCTEXT("DWCGeneratedMaterialValidation", "PrerequisiteDetail", "Generated materials require a runtime mesh and a current DWC data UV layout."),
-            NSLOCTEXT("DWCGeneratedMaterialValidation", "PrerequisiteAction", "Initialize the DWC data UV layout, then generate materials."),
+            NSLOCTEXT("DWCGeneratedMaterialValidation", "WaitingForDataUV", "Prerequisite Required"),
+            NSLOCTEXT("DWCGeneratedMaterialValidation", "DataUVPrerequisiteDetail", "Generated materials require a current DWC data UV layout."),
+            NSLOCTEXT("DWCGeneratedMaterialValidation", "DataUVPrerequisiteAction", "Initialize the DWC data UV layout, then generate materials."),
             EDWCEditorValidationRemediation::BuildAction,
             EDWCEditorBuildAction::GenerateMaterials);
         return;

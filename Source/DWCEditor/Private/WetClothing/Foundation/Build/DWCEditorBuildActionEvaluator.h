@@ -4,15 +4,16 @@
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
 
+struct FDWCEditorValidationEvaluationContext;
+
 class FDWCEditorBuildActionEvaluator
 {
   public:
-    /** Captures only cheap WCA state. Service-owned probes remain explicit. */
+    /** Captures WCA state without exceeding the validation context's access policy. */
     static FDWCEditorBuildEvaluationInput CaptureAssetState(
-        const UWetClothingAsset& Asset,
+        const FDWCEditorValidationEvaluationContext& Context,
         EDWCEditorBuildSurfaceMode SurfaceMode,
         FDWCEditorBuildEvaluationInput ServiceState = {});
 
     static FDWCEditorBuildStatusSnapshot Evaluate(const FDWCEditorBuildEvaluationInput& Input);
 };
-

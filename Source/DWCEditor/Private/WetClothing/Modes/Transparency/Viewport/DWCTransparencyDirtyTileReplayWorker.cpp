@@ -60,6 +60,7 @@ namespace
         WorkingStore.SnapshotTiles(Input.DirtyTileCoordinates, Output.AlphaTiles);
 
         const int32 FirstStroke = FMath::Clamp(Input.BaselineStrokeCount, 0, Input.AlphaStrokes.Num());
+        TArray<FDWCTransparencyBrushSample> DecodedSamples;
         for (int32 Index = FirstStroke; Index < Input.AlphaStrokes.Num(); ++Index)
         {
             if (CancellationToken->IsCanceled())
@@ -67,14 +68,15 @@ namespace
                 return false;
             }
             const FDWCTransparencyBrushStroke& Stroke = Input.AlphaStrokes[Index];
-            if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != Input.MaterialSlotIndex || Stroke.Samples.IsEmpty())
+            if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != Input.MaterialSlotIndex || !Stroke.HasSamples())
             {
                 continue;
             }
+            Stroke.DecodeSamples(DecodedSamples);
             FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
                 *Input.SourcePayload,
                 Stroke,
-                Stroke.Samples,
+                DecodedSamples,
                 Input.DirtyTileCoordinates,
                 Output.AlphaTiles);
         }
@@ -160,20 +162,22 @@ namespace
             MakeArrayView(Input.SourcePayload->InnerColorBuffer),
             Output.RevealColorTiles);
 
+        TArray<FDWCTransparencyBrushSample> DecodedSamples;
         for (const FDWCTransparencyRevealColorStroke& Stroke : Input.RevealColorStrokes)
         {
             if (CancellationToken->IsCanceled())
             {
                 return false;
             }
-            if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != Input.MaterialSlotIndex || Stroke.Samples.IsEmpty())
+            if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != Input.MaterialSlotIndex || !Stroke.HasSamples())
             {
                 continue;
             }
+            Stroke.DecodeSamples(DecodedSamples);
             FDWCTransparencyBrushRasterizer::RasterizeRevealColorSamplesToTiles(
                 *Input.SourcePayload,
                 Stroke,
-                Stroke.Samples,
+                DecodedSamples,
                 Input.BaseRevealColor,
                 Input.DirtyTileCoordinates,
                 Output.RevealColorTiles);
@@ -207,11 +211,11 @@ FDWCEditorWorkerMemoryEstimate FDWCTransparencyDirtyTileReplayWorker::EstimateMe
         (Input.Target == EDWCTransparencyDirtyReplayTarget::Alpha ? 2ull : sizeof(FColor)));
     for (const FDWCTransparencyBrushStroke& Stroke : Input.AlphaStrokes)
     {
-        Estimate.SnapshotBytes += Stroke.Samples.GetAllocatedSize();
+        Estimate.SnapshotBytes += Stroke.GetSampleAllocatedSize();
     }
     for (const FDWCTransparencyRevealColorStroke& Stroke : Input.RevealColorStrokes)
     {
-        Estimate.SnapshotBytes += Stroke.Samples.GetAllocatedSize();
+        Estimate.SnapshotBytes += Stroke.GetSampleAllocatedSize();
     }
     return Estimate;
 }

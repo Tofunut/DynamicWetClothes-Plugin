@@ -16,6 +16,7 @@
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetRendering/DWCSurfaceTextureSharedAsset.h"
 #include "WetClothing/Foundation/Assets/DWCEditorArtifactStore.h"
+#include "WetClothing/Foundation/Build/DWCRenderProfileBuildTargetResolver.h"
 
 namespace
 {
@@ -299,13 +300,37 @@ namespace
 
 } // namespace
 
-FDWCRenderProfileValidationSnapshot FWetClothingRenderProfileBakeService::EvaluateVisualBakeState(
+FDWCRenderProfileValidationSnapshot FDWCRenderProfileBuildTargetResolver::Resolve(
     const UWetClothingAsset* WetClothingAsset)
 {
     FDWCRenderProfileValidationSnapshot Snapshot;
-    Snapshot.bRequired = WetClothingAsset != nullptr &&
-        WetClothingAsset->HasAnyWettableMaterialSlot();
-    if (WetClothingAsset == nullptr || WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
+    if (WetClothingAsset != nullptr)
+    {
+        Snapshot.RecordedStatus = WetClothingAsset->GetBakeOutputStatus(
+            DWCBakeOutput::RenderProfileData);
+        Snapshot.FailureMessage = WetClothingAsset->GetBakeOutputFailureMessage(
+            DWCBakeOutput::RenderProfileData);
+        Snapshot.bSavePending = WetClothingAsset->IsBakeOutputSavePending(
+            DWCBakeOutput::RenderProfileData);
+    }
+    if (WetClothingAsset == nullptr)
+    {
+        Snapshot.BakeState = EDWCEditorBuildActionState::Unavailable;
+        Snapshot.BakeReason = TEXT("No Wet Clothing Asset is available.");
+        return Snapshot;
+    }
+
+    TSet<int32> WetMaterialSlots;
+    CollectWetMaterialSlots(WetClothingAsset, WetMaterialSlots);
+    Snapshot.bRequired = WetClothingAsset->HasRenderProfileBakeContent();
+    if (!Snapshot.bRequired)
+    {
+        Snapshot.BakeState = EDWCEditorBuildActionState::Unavailable;
+        Snapshot.BakeReason = TEXT("No bakeable Wet Part render profiles are configured.");
+        return Snapshot;
+    }
+
+    if (WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
     {
         AddValidationIssue(
             Snapshot.Issues,
@@ -327,9 +352,6 @@ FDWCRenderProfileValidationSnapshot FWetClothingRenderProfileBakeService::Evalua
     }
     else
     {
-        TSet<int32> WetMaterialSlots;
-        CollectWetMaterialSlots(WetClothingAsset, WetMaterialSlots);
-        Snapshot.bRequired = !WetMaterialSlots.IsEmpty();
         if (!WetMaterialSlots.IsEmpty())
         {
             const TArray<FSkeletalMaterial>& Materials = WetClothingAsset->GetRuntimeSkeletalMesh()->GetMaterials();
@@ -414,6 +436,40 @@ FDWCRenderProfileValidationSnapshot FWetClothingRenderProfileBakeService::Evalua
         }
     }
 
+    bool bRequiresBake = false;
+    bool bBlocked = false;
+    for (const FDWCRenderProfileValidationIssue& Issue : Snapshot.Issues)
+    {
+        bRequiresBake |= Issue.Resolution == EDWCRenderProfileIssueResolution::BakeRenderProfile;
+        bBlocked |= Issue.Resolution != EDWCRenderProfileIssueResolution::BakeRenderProfile;
+    }
+    if (!Snapshot.bRequired)
+    {
+        Snapshot.BakeState = EDWCEditorBuildActionState::Unavailable;
+        Snapshot.BakeReason = TEXT("No bakeable Wet Part render profiles are configured.");
+    }
+    else if (Snapshot.RecordedStatus == EDWCBakeStatus::Failed)
+    {
+        Snapshot.BakeState = EDWCEditorBuildActionState::Failed;
+        Snapshot.BakeReason = Snapshot.FailureMessage.IsEmpty()
+            ? TEXT("The Render Profile build failed.")
+            : Snapshot.FailureMessage;
+    }
+    else if (bBlocked)
+    {
+        Snapshot.BakeState = EDWCEditorBuildActionState::Blocked;
+        Snapshot.BakeReason = TEXT("Render Profile inputs or generated materials must be repaired first.");
+    }
+    else if (bRequiresBake)
+    {
+        Snapshot.BakeState = EDWCEditorBuildActionState::Required;
+        Snapshot.BakeReason = TEXT("One or more Render Profile outputs require a bake.");
+    }
+    else
+    {
+        Snapshot.BakeState = EDWCEditorBuildActionState::UpToDate;
+        Snapshot.BakeReason = TEXT("Render Profile data is up to date.");
+    }
     return Snapshot;
 }
 
@@ -422,7 +478,7 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
     FString* OutSummary)
 {
     const FDWCRenderProfileValidationSnapshot Snapshot =
-        EvaluateVisualBakeState(WetClothingAsset);
+        FDWCRenderProfileBuildTargetResolver::Resolve(WetClothingAsset);
 
     if (OutSummary != nullptr)
     {
@@ -454,11 +510,16 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
     if (WetClothingAsset == nullptr || WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
     {
         OutSummary = TEXT("Assign a Source Skeletal Mesh and generate DWC UV Channel before baking render profile data.");
+        if (WetClothingAsset != nullptr)
+        {
+            WetClothingAsset->SetRenderProfileBakeStatus(EDWCBakeStatus::Failed, OutSummary);
+        }
         return false;
     }
     if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()))
     {
         OutSummary = TEXT("The sealed DWC UV Channel is invalid. Create a new WCA before building the Render Profile Lookup Texture.");
+        WetClothingAsset->SetRenderProfileBakeStatus(EDWCBakeStatus::Failed, OutSummary);
         return false;
     }
 
@@ -467,6 +528,7 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
     if (WetMaterialSlots.IsEmpty())
     {
         OutSummary = TEXT("No wettable WetPart material slots were found.");
+        WetClothingAsset->SetRenderProfileBakeStatus(EDWCBakeStatus::Disabled);
         return false;
     }
 
@@ -558,11 +620,13 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
     if (!FWetClothingWetPartDataTextureBaker::Bake(WetClothingAsset, WetPartDataResult, WetPartDataError))
     {
         OutSummary = FString::Printf(TEXT("Wet Part Data Texture bake failed: %s"), *WetPartDataError);
+        WetClothingAsset->SetRenderProfileBakeStatus(EDWCBakeStatus::Failed, OutSummary);
         return false;
     }
     if (!WetClothingAsset->Derived.Inline.BakedWetPartData.IsValid())
     {
         OutSummary = TEXT("Wet Part Data Texture bake completed but did not produce runtime-usable profile data.");
+        WetClothingAsset->SetRenderProfileBakeStatus(EDWCBakeStatus::Failed, OutSummary);
         return false;
     }
 
@@ -598,6 +662,10 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
     {
         *OutHadWarnings = !Warnings.IsEmpty();
     }
+    WetClothingAsset->SetRenderProfileBakeStatus(
+        Warnings.IsEmpty()
+            ? EDWCBakeStatus::Valid
+            : EDWCBakeStatus::ValidWithDiagnostics);
     return true;
 }
 

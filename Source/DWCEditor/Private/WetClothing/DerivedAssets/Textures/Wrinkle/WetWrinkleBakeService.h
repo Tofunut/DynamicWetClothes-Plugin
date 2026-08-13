@@ -16,6 +16,7 @@ struct FWetWrinkleAuthoredSlotState
     int32 PatchCount = 0;
     int32 ValidPatchCount = 0;
     int32 MissingPatchTextureCount = 0;
+    int32 InvalidPatchTextureCount = 0;
     int32 InvalidPatchPlacementCount = 0;
     int32 RidgeStrokeCount = 0;
     int32 ValidRidgeStrokeCount = 0;
@@ -28,7 +29,8 @@ struct FWetWrinkleAuthoredSlotState
     }
     bool HasInvalidInput() const
     {
-        return MissingPatchTextureCount > 0 || InvalidPatchPlacementCount > 0 ||
+        return MissingPatchTextureCount > 0 || InvalidPatchTextureCount > 0 ||
+               InvalidPatchPlacementCount > 0 ||
                InvalidRidgeStrokeCount > 0;
     }
 };

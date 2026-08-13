@@ -6,7 +6,6 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/Texture2D.h"
 #include "WetClothing/Foundation/Preview/Layers/DWCEditorPreviewLayerResolver.h"
-#include "WetClothing/WCAEditor/WCAValidationReport.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorPreviewStaleTransparencyLayerTest,
@@ -22,8 +21,10 @@ bool FDWCEditorPreviewStaleTransparencyLayerTest::RunTest(const FString& Paramet
 
     FWetClothingTransparencyLayerData& Layer =
         Asset->Authored.TransparencyData.TransparencyLayers.AddDefaulted_GetRef();
+    Layer.LayerGuid = FGuid::NewGuid();
     Layer.TargetSurface.OuterMaterialSlotIndex = MaterialSlotIndex;
     Layer.SourceType = EDWCTransparencySourceType::ManualColorOrTexture;
+    Layer.bSourceTypeConfigured = true;
     FWetClothingAuthoredMaterialSlot& WettableSlot =
         Asset->Authored.PartData.EditableWetPartData.FindOrAddMaterialSlot(MaterialSlotIndex);
     WettableSlot.bIsWettableSlot = true;
@@ -41,6 +42,8 @@ bool FDWCEditorPreviewStaleTransparencyLayerTest::RunTest(const FString& Paramet
     TestNull(TEXT("Runtime rejects the stale result"),
         Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex));
 
+    Layer.SourceType = EDWCTransparencySourceType::SameMeshMaterialSlots;
+    BakedMap.bMetallicDarkeningBakedIntoColor = true;
     BakedMap.RevealNormalMap = RevealNormalTexture;
     BakedMap.RevealNormalBuildSignature = TEXT("RevealNormalBuild");
     BakedMap.bSourceCoverageBakedIntoRevealNormal = true;
@@ -56,8 +59,6 @@ bool FDWCEditorPreviewStaleTransparencyLayerTest::RunTest(const FString& Paramet
     TestNotNull(TEXT("Runtime accepts the current result"),
         Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex));
 
-    Layer.SourceType = EDWCTransparencySourceType::SameMeshMaterialSlots;
-    BakedMap.bMetallicDarkeningBakedIntoColor = true;
     TestNotNull(TEXT("A raycast layer accepts a complete Reveal Normal payload"),
         Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex));
     BakedMap.RevealNormalMap = nullptr;
@@ -75,16 +76,6 @@ bool FDWCEditorPreviewStaleTransparencyLayerTest::RunTest(const FString& Paramet
     TestNull(TEXT("Runtime still rejects the invalidated result"),
         Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex));
 
-    Asset->SetTransparencyBakeStatus(EDWCBakeStatus::OutOfDate);
-    const FWCAValidationReport Validation =
-        BuildWCAValidationReport(*Asset, EWCAValidationMode::Fast, true);
-    const FWCAValidationIssue* TransparencyIssue = Validation.Issues.FindByPredicate(
-        [](const FWCAValidationIssue& Issue)
-        {
-            return Issue.Section == EWCAValidationSection::TransparencyMaps &&
-                   Issue.Status.ToString() == TEXT("Out of Date");
-        });
-    TestNotNull(TEXT("Fast validation reports the stale transparency output"), TransparencyIssue);
     return true;
 }
 

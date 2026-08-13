@@ -29,5 +29,6 @@ void AddDiagnostic(
     EDWCEditorValidationRemediation Remediation,
     TOptional<EDWCEditorBuildAction> SuggestedAction = {},
     bool bFailed = false,
-    const FText& ContextLabel = FText::GetEmpty());
+    const FText& ContextLabel = FText::GetEmpty(),
+    int32 OwnedBakeOutput = 0);
 }

@@ -72,7 +72,8 @@ void AddDiagnostic(
     const EDWCEditorValidationRemediation Remediation,
     const TOptional<EDWCEditorBuildAction> SuggestedAction,
     const bool bFailed,
-    const FText& ContextLabel)
+    const FText& ContextLabel,
+    const int32 OwnedBakeOutput)
 {
     FDWCEditorValidationDiagnostic& Diagnostic = Snapshot.Diagnostics.AddDefaulted_GetRef();
     Diagnostic.Code = Code;
@@ -86,6 +87,7 @@ void AddDiagnostic(
     Diagnostic.Presentation.RequiredAction = RequiredAction;
     Diagnostic.Presentation.ContextLabel = ContextLabel;
     Diagnostic.bFailed = bFailed;
+    Diagnostic.OwnedBakeOutput = OwnedBakeOutput;
     Node.DiagnosticIndices.Add(Snapshot.Diagnostics.Num() - 1);
 
     if (SuggestedAction.IsSet())

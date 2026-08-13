@@ -84,7 +84,12 @@ struct DWC_API FWCADerivedInlineData
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Generated Materials")
     TObjectPtr<UMaterialFunctionInterface> GeneratedEvaluateSurfaceAppearanceFunction = nullptr;
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Editor Derived Data")
+    /** Small, eagerly loaded index for the lazy Original UV topology bulk payload. */
+    UPROPERTY(VisibleAnywhere, NonTransactional, Category = "Wet Clothing|Editor Derived Data")
+    TArray<FDWCEditorUVTopologyDescriptor> OriginalUVTopologyDescriptors;
+
+    /** Legacy v13 payload. Cleared after PostLoad migration and never populated by new commits. */
+    UPROPERTY(VisibleAnywhere, NonTransactional, Category = "Wet Clothing|Editor Derived Data", meta = (DeprecatedProperty, DeprecationMessage = "Original UV topology now lives in lazy editor bulk data."))
     TArray<FDWCEditorUVTopologyData> OriginalUVTopologies;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Bake Status", meta = (ShowOnlyInnerProperties))
@@ -114,6 +119,53 @@ struct DWC_API FWCADerivedInlineData
     uint64 PreviewTopologyRevision = 1;
 #endif
 };
+
+#if WITH_EDITOR
+/** Immutable lifetime token for a lazily decoded Original UV topology record. */
+class DWC_API FDWCEditorUVTopologyHandle final
+{
+  public:
+    FDWCEditorUVTopologyHandle() = default;
+
+    bool IsValid() const { return Get() != nullptr; }
+    explicit operator bool() const { return IsValid(); }
+
+    const FDWCEditorUVTopologyData* Get() const
+    {
+        if (!Payload.IsValid())
+        {
+            return nullptr;
+        }
+        return Payload->FindByPredicate(
+            [LODIndex = RequestedLODIndex](const FDWCEditorUVTopologyData& Data)
+            {
+                return Data.LODIndex == LODIndex;
+            });
+    }
+
+    const FDWCEditorUVTopologyData* operator->() const { return Get(); }
+    const FDWCEditorUVTopologyData& operator*() const { return *Get(); }
+    void Reset()
+    {
+        Payload.Reset();
+        RequestedLODIndex = INDEX_NONE;
+    }
+
+  private:
+    friend class UWetClothingAsset;
+
+    FDWCEditorUVTopologyHandle(
+        TSharedPtr<const TArray<FDWCEditorUVTopologyData>, ESPMode::ThreadSafe> InPayload,
+        const int32 InLODIndex)
+        : Payload(MoveTemp(InPayload))
+        , RequestedLODIndex(InLODIndex)
+    {
+    }
+
+    TSharedPtr<const TArray<FDWCEditorUVTopologyData>, ESPMode::ThreadSafe> Payload;
+    int32 RequestedLODIndex = INDEX_NONE;
+};
+#endif
 
 USTRUCT()
 struct DWC_API FWCADerivedBulkData
@@ -210,6 +262,9 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool         InitializeNewAsset(USkeletalMesh* InSourceMesh, const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutErrorMessage = nullptr);
     bool         ApplySetupSettings(const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutChangeSummary = nullptr);
 
+    /** Returns the per-layer editor transaction object, creating and migrating it when needed. */
+    UDWCTransparencyLayerStrokeHistory* EnsureTransparencyLayerStrokeHistory(FGuid LayerGuid);
+
     /** True after the first successful DWC UV Channel build seals the Original UV topology and packed layout. */
     bool HasLockedDataUVLayout() const;
 
@@ -239,7 +294,13 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void                                 MarkSimulationBakeOutOfDate();
     void                                 MarkWrinkleBakeOutOfDate();
     void                                 MarkVisualBakeOutOfDate();
-    void                                 SetLastBakeFailure(const FString& InFailure);
+    void                                 MarkRenderProfileBakeOutOfDate();
+    void                                 SetBakeOutputStatus(int32 Output, EDWCBakeStatus InStatus, const FString& InFailure = FString());
+    void                                 SetBakeOutputFailure(int32 OutputMask, const FString& InFailure);
+    void                                 ClearBakeOutputFailure(int32 OutputMask);
+    EDWCBakeStatus                       GetBakeOutputStatus(int32 Output) const;
+    FString                              GetBakeOutputFailureMessage(int32 Output) const;
+    bool                                 HasBakeOutputFailure(int32 Output) const;
     /** Returns true when the referenced Original Mesh no longer matches the content signature accepted by this WCA. */
     bool   HasSourceMeshContentChanged(FString* OutCurrentSignature = nullptr) const;
     void   SetCPURuntimeDataStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
@@ -247,6 +308,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void   SetGPUMapBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
     void   SetWrinkleBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
     void   SetTransparencyBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
+    void   SetRenderProfileBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
     void   MarkBakeOutputGenerated(int32 OutputMask);
     void   MarkBakeOutputsSaved(int32 OutputMask);
     bool   HasGeneratedBakeOutput(int32 OutputMask) const;
@@ -316,6 +378,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     FString                                      GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh) const;
     bool                                         IsMaterialSlotWettable(int32 MaterialSlotIndex) const;
     bool                                         HasAnyWettableMaterialSlot() const;
+    bool                                         HasRenderProfileBakeContent() const;
     bool                                         DoesMaterialSlotUseSurfaceWater(int32 MaterialSlotIndex) const;
     bool                                         UsesSurfaceWater() const;
     bool                                         HasWrinkleBakeContent() const;
@@ -377,7 +440,20 @@ class DWC_API UWetClothingAsset : public UDataAsset
     const FDWCWetClothingAssetSetupSettings& GetSetupSettings() const { return Metadata.SetupSettings; }
 
 #if WITH_EDITORONLY_DATA
-    const FDWCEditorUVTopologyData*      FindOriginalUVTopologyForLOD(int32 LODIndex) const;
+    const FDWCEditorUVTopologyDescriptor* FindOriginalUVTopologyDescriptorForLOD(int32 LODIndex) const;
+#if WITH_EDITOR
+    FDWCEditorUVTopologyHandle AcquireOriginalUVTopologyForLOD(
+        int32 LODIndex,
+        FString* OutErrorMessage = nullptr) const;
+    bool CopyOriginalUVTopologiesForEditor(
+        TArray<FDWCEditorUVTopologyData>& OutTopologies,
+        FString* OutErrorMessage = nullptr) const;
+    uint64 GetResidentOriginalUVTopologyBytesForEditor() const;
+    int64 GetSerializedOriginalUVTopologyBytesForEditor() const;
+    uint64 GetReclaimableOriginalUVTopologyBytesForEditor() const;
+    uint64 ReclaimOriginalUVTopologyBytesForEditor();
+    void ReleaseLoadedOriginalUVTopologiesForEditor();
+#endif
     const FDWCAssetBakeState&            GetBakeState() const { return Derived.Inline.BakeState; }
     const FString&                       GetSourceMeshSignature() const { return Derived.Inline.SourceMeshSignature; }
     const FDWCTriangleValidationSummary& GetValidationSummary() const { return Derived.Inline.ValidationSummary; }
@@ -401,15 +477,26 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void MarkRuntimeBulkDataDirty(int32 OutputMask = 0);
     void ClearRuntimeBulkData();
 
+#if WITH_EDITORONLY_DATA
+    bool StoreOriginalUVTopologiesToBulkData(
+        TArray<FDWCEditorUVTopologyData>&& InTopologies,
+        FString* OutErrorMessage = nullptr);
+#if WITH_EDITOR
+    bool LoadOriginalUVTopologiesFromBulkData(FString* OutErrorMessage = nullptr) const;
+#endif
+    void ClearOriginalUVTopologyBulkData();
+#endif
+
 #if WITH_EDITOR
     void RefreshBakeStateFast();
     void RefreshBakeStateDeep();
     void RefreshBakeStateInternal(bool bRunDeepValidation);
+    void NormalizeLegacyBakeFailures();
 
     bool  bRuntimeDataRebuildInProgress = false;
     bool  bSkipNextPreSaveRuntimeDataRebuild = false;
     bool  bRuntimeDataEditorSaveAttemptActive = false;
-    int32 PendingRuntimeSaveOutputMask = 0;
+    int32 PendingEditorSaveOutputMask = 0;
     int32 EditorSavePendingOutputMaskSnapshot = 0;
     int32 EditorSaveSavedOutputMaskSnapshot = 0;
 #endif
@@ -418,4 +505,11 @@ class DWC_API UWetClothingAsset : public UDataAsset
     mutable bool          bRuntimeBulkDataLoaded = false;
     mutable bool          bRuntimeBulkDataLoadFailed = false;
     bool                  bRuntimeBulkDataDirty = false;
+
+#if WITH_EDITORONLY_DATA
+    mutable FByteBulkData OriginalUVTopologyBulkData;
+    mutable TSharedPtr<const TArray<FDWCEditorUVTopologyData>, ESPMode::ThreadSafe> LoadedOriginalUVTopologies;
+    mutable bool bOriginalUVTopologyBulkLoaded = false;
+    mutable bool bOriginalUVTopologyBulkLoadFailed = false;
+#endif
 };

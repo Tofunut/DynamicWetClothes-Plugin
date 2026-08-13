@@ -172,7 +172,7 @@ void FDWCTransparencyAuthoringController::BeginSurfaceInteraction(
                         }))
             {
                 int32 ModeStrokeNumber = 1;
-                for (const FDWCTransparencyBrushStroke& Candidate : Layer->EditableStrokes)
+                for (const FDWCTransparencyBrushStroke& Candidate : Layer->GetEditableStrokes())
                 {
                     ModeStrokeNumber += Candidate.BrushMode == Stroke.BrushMode ? 1 : 0;
                 }
@@ -289,11 +289,30 @@ void FDWCTransparencyAuthoringController::EndSurfaceInteraction()
     Change.LayerGuid = ActiveContext.LayerGuid;
     Change.ElementGuid = ActiveStrokeGuid;
     Change.Impact |= GetInteractiveImpact(ActiveContext.PaintTarget);
-    const FGuid                                        LayerGuid = ActiveContext.LayerGuid;
-    const TOptional<FDWCTransparencyBrushStroke>       BrushStroke = ActiveBrushStroke;
-    const TOptional<FDWCTransparencyRevealColorStroke> RevealStroke = ActiveRevealColorStroke;
-    if ((!BrushStroke.IsSet() || BrushStroke->Samples.IsEmpty()) &&
-        (!RevealStroke.IsSet() || RevealStroke->Samples.IsEmpty()))
+    const FGuid                                  LayerGuid = ActiveContext.LayerGuid;
+    TOptional<FDWCTransparencyBrushStroke>       BrushStroke = MoveTemp(ActiveBrushStroke);
+    TOptional<FDWCTransparencyRevealColorStroke> RevealStroke = MoveTemp(ActiveRevealColorStroke);
+    if ((!BrushStroke.IsSet() || !BrushStroke->HasSamples()) &&
+        (!RevealStroke.IsSet() || !RevealStroke->HasSamples()))
+    {
+        CancelActiveInteraction(true);
+        return;
+    }
+
+    if (BrushStroke.IsSet())
+    {
+        BrushStroke->CompactLegacySamples();
+    }
+    if (RevealStroke.IsSet())
+    {
+        RevealStroke->CompactLegacySamples();
+    }
+
+    UWetClothingAsset* MutableAsset = Asset.Get();
+    UDWCTransparencyLayerStrokeHistory* StrokeHistory = MutableAsset != nullptr
+        ? MutableAsset->EnsureTransparencyLayerStrokeHistory(LayerGuid)
+        : nullptr;
+    if (StrokeHistory == nullptr)
     {
         CancelActiveInteraction(true);
         return;
@@ -303,7 +322,8 @@ void FDWCTransparencyAuthoringController::EndSurfaceInteraction()
             ActiveContext.PaintTarget == EDWCTransparencyPaintTarget::RevealColor
                 ? LOCTEXT("PaintRevealColorStroke", "Paint Reveal Color")
                 : LOCTEXT("PaintTransparencyStroke", "Paint Transparency Stroke"),
-            Change))
+            Change,
+            StrokeHistory))
     {
         CancelActiveInteraction(true);
         return;
@@ -311,7 +331,8 @@ void FDWCTransparencyAuthoringController::EndSurfaceInteraction()
 
     const FDWCEditorAuthoringResult UpdateResult = AuthoringDocument->UpdateInteractiveEdit(
         Change,
-        [LayerGuid, BrushStroke, RevealStroke](UWetClothingAsset& MutableAsset)
+        [LayerGuid, BrushStroke = MoveTemp(BrushStroke), RevealStroke = MoveTemp(RevealStroke)](
+            UWetClothingAsset& MutableAsset) mutable
         {
             FWetClothingTransparencyLayerData* Layer =
                 MutableAsset.Authored.TransparencyData.TransparencyLayers.FindByPredicate(
@@ -325,12 +346,12 @@ void FDWCTransparencyAuthoringController::EndSurfaceInteraction()
             }
             if (RevealStroke.IsSet())
             {
-                Layer->RevealColorPaintStrokes.Add(RevealStroke.GetValue());
+                Layer->GetMutableRevealColorPaintStrokes().Add(MoveTemp(RevealStroke.GetValue()));
                 return true;
             }
             if (BrushStroke.IsSet())
             {
-                Layer->EditableStrokes.Add(BrushStroke.GetValue());
+                Layer->GetMutableEditableStrokes().Add(MoveTemp(BrushStroke.GetValue()));
                 return true;
             }
             return false;
@@ -395,12 +416,12 @@ bool FDWCTransparencyAuthoringController::CancelActiveInteraction(const bool bRe
                 {
                     return;
                 }
-                Layer->RevealColorPaintStrokes.RemoveAll(
+                Layer->GetMutableRevealColorPaintStrokes().RemoveAll(
                     [StrokeGuid](const FDWCTransparencyRevealColorStroke& Stroke)
                     {
                         return Stroke.StrokeGuid == StrokeGuid;
                     });
-                Layer->EditableStrokes.RemoveAll(
+                Layer->GetMutableEditableStrokes().RemoveAll(
                     [StrokeGuid](const FDWCTransparencyBrushStroke& Stroke)
                     {
                         return Stroke.StrokeGuid == StrokeGuid;

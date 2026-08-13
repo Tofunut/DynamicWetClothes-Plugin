@@ -9,6 +9,7 @@
 #include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjector.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleHitData.h"
+#include "WetClothing/Modes/Wrinkle/Authoring/DWCEditorWrinkleTextureResolver.h"
 
 namespace
 {
@@ -168,7 +169,7 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
 {
     OutDescriptor = {};
     if (!Placement.HasValidSurfaceAnchor() || !Placement.HasValidSurfaceFootprint() ||
-        !Placement.HasValidSurfaceFrame() || Placement.WrinkleNormalTexture == nullptr)
+        !Placement.HasValidSurfaceFrame() || !Placement.HasWrinkleNormalTexture())
     {
         SetDescriptorError(OutError, TEXT("The authored patch has no valid physical surface contract."));
         return false;
@@ -192,8 +193,19 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildFromPlacement(
     OutDescriptor.Scale = FVector2f(Placement.Scale);
     OutDescriptor.Strength = Placement.Strength;
     OutDescriptor.Falloff = Placement.Falloff;
-    OutDescriptor.NormalTexture = Placement.WrinkleNormalTexture.Get();
-    OutDescriptor.NormalTextureSourceId = Placement.WrinkleNormalTexture->Source.GetId();
+    const FDWCEditorWrinkleTextureReferenceSnapshot SourceReference =
+        FDWCEditorWrinkleTextureResolver::ResolveSource(Placement);
+    if (!SourceReference.IsReady())
+    {
+        SetDescriptorError(
+            OutError,
+            SourceReference.Detail.IsEmpty()
+                ? TEXT("The authored patch wrinkle source could not be resolved.")
+                : *SourceReference.Detail);
+        return false;
+    }
+    OutDescriptor.NormalTexture = SourceReference.Texture;
+    OutDescriptor.NormalTextureSourceId = SourceReference.SourceId;
     if (!OutDescriptor.IsValid())
     {
         SetDescriptorError(OutError, TEXT("The authored patch descriptor is invalid."));
@@ -209,7 +221,7 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::ValidatePlacement(
 {
     OutResult = {};
     if (!Placement.HasValidSurfaceAnchor() || !Placement.HasValidSurfaceFootprint() ||
-        !Placement.HasValidSurfaceFrame() || Placement.WrinkleNormalTexture == nullptr)
+        !Placement.HasValidSurfaceFrame() || !Placement.HasWrinkleNormalTexture())
     {
         OutResult.Status = EDWCEditorWrinklePatchValidationStatus::InvalidSurfaceContract;
         OutResult.Error = TEXT("The authored patch has no valid physical surface contract.");
@@ -357,7 +369,7 @@ bool FDWCEditorWrinklePatchDescriptorBuilder::BuildPlacement(
     OutPlacement.Scale = FVector2D(Descriptor.Scale);
     OutPlacement.Strength = Descriptor.Strength;
     OutPlacement.Falloff = Descriptor.Falloff;
-    OutPlacement.WrinkleNormalTexture = NormalTexture;
+    OutPlacement.SetWrinkleNormalTexture(NormalTexture);
     OutPlacement.bEnabled = true;
     return true;
 }

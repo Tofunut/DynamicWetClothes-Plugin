@@ -197,7 +197,7 @@ uint64 FDWCTransparencyAlphaWorkingSnapshot::GetAllocatedBytes() const
     }
     for (const FDWCTransparencyBrushStroke& Stroke : FallbackStrokes)
     {
-        Bytes += Stroke.DisplayName.GetAllocatedSize() + Stroke.Samples.GetAllocatedSize();
+        Bytes += Stroke.DisplayName.GetAllocatedSize() + Stroke.GetSampleAllocatedSize();
     }
     return Bytes;
 }

@@ -3,6 +3,7 @@
 
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionRegistry.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationSnapshot.h"
+#include "Misc/ScopeExit.h"
 
 namespace
 {
@@ -25,12 +26,23 @@ namespace
         const FDWCEditorBuildStatusSnapshot& Snapshot,
         const EDWCEditorBuildAction Action,
         TSet<EDWCEditorBuildAction>& Selected,
+        TSet<EDWCEditorBuildAction>& Visiting,
         FDWCEditorBuildPlan& Plan)
     {
         if (Selected.Contains(Action))
         {
             return;
         }
+        if (Visiting.Contains(Action))
+        {
+            AddBlocked(Plan, Action, TEXT("The evaluated build prerequisites contain a cycle."));
+            return;
+        }
+        Visiting.Add(Action);
+        ON_SCOPE_EXIT
+        {
+            Visiting.Remove(Action);
+        };
 
         const FDWCEditorBuildActionStatus* Status = Snapshot.Find(Action);
         if (Status == nullptr)
@@ -43,7 +55,7 @@ namespace
             AddBlocked(Plan, Action, Status->Reason);
             for (const EDWCEditorBuildAction Blocker : Status->BlockingActions)
             {
-                ExpandHardPrerequisites(Snapshot, Blocker, Selected, Plan);
+                ExpandHardPrerequisites(Snapshot, Blocker, Selected, Visiting, Plan);
             }
             return;
         }
@@ -71,11 +83,15 @@ namespace
             return;
         }
 
+        for (const EDWCEditorBuildAction Blocker : Status->BlockingActions)
+        {
+            ExpandHardPrerequisites(Snapshot, Blocker, Selected, Visiting, Plan);
+        }
         for (const FDWCEditorBuildActionDependency& Dependency : Descriptor->Dependencies)
         {
             if (Dependency.Kind == EDWCEditorBuildDependencyKind::HardPrerequisite)
             {
-                ExpandHardPrerequisites(Snapshot, Dependency.Action, Selected, Plan);
+                ExpandHardPrerequisites(Snapshot, Dependency.Action, Selected, Visiting, Plan);
             }
         }
         if (!Plan.BlockedActions.Contains(Action))
@@ -86,6 +102,7 @@ namespace
 
     void SortSelectedActions(
         const TSet<EDWCEditorBuildAction>& Selected,
+        const FDWCEditorBuildStatusSnapshot& Snapshot,
         FDWCEditorBuildPlan& Plan)
     {
         TMap<EDWCEditorBuildAction, int32> InDegree;
@@ -94,6 +111,22 @@ namespace
         {
             InDegree.Add(Action, 0);
         }
+
+        const auto AddDependencyEdge = [&Selected, &InDegree, &Dependents](
+            const EDWCEditorBuildAction Prerequisite,
+            const EDWCEditorBuildAction Dependent)
+        {
+            if (!Selected.Contains(Prerequisite))
+            {
+                return;
+            }
+            TArray<EDWCEditorBuildAction>& Actions = Dependents.FindOrAdd(Prerequisite);
+            if (!Actions.Contains(Dependent))
+            {
+                Actions.Add(Dependent);
+                ++InDegree.FindChecked(Dependent);
+            }
+        };
 
         for (const EDWCEditorBuildAction Action : Selected)
         {
@@ -104,12 +137,14 @@ namespace
             }
             for (const FDWCEditorBuildActionDependency& Dependency : Descriptor->Dependencies)
             {
-                if (!Selected.Contains(Dependency.Action))
+                AddDependencyEdge(Dependency.Action, Action);
+            }
+            if (const FDWCEditorBuildActionStatus* Status = Snapshot.Find(Action))
+            {
+                for (const EDWCEditorBuildAction Blocker : Status->BlockingActions)
                 {
-                    continue;
+                    AddDependencyEdge(Blocker, Action);
                 }
-                Dependents.FindOrAdd(Dependency.Action).Add(Action);
-                ++InDegree.FindChecked(Action);
             }
         }
 
@@ -281,13 +316,14 @@ FDWCEditorBuildPlan FDWCEditorBuildPlanResolver::ResolveActions(
     FDWCEditorBuildPlan Plan;
     Plan.Policy = EDWCEditorBuildPlanPolicy::ExplicitActions;
     TSet<EDWCEditorBuildAction> Selected;
+    TSet<EDWCEditorBuildAction> Visiting;
     TSet<EDWCEditorBuildAction> ExplicitActions;
     for (const EDWCEditorBuildAction Action : RequestedActions)
     {
         ExplicitActions.Add(Action);
-        ExpandHardPrerequisites(Snapshot, Action, Selected, Plan);
+        ExpandHardPrerequisites(Snapshot, Action, Selected, Visiting, Plan);
     }
-    SortSelectedActions(Selected, Plan);
+    SortSelectedActions(Selected, Snapshot, Plan);
     PopulateStepTargets(Plan, Snapshot, ExplicitActions, nullptr);
     return Plan;
 }

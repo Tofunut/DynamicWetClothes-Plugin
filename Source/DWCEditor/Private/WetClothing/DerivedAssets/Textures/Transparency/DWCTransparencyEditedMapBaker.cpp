@@ -633,7 +633,6 @@ struct FDWCTransparencyEditedMapBakeSnapshot::FImpl
     FString RevealFallbackWarning;
     FDWCTransparencyFinalWorkingSet WorkingSet;
     FGuid LayerGuid;
-    FWetClothingTransparencyTargetSurface TargetSurface;
     FWetClothingTransparencyManualColorSource ManualColorSource;
     TArray<FDWCTransparencyRevealColorStroke> RevealColorPaintStrokes;
     TSharedPtr<FDWCWrinkleSuppressionCoverageService> CoverageService;
@@ -950,16 +949,17 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
     FDWCTransparencyAlphaWorkingSnapshot AlphaSnapshot;
     AlphaSnapshot.Mode = EDWCTransparencyAlphaSnapshotMode::StrokeReplay;
     AlphaSnapshot.Resolution = AutoResultRef->Resolution;
+    const TArray<FDWCTransparencyBrushStroke>& EditableStrokes = Layer.GetEditableStrokes();
     AlphaSnapshot.BaselineStrokeCount = FMath::Clamp(
-        AutoResultRef->BaselineStrokeCount, 0, Layer.EditableStrokes.Num());
-    AlphaSnapshot.AuthoredStrokeCount = Layer.EditableStrokes.Num();
-    AlphaSnapshot.FallbackStrokes = Layer.EditableStrokes;
+        AutoResultRef->BaselineStrokeCount, 0, EditableStrokes.Num());
+    AlphaSnapshot.AuthoredStrokeCount = EditableStrokes.Num();
+    AlphaSnapshot.FallbackStrokes = EditableStrokes;
     for (int32 StrokeIndex = AlphaSnapshot.BaselineStrokeCount;
-         StrokeIndex < Layer.EditableStrokes.Num();
+         StrokeIndex < EditableStrokes.Num();
          ++StrokeIndex)
     {
-        const FDWCTransparencyBrushStroke& Stroke = Layer.EditableStrokes[StrokeIndex];
-        AlphaSnapshot.AppliedSampleCount += Stroke.bEnabled ? Stroke.Samples.Num() : 0;
+        const FDWCTransparencyBrushStroke& Stroke = EditableStrokes[StrokeIndex];
+        AlphaSnapshot.AppliedSampleCount += Stroke.bEnabled ? Stroke.GetSampleCount() : 0;
     }
     return BuildSnapshot(
         WetClothingAsset,
@@ -981,16 +981,17 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
     FDWCTransparencyAlphaWorkingSnapshot AlphaSnapshot;
     AlphaSnapshot.Mode = EDWCTransparencyAlphaSnapshotMode::StrokeReplay;
     AlphaSnapshot.Resolution = AutoResultRef->Resolution;
+    const TArray<FDWCTransparencyBrushStroke>& EditableStrokes = Layer.GetEditableStrokes();
     AlphaSnapshot.BaselineStrokeCount = FMath::Clamp(
-        AutoResultRef->BaselineStrokeCount, 0, Layer.EditableStrokes.Num());
-    AlphaSnapshot.AuthoredStrokeCount = Layer.EditableStrokes.Num();
-    AlphaSnapshot.FallbackStrokes = Layer.EditableStrokes;
+        AutoResultRef->BaselineStrokeCount, 0, EditableStrokes.Num());
+    AlphaSnapshot.AuthoredStrokeCount = EditableStrokes.Num();
+    AlphaSnapshot.FallbackStrokes = EditableStrokes;
     for (int32 StrokeIndex = AlphaSnapshot.BaselineStrokeCount;
-         StrokeIndex < Layer.EditableStrokes.Num();
+         StrokeIndex < EditableStrokes.Num();
          ++StrokeIndex)
     {
-        const FDWCTransparencyBrushStroke& Stroke = Layer.EditableStrokes[StrokeIndex];
-        AlphaSnapshot.AppliedSampleCount += Stroke.bEnabled ? Stroke.Samples.Num() : 0;
+        const FDWCTransparencyBrushStroke& Stroke = EditableStrokes[StrokeIndex];
+        AlphaSnapshot.AppliedSampleCount += Stroke.bEnabled ? Stroke.GetSampleCount() : 0;
     }
     return BuildSnapshot(
         WetClothingAsset,
@@ -1113,12 +1114,11 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
     Snapshot.CorrectedRevealPixels = MoveTemp(Stage4Reveal.CorrectedPixels);
     Snapshot.RevealFallbackWarning = MoveTemp(Stage4Reveal.Warning);
     Snapshot.LayerGuid = Layer.LayerGuid;
-    Snapshot.TargetSurface = Layer.TargetSurface;
     Snapshot.bRequiresRevealSurface = Layer.RequiresRevealSurface();
     Snapshot.ManualColorSource = Layer.ManualColorSource;
     if (Snapshot.RevealSource == EDWCTransparencyStage4RevealSource::CanonicalReplay)
     {
-        Snapshot.RevealColorPaintStrokes = Layer.RevealColorPaintStrokes;
+        Snapshot.RevealColorPaintStrokes = Layer.GetRevealColorPaintStrokes();
     }
     Snapshot.RevealMetallicDarkeningStrength =
         WetClothingAsset.Authored.TransparencyData.RevealMetallicDarkeningStrength;
@@ -1202,7 +1202,7 @@ bool FDWCTransparencyEditedMapBaker::BuildSnapshot(
     for (const FDWCTransparencyRevealColorStroke& Stroke : Snapshot.RevealColorPaintStrokes)
     {
         Snapshot.EstimatedPrivateBytes +=
-            static_cast<uint64>(Stroke.Samples.GetAllocatedSize());
+            Stroke.GetSampleAllocatedSize();
     }
     Snapshot.EstimatedOutputBytes = PixelCount * sizeof(FColor) *
         (Snapshot.bRequiresRevealSurface ? 2ull : 1ull) +
@@ -1238,11 +1238,6 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
     const FDWCTransparencyAlphaDomainSnapshot& AlphaDomain = *Snapshot.WorkingSet.AlphaDomain;
     const int32 PixelCount = AlphaDomain.Resolution.X * AlphaDomain.Resolution.Y;
 
-    FWetClothingTransparencyLayerData WorkerLayer;
-    WorkerLayer.LayerGuid = Snapshot.LayerGuid;
-    WorkerLayer.TargetSurface = Snapshot.TargetSurface;
-    WorkerLayer.ManualColorSource = Snapshot.ManualColorSource;
-    WorkerLayer.RevealColorPaintStrokes = Snapshot.RevealColorPaintStrokes;
     FDWCTransparencyAlphaWorkingSnapshot MaterializedAlphaSnapshot;
     const FDWCTransparencyAlphaWorkingSnapshot* SparseAlphaSnapshot = &Snapshot.WorkingSet.Alpha;
     FString AlphaError;
@@ -1306,9 +1301,9 @@ FDWCTransparencyEditedMapComputedResult FDWCTransparencyEditedMapBaker::ComputeS
         // canonical Stage 2 result and serialized Reveal Color strokes.
         FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
             SourcePayload,
-            WorkerLayer.RevealColorPaintStrokes,
+            Snapshot.RevealColorPaintStrokes,
             SourcePayload.MaterialSlotIndex,
-            WorkerLayer.ManualColorSource.BaseRevealColor,
+            Snapshot.ManualColorSource.BaseRevealColor,
             Result.FinalPixels);
         if (!FDWCTransparencyComposite::ApplyRevealMetallicDarkening(
                 Result.FinalPixels,

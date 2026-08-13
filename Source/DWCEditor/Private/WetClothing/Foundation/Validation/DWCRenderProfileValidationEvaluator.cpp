@@ -2,7 +2,7 @@
 #include "WetClothing/Foundation/Validation/DWCRenderProfileValidationEvaluator.h"
 
 #include "DataAssets/WetClothingAsset.h"
-#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
+#include "WetClothing/Foundation/Build/DWCRenderProfileBuildTargetResolver.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationEvaluatorUtils.h"
 
 namespace
@@ -26,7 +26,7 @@ void FDWCRenderProfileValidationEvaluator::AppendToSnapshot(
     FWCAEditorValidationSnapshot& InOutSnapshot)
 {
     const FDWCRenderProfileValidationSnapshot ServiceState =
-        FWetClothingRenderProfileBakeService::EvaluateVisualBakeState(&Asset);
+        FDWCRenderProfileBuildTargetResolver::Resolve(&Asset);
     const FDWCEditorValidationTargetKey RootKey{
         EDWCEditorValidationDomain::RenderProfile};
     FDWCEditorValidationNode& RootNode =
@@ -38,17 +38,40 @@ void FDWCRenderProfileValidationEvaluator::AppendToSnapshot(
     RootNode.Artifact = ServiceState.bRequired
         ? EDWCEditorValidationArtifactState::Current
         : EDWCEditorValidationArtifactState::NotRequired;
+    RootNode.Persistence = ServiceState.bSavePending
+        ? EDWCEditorValidationPersistenceState::SavePending
+        : EDWCEditorValidationPersistenceState::Saved;
+
+    DWCEditorValidation::SetActionState(
+        InOutSnapshot,
+        EDWCEditorBuildAction::BakeRenderProfileData,
+        ServiceState.BakeState,
+        &RootKey);
+
+    if (ServiceState.RecordedStatus == EDWCBakeStatus::Failed)
+    {
+        RootNode.Operation = EDWCEditorValidationOperationState::Failed;
+        DWCEditorValidation::AddDiagnostic(
+            InOutSnapshot,
+            RootNode,
+            TEXT("RenderProfile.BuildFailed"),
+            EDWCEditorValidationSeverity::Error,
+            NSLOCTEXT("DWCRenderProfileValidation", "Title", "Render Profile Lookup Texture"),
+            NSLOCTEXT("DWCRenderProfileValidation", "Failed", "Failed"),
+            FText::FromString(ServiceState.BakeReason),
+            NSLOCTEXT("DWCRenderProfileValidation", "Retry", "Fix any reported inputs, then retry Build for Runtime > Bake Render Profile Data."),
+            EDWCEditorValidationRemediation::BuildAction,
+            EDWCEditorBuildAction::BakeRenderProfileData,
+            true,
+            FText::GetEmpty(),
+            DWCBakeOutput::RenderProfileData);
+    }
 
     if (!ServiceState.bRequired && ServiceState.Issues.IsEmpty())
     {
-        DWCEditorValidation::SetActionState(
-            InOutSnapshot,
-            EDWCEditorBuildAction::BakeRenderProfileData,
-            EDWCEditorBuildActionState::Unavailable);
         return;
     }
 
-    bool bRequiresBake = false;
     for (const FDWCRenderProfileValidationIssue& Issue : ServiceState.Issues)
     {
         FDWCEditorValidationTargetKey Key{
@@ -93,7 +116,6 @@ void FDWCRenderProfileValidationEvaluator::AppendToSnapshot(
             break;
         case EDWCRenderProfileIssueResolution::BakeRenderProfile:
         default:
-            bRequiresBake = true;
             break;
         }
 
@@ -121,21 +143,4 @@ void FDWCRenderProfileValidationEvaluator::AppendToSnapshot(
     FinalRootNode.Artifact = ServiceState.Issues.IsEmpty()
         ? EDWCEditorValidationArtifactState::Current
         : EDWCEditorValidationArtifactState::Stale;
-    if (ServiceState.Issues.IsEmpty())
-    {
-        DWCEditorValidation::SetActionState(
-            InOutSnapshot,
-            EDWCEditorBuildAction::BakeRenderProfileData,
-            EDWCEditorBuildActionState::UpToDate,
-            &RootKey);
-    }
-    else if (!bRequiresBake &&
-             !InOutSnapshot.Actions.Contains(EDWCEditorBuildAction::BakeRenderProfileData))
-    {
-        DWCEditorValidation::SetActionState(
-            InOutSnapshot,
-            EDWCEditorBuildAction::BakeRenderProfileData,
-            EDWCEditorBuildActionState::Blocked,
-            &RootKey);
-    }
 }

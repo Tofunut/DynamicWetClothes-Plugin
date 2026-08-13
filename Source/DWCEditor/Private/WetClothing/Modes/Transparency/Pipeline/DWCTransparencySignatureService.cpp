@@ -232,11 +232,28 @@ namespace
             Scale.X, Scale.Y, Scale.Z));
     }
 
+    void AppendCanonicalStrokeSample(
+        const FDWCTransparencyBrushSample& Sample,
+        FString& InOutCanonical)
+    {
+        // Persisted strokes use float32 UVs. Normalize legacy FVector2D samples
+        // to the same representation so migration alone cannot stale outputs.
+        const FDWCTransparencyCompactBrushSample Compact =
+            FDWCTransparencyCompactBrushSample::Encode(Sample);
+        InOutCanonical += FString::Printf(
+            TEXT(";%.9g,%.9g,%.9g,%.9g,%d"),
+            Compact.PositionUV.X,
+            Compact.PositionUV.Y,
+            Compact.RadiusUV,
+            Compact.Strength,
+            Compact.UVIslandID);
+    }
+
     void AppendRevealStrokes(
         const FWetClothingTransparencyLayerData& Layer,
         FString& InOutCanonical)
     {
-        for (const FDWCTransparencyRevealColorStroke& Stroke : Layer.RevealColorPaintStrokes)
+        for (const FDWCTransparencyRevealColorStroke& Stroke : Layer.GetRevealColorPaintStrokes())
         {
             InOutCanonical += FString::Printf(
                 TEXT("|RevealStroke=%s,%d,%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%d"),
@@ -244,14 +261,12 @@ namespace
                 Stroke.MaterialSlotIndex, static_cast<int32>(Stroke.UVAddressMode),
                 static_cast<int32>(Stroke.BrushMode), Stroke.PaintColor.R,
                 Stroke.PaintColor.G, Stroke.PaintColor.B, Stroke.Falloff,
-                Stroke.Spacing, Stroke.Samples.Num());
-            for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
-            {
-                InOutCanonical += FString::Printf(
-                    TEXT(";%.9g,%.9g,%.9g,%.9g,%d"), Sample.PositionUV.X,
-                    Sample.PositionUV.Y, Sample.RadiusUV, Sample.Strength,
-                    Sample.UVIslandID);
-            }
+                Stroke.Spacing, Stroke.GetSampleCount());
+            Stroke.ForEachSample(
+                [&InOutCanonical](const FDWCTransparencyBrushSample& Sample)
+                {
+                    AppendCanonicalStrokeSample(Sample, InOutCanonical);
+                });
         }
     }
 
@@ -259,21 +274,19 @@ namespace
         const FWetClothingTransparencyLayerData& Layer,
         FString& InOutCanonical)
     {
-        for (const FDWCTransparencyBrushStroke& Stroke : Layer.EditableStrokes)
+        for (const FDWCTransparencyBrushStroke& Stroke : Layer.GetEditableStrokes())
         {
             InOutCanonical += FString::Printf(
                 TEXT("|AlphaStroke=%s,%d,%d,%d,%d,%.9g,%.9g,%.9g,%d"),
                 *Stroke.StrokeGuid.ToString(EGuidFormats::Digits), Stroke.bEnabled ? 1 : 0,
                 Stroke.MaterialSlotIndex, static_cast<int32>(Stroke.UVAddressMode),
                 static_cast<int32>(Stroke.BrushMode), Stroke.Falloff,
-                Stroke.TargetAlpha, Stroke.Spacing, Stroke.Samples.Num());
-            for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
-            {
-                InOutCanonical += FString::Printf(
-                    TEXT(";%.9g,%.9g,%.9g,%.9g,%d"), Sample.PositionUV.X,
-                    Sample.PositionUV.Y, Sample.RadiusUV, Sample.Strength,
-                    Sample.UVIslandID);
-            }
+                Stroke.TargetAlpha, Stroke.Spacing, Stroke.GetSampleCount());
+            Stroke.ForEachSample(
+                [&InOutCanonical](const FDWCTransparencyBrushSample& Sample)
+                {
+                    AppendCanonicalStrokeSample(Sample, InOutCanonical);
+                });
         }
     }
 

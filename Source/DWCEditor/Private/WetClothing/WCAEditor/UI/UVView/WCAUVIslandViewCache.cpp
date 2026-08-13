@@ -263,7 +263,9 @@ bool FWCAUVIslandViewCache::BuildMaterialSlotUVIslandsUncached(
     }
 
     const int32 OriginalUVChannelIndex = WetClothingAsset->GetOriginalUVChannelIndex();
-    const FDWCEditorUVTopologyData* Topology = WetClothingAsset->FindOriginalUVTopologyForLOD(LODIndex);
+    const FDWCEditorUVTopologyHandle TopologyHandle =
+        WetClothingAsset->AcquireOriginalUVTopologyForLOD(LODIndex);
+    const FDWCEditorUVTopologyData* Topology = TopologyHandle.Get();
     const bool bUseStoredTopology =
         Topology != nullptr && Topology->bIsValid &&
         Topology->UVChannelIndex == OriginalUVChannelIndex &&
@@ -331,7 +333,9 @@ bool FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
         return false;
     }
 
-    const FDWCEditorUVTopologyData* Topology = WetClothingAsset->FindOriginalUVTopologyForLOD(LODIndex);
+    const FDWCEditorUVTopologyHandle TopologyHandle =
+        WetClothingAsset->AcquireOriginalUVTopologyForLOD(LODIndex);
+    const FDWCEditorUVTopologyData* Topology = TopologyHandle.Get();
     const bool                      bUseStoredTopology =
         Topology != nullptr &&
         Topology->bIsValid &&

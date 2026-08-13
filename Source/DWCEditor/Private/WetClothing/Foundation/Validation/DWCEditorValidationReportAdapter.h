@@ -4,11 +4,14 @@
 #include "CoreMinimal.h"
 
 struct FWCAEditorValidationSnapshot;
+struct FDWCEditorBuildStatusSnapshot;
 struct FWCAValidationReport;
 
 class FDWCEditorValidationReportAdapter
 {
   public:
-    static FWCAValidationReport BuildReport(const FWCAEditorValidationSnapshot& Snapshot);
+    static FWCAValidationReport BuildReport(
+        const FWCAEditorValidationSnapshot& Snapshot,
+        const FDWCEditorBuildStatusSnapshot* BuildStatus = nullptr);
 };
 

@@ -5,6 +5,7 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "ScopedTransaction.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDWCEditorAuthoring, Log, All);
 
@@ -87,6 +88,15 @@ FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::Edit(
     FDWCEditorAuthoringChange              Change,
     TFunctionRef<bool(UWetClothingAsset&)> Mutation)
 {
+    return Edit(TransactionText, Change, nullptr, Mutation);
+}
+
+FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::Edit(
+    const FText&                           TransactionText,
+    FDWCEditorAuthoringChange              Change,
+    UObject*                               AdditionalTransactionTarget,
+    TFunctionRef<bool(UWetClothingAsset&)> Mutation)
+{
     FString Error;
     if (!IsOnGameThread(&Error))
     {
@@ -107,8 +117,13 @@ FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::Edit(
         return MakeFailure(Change, TEXT("The Wet Clothing Asset is unavailable."));
     }
 
+    FDWCEditorAuthoringOperationScope DiagnosticScope(TransactionText.ToString(), MutableAsset);
     FScopedTransaction Transaction(TransactionText);
     ModifyAssetForAuthoringTransaction(*MutableAsset, TransactionText);
+    if (AdditionalTransactionTarget != nullptr && AdditionalTransactionTarget != MutableAsset)
+    {
+        AdditionalTransactionTarget->Modify();
+    }
     if (!Mutation(*MutableAsset))
     {
         Transaction.Cancel();
@@ -122,6 +137,15 @@ FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::Edit(
 bool FDWCEditorAuthoringDocument::BeginInteractiveEdit(
     const FText&              TransactionText,
     FDWCEditorAuthoringChange Change,
+    FString*                  OutError)
+{
+    return BeginInteractiveEdit(TransactionText, Change, nullptr, OutError);
+}
+
+bool FDWCEditorAuthoringDocument::BeginInteractiveEdit(
+    const FText&              TransactionText,
+    FDWCEditorAuthoringChange Change,
+    UObject*                  AdditionalTransactionTarget,
     FString*                  OutError)
 {
     if (!IsOnGameThread(OutError))
@@ -151,8 +175,15 @@ bool FDWCEditorAuthoringDocument::BeginInteractiveEdit(
         return false;
     }
 
+    FDWCEditorAuthoringOperationScope DiagnosticScope(
+        TransactionText.ToString() + TEXT(".BeginInteractive"),
+        MutableAsset);
     InteractiveTransaction = MakeUnique<FScopedTransaction>(TransactionText);
     ModifyAssetForAuthoringTransaction(*MutableAsset, TransactionText);
+    if (AdditionalTransactionTarget != nullptr && AdditionalTransactionTarget != MutableAsset)
+    {
+        AdditionalTransactionTarget->Modify();
+    }
     InteractiveChange = Change;
     InteractiveChange.Phase = EDWCEditorAuthoringChangePhase::Interactive;
     bInteractiveMutationChanged = false;

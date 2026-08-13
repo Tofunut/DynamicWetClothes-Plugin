@@ -9,14 +9,14 @@ FWCAEditorCanonicalStateSnapshot FWCAEditorCanonicalStateProvider::Build(
     UWetClothingAsset& Asset,
     const SWCAEditorPanel* EditorPanel,
     const EDWCEditorBuildSurfaceMode SurfaceMode,
-    const bool bDeepValidation,
-    const bool bRefreshAssetState)
+    const bool bDeepValidation)
 {
     FWCAEditorCanonicalStateSnapshot Result;
     Result.Validation = BuildWCAValidationSnapshot(
         Asset,
-        bDeepValidation ? EWCAValidationMode::Deep : EWCAValidationMode::Fast,
-        bRefreshAssetState);
+        bDeepValidation
+            ? EWCAValidationMode::ExactPayload
+            : EWCAValidationMode::MetadataOnly);
     Result.BuildStatus = FWCAEditorBuildStatusProvider::BuildSnapshot(
         Asset,
         EditorPanel,

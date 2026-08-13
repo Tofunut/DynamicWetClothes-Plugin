@@ -389,7 +389,9 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
 
     const FDWCDataUVLODMetadata* DataUVMetadata = WetClothingAsset->FindDataUVMetadataForLOD(WetClothingAsset->GetSimulationLODIndex());
 #if WITH_EDITORONLY_DATA
-    const FDWCEditorUVTopologyData* OriginalUVTopology = WetClothingAsset->FindOriginalUVTopologyForLOD(WetClothingAsset->GetSimulationLODIndex());
+    const FDWCEditorUVTopologyDescriptor* OriginalUVTopology =
+        WetClothingAsset->FindOriginalUVTopologyDescriptorForLOD(
+            WetClothingAsset->GetSimulationLODIndex());
 #endif
     const FString RuntimeMeshContentSignature = UWetClothingAsset::BuildMeshContentSignature(
         WetClothingAsset->GetRuntimeSkeletalMesh(),

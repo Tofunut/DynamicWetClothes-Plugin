@@ -230,6 +230,63 @@ bool FDWCEditorBuildAffectedTransparencySelectionTest::RunTest(const FString& Pa
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorBuildDynamicPrerequisitePlanTest,
+    "DWC.Editor.Foundation.Build.DynamicPrerequisitePlan",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorBuildDynamicPrerequisitePlanTest::RunTest(const FString& Parameters)
+{
+    FDWCEditorBuildStatusSnapshot Snapshot =
+        FDWCEditorBuildActionEvaluator::Evaluate(MakeReadyInput());
+    FDWCEditorBuildActionStatus& RuntimeStatus =
+        Snapshot.Actions.FindChecked(EDWCEditorBuildAction::BuildCPURuntimeData);
+    RuntimeStatus.State = EDWCEditorBuildActionState::Required;
+    RuntimeStatus.BlockingActions.Add(EDWCEditorBuildAction::BakeRenderProfileData);
+    FDWCEditorBuildActionStatus& DynamicPrerequisite =
+        Snapshot.Actions.FindChecked(EDWCEditorBuildAction::BakeRenderProfileData);
+    DynamicPrerequisite.State = EDWCEditorBuildActionState::Required;
+
+    const EDWCEditorBuildAction Requested = EDWCEditorBuildAction::BuildCPURuntimeData;
+    const FDWCEditorBuildPlan Plan = FDWCEditorBuildPlanResolver::ResolveActions(
+        Snapshot, MakeArrayView(&Requested, 1));
+    TestTrue(TEXT("A retryable dynamic prerequisite produces an executable plan"),
+        Plan.IsExecutable());
+    TestTrue(TEXT("The dynamic prerequisite is selected"),
+        FindStep(Plan, EDWCEditorBuildAction::BakeRenderProfileData) != INDEX_NONE);
+    TestTrue(TEXT("The dynamic prerequisite precedes its dependent"),
+        FindStep(Plan, EDWCEditorBuildAction::BakeRenderProfileData) <
+        FindStep(Plan, EDWCEditorBuildAction::BuildCPURuntimeData));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorBuildDynamicPrerequisiteCycleTest,
+    "DWC.Editor.Foundation.Build.DynamicPrerequisiteCycle",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorBuildDynamicPrerequisiteCycleTest::RunTest(const FString& Parameters)
+{
+    FDWCEditorBuildStatusSnapshot Snapshot =
+        FDWCEditorBuildActionEvaluator::Evaluate(MakeReadyInput());
+    FDWCEditorBuildActionStatus& RuntimeStatus =
+        Snapshot.Actions.FindChecked(EDWCEditorBuildAction::BuildCPURuntimeData);
+    RuntimeStatus.State = EDWCEditorBuildActionState::Required;
+    RuntimeStatus.BlockingActions.Add(EDWCEditorBuildAction::BakeRenderProfileData);
+    FDWCEditorBuildActionStatus& RenderProfileStatus =
+        Snapshot.Actions.FindChecked(EDWCEditorBuildAction::BakeRenderProfileData);
+    RenderProfileStatus.State = EDWCEditorBuildActionState::Required;
+    RenderProfileStatus.BlockingActions.Add(EDWCEditorBuildAction::BuildCPURuntimeData);
+
+    const EDWCEditorBuildAction Requested = EDWCEditorBuildAction::BuildCPURuntimeData;
+    const FDWCEditorBuildPlan Plan = FDWCEditorBuildPlanResolver::ResolveActions(
+        Snapshot, MakeArrayView(&Requested, 1));
+    TestFalse(TEXT("A dynamic prerequisite cycle is not executable"), Plan.IsExecutable());
+    TestTrue(TEXT("The cycle emits a planner diagnostic"),
+        Plan.Diagnostics.Contains(TEXT("The evaluated build prerequisites contain a cycle.")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorValidationSuggestedPlanTest,
     "DWC.Editor.Foundation.Build.ValidationSuggestedPlan",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

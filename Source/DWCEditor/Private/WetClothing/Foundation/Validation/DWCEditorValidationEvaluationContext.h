@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationTypes.h"
 
 class USkeletalMesh;
 class UWetClothingAsset;
@@ -12,11 +13,12 @@ struct FDWCEditorValidationEvaluationContext
 {
     explicit FDWCEditorValidationEvaluationContext(
         const UWetClothingAsset& InAsset,
-        bool bInDeepValidation);
+        EDWCEditorValidationAccess InAccess);
 
     const UWetClothingAsset& Asset;
     const FDWCWetClothingAssetSetupSettings& Setup;
     USkeletalMesh* RuntimeMesh = nullptr;
+    EDWCEditorValidationAccess Access = EDWCEditorValidationAccess::MetadataOnly;
     bool bDeepValidation = false;
     bool bAssetDirty = false;
     bool bHasWettableSlots = false;
@@ -24,8 +26,16 @@ struct FDWCEditorValidationEvaluationContext
     bool bGPUBackendEnabled = false;
     bool bDataUVReady = false;
     bool bOriginalUVTopologyReady = false;
+    bool bHasOriginalUVTopologyPayload = false;
+    bool bOriginalUVTopologyMetadataValid = false;
+    bool bOriginalUVTopologySignatureCurrent = false;
     int32 RuntimeLODIndex = 0;
     TArray<int32> WettableMaterialSlotIndices;
+
+    bool AllowsPayloadAccess() const
+    {
+        return Access == EDWCEditorValidationAccess::ExactPayload;
+    }
 
     bool IsBakeOutputSavePending(int32 OutputMask) const;
 };

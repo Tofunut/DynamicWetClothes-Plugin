@@ -1247,7 +1247,18 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
                 return PayloadLODIndices.Contains(Metadata.LODIndex);
             });
 #if WITH_EDITORONLY_DATA
-        OriginalUVTopologies = Asset.Derived.Inline.OriginalUVTopologies;
+        FString ExistingTopologyError;
+        if (!Asset.CopyOriginalUVTopologiesForEditor(
+                OriginalUVTopologies,
+                &ExistingTopologyError))
+        {
+            SetFailure(
+                Result,
+                ExistingTopologyError.IsEmpty()
+                    ? TEXT("The existing Original UV topology payload could not be loaded for the partial Data UV rebuild.")
+                    : ExistingTopologyError);
+            return Result;
+        }
         for (const FDWCEditorUVTopologyData& ExistingTopology : OriginalUVTopologies)
         {
             if (PayloadLODIndices.Contains(ExistingTopology.LODIndex) ||
@@ -2515,9 +2526,11 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::RelocateChannel(
     Result.bSucceeded = true;
     Result.PreparedMesh = PreparedMesh;
     Result.DataUVChannelIndex = SafeDestinationUVChannelIndex;
-    Result.OriginalUVIslandCount = Asset.FindOriginalUVTopologyForLOD(Asset.GetSimulationLODIndex()) != nullptr
-                                       ? Asset.FindOriginalUVTopologyForLOD(Asset.GetSimulationLODIndex())->Islands.Num()
-                                       : 0;
+    const FDWCEditorUVTopologyDescriptor* TopologyDescriptor =
+        Asset.FindOriginalUVTopologyDescriptorForLOD(Asset.GetSimulationLODIndex());
+    Result.OriginalUVIslandCount = TopologyDescriptor != nullptr
+        ? TopologyDescriptor->IslandCount
+        : 0;
     Result.Message = FString::Printf(
         TEXT("Relocated the sealed DWC UV Channel layout from UV%d to UV%d without rebuilding packed charts or Original UV island topology. The previous channel remains unchanged but is no longer referenced by this WCA."),
         SourceUVChannelIndex,

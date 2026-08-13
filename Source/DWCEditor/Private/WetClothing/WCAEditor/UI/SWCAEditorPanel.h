@@ -5,6 +5,7 @@
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
 #include "WetClothing/Foundation/Resources/DWCEditorResourceBroker.h"
 #include "WetClothing/WCAEditor/WCAEditorMode.h"
+#include "WetClothing/WCAEditor/WCAValidationReport.h"
 #include "Widgets/SCompoundWidget.h"
 
 class IDetailsView;
@@ -82,7 +83,7 @@ public:
     void RefreshFromAsset(bool bRebuildActiveModePreview = true);
     void RefreshStatusFromAsset();
     void RequestRefreshFromAsset(bool bRebuildActiveModePreview = true);
-    FWCAEditorIssueStatus CollectIssueStatus(bool bRefreshAssetState = true, bool bRunDeepValidation = false) const;
+    FWCAEditorIssueStatus CollectIssueStatus(bool bRunDeepValidation = false) const;
     bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
     bool BakeWetVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
@@ -113,10 +114,11 @@ public:
 private:
     TSharedRef<SWidget> EnsureModeWidget(EWCAEditorMode Mode);
     EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime, float DeltaTime);
-    EActiveTimerReturnType HandleStatusRefreshTimer(double CurrentTime, float DeltaTime);
+    EActiveTimerReturnType HandleDeferredStatusRefresh(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleTextureUploadTimer(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleExclusiveBuildTimer(double CurrentTime, float DeltaTime);
-    void UpdateCachedStatus(bool bRefreshAssetState = true);
+    void RequestStatusRefresh();
+    void UpdateCachedStatus();
     void HandleAuthoringDocumentChanged(const FDWCEditorAuthoringChange& Change);
     void SuspendPreviewMode(EWCAEditorMode Mode, EDWCEditorPreviewSuspendReason Reason);
     void ResumePreviewModeIfNeeded(EWCAEditorMode Mode);
@@ -160,6 +162,7 @@ private:
     TSharedPtr<SWetClothingTransparencyBakePanel> TransparencyBakePanel;
     bool bRefreshPending = false;
     bool bPendingFullModeRefresh = false;
+    bool bStatusRefreshPending = false;
     bool bSuppressStatusChangedNotification = false;
     bool bHasActiveEditorMode = false;
     EWCAEditorMode ActiveEditorMode = EWCAEditorMode::PartEdit;

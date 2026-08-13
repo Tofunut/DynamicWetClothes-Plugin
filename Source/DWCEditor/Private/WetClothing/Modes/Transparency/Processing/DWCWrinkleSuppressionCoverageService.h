@@ -24,7 +24,7 @@ struct FDWCWrinkleSuppressionDependencySnapshot
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 DataUVChannelIndex = INDEX_NONE;
     int32 LODIndex = 0;
-    TWeakObjectPtr<UTexture2D> MaskTexture;
+    TSoftObjectPtr<UTexture2D> MaskTexture;
     FString MaskTexturePath;
     FString BuildSignature;
     FGuid BakeGuid;
@@ -82,7 +82,8 @@ class FDWCWrinkleSuppressionCoverageService final
     static FName CacheNamespace();
     static FDWCEditorCacheKey BuildCacheKey(
         const UWetClothingAsset& Asset,
-        const FDWCWrinkleSuppressionDependencySnapshot& Dependency);
+        const FDWCWrinkleSuppressionDependencySnapshot& Dependency,
+        const UTexture2D& Texture);
 
     TSharedRef<FDWCEditorCacheStore> CacheStore;
 };

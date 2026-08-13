@@ -110,12 +110,49 @@ namespace DWCBakeOutput
     static constexpr int32 GPUMaps = 1 << 4;
     static constexpr int32 WrinkleMaps = 1 << 5;
     static constexpr int32 TransparencyMaps = 1 << 6;
+    static constexpr int32 RenderProfileData = 1 << 7;
+    static constexpr int32 All =
+        GeneratedDataUV |
+        OriginalUVTopology |
+        CPURuntimeData |
+        GPURuntimeData |
+        GPUMaps |
+        WrinkleMaps |
+        TransparencyMaps |
+        RenderProfileData;
+
+    FORCEINLINE TConstArrayView<int32> GetOutputs()
+    {
+        static const int32 Outputs[] = {
+            GeneratedDataUV,
+            OriginalUVTopology,
+            CPURuntimeData,
+            GPURuntimeData,
+            GPUMaps,
+            WrinkleMaps,
+            TransparencyMaps,
+            RenderProfileData};
+        return MakeArrayView(Outputs);
+    }
 
     FORCEINLINE bool Has(const int32 Mask, const int32 Output)
     {
         return (Mask & Output) != 0;
     }
 } // namespace DWCBakeOutput
+
+USTRUCT()
+struct DWC_API FDWCBakeOutputFailureRecord
+{
+    GENERATED_BODY()
+
+    /** Exactly one DWCBakeOutput bit owned by this failure. */
+    UPROPERTY(VisibleAnywhere, Category = "Bake Status")
+    int32 Output = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Bake Status")
+    FString Message;
+};
 
 UENUM()
 enum class EDWCMapResolution : uint8
@@ -283,6 +320,40 @@ struct DWC_API FDWCEditorUVTopologyData
 
     UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
     TArray<FDWCOriginalUVIslandTopology> Islands;
+};
+
+/** Lightweight state for an Original UV topology payload stored in editor-only bulk data. */
+USTRUCT()
+struct DWC_API FDWCEditorUVTopologyDescriptor
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    bool bIsValid = false;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    int32 LODIndex = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    int32 UVChannelIndex = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    FString BuildSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    int32 GeneratorVersion = 1;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    int32 IslandCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    int32 TriangleReferenceCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    int64 SerializedPayloadBytes = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    uint32 PayloadHash = 0;
 };
 
 USTRUCT()
@@ -485,6 +556,9 @@ struct DWC_API FDWCAssetBakeState
     UPROPERTY(VisibleAnywhere, Category = "Map Bake Status")
     EDWCBakeStatus TransparencyMaps = EDWCBakeStatus::Required;
 
+    UPROPERTY(VisibleAnywhere, Category = "Map Bake Status")
+    EDWCBakeStatus RenderProfileData = EDWCBakeStatus::Required;
+
     /** Outputs that have completed at least once. Used to distinguish first-time guidance from rebuild guidance. */
     UPROPERTY(VisibleAnywhere, Category = "Bake Status")
     int32 GeneratedOutputMask = 0;
@@ -493,6 +567,11 @@ struct DWC_API FDWCAssetBakeState
     UPROPERTY(VisibleAnywhere, Category = "Bake Status")
     int32 SavedOutputMask = 0;
 
+    /** Failures are independently owned so one successful output cannot erase another output's error. */
     UPROPERTY(VisibleAnywhere, Category = "Bake Status")
+    TArray<FDWCBakeOutputFailureRecord> OutputFailures;
+
+    /** Legacy shared failure string. Imported into OutputFailures on load; new code must not write it. */
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use OutputFailures instead."))
     FString LastFailure;
 };

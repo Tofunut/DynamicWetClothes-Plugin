@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 
 class UWetClothingAsset;
+struct FDWCEditorValidationEvaluationContext;
 struct FWCAEditorValidationSnapshot;
 
 /** Canonical asset, persistence, Data UV, and unowned failure validation. */
@@ -11,7 +12,7 @@ class FDWCAssetValidationEvaluator
 {
 public:
     static void AppendAssetAndDataUV(
-        const UWetClothingAsset& Asset,
+        const FDWCEditorValidationEvaluationContext& Context,
         FWCAEditorValidationSnapshot& InOutSnapshot);
 
     static void AppendUnownedFailure(

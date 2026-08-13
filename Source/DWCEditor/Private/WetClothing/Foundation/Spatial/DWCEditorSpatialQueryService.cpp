@@ -924,8 +924,8 @@ TOptional<FDWCEditorCacheKey> FDWCEditorSpatialQueryService::MakeCacheKey(
             Key.Signature = DataUVMetadata->DataUVOutputSignature;
         }
 #if WITH_EDITORONLY_DATA
-        else if (const FDWCEditorUVTopologyData* OriginalUVTopology =
-                     WetClothingAsset->FindOriginalUVTopologyForLOD(LODIndex);
+        else if (const FDWCEditorUVTopologyDescriptor* OriginalUVTopology =
+                     WetClothingAsset->FindOriginalUVTopologyDescriptorForLOD(LODIndex);
                  OriginalUVTopology != nullptr && OriginalUVTopology->UVChannelIndex == UVChannelIndex)
         {
             Key.Signature = OriginalUVTopology->BuildSignature;

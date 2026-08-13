@@ -33,7 +33,11 @@ void FDWCWrinkleValidationEvaluator::AppendToSnapshot(
 {
     using namespace DWCEditorValidation;
     const FDWCWrinkleBuildTargetSnapshot Targets =
-        FDWCWrinkleBuildTargetResolver::Resolve(Asset, bDeepValidation);
+        FDWCWrinkleBuildTargetResolver::Resolve(
+            Asset,
+            bDeepValidation
+                ? EDWCEditorValidationAccess::ExactPayload
+                : EDWCEditorValidationAccess::MetadataOnly);
 
     SetActionState(
         InOutSnapshot,

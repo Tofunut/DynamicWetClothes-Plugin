@@ -54,6 +54,9 @@ bool FDWCTransparencyAlphaSnapshotMaterializerParityTest::RunTest(const FString&
         0,
         DensePremultiplied,
         DenseWeight);
+    TestTrue(TEXT("Persisted replay uses compact samples."), Stroke.CompactLegacySamples());
+    TestTrue(TEXT("Legacy sample storage is released."), Stroke.Samples.IsEmpty());
+    TestEqual(TEXT("Compact storage preserves sample count."), Stroke.GetSampleCount(), 1);
 
     FDWCTransparencyAlphaWorkingSnapshot Replay;
     Replay.Mode = EDWCTransparencyAlphaSnapshotMode::StrokeReplay;

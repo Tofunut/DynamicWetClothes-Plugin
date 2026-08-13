@@ -613,7 +613,9 @@ namespace DWCWetGPUMapBakePrivate
         OutLookup.Reset();
         OutDefaultProfileByMaterial.Reset();
 #if WITH_EDITORONLY_DATA
-        const FDWCEditorUVTopologyData* Topology = Asset.FindOriginalUVTopologyForLOD(LODIndex);
+        const FDWCEditorUVTopologyHandle TopologyHandle =
+            Asset.AcquireOriginalUVTopologyForLOD(LODIndex, OutErrorMessage);
+        const FDWCEditorUVTopologyData* Topology = TopologyHandle.Get();
         const FString                   CurrentTopologySignature = UWetClothingAsset::BuildMeshContentSignature(
             Asset.GetRuntimeSkeletalMesh(),
             LODIndex,
@@ -1446,7 +1448,8 @@ namespace DWCWetGPUMapBakePrivate
         Builder.AddValue(DataUVMetadata.RenderVertexCount);
         Builder.AddValue(DataUVMetadata.UVChannelIndex);
 
-        const FDWCEditorUVTopologyData* OriginalUVTopology = Asset.FindOriginalUVTopologyForLOD(CanonicalWetPartLODIndex);
+        const FDWCEditorUVTopologyDescriptor* OriginalUVTopology =
+            Asset.FindOriginalUVTopologyDescriptorForLOD(CanonicalWetPartLODIndex);
         Builder.AddValue(OriginalUVTopology != nullptr ? OriginalUVTopology->GeneratorVersion : 0);
         Builder.AddString(OriginalUVTopology != nullptr ? OriginalUVTopology->BuildSignature : FString());
 
@@ -1525,7 +1528,8 @@ static bool BuildLODRuntimeSignatureInternal(
         return false;
     }
 
-    const FDWCEditorUVTopologyData* OriginalUVTopology = Asset.FindOriginalUVTopologyForLOD(CanonicalWetPartLODIndex);
+    const FDWCEditorUVTopologyDescriptor* OriginalUVTopology =
+        Asset.FindOriginalUVTopologyDescriptorForLOD(CanonicalWetPartLODIndex);
     const FString                   CurrentOriginalUVSignature = UWetClothingAsset::BuildMeshContentSignature(
         RuntimeMesh,
         CanonicalWetPartLODIndex,

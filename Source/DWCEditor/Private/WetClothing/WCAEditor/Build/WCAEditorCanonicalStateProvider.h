@@ -21,6 +21,5 @@ class FWCAEditorCanonicalStateProvider
         UWetClothingAsset& Asset,
         const SWCAEditorPanel* EditorPanel,
         EDWCEditorBuildSurfaceMode SurfaceMode,
-        bool bDeepValidation,
-        bool bRefreshAssetState);
+        bool bDeepValidation);
 };

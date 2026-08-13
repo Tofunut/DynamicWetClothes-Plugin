@@ -55,6 +55,12 @@ FString BuildInvalidAuthoredDetail(const FWetWrinkleAuthoredSlotState& State)
             TEXT("%d wrinkle patch(es) have no normal texture."),
             State.MissingPatchTextureCount));
     }
+    if (State.InvalidPatchTextureCount > 0)
+    {
+        Details.Add(FString::Printf(
+            TEXT("%d wrinkle patch source texture reference(s) are missing or invalid."),
+            State.InvalidPatchTextureCount));
+    }
     if (State.InvalidPatchPlacementCount > 0)
     {
         Details.Add(FString::Printf(
@@ -106,8 +112,9 @@ void FDWCWrinkleBuildTargetSnapshot::CollectBuildMaterialSlots(
 
 FDWCWrinkleBuildTargetSnapshot FDWCWrinkleBuildTargetResolver::Resolve(
     const UWetClothingAsset& Asset,
-    const bool bDeepValidation)
+    const EDWCEditorValidationAccess Access)
 {
+    const bool bExactPayload = Access == EDWCEditorValidationAccess::ExactPayload;
     FDWCWrinkleBuildTargetSnapshot Result;
     const FWetClothingWrinkleData& Data = Asset.Authored.WrinkleData;
     TArray<FWetWrinkleAuthoredSlotState> AuthoredStates;
@@ -220,7 +227,9 @@ FDWCWrinkleBuildTargetSnapshot FDWCWrinkleBuildTargetResolver::Resolve(
         if (Authored == nullptr || Authored->HasInvalidInput() || !Target.bHasBakeableContent)
         {
             Target.Requirement = EDWCWrinkleBuildRequirement::ManualRepair;
-            Target.DiagnosticCode = Authored != nullptr && Authored->MissingPatchTextureCount > 0
+            Target.DiagnosticCode = Authored != nullptr &&
+                    (Authored->MissingPatchTextureCount > 0 ||
+                     Authored->InvalidPatchTextureCount > 0)
                 ? FName(TEXT("WrinklePatchMissingTexture"))
                 : FName(TEXT("WrinkleSourceInvalid"));
             Target.Detail = Authored != nullptr
@@ -232,13 +241,13 @@ FDWCWrinkleBuildTargetSnapshot FDWCWrinkleBuildTargetResolver::Resolve(
         Target.bInputValid = true;
         const FWetWrinkleMaterialSlotBakeState BakeState =
             FWetWrinkleNormalMapBaker::EvaluateMaterialSlotBakeState(
-                &Asset, Slot, bDeepValidation);
+                &Asset, Slot, bExactPayload);
         Target.bHasBakedNormal = BakeState.bNormalExists;
         Target.bHasCoverageMask = BakeState.bCoverageMaskExists;
         Target.bHasRuntimeNormal = BakeState.bNormalExists;
         Target.bOutputCurrent = BakeState.IsCurrent();
         Target.Detail = BakeState.Detail;
-        if (!bDeepValidation &&
+        if (!bExactPayload &&
             !DWCBuildStatus::IsUsable(Asset.GetBakeState().WrinkleMaps))
         {
             Target.bOutputCurrent = false;

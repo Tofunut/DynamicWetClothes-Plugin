@@ -56,8 +56,13 @@ void FDWCWetPartValidationEvaluator::AppendToSnapshot(
         ++SlotRecordCounts.FindOrAdd(Slot.MaterialSlotIndex);
     }
 
-    const FDWCEditorUVTopologyData* Topology =
-        Asset.FindOriginalUVTopologyForLOD(Context.RuntimeLODIndex);
+    FDWCEditorUVTopologyHandle TopologyHandle;
+    const FDWCEditorUVTopologyData* Topology = nullptr;
+    if (Context.AllowsPayloadAccess())
+    {
+        TopologyHandle = Asset.AcquireOriginalUVTopologyForLOD(Context.RuntimeLODIndex);
+        Topology = TopologyHandle.Get();
+    }
     TSet<int32> EvaluatedSlots;
     TSet<int32> ReportedMissingMaskProfiles;
     for (const FWetClothingAuthoredMaterialSlot& Slot : Data.MaterialSlots)
@@ -138,7 +143,7 @@ void FDWCWetPartValidationEvaluator::AppendToSnapshot(
                 }
             }
         }
-        else
+        else if (Context.AllowsPayloadAccess())
         {
             Node.Dependency = EDWCEditorValidationDependencyState::Blocked;
         }

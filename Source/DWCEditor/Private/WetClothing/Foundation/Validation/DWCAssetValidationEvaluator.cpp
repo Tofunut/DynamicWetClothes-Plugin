@@ -2,20 +2,26 @@
 #include "WetClothing/Foundation/Validation/DWCAssetValidationEvaluator.h"
 
 #include "DataAssets/WetClothingAsset.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationEvaluationContext.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationEvaluatorUtils.h"
 #include "UObject/Package.h"
 
 namespace
 {
-bool HasFailedBakeState(const FDWCAssetBakeState& State)
+FName GetFailureOutputName(const int32 Output)
 {
-    return State.GeneratedDataUV == EDWCBakeStatus::Failed ||
-           State.OriginalUVTopology == EDWCBakeStatus::Failed ||
-           State.CPURuntimeData == EDWCBakeStatus::Failed ||
-           State.GPURuntimeData == EDWCBakeStatus::Failed ||
-           State.GPUMaps == EDWCBakeStatus::Failed ||
-           State.WrinkleMaps == EDWCBakeStatus::Failed ||
-           State.TransparencyMaps == EDWCBakeStatus::Failed;
+    switch (Output)
+    {
+    case DWCBakeOutput::GeneratedDataUV: return TEXT("GeneratedDataUV");
+    case DWCBakeOutput::OriginalUVTopology: return TEXT("OriginalUVTopology");
+    case DWCBakeOutput::CPURuntimeData: return TEXT("CPURuntimeData");
+    case DWCBakeOutput::GPURuntimeData: return TEXT("GPURuntimeData");
+    case DWCBakeOutput::GPUMaps: return TEXT("GPUMaps");
+    case DWCBakeOutput::WrinkleMaps: return TEXT("WrinkleMaps");
+    case DWCBakeOutput::TransparencyMaps: return TEXT("TransparencyMaps");
+    case DWCBakeOutput::RenderProfileData: return TEXT("RenderProfileData");
+    default: return TEXT("UnknownOutput");
+    }
 }
 
 EDWCEditorValidationArtifactState MapDataUVArtifact(const EDWCBakeStatus Status)
@@ -37,9 +43,10 @@ EDWCEditorValidationArtifactState MapDataUVArtifact(const EDWCBakeStatus Status)
 }
 
 void FDWCAssetValidationEvaluator::AppendAssetAndDataUV(
-    const UWetClothingAsset& Asset,
+    const FDWCEditorValidationEvaluationContext& Context,
     FWCAEditorValidationSnapshot& InOutSnapshot)
 {
+    const UWetClothingAsset& Asset = Context.Asset;
     const bool bSavePending = Asset.GetOutermost() != nullptr &&
         Asset.GetOutermost()->IsDirty();
     const FDWCEditorValidationTargetKey AssetKey{
@@ -83,9 +90,8 @@ void FDWCAssetValidationEvaluator::AppendAssetAndDataUV(
     const FDWCAssetBakeState& BakeState = Asset.GetBakeState();
     DataUVNode.Artifact = MapDataUVArtifact(BakeState.GeneratedDataUV);
 
-    const bool bHasRuntimeMesh = Asset.GetRuntimeSkeletalMesh() != nullptr;
-    const bool bHasCurrentDataUV = bHasRuntimeMesh &&
-        Asset.HasValidDataUVForLOD(Asset.GetSimulationLODIndex());
+    const bool bHasRuntimeMesh = Context.RuntimeMesh != nullptr;
+    const bool bHasCurrentDataUV = Context.bDataUVReady;
     if (bHasCurrentDataUV)
     {
         DataUVNode.Input = EDWCEditorValidationInputState::Valid;
@@ -153,32 +159,48 @@ void FDWCAssetValidationEvaluator::AppendUnownedFailure(
     FWCAEditorValidationSnapshot& InOutSnapshot)
 {
     const FDWCAssetBakeState& State = Asset.GetBakeState();
-    if (!HasFailedBakeState(State) || State.LastFailure.IsEmpty() ||
-        InOutSnapshot.Diagnostics.ContainsByPredicate(
-            [](const FDWCEditorValidationDiagnostic& Diagnostic)
-            {
-                return Diagnostic.bFailed;
-            }))
+    for (const FDWCBakeOutputFailureRecord& Record : State.OutputFailures)
     {
-        return;
-    }
+        if (Record.Message.IsEmpty() ||
+            Asset.GetBakeOutputStatus(Record.Output) != EDWCBakeStatus::Failed)
+        {
+            continue;
+        }
 
-    const FDWCEditorValidationTargetKey FailureKey{
-        EDWCEditorValidationDomain::Failure};
-    FDWCEditorValidationNode& FailureNode =
-        DWCEditorValidation::FindOrAddNode(InOutSnapshot, FailureKey);
-    FailureNode.Intent = EDWCEditorValidationIntentState::Enabled;
-    FailureNode.Operation = EDWCEditorValidationOperationState::Failed;
-    DWCEditorValidation::AddDiagnostic(
-        InOutSnapshot,
-        FailureNode,
-        TEXT("Asset.UnownedBuildFailure"),
-        EDWCEditorValidationSeverity::Error,
-        NSLOCTEXT("DWCAssetValidation", "FailureTitle", "Internal Failure"),
-        NSLOCTEXT("DWCAssetValidation", "Failed", "Failed"),
-        FText::FromString(State.LastFailure),
-        NSLOCTEXT("DWCAssetValidation", "FailureAction", "Review the failed build output and retry its corresponding Build for Runtime action."),
-        EDWCEditorValidationRemediation::Manual,
-        {},
-        true);
+        const bool bAlreadyOwned = InOutSnapshot.Diagnostics.ContainsByPredicate(
+            [&Record](const FDWCEditorValidationDiagnostic& Diagnostic)
+            {
+                return Diagnostic.bFailed &&
+                       Diagnostic.OwnedBakeOutput == Record.Output;
+            });
+        if (bAlreadyOwned)
+        {
+            continue;
+        }
+
+        const FName OutputName = GetFailureOutputName(Record.Output);
+        const FDWCEditorValidationTargetKey FailureKey{
+            EDWCEditorValidationDomain::Failure,
+            INDEX_NONE,
+            FGuid(),
+            OutputName};
+        FDWCEditorValidationNode& FailureNode =
+            DWCEditorValidation::FindOrAddNode(InOutSnapshot, FailureKey);
+        FailureNode.Intent = EDWCEditorValidationIntentState::Enabled;
+        FailureNode.Operation = EDWCEditorValidationOperationState::Failed;
+        DWCEditorValidation::AddDiagnostic(
+            InOutSnapshot,
+            FailureNode,
+            FName(*FString::Printf(TEXT("Asset.UnownedBuildFailure.%s"), *OutputName.ToString())),
+            EDWCEditorValidationSeverity::Error,
+            NSLOCTEXT("DWCAssetValidation", "FailureTitle", "Internal Failure"),
+            NSLOCTEXT("DWCAssetValidation", "Failed", "Failed"),
+            FText::FromString(Record.Message),
+            NSLOCTEXT("DWCAssetValidation", "FailureAction", "Review the failed build output and retry its corresponding Build for Runtime action."),
+            EDWCEditorValidationRemediation::Manual,
+            {},
+            true,
+            FText::GetEmpty(),
+            Record.Output);
+    }
 }

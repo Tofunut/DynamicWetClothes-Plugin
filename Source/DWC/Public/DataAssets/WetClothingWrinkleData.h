@@ -93,9 +93,25 @@ struct DWC_API FWetWrinklePatchPlacement
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float Falloff = 0.5f;
 
-    // Canonical normal source for patch preview and bake.
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
-    TObjectPtr<UTexture2D> WrinkleNormalTexture = nullptr;
+    // Canonical editor-authoring source for patch preview and bake. Keeping this
+    // soft prevents opening a WCA from loading every referenced source texture.
+    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (Untracked))
+    TSoftObjectPtr<UTexture2D> WrinkleNormalTexture;
+
+    FSoftObjectPath GetWrinkleNormalTexturePath() const
+    {
+        return WrinkleNormalTexture.ToSoftObjectPath();
+    }
+
+    bool HasWrinkleNormalTexture() const
+    {
+        return !WrinkleNormalTexture.IsNull();
+    }
+
+    void SetWrinkleNormalTexture(UTexture2D* Texture)
+    {
+        WrinkleNormalTexture = Texture;
+    }
 
     bool HasValidSurfaceAnchor() const
     {
@@ -322,7 +338,17 @@ struct DWC_API FWetWrinkleBakedMapSet
     // Authoring-only source consumed while baking the final transparency map.
     // It is intentionally stripped from cooked/runtime WCA data.
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
-    TObjectPtr<UTexture2D> BakedWrinkleMask = nullptr;
+    TSoftObjectPtr<UTexture2D> BakedWrinkleMask;
+
+    FSoftObjectPath GetBakedWrinkleMaskPath() const
+    {
+        return BakedWrinkleMask.ToSoftObjectPath();
+    }
+
+    bool HasBakedWrinkleMask() const
+    {
+        return !BakedWrinkleMask.IsNull();
+    }
 #endif
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")

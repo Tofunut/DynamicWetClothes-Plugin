@@ -6,6 +6,7 @@
 #include "DerivedData/DWCMeshContentSignature.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Misc/SecureHash.h"
+#include "Misc/Crc.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "RuntimeState/WetBoneOptimizationCacheBuilder.h"
@@ -14,6 +15,7 @@
 #include "RuntimeState/WCALODVertexColorBuilder.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
+#include "Serialization/CustomVersion.h"
 #include "UObject/MetaData.h"
 #include "UObject/Package.h"
 #include "DataAssets/WetnessProfile.h"
@@ -26,6 +28,250 @@ namespace
     static constexpr float CoincidentVertexNeighborTolerance = 0.001f;
     static constexpr int32 DWCRuntimeBulkPayloadMagic = 0x44574342; // DWCB
     static constexpr int32 DWCMinSupportedRuntimeBulkDataVersion = 1;
+#if WITH_EDITORONLY_DATA
+    static constexpr int32 DWCOriginalUVTopologyBulkMagic = 0x44574354; // DWCT
+    static constexpr int32 DWCOriginalUVTopologyBulkVersion = 1;
+
+    struct FDWCAssetSerializationVersion
+    {
+        enum Type
+        {
+            BeforeCustomVersionWasAdded = 0,
+            EditorOriginalUVTopologyBulk = 1,
+            LatestVersion = EditorOriginalUVTopologyBulk
+        };
+
+        static const FGuid GUID;
+    };
+
+    const FGuid FDWCAssetSerializationVersion::GUID(0xD87CD7B1, 0x5EAF4C3A, 0x92C618D0, 0x7F0A4B29);
+    const FCustomVersionRegistration GDWCAssetSerializationVersion(
+        FDWCAssetSerializationVersion::GUID,
+        FDWCAssetSerializationVersion::LatestVersion,
+        TEXT("DWCAssetSerializationVersion"));
+
+    void SerializeOriginalUVTopologyRecord(FArchive& Ar, FDWCEditorUVTopologyData& Topology)
+    {
+        Ar << Topology.bIsValid;
+        Ar << Topology.LODIndex;
+        Ar << Topology.UVChannelIndex;
+        Ar << Topology.BuildSignature;
+        Ar << Topology.GeneratorVersion;
+
+        int32 IslandCount = Topology.Islands.Num();
+        Ar << IslandCount;
+        if (Ar.IsLoading())
+        {
+            if (IslandCount < 0)
+            {
+                Ar.SetError();
+                return;
+            }
+            Topology.Islands.SetNum(IslandCount);
+        }
+
+        for (FDWCOriginalUVIslandTopology& Island : Topology.Islands)
+        {
+            Ar << Island.MaterialSlotIndex;
+            Ar << Island.IslandID;
+            Ar << Island.TriangleIndices;
+
+            bool bBoundsValid = Island.UVBounds.bIsValid;
+            FVector2D BoundsMin = Island.UVBounds.Min;
+            FVector2D BoundsMax = Island.UVBounds.Max;
+            Ar << bBoundsValid;
+            Ar << BoundsMin;
+            Ar << BoundsMax;
+            Ar << Island.UVArea;
+            if (Ar.IsLoading())
+            {
+                Island.UVBounds = bBoundsValid
+                    ? FBox2D(BoundsMin, BoundsMax)
+                    : FBox2D(ForceInit);
+            }
+        }
+    }
+
+    FDWCEditorUVTopologyDescriptor MakeOriginalUVTopologyDescriptor(
+        const FDWCEditorUVTopologyData& Topology,
+        const int64 SerializedPayloadBytes,
+        const uint32 PayloadHash)
+    {
+        FDWCEditorUVTopologyDescriptor Descriptor;
+        Descriptor.bIsValid = Topology.bIsValid;
+        Descriptor.LODIndex = Topology.LODIndex;
+        Descriptor.UVChannelIndex = Topology.UVChannelIndex;
+        Descriptor.BuildSignature = Topology.BuildSignature;
+        Descriptor.GeneratorVersion = Topology.GeneratorVersion;
+        Descriptor.IslandCount = Topology.Islands.Num();
+        Descriptor.SerializedPayloadBytes = SerializedPayloadBytes;
+        Descriptor.PayloadHash = PayloadHash;
+        for (const FDWCOriginalUVIslandTopology& Island : Topology.Islands)
+        {
+            Descriptor.TriangleReferenceCount += Island.TriangleIndices.Num();
+        }
+        return Descriptor;
+    }
+
+    bool BuildOriginalUVTopologyBulkBytes(
+        const TArray<FDWCEditorUVTopologyData>& Topologies,
+        TArray<FDWCEditorUVTopologyDescriptor>& OutDescriptors,
+        TArray<uint8>& OutBytes,
+        FString* OutErrorMessage)
+    {
+        OutDescriptors.Reset();
+        OutBytes.Reset();
+
+        TSet<int32> SeenLODIndices;
+        TArray<TArray<uint8>> RecordBytes;
+        RecordBytes.Reserve(Topologies.Num());
+        OutDescriptors.Reserve(Topologies.Num());
+        for (const FDWCEditorUVTopologyData& Topology : Topologies)
+        {
+            if (Topology.LODIndex < 0 || SeenLODIndices.Contains(Topology.LODIndex))
+            {
+                DWC::Error::SetMessage(
+                    OutErrorMessage,
+                    FString::Printf(TEXT("Original UV topology contains an invalid or duplicate LOD index %d."), Topology.LODIndex));
+                return false;
+            }
+            SeenLODIndices.Add(Topology.LODIndex);
+
+            TArray<uint8>& Bytes = RecordBytes.AddDefaulted_GetRef();
+            FMemoryWriter RecordWriter(Bytes, true);
+            FDWCEditorUVTopologyData WritableTopology = Topology;
+            SerializeOriginalUVTopologyRecord(RecordWriter, WritableTopology);
+            if (RecordWriter.IsError())
+            {
+                DWC::Error::SetMessage(
+                    OutErrorMessage,
+                    FString::Printf(TEXT("Could not serialize Original UV topology for LOD%d."), Topology.LODIndex));
+                return false;
+            }
+            const uint32 PayloadHash = FCrc::MemCrc32(Bytes.GetData(), Bytes.Num());
+            OutDescriptors.Add(MakeOriginalUVTopologyDescriptor(Topology, Bytes.Num(), PayloadHash));
+        }
+
+        FMemoryWriter Writer(OutBytes, true);
+        int32 Magic = DWCOriginalUVTopologyBulkMagic;
+        int32 Version = DWCOriginalUVTopologyBulkVersion;
+        int32 RecordCount = RecordBytes.Num();
+        Writer << Magic;
+        Writer << Version;
+        Writer << RecordCount;
+        for (int32 RecordIndex = 0; RecordIndex < RecordCount; ++RecordIndex)
+        {
+            int32 LODIndex = Topologies[RecordIndex].LODIndex;
+            int32 ByteCount = RecordBytes[RecordIndex].Num();
+            uint32 PayloadHash = OutDescriptors[RecordIndex].PayloadHash;
+            Writer << LODIndex;
+            Writer << ByteCount;
+            Writer << PayloadHash;
+            Writer.Serialize(RecordBytes[RecordIndex].GetData(), ByteCount);
+        }
+        if (Writer.IsError())
+        {
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("Could not serialize the Original UV topology bulk payload."));
+            return false;
+        }
+        DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+        return true;
+    }
+
+    bool ReadOriginalUVTopologyBulkBytes(
+        const TConstArrayView<uint8> Bytes,
+        const TArray<FDWCEditorUVTopologyDescriptor>& Descriptors,
+        TArray<FDWCEditorUVTopologyData>& OutTopologies,
+        FString* OutErrorMessage)
+    {
+        OutTopologies.Reset();
+        FMemoryReaderView Reader(Bytes, true);
+        int32 Magic = 0;
+        int32 Version = 0;
+        int32 RecordCount = 0;
+        Reader << Magic;
+        Reader << Version;
+        Reader << RecordCount;
+        if (Reader.IsError() || Magic != DWCOriginalUVTopologyBulkMagic ||
+            Version != DWCOriginalUVTopologyBulkVersion || RecordCount < 0 ||
+            RecordCount != Descriptors.Num())
+        {
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("Original UV topology bulk header is missing, corrupt, or unsupported."));
+            return false;
+        }
+
+        OutTopologies.Reserve(RecordCount);
+        TSet<int32> SeenLODIndices;
+        for (int32 RecordIndex = 0; RecordIndex < RecordCount; ++RecordIndex)
+        {
+            int32 LODIndex = INDEX_NONE;
+            int32 ByteCount = 0;
+            uint32 StoredHash = 0;
+            Reader << LODIndex;
+            Reader << ByteCount;
+            Reader << StoredHash;
+            const int64 RemainingBytes = Reader.TotalSize() - Reader.Tell();
+            if (Reader.IsError() || LODIndex < 0 || SeenLODIndices.Contains(LODIndex) ||
+                ByteCount < 0 || static_cast<int64>(ByteCount) > RemainingBytes)
+            {
+                DWC::Error::SetMessage(OutErrorMessage, TEXT("Original UV topology bulk record table is corrupt."));
+                return false;
+            }
+            SeenLODIndices.Add(LODIndex);
+
+            const int64 RecordOffset = Reader.Tell();
+            const TConstArrayView<uint8> RecordBytes = Bytes.Slice(
+                static_cast<int32>(RecordOffset),
+                ByteCount);
+            Reader.Seek(RecordOffset + ByteCount);
+            if (Reader.IsError() || FCrc::MemCrc32(RecordBytes.GetData(), RecordBytes.Num()) != StoredHash)
+            {
+                DWC::Error::SetMessage(
+                    OutErrorMessage,
+                    FString::Printf(TEXT("Original UV topology payload hash failed for LOD%d."), LODIndex));
+                return false;
+            }
+
+            FDWCEditorUVTopologyData& Topology = OutTopologies.AddDefaulted_GetRef();
+            FMemoryReaderView RecordReader(RecordBytes, true);
+            SerializeOriginalUVTopologyRecord(RecordReader, Topology);
+            const FDWCEditorUVTopologyDescriptor* Descriptor = Descriptors.FindByPredicate(
+                [LODIndex](const FDWCEditorUVTopologyDescriptor& Candidate)
+                {
+                    return Candidate.LODIndex == LODIndex;
+                });
+            if (RecordReader.IsError() || RecordReader.Tell() != RecordReader.TotalSize() ||
+                Descriptor == nullptr || Topology.LODIndex != LODIndex ||
+                Descriptor->bIsValid != Topology.bIsValid ||
+                Descriptor->UVChannelIndex != Topology.UVChannelIndex ||
+                Descriptor->BuildSignature != Topology.BuildSignature ||
+                Descriptor->GeneratorVersion != Topology.GeneratorVersion ||
+                Descriptor->IslandCount != Topology.Islands.Num() ||
+                Descriptor->SerializedPayloadBytes != ByteCount ||
+                Descriptor->PayloadHash != StoredHash)
+            {
+                DWC::Error::SetMessage(
+                    OutErrorMessage,
+                    FString::Printf(TEXT("Original UV topology descriptor does not match the LOD%d payload."), LODIndex));
+                return false;
+            }
+            int32 TriangleReferenceCount = 0;
+            for (const FDWCOriginalUVIslandTopology& Island : Topology.Islands)
+            {
+                TriangleReferenceCount += Island.TriangleIndices.Num();
+            }
+            if (Descriptor->TriangleReferenceCount != TriangleReferenceCount)
+            {
+                DWC::Error::SetMessage(
+                    OutErrorMessage,
+                    FString::Printf(TEXT("Original UV topology triangle count does not match the LOD%d descriptor."), LODIndex));
+                return false;
+            }
+        }
+        DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+        return true;
+    }
+#endif
     static constexpr int64 RuntimeBulkProgressThresholdBytes = 8ll * 1024ll * 1024ll;
     static constexpr float DWCRuntimeBulkHeaderProgress = 0.2f;
     static constexpr float DWCRuntimeBulkCPUVertexProgress = 0.25f;
@@ -205,7 +451,7 @@ namespace
         return BakedMap != nullptr &&
                BakedMap->BakedWrinkleNormalMap != nullptr &&
 #if WITH_EDITORONLY_DATA
-               BakedMap->BakedWrinkleMask != nullptr &&
+               BakedMap->HasBakedWrinkleMask() &&
 #endif
                BakedMap->BakeGuid.IsValid() &&
                !BakedMap->BuildSignature.IsEmpty();
@@ -222,7 +468,7 @@ namespace
         {
             if ((!Patch.bEnabled && !bIncludeDisabled) ||
                 Patch.MaterialSlotIndex != MaterialSlotIndex ||
-                Patch.WrinkleNormalTexture == nullptr)
+                !Patch.HasWrinkleNormalTexture())
             {
                 continue;
             }
@@ -254,7 +500,7 @@ namespace
         {
             if ((!Patch.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
                 Patch.MaterialSlotIndex == INDEX_NONE ||
-                Patch.WrinkleNormalTexture == nullptr ||
+                !Patch.HasWrinkleNormalTexture() ||
                 !Asset.IsMaterialSlotWettable(Patch.MaterialSlotIndex) ||
                 WrinkleData.IsUsingCustomWrinkleNormalMap(
                     Patch.MaterialSlotIndex))
@@ -1609,6 +1855,21 @@ bool UWetClothingAsset::HasAnyWettableMaterialSlot() const
         });
 }
 
+bool UWetClothingAsset::HasRenderProfileBakeContent() const
+{
+    return Authored.PartData.EditableWetPartData.MaterialSlots.ContainsByPredicate(
+        [](const FWetClothingAuthoredMaterialSlot& Slot)
+        {
+            return Slot.bIsWettableSlot &&
+                   Slot.MaterialSlotIndex != INDEX_NONE &&
+                   Slot.WetPartEntries.ContainsByPredicate(
+                       [](const FWetClothingWetPartEntry& Entry)
+                       {
+                           return Entry.WetPartID != 0 && !Entry.AssignedUVIslandIDs.IsEmpty();
+                       });
+        });
+}
+
 bool UWetClothingAsset::DoesMaterialSlotUseSurfaceWater(const int32 MaterialSlotIndex) const
 {
     const FWetClothingEditableWetPartData& WetPartData = Authored.PartData.EditableWetPartData;
@@ -1693,7 +1954,7 @@ bool UWetClothingAsset::HasWrinkleBakeContent() const
         if (Patch.MaterialSlotIndex != INDEX_NONE &&
             IsMaterialSlotWettable(Patch.MaterialSlotIndex) &&
             !Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(Patch.MaterialSlotIndex) &&
-            Patch.WrinkleNormalTexture != nullptr &&
+            Patch.HasWrinkleNormalTexture() &&
             Patch.HasValidSurfaceAnchor() &&
             Patch.HasValidSurfaceFrame() &&
             Patch.HasValidSurfaceFootprint())
@@ -1788,6 +2049,9 @@ bool UWetClothingAsset::HasValidDataUVForLOD(const int32 LODIndex) const
 
 void UWetClothingAsset::Serialize(FArchive& Ar)
 {
+#if WITH_EDITORONLY_DATA
+    Ar.UsingCustomVersion(FDWCAssetSerializationVersion::GUID);
+#endif
     const bool bSerializePersistentRuntimeBulkData = Ar.IsPersistent();
     if (Ar.IsSaving() && bSerializePersistentRuntimeBulkData)
     {
@@ -1833,6 +2097,38 @@ void UWetClothingAsset::Serialize(FArchive& Ar)
         bRuntimeBulkDataLoadFailed = false;
         bRuntimeBulkDataDirty = false;
     }
+
+#if WITH_EDITORONLY_DATA
+    const bool bSerializeEditorTopologyBulk =
+        Ar.IsPersistent() && !Ar.IsFilterEditorOnly() && !Ar.IsCooking() && !Ar.IsLoadingFromCookedPackage();
+    const bool bArchiveHasEditorTopologyBulk =
+        Ar.CustomVer(FDWCAssetSerializationVersion::GUID) >=
+        FDWCAssetSerializationVersion::EditorOriginalUVTopologyBulk;
+    if (bSerializeEditorTopologyBulk && (Ar.IsSaving() || bArchiveHasEditorTopologyBulk))
+    {
+        bool bHasSerializedEditorTopologyBulk = OriginalUVTopologyBulkData.GetBulkDataSize() > 0;
+        Ar << bHasSerializedEditorTopologyBulk;
+        if (bHasSerializedEditorTopologyBulk)
+        {
+            if (Ar.IsSaving())
+            {
+                OriginalUVTopologyBulkData.SetBulkDataFlags(
+                    BULKDATA_Force_NOT_InlinePayload |
+                    BULKDATA_LazyLoadable);
+                OriginalUVTopologyBulkData.ClearBulkDataFlags(BULKDATA_ForceInlinePayload);
+            }
+            OriginalUVTopologyBulkData.Serialize(Ar, this, INDEX_NONE, false, EFileRegionType::None);
+        }
+
+        if (Ar.IsLoading())
+        {
+            bOriginalUVTopologyBulkLoaded =
+                !bHasSerializedEditorTopologyBulk || OriginalUVTopologyBulkData.GetBulkDataSize() == 0;
+            bOriginalUVTopologyBulkLoadFailed = false;
+            LoadedOriginalUVTopologies.Reset();
+        }
+    }
+#endif
 }
 
 void UWetClothingAsset::PostLoad()
@@ -1889,6 +2185,35 @@ void UWetClothingAsset::PostLoad()
                 RepairedIdentityCount);
         }
     }
+
+    bool bCompactedTransparencyHistory = false;
+    for (FWetClothingTransparencyLayerData& Layer : Authored.TransparencyData.TransparencyLayers)
+    {
+        if (Layer.EditorStrokeHistory == nullptr &&
+            (!Layer.EditableStrokes.IsEmpty() || !Layer.RevealColorPaintStrokes.IsEmpty()))
+        {
+            Layer.EditorStrokeHistory = NewObject<UDWCTransparencyLayerStrokeHistory>(
+                this,
+                NAME_None,
+                RF_Transactional);
+            Layer.EditorStrokeHistory->AlphaStrokes = MoveTemp(Layer.EditableStrokes);
+            Layer.EditorStrokeHistory->RevealColorStrokes = MoveTemp(Layer.RevealColorPaintStrokes);
+            bCompactedTransparencyHistory = true;
+        }
+
+        if (Layer.EditorStrokeHistory != nullptr)
+        {
+            Layer.EditorStrokeHistory->SetFlags(RF_Transactional);
+            bCompactedTransparencyHistory |= Layer.EditorStrokeHistory->CompactLegacySamples();
+        }
+    }
+    if (bCompactedTransparencyHistory)
+    {
+        MarkPackageDirty();
+    }
+#endif
+#if WITH_EDITOR
+    NormalizeLegacyBakeFailures();
 #endif
     if (Metadata.DWCSkeletalMesh != nullptr && Metadata.DWCSkeletalMesh == Metadata.SourceSkeletalMesh)
     {
@@ -1900,13 +2225,34 @@ void UWetClothingAsset::PostLoad()
     bRuntimeBulkDataLoadFailed = false;
     bRuntimeBulkDataDirty = false;
 #if WITH_EDITORONLY_DATA
+    if (!Derived.Inline.OriginalUVTopologies.IsEmpty())
+    {
+        FString MigrationError;
+        if (!StoreOriginalUVTopologiesToBulkData(
+                MoveTemp(Derived.Inline.OriginalUVTopologies),
+                &MigrationError))
+        {
+            UE_LOG(
+                LogDWC,
+                Error,
+                TEXT("WetClothingAsset: could not migrate legacy Original UV topology on '%s': %s"),
+                *GetNameSafe(this),
+                *MigrationError);
+        }
+        else
+        {
+            Derived.Inline.OriginalUVTopologies.Reset();
+            MarkPackageDirty();
+        }
+    }
+
     // Seal any legacy asset that already owns persistent UV/topology payloads before schema validation.
     // Unsupported layouts remain inspectable but can never be regenerated in place.
     const bool bHadPersistentDataUVLayout =
         Metadata.DWCSkeletalMesh != nullptr &&
         Metadata.DWCDataUVChannelIndex != INDEX_NONE &&
         !Derived.Inline.DataUVMetadata.IsEmpty() &&
-        !Derived.Inline.OriginalUVTopologies.IsEmpty();
+        !Derived.Inline.OriginalUVTopologyDescriptors.IsEmpty();
     Metadata.bDataUVLayoutSealed = Metadata.bDataUVLayoutSealed || bHadPersistentDataUVLayout;
     if (Metadata.AssetDataVersion != CurrentAssetDataVersion)
     {
@@ -1923,6 +2269,8 @@ void UWetClothingAsset::PostLoad()
         Derived.Inline.BakeState.GPUMaps = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
                                 ? EDWCBakeStatus::Required
                                 : EDWCBakeStatus::Disabled;
+        Derived.Inline.BakeState.RenderProfileData = EDWCBakeStatus::Required;
+        Derived.Inline.BakeState.OutputFailures.Reset();
         Derived.Inline.BakeState.GeneratedOutputMask = 0;
         Derived.Inline.BakeState.SavedOutputMask = 0;
         UE_LOG(
@@ -1960,7 +2308,7 @@ void UWetClothingAsset::PostLoad()
     }
 #endif
 #if WITH_EDITOR
-    PendingRuntimeSaveOutputMask = 0;
+    PendingEditorSaveOutputMask = 0;
     EditorSavePendingOutputMaskSnapshot = 0;
     EditorSaveSavedOutputMaskSnapshot = 0;
     bRuntimeDataEditorSaveAttemptActive = false;
@@ -2246,7 +2594,7 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
     {
         MetadataOutputsBeingSaved |= DWCBakeOutput::GeneratedDataUV;
     }
-    if (!Derived.Inline.OriginalUVTopologies.IsEmpty())
+    if (!Derived.Inline.OriginalUVTopologyDescriptors.IsEmpty())
     {
         MetadataOutputsBeingSaved |= DWCBakeOutput::OriginalUVTopology;
     }
@@ -2270,6 +2618,10 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
     {
         MetadataOutputsBeingSaved |= DWCBakeOutput::TransparencyMaps;
     }
+    if (DWCBuildStatus::IsUsable(Derived.Inline.BakeState.RenderProfileData))
+    {
+        MetadataOutputsBeingSaved |= DWCBakeOutput::RenderProfileData;
+    }
     Derived.Inline.BakeState.GeneratedOutputMask |= MetadataOutputsBeingSaved | RuntimeOutputsBeingSaved;
     Derived.Inline.BakeState.SavedOutputMask |= MetadataOutputsBeingSaved;
 #endif
@@ -2278,6 +2630,9 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
     {
 #if WITH_EDITORONLY_DATA
         Derived.Inline.BakeState.SavedOutputMask |= RuntimeOutputsBeingSaved;
+#endif
+#if WITH_EDITOR
+        PendingEditorSaveOutputMask &= ~(MetadataOutputsBeingSaved | RuntimeOutputsBeingSaved);
 #endif
         return;
     }
@@ -2306,7 +2661,7 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
         bRuntimeBulkDataLoadFailed = false;
         bRuntimeBulkDataDirty = false;
 #if WITH_EDITOR
-        PendingRuntimeSaveOutputMask &= ~RuntimeSavedOutputMask;
+        PendingEditorSaveOutputMask &= ~(MetadataOutputsBeingSaved | RuntimeSavedOutputMask);
 #endif
         return;
     }
@@ -2374,7 +2729,7 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
     Derived.Inline.BakeState.SavedOutputMask |= RuntimeOutputsBeingSaved;
 #endif
 #if WITH_EDITOR
-    PendingRuntimeSaveOutputMask &= ~RuntimeSavedOutputMask;
+    PendingEditorSaveOutputMask &= ~(MetadataOutputsBeingSaved | RuntimeSavedOutputMask);
 #endif
 }
 
@@ -2406,7 +2761,7 @@ void UWetClothingAsset::MarkRuntimeBulkDataDirty(const int32 OutputMask)
                                         : (DWCBakeOutput::CPURuntimeData |
                                            DWCBakeOutput::GPURuntimeData |
                                            DWCBakeOutput::GPUMaps);
-    PendingRuntimeSaveOutputMask |= RuntimeOutputMask;
+    PendingEditorSaveOutputMask |= RuntimeOutputMask;
     if (bRuntimeDataEditorSaveAttemptActive)
     {
         EditorSavePendingOutputMaskSnapshot |= RuntimeOutputMask;
@@ -2636,7 +2991,7 @@ bool UWetClothingAsset::InitializeNewAsset(
         Metadata.DWCDataUVChannelIndex != INDEX_NONE ||
         !Derived.Inline.DataUVMetadata.IsEmpty();
 #if WITH_EDITORONLY_DATA
-    if (bAlreadyInitialized || !Derived.Inline.OriginalUVTopologies.IsEmpty())
+    if (bAlreadyInitialized || !Derived.Inline.OriginalUVTopologyDescriptors.IsEmpty())
 #else
     if (bAlreadyInitialized)
 #endif
@@ -2841,7 +3196,7 @@ bool UWetClothingAsset::HasLockedDataUVLayout() const
            (Metadata.DWCSkeletalMesh != nullptr &&
             Metadata.DWCDataUVChannelIndex != INDEX_NONE &&
             !Derived.Inline.DataUVMetadata.IsEmpty() &&
-            !Derived.Inline.OriginalUVTopologies.IsEmpty());
+            !Derived.Inline.OriginalUVTopologyDescriptors.IsEmpty());
 #else
     return false;
 #endif
@@ -2858,7 +3213,7 @@ bool UWetClothingAsset::CommitInitialDataUVLayout(USkeletalMesh* InRuntimeMesh, 
         Metadata.DWCSkeletalMesh != nullptr ||
         Metadata.DWCDataUVChannelIndex != INDEX_NONE ||
         !Derived.Inline.DataUVMetadata.IsEmpty() ||
-        !Derived.Inline.OriginalUVTopologies.IsEmpty();
+        !Derived.Inline.OriginalUVTopologyDescriptors.IsEmpty();
     if (bHasAnyExistingLayoutPayload)
     {
         DWC::Error::SetMessage(
@@ -2881,17 +3236,20 @@ bool UWetClothingAsset::CommitInitialDataUVLayout(USkeletalMesh* InRuntimeMesh, 
         DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC UV Channel commit requires both metadata and Original UV topology payloads."));
         return false;
     }
+    if (!StoreOriginalUVTopologiesToBulkData(MoveTemp(InTopologies), OutErrorMessage))
+    {
+        return false;
+    }
+
     Metadata.DWCSkeletalMesh = InRuntimeMesh;
     Metadata.DWCDataUVChannelIndex = InDWCDataUVChannelIndex;
     Metadata.SetupSettings.PreferredDWCDataUVChannelIndex = InDWCDataUVChannelIndex;
     Derived.Inline.DataUVMetadata = MoveTemp(InMetadata);
-    Derived.Inline.OriginalUVTopologies = MoveTemp(InTopologies);
     Metadata.bDataUVLayoutSealed = true;
 
-    Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Valid;
-        MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV | DWCBakeOutput::OriginalUVTopology);
+    SetBakeOutputStatus(DWCBakeOutput::GeneratedDataUV, EDWCBakeStatus::Valid);
+    SetBakeOutputStatus(DWCBakeOutput::OriginalUVTopology, EDWCBakeStatus::Valid);
     MarkSimulationBakeOutOfDate();
-    Derived.Inline.BakeState.LastFailure.Reset();
     MarkPackageDirty();
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
@@ -2931,18 +3289,21 @@ bool UWetClothingAsset::ReplaceDataUVLayout(
         return false;
     }
 
+    if (!StoreOriginalUVTopologiesToBulkData(MoveTemp(InTopologies), OutErrorMessage))
+    {
+        return false;
+    }
+
     Metadata.DWCSkeletalMesh = InRuntimeMesh;
     Metadata.DWCDataUVChannelIndex = InDWCDataUVChannelIndex;
     Metadata.SetupSettings.PreferredDWCDataUVChannelIndex = InDWCDataUVChannelIndex;
     Derived.Inline.DataUVMetadata = MoveTemp(InMetadata);
-    Derived.Inline.OriginalUVTopologies = MoveTemp(InTopologies);
     Metadata.bDataUVLayoutSealed = true;
 
-    Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;
-    Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Valid;
-    MarkBakeOutputGenerated (DWCBakeOutput::GeneratedDataUV | DWCBakeOutput::OriginalUVTopology);
+    SetBakeOutputStatus(DWCBakeOutput::GeneratedDataUV, EDWCBakeStatus::Valid);
+    SetBakeOutputStatus(DWCBakeOutput::OriginalUVTopology, EDWCBakeStatus::Valid);
     MarkSimulationBakeOutOfDate();
-    MarkVisualBakeOutOfDate();Derived.Inline.BakeState.LastFailure.Reset();
+    MarkVisualBakeOutOfDate();
     MarkPackageDirty();
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
@@ -3001,11 +3362,9 @@ bool UWetClothingAsset::CommitDataUVChannelRelocation(
         LODMetadata.DataUVOutputSignature = NewOutputSignatures[MetadataIndex];
     }
 
-    Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;
-        MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV);
+    SetBakeOutputStatus(DWCBakeOutput::GeneratedDataUV, EDWCBakeStatus::Valid);
     MarkSimulationBakeOutOfDate();
     MarkVisualBakeOutOfDate();
-    Derived.Inline.BakeState.LastFailure.Reset();
     MarkPackageDirty();
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
@@ -3018,6 +3377,46 @@ bool UWetClothingAsset::CommitDataUVChannelRelocation(
 int32 UWetClothingAsset::PruneDataUVLODData(const TSet<int32>& RetainedLODIndices)
 {
 #if WITH_EDITORONLY_DATA
+    int32 RemovedTopologyCount = 0;
+    const bool bNeedsTopologyPrune = Derived.Inline.OriginalUVTopologyDescriptors.ContainsByPredicate(
+        [&RetainedLODIndices](const FDWCEditorUVTopologyDescriptor& Descriptor)
+        {
+            return !RetainedLODIndices.Contains(Descriptor.LODIndex);
+        });
+    if (bNeedsTopologyPrune)
+    {
+        TArray<FDWCEditorUVTopologyData> Topologies;
+        FString TopologyError;
+        if (CopyOriginalUVTopologiesForEditor(Topologies, &TopologyError))
+        {
+            RemovedTopologyCount = Topologies.RemoveAll(
+                [&RetainedLODIndices](const FDWCEditorUVTopologyData& Topology)
+                {
+                    return !RetainedLODIndices.Contains(Topology.LODIndex);
+                });
+            if (RemovedTopologyCount > 0 &&
+                !StoreOriginalUVTopologiesToBulkData(MoveTemp(Topologies), &TopologyError))
+            {
+                UE_LOG(
+                    LogDWC,
+                    Error,
+                    TEXT("WetClothingAsset: failed to prune Original UV topology on '%s': %s"),
+                    *GetNameSafe(this),
+                    *TopologyError);
+                RemovedTopologyCount = 0;
+            }
+        }
+        else
+        {
+            UE_LOG(
+                LogDWC,
+                Error,
+                TEXT("WetClothingAsset: failed to load Original UV topology for LOD pruning on '%s': %s"),
+                *GetNameSafe(this),
+                *TopologyError);
+        }
+    }
+
     const int32 RemovedMetadataCount = Derived.Inline.DataUVMetadata.RemoveAll(
         [&RetainedLODIndices](const FDWCDataUVLODMetadata& Metadata)
         {
@@ -3059,7 +3458,8 @@ int32 UWetClothingAsset::PruneDataUVLODData(const TSet<int32>& RetainedLODIndice
                    !RetainedLODIndices.Contains(Data.TargetLODIndex);
         });
 
-    if (RemovedMetadataCount > 0 || RemovedGPUDataCount > 0 || RemovedVertexColorDataCount > 0)
+    if (RemovedMetadataCount > 0 || RemovedTopologyCount > 0 ||
+        RemovedGPUDataCount > 0 || RemovedVertexColorDataCount > 0)
     {
         MarkSimulationBakeOutOfDate();
         MarkVisualBakeOutOfDate();
@@ -3074,6 +3474,7 @@ int32 UWetClothingAsset::PruneDataUVLODData(const TSet<int32>& RetainedLODIndice
 void UWetClothingAsset::MarkGeneratedDataUVOutOfDate()
 {
     Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::OutOfDate;
+    ClearBakeOutputFailure(DWCBakeOutput::GeneratedDataUV);
     MarkSimulationBakeOutOfDate();
 }
 
@@ -3085,6 +3486,10 @@ void UWetClothingAsset::MarkSimulationBakeOutOfDate()
         Derived.Inline.BakeState.CPURuntimeData = EDWCBakeStatus::Disabled;
         Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Disabled;
         Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Disabled;
+        ClearBakeOutputFailure(
+            DWCBakeOutput::CPURuntimeData |
+            DWCBakeOutput::GPURuntimeData |
+            DWCBakeOutput::GPUMaps);
         return;
     }
 
@@ -3102,7 +3507,11 @@ void UWetClothingAsset::MarkSimulationBakeOutOfDate()
                             ? (HasGPUMapDataPayload()
                                    ? EDWCBakeStatus::OutOfDate
                                    : EDWCBakeStatus::Required)
-                            : EDWCBakeStatus::Disabled;
+                             : EDWCBakeStatus::Disabled;
+    ClearBakeOutputFailure(
+        DWCBakeOutput::CPURuntimeData |
+        DWCBakeOutput::GPURuntimeData |
+        DWCBakeOutput::GPUMaps);
 }
 
 void UWetClothingAsset::MarkWrinkleBakeOutOfDate()
@@ -3111,22 +3520,166 @@ void UWetClothingAsset::MarkWrinkleBakeOutOfDate()
                                 ? (HasSavedBakeOutput(DWCBakeOutput::WrinkleMaps)
                                        ? EDWCBakeStatus::OutOfDate
                                        : EDWCBakeStatus::Required)
-                                : EDWCBakeStatus::Disabled;
+                                 : EDWCBakeStatus::Disabled;
+    ClearBakeOutputFailure(DWCBakeOutput::WrinkleMaps);
 }
 
 void UWetClothingAsset::MarkVisualBakeOutOfDate()
 {
     MarkWrinkleBakeOutOfDate();
+    MarkRenderProfileBakeOutOfDate();
     Derived.Inline.BakeState.TransparencyMaps = HasTransparencyBakeContent()
                                      ? (HasSavedBakeOutput(DWCBakeOutput::TransparencyMaps)
                                             ? EDWCBakeStatus::OutOfDate
                                             : EDWCBakeStatus::Required)
-                                     : EDWCBakeStatus::Disabled;
+                                      : EDWCBakeStatus::Disabled;
+    ClearBakeOutputFailure(DWCBakeOutput::TransparencyMaps);
 }
 
-void UWetClothingAsset::SetLastBakeFailure(const FString& InFailure)
+#if WITH_EDITOR
+UDWCTransparencyLayerStrokeHistory* UWetClothingAsset::EnsureTransparencyLayerStrokeHistory(
+    const FGuid LayerGuid)
 {
-    Derived.Inline.BakeState.LastFailure = InFailure;
+    FWetClothingTransparencyLayerData* Layer = Authored.TransparencyData.TransparencyLayers.FindByPredicate(
+        [LayerGuid](const FWetClothingTransparencyLayerData& Candidate)
+        {
+            return Candidate.LayerGuid == LayerGuid;
+        });
+    if (Layer == nullptr)
+    {
+        return nullptr;
+    }
+
+    if (Layer->EditorStrokeHistory == nullptr)
+    {
+        Layer->EditorStrokeHistory = NewObject<UDWCTransparencyLayerStrokeHistory>(
+            this,
+            NAME_None,
+            RF_Transactional);
+        Layer->EditorStrokeHistory->AlphaStrokes = MoveTemp(Layer->EditableStrokes);
+        Layer->EditorStrokeHistory->RevealColorStrokes = MoveTemp(Layer->RevealColorPaintStrokes);
+    }
+    else
+    {
+        Layer->EditorStrokeHistory->SetFlags(RF_Transactional);
+    }
+
+    Layer->EditorStrokeHistory->CompactLegacySamples();
+    return Layer->EditorStrokeHistory;
+}
+#endif
+
+void UWetClothingAsset::MarkRenderProfileBakeOutOfDate()
+{
+    const bool bRequired = HasRenderProfileBakeContent();
+    const bool bHasPriorOutput =
+        Derived.Inline.BakedWetPartData.IsValid() ||
+        HasGeneratedBakeOutput(DWCBakeOutput::RenderProfileData) ||
+        HasSavedBakeOutput(DWCBakeOutput::RenderProfileData);
+    Derived.Inline.BakeState.RenderProfileData = bRequired
+        ? (bHasPriorOutput ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required)
+        : EDWCBakeStatus::Disabled;
+    ClearBakeOutputFailure(DWCBakeOutput::RenderProfileData);
+}
+
+void UWetClothingAsset::SetBakeOutputFailure(const int32 OutputMask, const FString& InFailure)
+{
+    ClearBakeOutputFailure(OutputMask);
+    if (InFailure.IsEmpty())
+    {
+        return;
+    }
+
+    for (const int32 Output : DWCBakeOutput::GetOutputs())
+    {
+        if (!DWCBakeOutput::Has(OutputMask, Output))
+        {
+            continue;
+        }
+        FDWCBakeOutputFailureRecord& Record =
+            Derived.Inline.BakeState.OutputFailures.AddDefaulted_GetRef();
+        Record.Output = Output;
+        Record.Message = InFailure;
+    }
+}
+
+void UWetClothingAsset::ClearBakeOutputFailure(const int32 OutputMask)
+{
+    Derived.Inline.BakeState.OutputFailures.RemoveAll(
+        [OutputMask](const FDWCBakeOutputFailureRecord& Record)
+        {
+            return Record.Output == 0 || DWCBakeOutput::Has(OutputMask, Record.Output);
+        });
+}
+
+FString UWetClothingAsset::GetBakeOutputFailureMessage(const int32 Output) const
+{
+    const FDWCBakeOutputFailureRecord* Record =
+        Derived.Inline.BakeState.OutputFailures.FindByPredicate(
+            [Output](const FDWCBakeOutputFailureRecord& Candidate)
+            {
+                return Candidate.Output == Output;
+            });
+    return Record != nullptr ? Record->Message : FString();
+}
+
+bool UWetClothingAsset::HasBakeOutputFailure(const int32 Output) const
+{
+    return !GetBakeOutputFailureMessage(Output).IsEmpty();
+}
+
+EDWCBakeStatus UWetClothingAsset::GetBakeOutputStatus(const int32 Output) const
+{
+    const FDWCAssetBakeState& State = Derived.Inline.BakeState;
+    switch (Output)
+    {
+    case DWCBakeOutput::GeneratedDataUV: return State.GeneratedDataUV;
+    case DWCBakeOutput::OriginalUVTopology: return State.OriginalUVTopology;
+    case DWCBakeOutput::CPURuntimeData: return State.CPURuntimeData;
+    case DWCBakeOutput::GPURuntimeData: return State.GPURuntimeData;
+    case DWCBakeOutput::GPUMaps: return State.GPUMaps;
+    case DWCBakeOutput::WrinkleMaps: return State.WrinkleMaps;
+    case DWCBakeOutput::TransparencyMaps: return State.TransparencyMaps;
+    case DWCBakeOutput::RenderProfileData: return State.RenderProfileData;
+    default: return EDWCBakeStatus::Disabled;
+    }
+}
+
+void UWetClothingAsset::SetBakeOutputStatus(
+    const int32 Output,
+    const EDWCBakeStatus InStatus,
+    const FString& InFailure)
+{
+    FDWCAssetBakeState& State = Derived.Inline.BakeState;
+    switch (Output)
+    {
+    case DWCBakeOutput::GeneratedDataUV: State.GeneratedDataUV = InStatus; break;
+    case DWCBakeOutput::OriginalUVTopology: State.OriginalUVTopology = InStatus; break;
+    case DWCBakeOutput::CPURuntimeData: State.CPURuntimeData = InStatus; break;
+    case DWCBakeOutput::GPURuntimeData: State.GPURuntimeData = InStatus; break;
+    case DWCBakeOutput::GPUMaps: State.GPUMaps = InStatus; break;
+    case DWCBakeOutput::WrinkleMaps: State.WrinkleMaps = InStatus; break;
+    case DWCBakeOutput::TransparencyMaps: State.TransparencyMaps = InStatus; break;
+    case DWCBakeOutput::RenderProfileData: State.RenderProfileData = InStatus; break;
+    default: return;
+    }
+
+    if (InStatus == EDWCBakeStatus::Failed)
+    {
+        SetBakeOutputFailure(
+            Output,
+            InFailure.IsEmpty()
+                ? TEXT("The output build failed without an error message.")
+                : InFailure);
+    }
+    else
+    {
+        ClearBakeOutputFailure(Output);
+    }
+    if (DWCBuildStatus::IsUsable(InStatus))
+    {
+        MarkBakeOutputGenerated(Output);
+    }
 }
 
 bool UWetClothingAsset::HasSourceMeshContentChanged(FString* OutCurrentSignature) const
@@ -3163,62 +3716,52 @@ bool UWetClothingAsset::HasSourceMeshContentChanged(FString* OutCurrentSignature
 
 void UWetClothingAsset::SetCPURuntimeDataStatus(const EDWCBakeStatus InStatus, const FString& InFailure)
 {
-    Derived.Inline.BakeState.CPURuntimeData = InStatus;
-    if (DWCBuildStatus::IsUsable(InStatus))
-    {
-        MarkBakeOutputGenerated(DWCBakeOutput::CPURuntimeData);
-    }
-    Derived.Inline.BakeState.LastFailure = InFailure;
+    SetBakeOutputStatus(DWCBakeOutput::CPURuntimeData, InStatus, InFailure);
 }
 
 void UWetClothingAsset::SetGPURuntimeDataStatus(const EDWCBakeStatus InStatus, const FString& InFailure)
 {
-    Derived.Inline.BakeState.GPURuntimeData = InStatus;
-    if (DWCBuildStatus::IsUsable(InStatus))
-    {
-        MarkBakeOutputGenerated(DWCBakeOutput::GPURuntimeData);
-    }
-    Derived.Inline.BakeState.LastFailure = InFailure;
+    SetBakeOutputStatus(DWCBakeOutput::GPURuntimeData, InStatus, InFailure);
 }
 
 void UWetClothingAsset::SetGPUMapBakeStatus(const EDWCBakeStatus InStatus, const FString& InFailure)
 {
-    Derived.Inline.BakeState.GPUMaps = InStatus;
-    if (DWCBuildStatus::IsUsable(InStatus))
-    {
-        MarkBakeOutputGenerated(DWCBakeOutput::GPUMaps);
-    }
-    Derived.Inline.BakeState.LastFailure = InFailure;
+    SetBakeOutputStatus(DWCBakeOutput::GPUMaps, InStatus, InFailure);
 }
 
 void UWetClothingAsset::SetWrinkleBakeStatus(const EDWCBakeStatus InStatus, const FString& InFailure)
 {
-    Derived.Inline.BakeState.WrinkleMaps = InStatus;
-    if (DWCBuildStatus::IsUsable(InStatus))
-    {
-        MarkBakeOutputGenerated(DWCBakeOutput::WrinkleMaps);
-    }
-    Derived.Inline.BakeState.LastFailure = InFailure;
+    SetBakeOutputStatus(DWCBakeOutput::WrinkleMaps, InStatus, InFailure);
 }
 
 void UWetClothingAsset::SetTransparencyBakeStatus(const EDWCBakeStatus InStatus, const FString& InFailure)
 {
-    Derived.Inline.BakeState.TransparencyMaps = InStatus;
-    if (DWCBuildStatus::IsUsable(InStatus))
-    {
-        MarkBakeOutputGenerated(DWCBakeOutput::TransparencyMaps);
-    }
-    Derived.Inline.BakeState.LastFailure = InFailure;
+    SetBakeOutputStatus(DWCBakeOutput::TransparencyMaps, InStatus, InFailure);
+}
+
+void UWetClothingAsset::SetRenderProfileBakeStatus(const EDWCBakeStatus InStatus, const FString& InFailure)
+{
+    SetBakeOutputStatus(DWCBakeOutput::RenderProfileData, InStatus, InFailure);
 }
 
 void UWetClothingAsset::MarkBakeOutputGenerated(const int32 OutputMask)
 {
     Derived.Inline.BakeState.GeneratedOutputMask |= OutputMask;
+#if WITH_EDITOR
+    PendingEditorSaveOutputMask |= OutputMask;
+    if (bRuntimeDataEditorSaveAttemptActive)
+    {
+        EditorSavePendingOutputMaskSnapshot |= OutputMask;
+    }
+#endif
 }
 
 void UWetClothingAsset::MarkBakeOutputsSaved(const int32 OutputMask)
 {
     Derived.Inline.BakeState.SavedOutputMask |= OutputMask;
+#if WITH_EDITOR
+    PendingEditorSaveOutputMask &= ~OutputMask;
+#endif
 }
 
 bool UWetClothingAsset::HasGeneratedBakeOutput(const int32 OutputMask) const
@@ -3229,6 +3772,46 @@ bool UWetClothingAsset::HasGeneratedBakeOutput(const int32 OutputMask) const
 bool UWetClothingAsset::HasSavedBakeOutput(const int32 OutputMask) const
 {
     return DWCBakeOutput::Has(Derived.Inline.BakeState.SavedOutputMask, OutputMask);
+}
+
+void UWetClothingAsset::NormalizeLegacyBakeFailures()
+{
+    FDWCAssetBakeState& State = Derived.Inline.BakeState;
+    State.OutputFailures.RemoveAll(
+        [](const FDWCBakeOutputFailureRecord& Record)
+        {
+            return Record.Output <= 0 ||
+                   !DWCBakeOutput::Has(DWCBakeOutput::All, Record.Output) ||
+                   (Record.Output & (Record.Output - 1)) != 0 ||
+                   Record.Message.IsEmpty();
+        });
+
+    TSet<int32> SeenOutputs;
+    State.OutputFailures.RemoveAll(
+        [&SeenOutputs](const FDWCBakeOutputFailureRecord& Record)
+        {
+            if (SeenOutputs.Contains(Record.Output))
+            {
+                return true;
+            }
+            SeenOutputs.Add(Record.Output);
+            return false;
+        });
+
+    if (!State.LastFailure.IsEmpty())
+    {
+        for (const int32 Output : DWCBakeOutput::GetOutputs())
+        {
+            if (GetBakeOutputStatus(Output) == EDWCBakeStatus::Failed &&
+                !HasBakeOutputFailure(Output))
+            {
+                FDWCBakeOutputFailureRecord& Record = State.OutputFailures.AddDefaulted_GetRef();
+                Record.Output = Output;
+                Record.Message = State.LastFailure;
+            }
+        }
+        State.LastFailure.Reset();
+    }
 }
 
 void UWetClothingAsset::RefreshBakeState(const bool bRunDeepValidation)
@@ -3248,18 +3831,17 @@ void UWetClothingAsset::RefreshBakeStateDeep()
 
 void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
 {
-    const EDWCBakeStatus PreviousCPUStatus = Derived.Inline.BakeState.CPURuntimeData;
-    const EDWCBakeStatus PreviousGPUStatus = Derived.Inline.BakeState.GPURuntimeData;
-    const EDWCBakeStatus PreviousGPUMapStatus = Derived.Inline.BakeState.GPUMaps;
-    const EDWCBakeStatus PreviousWrinkleMapStatus = Derived.Inline.BakeState.WrinkleMaps;
-    const EDWCBakeStatus PreviousTransparencyMapStatus = Derived.Inline.BakeState.TransparencyMaps;
-    auto PreserveFailureStatus = [this](const EDWCBakeStatus PreviousStatus, const EDWCBakeStatus NewStatus)
+    auto ResolveRefreshedStatus = [this](const int32 Output, const EDWCBakeStatus NewStatus)
     {
-        return PreviousStatus == EDWCBakeStatus::Failed &&
-               NewStatus != EDWCBakeStatus::Valid &&
-               !Derived.Inline.BakeState.LastFailure.IsEmpty()
-                   ? EDWCBakeStatus::Failed
-                   : NewStatus;
+        if (NewStatus == EDWCBakeStatus::Valid || NewStatus == EDWCBakeStatus::Disabled)
+        {
+            ClearBakeOutputFailure(Output);
+            return NewStatus;
+        }
+        return GetBakeOutputStatus(Output) == EDWCBakeStatus::Failed &&
+               HasBakeOutputFailure(Output)
+            ? EDWCBakeStatus::Failed
+            : NewStatus;
     };
 
     const bool bHasWettableSlots = HasAnyWettableMaterialSlot();
@@ -3288,30 +3870,46 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     const bool bDataUVMetadataValid = bRunDeepValidation
         ? DoesMappedLODRangeHavePayload(RuntimeMesh, Metadata.SetupSettings, IsDataUVMetadataCurrent)
         : DoesSavedDataUVLODRangeHavePayload(Metadata.SetupSettings, Derived.Inline.DataUVMetadata, IsDataUVMetadataCurrent);
-    Derived.Inline.BakeState.GeneratedDataUV = bDataUVMetadataValid
-                                     ? EDWCBakeStatus::Valid
-                                     : (!Derived.Inline.DataUVMetadata.IsEmpty() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
+    const EDWCBakeStatus NewDataUVStatus = bDataUVMetadataValid
+        ? EDWCBakeStatus::Valid
+        : (!Derived.Inline.DataUVMetadata.IsEmpty()
+               ? EDWCBakeStatus::OutOfDate
+               : EDWCBakeStatus::Required);
+    Derived.Inline.BakeState.GeneratedDataUV =
+        ResolveRefreshedStatus(DWCBakeOutput::GeneratedDataUV, NewDataUVStatus);
 
     const int32 CanonicalTopologyLODIndex = RuntimeSimulationLODIndex;
     bool bTopologyValid = false;
     if (RuntimeMesh != nullptr && (!bRunDeepValidation || GetLODCount(RuntimeMesh) > CanonicalTopologyLODIndex))
     {
-        const FDWCEditorUVTopologyData* Topology = FindOriginalUVTopologyForLOD(CanonicalTopologyLODIndex);
+        const FDWCEditorUVTopologyDescriptor* Topology =
+            FindOriginalUVTopologyDescriptorForLOD(CanonicalTopologyLODIndex);
         bTopologyValid =
             Topology != nullptr && Topology->bIsValid &&
             Topology->LODIndex == CanonicalTopologyLODIndex &&
             Topology->UVChannelIndex == Metadata.OriginalUVChannelIndex &&
-            Topology->GeneratorVersion == DWCGeneratedDataVersion::OriginalUVTopology;
+            Topology->GeneratorVersion == DWCGeneratedDataVersion::OriginalUVTopology &&
+            Topology->IslandCount > 0 && Topology->TriangleReferenceCount > 0 &&
+            Topology->SerializedPayloadBytes > 0 &&
+            GetSerializedOriginalUVTopologyBytesForEditor() > 0;
         if (bTopologyValid && bRunDeepValidation)
         {
+            const FDWCEditorUVTopologyHandle TopologyHandle =
+                AcquireOriginalUVTopologyForLOD(CanonicalTopologyLODIndex);
             const FString CurrentTopologySignature = BuildMeshContentSignature(
                 RuntimeMesh, CanonicalTopologyLODIndex, Metadata.OriginalUVChannelIndex);
-            bTopologyValid = !CurrentTopologySignature.IsEmpty() && Topology->BuildSignature == CurrentTopologySignature;
+            bTopologyValid = TopologyHandle.IsValid() &&
+                !CurrentTopologySignature.IsEmpty() &&
+                Topology->BuildSignature == CurrentTopologySignature;
         }
     }
-    Derived.Inline.BakeState.OriginalUVTopology = bTopologyValid
-                                       ? EDWCBakeStatus::Valid
-                                       : (!Derived.Inline.OriginalUVTopologies.IsEmpty() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
+    const EDWCBakeStatus NewTopologyStatus = bTopologyValid
+        ? EDWCBakeStatus::Valid
+        : (!Derived.Inline.OriginalUVTopologyDescriptors.IsEmpty()
+               ? EDWCBakeStatus::OutOfDate
+               : EDWCBakeStatus::Required);
+    Derived.Inline.BakeState.OriginalUVTopology =
+        ResolveRefreshedStatus(DWCBakeOutput::OriginalUVTopology, NewTopologyStatus);
 
     if (!bHasWettableSlots)
     {
@@ -3320,7 +3918,14 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
         Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Disabled;
         Derived.Inline.BakeState.WrinkleMaps = EDWCBakeStatus::Disabled;
         Derived.Inline.BakeState.TransparencyMaps = EDWCBakeStatus::Disabled;
-        Derived.Inline.BakeState.LastFailure.Reset();
+        Derived.Inline.BakeState.RenderProfileData = EDWCBakeStatus::Disabled;
+        ClearBakeOutputFailure(
+            DWCBakeOutput::CPURuntimeData |
+            DWCBakeOutput::GPURuntimeData |
+            DWCBakeOutput::GPUMaps |
+            DWCBakeOutput::WrinkleMaps |
+            DWCBakeOutput::TransparencyMaps |
+            DWCBakeOutput::RenderProfileData);
         return;
     }
 
@@ -3345,8 +3950,8 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
                                                           ? EDWCBakeStatus::OutOfDate
                                                           : EDWCBakeStatus::Required))
                                             : EDWCBakeStatus::Disabled;
-    Derived.Inline.BakeState.CPURuntimeData = PreserveFailureStatus(PreviousCPUStatus, NewCPUStatus);
-    Derived.Inline.BakeState.GPURuntimeData = PreserveFailureStatus(PreviousGPUStatus, NewGPUStatus);
+    Derived.Inline.BakeState.CPURuntimeData = ResolveRefreshedStatus(DWCBakeOutput::CPURuntimeData, NewCPUStatus);
+    Derived.Inline.BakeState.GPURuntimeData = ResolveRefreshedStatus(DWCBakeOutput::GPURuntimeData, NewGPUStatus);
     const bool bGPUMapDataValid = bRunDeepValidation
         ? IsGPUWetMapDataValidForMesh(RuntimeMesh, RuntimeLODIndex)
         : IsGPUWetMapDataMetadataValidForMesh(RuntimeMesh, RuntimeLODIndex);
@@ -3357,11 +3962,12 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
                                                              ? EDWCBakeStatus::OutOfDate
                                                              : EDWCBakeStatus::Required))
                                                : EDWCBakeStatus::Disabled;
-    Derived.Inline.BakeState.GPUMaps = PreserveFailureStatus(PreviousGPUMapStatus, NewGPUMapStatus);
+    Derived.Inline.BakeState.GPUMaps = ResolveRefreshedStatus(DWCBakeOutput::GPUMaps, NewGPUMapStatus);
 
     if (!HasWrinkleBakeContent())
     {
         Derived.Inline.BakeState.WrinkleMaps = EDWCBakeStatus::Disabled;
+        ClearBakeOutputFailure(DWCBakeOutput::WrinkleMaps);
     }
     else if (!AreRequiredWrinkleBakeAssetReferencesValid(*this))
     {
@@ -3372,7 +3978,7 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
                 ? EDWCBakeStatus::OutOfDate
                 : EDWCBakeStatus::Required;
         Derived.Inline.BakeState.WrinkleMaps =
-            PreserveFailureStatus(PreviousWrinkleMapStatus, NewWrinkleMapStatus);
+            ResolveRefreshedStatus(DWCBakeOutput::WrinkleMaps, NewWrinkleMapStatus);
     }
     else if (Derived.Inline.BakeState.WrinkleMaps == EDWCBakeStatus::Disabled)
     {
@@ -3384,6 +3990,7 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     if (!HasTransparencyBakeContent())
     {
         Derived.Inline.BakeState.TransparencyMaps = EDWCBakeStatus::Disabled;
+        ClearBakeOutputFailure(DWCBakeOutput::TransparencyMaps);
     }
     else if (!AreRequiredTransparencyBakeAssetReferencesValid(*this))
     {
@@ -3399,13 +4006,30 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
                 ? EDWCBakeStatus::OutOfDate
                 : EDWCBakeStatus::Required;
         Derived.Inline.BakeState.TransparencyMaps =
-            PreserveFailureStatus(PreviousTransparencyMapStatus, NewTransparencyMapStatus);
+            ResolveRefreshedStatus(DWCBakeOutput::TransparencyMaps, NewTransparencyMapStatus);
     }
     else if (Derived.Inline.BakeState.TransparencyMaps == EDWCBakeStatus::Disabled)
     {
         Derived.Inline.BakeState.TransparencyMaps = HasSavedBakeOutput(DWCBakeOutput::TransparencyMaps)
                                          ? EDWCBakeStatus::OutOfDate
                                          : EDWCBakeStatus::Required;
+    }
+
+    if (!HasRenderProfileBakeContent())
+    {
+        Derived.Inline.BakeState.RenderProfileData = EDWCBakeStatus::Disabled;
+        ClearBakeOutputFailure(DWCBakeOutput::RenderProfileData);
+    }
+    else if (Derived.Inline.BakeState.RenderProfileData == EDWCBakeStatus::Disabled)
+    {
+        const EDWCBakeStatus NewRenderProfileStatus =
+            Derived.Inline.BakedWetPartData.IsValid() ||
+                    HasGeneratedBakeOutput(DWCBakeOutput::RenderProfileData) ||
+                    HasSavedBakeOutput(DWCBakeOutput::RenderProfileData)
+                ? EDWCBakeStatus::OutOfDate
+                : EDWCBakeStatus::Required;
+        Derived.Inline.BakeState.RenderProfileData =
+            ResolveRefreshedStatus(DWCBakeOutput::RenderProfileData, NewRenderProfileStatus);
     }
 }
 
@@ -3508,8 +4132,9 @@ bool UWetClothingAsset::BakeGPUWetnessMaps(FString* OutErrorMessage)
 
     if (!FWetGPUMapBakeBuilder::BuildLODMaps(*this, LODIndex, OutErrorMessage, &SlowTask))
     {
-        Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Failed;
-        Derived.Inline.BakeState.LastFailure = OutErrorMessage != nullptr ? *OutErrorMessage : FString();
+        SetGPUMapBakeStatus(
+            EDWCBakeStatus::Failed,
+            OutErrorMessage != nullptr ? *OutErrorMessage : FString());
         return false;
     }
     RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
@@ -3518,9 +4143,7 @@ bool UWetClothingAsset::BakeGPUWetnessMaps(FString* OutErrorMessage)
         SaveWork,
         FText::FromString(FString::Printf(TEXT("Saving LOD%d GPU simulation map data into the WCA runtime payload..."), LODIndex)));
 
-    Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Valid;
-    Derived.Inline.BakeState.LastFailure.Reset();
-    MarkBakeOutputGenerated(DWCBakeOutput::GPUMaps);
+    SetGPUMapBakeStatus(EDWCBakeStatus::Valid);
     MarkRuntimeBulkDataDirty(DWCBakeOutput::GPUMaps);
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
@@ -3567,7 +4190,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         Metadata.SetupSettings.FirstGeneratedLODIndex,
         Metadata.SetupSettings.LastGeneratedLODIndex,
         Derived.Bulk.LODVertexColorRuntimeData);
-    const bool bHasPendingRuntimeOutput = (PendingRuntimeSaveOutputMask & RuntimeOutputMask) != 0;
+    const bool bHasPendingRuntimeOutput = (PendingEditorSaveOutputMask & RuntimeOutputMask) != 0;
     auto RecoverUnreadableRuntimeBulkData = [this, RuntimeOutputMask, &bCPUDataCurrent, &bGPUDataCurrent]()
     {
         UE_LOG(
@@ -3590,8 +4213,8 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
                                 : EDWCBakeStatus::Disabled;
         Derived.Inline.BakeState.GeneratedOutputMask &= ~RuntimeOutputMask;
         Derived.Inline.BakeState.SavedOutputMask &= ~RuntimeOutputMask;
-        PendingRuntimeSaveOutputMask &= ~RuntimeOutputMask;
-        Derived.Inline.BakeState.LastFailure.Reset();
+        PendingEditorSaveOutputMask &= ~RuntimeOutputMask;
+        ClearBakeOutputFailure(RuntimeOutputMask);
         bCPUDataCurrent = false;
         bGPUDataCurrent = false;
     };
@@ -3611,13 +4234,11 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         {
             if (Metadata.SetupSettings.bBuildCPUVertexSimulationData)
             {
-                Derived.Inline.BakeState.CPURuntimeData = EDWCBakeStatus::Valid;
-                MarkBakeOutputGenerated(DWCBakeOutput::CPURuntimeData);
+                SetCPURuntimeDataStatus(EDWCBakeStatus::Valid);
             }
             if (Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData)
             {
-                Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Valid;
-                MarkBakeOutputGenerated(DWCBakeOutput::GPURuntimeData);
+                SetGPURuntimeDataStatus(EDWCBakeStatus::Valid);
             }
             DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
             return true;
@@ -3633,13 +4254,12 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         Derived.Bulk.NeighborRuntimeData = FWetClothingPrecomputedSimulationData();
         Derived.Bulk.GPURuntimeData.Reset();
         ClearRuntimeBulkData();
-        Derived.Inline.BakeState.CPURuntimeData = EDWCBakeStatus::Disabled;
-        Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Disabled;
-        Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Disabled;
+        SetCPURuntimeDataStatus(EDWCBakeStatus::Disabled);
+        SetGPURuntimeDataStatus(EDWCBakeStatus::Disabled);
+        SetGPUMapBakeStatus(EDWCBakeStatus::Disabled);
         Derived.Inline.BakeState.GeneratedOutputMask &= ~RuntimeOutputMask;
         Derived.Inline.BakeState.SavedOutputMask &= ~RuntimeOutputMask;
-        PendingRuntimeSaveOutputMask &= ~RuntimeOutputMask;
-        Derived.Inline.BakeState.LastFailure.Reset();
+        PendingEditorSaveOutputMask &= ~RuntimeOutputMask;
         DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
         return true;
     }
@@ -3676,15 +4296,26 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
             Layer.BakedMaps.Reset();
             Layer.AutoBakeMetadata = FWetClothingTransparencyAutoBakeMetadata();
         }
-        Derived.Inline.BakeState.CPURuntimeData = EDWCBakeStatus::Disabled;
-        Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Disabled;
-        Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Disabled;
-        Derived.Inline.BakeState.WrinkleMaps = EDWCBakeStatus::Disabled;
-        Derived.Inline.BakeState.TransparencyMaps = EDWCBakeStatus::Disabled;
-        Derived.Inline.BakeState.GeneratedOutputMask &= ~(DWCBakeOutput::CPURuntimeData | DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps | DWCBakeOutput::WrinkleMaps | DWCBakeOutput::TransparencyMaps);
-        Derived.Inline.BakeState.SavedOutputMask &= ~(DWCBakeOutput::CPURuntimeData | DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps | DWCBakeOutput::WrinkleMaps | DWCBakeOutput::TransparencyMaps);
-        PendingRuntimeSaveOutputMask = 0;
-        Derived.Inline.BakeState.LastFailure.Reset();
+        SetCPURuntimeDataStatus(EDWCBakeStatus::Disabled);
+        SetGPURuntimeDataStatus(EDWCBakeStatus::Disabled);
+        SetGPUMapBakeStatus(EDWCBakeStatus::Disabled);
+        SetWrinkleBakeStatus(EDWCBakeStatus::Disabled);
+        SetTransparencyBakeStatus(EDWCBakeStatus::Disabled);
+        Derived.Inline.BakeState.GeneratedOutputMask &= ~(
+            DWCBakeOutput::CPURuntimeData |
+            DWCBakeOutput::GPURuntimeData |
+            DWCBakeOutput::GPUMaps |
+            DWCBakeOutput::WrinkleMaps |
+            DWCBakeOutput::TransparencyMaps |
+            DWCBakeOutput::RenderProfileData);
+        Derived.Inline.BakeState.SavedOutputMask &= ~(
+            DWCBakeOutput::CPURuntimeData |
+            DWCBakeOutput::GPURuntimeData |
+            DWCBakeOutput::GPUMaps |
+            DWCBakeOutput::WrinkleMaps |
+            DWCBakeOutput::TransparencyMaps |
+            DWCBakeOutput::RenderProfileData);
+        PendingEditorSaveOutputMask = 0;
         DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
         return true;
     }
@@ -3726,8 +4357,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
                 FText::FromString(FString::Printf(
                     TEXT("CPU vertex simulation data for LOD%d is already current..."),
                     RuntimeLODIndex)));
-            Derived.Inline.BakeState.CPURuntimeData = EDWCBakeStatus::Valid;
-            MarkBakeOutputGenerated(DWCBakeOutput::CPURuntimeData);
+            SetCPURuntimeDataStatus(EDWCBakeStatus::Valid);
         }
         else
         {
@@ -3738,11 +4368,9 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
                     RuntimeLODIndex)));
             FString CPUError;
             bCPUSucceeded = RebuildPrecomputedSimulationData(&CPUError);
-            Derived.Inline.BakeState.CPURuntimeData = bCPUSucceeded ? EDWCBakeStatus::Valid : EDWCBakeStatus::Failed;
-            if (bCPUSucceeded)
-            {
-                MarkBakeOutputGenerated(DWCBakeOutput::CPURuntimeData);
-            }
+            SetCPURuntimeDataStatus(
+                bCPUSucceeded ? EDWCBakeStatus::Valid : EDWCBakeStatus::Failed,
+                CPUError);
             if (!bCPUSucceeded)
             {
                 FailureMessages.Add(FString::Printf(TEXT("CPU Runtime Data: %s"), *CPUError));
@@ -3755,7 +4383,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
             1.25f,
             NSLOCTEXT("WetClothingAsset", "ClearCPURuntimeDataForSave", "Clearing disabled CPU runtime data..."));
         ClearPrecomputedSimulationData();
-        Derived.Inline.BakeState.CPURuntimeData = EDWCBakeStatus::Disabled;
+        SetCPURuntimeDataStatus(EDWCBakeStatus::Disabled);
     }
 
     if (Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData)
@@ -3767,8 +4395,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
                 FText::FromString(FString::Printf(
                     TEXT("GPU wetness-map runtime data for LOD%d is already current..."),
                     RuntimeLODIndex)));
-            Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Valid;
-            MarkBakeOutputGenerated(DWCBakeOutput::GPURuntimeData);
+            SetGPURuntimeDataStatus(EDWCBakeStatus::Valid);
         }
         else
         {
@@ -3783,12 +4410,15 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
                     RuntimeLODIndex)));
             FString GPUError;
             bGPUSucceeded = RebuildGPURuntimeData(&GPUError);
-            Derived.Inline.BakeState.GPURuntimeData = bGPUSucceeded ? EDWCBakeStatus::Valid : EDWCBakeStatus::Failed;
+            SetGPURuntimeDataStatus(
+                bGPUSucceeded ? EDWCBakeStatus::Valid : EDWCBakeStatus::Failed,
+                GPUError);
             if (bGPUSucceeded)
             {
-                Derived.Inline.BakeState.GPUMaps = HasGPUMapDataPayload() || bHadGPUMapsBeforeRuntimeRebuild
-                                        ? EDWCBakeStatus::OutOfDate
-                                        : EDWCBakeStatus::Required;
+                SetGPUMapBakeStatus(
+                    HasGPUMapDataPayload() || bHadGPUMapsBeforeRuntimeRebuild
+                        ? EDWCBakeStatus::OutOfDate
+                        : EDWCBakeStatus::Required);
             }
             if (!bGPUSucceeded)
             {
@@ -3802,8 +4432,8 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
             1.5f,
             NSLOCTEXT("WetClothingAsset", "ClearGPURuntimeDataForSave", "Clearing disabled GPU runtime data..."));
         ClearGPUWetMapData();
-        Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Disabled;
-        Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Disabled;
+        SetGPURuntimeDataStatus(EDWCBakeStatus::Disabled);
+        SetGPUMapBakeStatus(EDWCBakeStatus::Disabled);
     }
 
     SlowTask.EnterProgressFrame(
@@ -3812,13 +4442,11 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
     const bool bSucceeded = bCPUSucceeded && bGPUSucceeded;
     if (bSucceeded)
     {
-        Derived.Inline.BakeState.LastFailure.Reset();
         DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     }
     else
     {
         const FString CombinedFailure = FString::Join(FailureMessages, TEXT("\n"));
-        Derived.Inline.BakeState.LastFailure = CombinedFailure;
         DWC::Error::SetMessage(OutErrorMessage, CombinedFailure.IsEmpty() ? TEXT("Runtime data rebuild failed.") : *CombinedFailure);
     }
     return bSucceeded;
@@ -3895,7 +4523,7 @@ void UWetClothingAsset::BeginRuntimeDataEditorSaveAttempt()
     }
 
     bRuntimeDataEditorSaveAttemptActive = true;
-    EditorSavePendingOutputMaskSnapshot = PendingRuntimeSaveOutputMask;
+    EditorSavePendingOutputMaskSnapshot = PendingEditorSaveOutputMask;
     EditorSaveSavedOutputMaskSnapshot = Derived.Inline.BakeState.SavedOutputMask;
 }
 
@@ -3911,8 +4539,8 @@ void UWetClothingAsset::CompleteRuntimeDataEditorSaveAttempt(const bool bSaveSuc
     if (!bSaveSucceeded)
     {
         Derived.Inline.BakeState.SavedOutputMask = EditorSaveSavedOutputMaskSnapshot;
-        PendingRuntimeSaveOutputMask |= EditorSavePendingOutputMaskSnapshot;
-        if (PendingRuntimeSaveOutputMask != 0)
+        PendingEditorSaveOutputMask |= EditorSavePendingOutputMaskSnapshot;
+        if (PendingEditorSaveOutputMask != 0)
         {
             bRuntimeBulkDataDirty = true;
             MarkPackageDirty();
@@ -3926,7 +4554,7 @@ void UWetClothingAsset::CompleteRuntimeDataEditorSaveAttempt(const bool bSaveSuc
 
 bool UWetClothingAsset::IsBakeOutputSavePending(const int32 OutputMask) const
 {
-    return DWCBakeOutput::Has(PendingRuntimeSaveOutputMask, OutputMask);
+    return DWCBakeOutput::Has(PendingEditorSaveOutputMask, OutputMask);
 }
 
 void UWetClothingAsset::MarkRuntimeBakeOutputsDirty(const int32 OutputMask)
@@ -3959,7 +4587,7 @@ void UWetClothingAsset::MarkRuntimeBakeOutputsDirty(const int32 OutputMask)
 
         // The previous payload is stale, not newly generated. Do not present it as
         // "Save Required"; it must be rebuilt (or explicitly baked) first.
-        PendingRuntimeSaveOutputMask &= ~Output;
+        PendingEditorSaveOutputMask &= ~Output;
     };
 
     InvalidateOutput(
@@ -3978,7 +4606,11 @@ void UWetClothingAsset::MarkRuntimeBakeOutputsDirty(const int32 OutputMask)
         Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData,
         HasGPUMapDataPayload());
 
-    Derived.Inline.BakeState.LastFailure.Reset();
+    ClearBakeOutputFailure(
+        OutputMask &
+        (DWCBakeOutput::CPURuntimeData |
+         DWCBakeOutput::GPURuntimeData |
+         DWCBakeOutput::GPUMaps));
     MarkPackageDirty();
 }
 
@@ -4009,13 +4641,223 @@ void UWetClothingAsset::ClearMeshContentSignatureCache()
     FWetGPUMapBakeBuilder::ClearSignatureCache();
 }
 
-const FDWCEditorUVTopologyData* UWetClothingAsset::FindOriginalUVTopologyForLOD(const int32 LODIndex) const
+const FDWCEditorUVTopologyDescriptor* UWetClothingAsset::FindOriginalUVTopologyDescriptorForLOD(
+    const int32 LODIndex) const
 {
-    return Derived.Inline.OriginalUVTopologies.FindByPredicate(
-        [LODIndex](const FDWCEditorUVTopologyData& Data)
+    return Derived.Inline.OriginalUVTopologyDescriptors.FindByPredicate(
+        [LODIndex](const FDWCEditorUVTopologyDescriptor& Data)
         {
             return Data.LODIndex == LODIndex;
         });
+}
+
+bool UWetClothingAsset::StoreOriginalUVTopologiesToBulkData(
+    TArray<FDWCEditorUVTopologyData>&& InTopologies,
+    FString* OutErrorMessage)
+{
+    if (InTopologies.IsEmpty())
+    {
+        ClearOriginalUVTopologyBulkData();
+        DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+        return true;
+    }
+
+    TArray<FDWCEditorUVTopologyDescriptor> NewDescriptors;
+    TArray<uint8> Bytes;
+    if (!BuildOriginalUVTopologyBulkBytes(InTopologies, NewDescriptors, Bytes, OutErrorMessage))
+    {
+        return false;
+    }
+
+    OriginalUVTopologyBulkData.RemoveBulkData();
+    if (!Bytes.IsEmpty())
+    {
+        OriginalUVTopologyBulkData.SetBulkDataFlags(
+            BULKDATA_Force_NOT_InlinePayload |
+            BULKDATA_LazyLoadable);
+        OriginalUVTopologyBulkData.ClearBulkDataFlags(BULKDATA_ForceInlinePayload);
+        OriginalUVTopologyBulkData.Lock(LOCK_READ_WRITE);
+        void* BulkBytes = OriginalUVTopologyBulkData.Realloc(Bytes.Num());
+        FMemory::Memcpy(BulkBytes, Bytes.GetData(), Bytes.Num());
+        OriginalUVTopologyBulkData.Unlock();
+    }
+
+    Derived.Inline.OriginalUVTopologyDescriptors = MoveTemp(NewDescriptors);
+    Derived.Inline.OriginalUVTopologies.Reset();
+    LoadedOriginalUVTopologies = MakeShared<TArray<FDWCEditorUVTopologyData>, ESPMode::ThreadSafe>(
+        MoveTemp(InTopologies));
+    bOriginalUVTopologyBulkLoaded = true;
+    bOriginalUVTopologyBulkLoadFailed = false;
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+    return true;
+}
+
+bool UWetClothingAsset::LoadOriginalUVTopologiesFromBulkData(FString* OutErrorMessage) const
+{
+    if (bOriginalUVTopologyBulkLoaded)
+    {
+        if (!bOriginalUVTopologyBulkLoadFailed && LoadedOriginalUVTopologies.IsValid())
+        {
+            DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+            return true;
+        }
+        DWC::Error::SetMessage(
+            OutErrorMessage,
+            bOriginalUVTopologyBulkLoadFailed
+                ? TEXT("The Original UV topology bulk payload could not be loaded.")
+                : TEXT("The Original UV topology payload is not available."));
+        return false;
+    }
+
+    if (OriginalUVTopologyBulkData.GetBulkDataSize() <= 0 ||
+        Derived.Inline.OriginalUVTopologyDescriptors.IsEmpty())
+    {
+        bOriginalUVTopologyBulkLoaded = true;
+        bOriginalUVTopologyBulkLoadFailed = true;
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The Original UV topology bulk payload is missing."));
+        return false;
+    }
+
+    const int64 BulkSize = OriginalUVTopologyBulkData.GetBulkDataSize();
+    if (BulkSize > MAX_int32)
+    {
+        bOriginalUVTopologyBulkLoaded = true;
+        bOriginalUVTopologyBulkLoadFailed = true;
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The Original UV topology bulk payload exceeds the supported size."));
+        return false;
+    }
+
+    const void* BulkData = OriginalUVTopologyBulkData.LockReadOnly();
+    if (BulkData == nullptr)
+    {
+        bOriginalUVTopologyBulkLoaded = true;
+        bOriginalUVTopologyBulkLoadFailed = true;
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The Original UV topology bulk payload could not be opened."));
+        return false;
+    }
+
+    TArray<FDWCEditorUVTopologyData> LoadedTopologies;
+    FString LoadError;
+    const bool bReadSucceeded = ReadOriginalUVTopologyBulkBytes(
+            MakeArrayView(static_cast<const uint8*>(BulkData), static_cast<int32>(BulkSize)),
+            Derived.Inline.OriginalUVTopologyDescriptors,
+            LoadedTopologies,
+            &LoadError);
+    OriginalUVTopologyBulkData.Unlock();
+    if (!bReadSucceeded)
+    {
+        bOriginalUVTopologyBulkLoaded = true;
+        bOriginalUVTopologyBulkLoadFailed = true;
+        DWC::Error::SetMessage(OutErrorMessage, LoadError);
+        return false;
+    }
+
+    LoadedOriginalUVTopologies = MakeShared<TArray<FDWCEditorUVTopologyData>, ESPMode::ThreadSafe>(
+        MoveTemp(LoadedTopologies));
+    bOriginalUVTopologyBulkLoaded = true;
+    bOriginalUVTopologyBulkLoadFailed = false;
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+    return true;
+}
+
+FDWCEditorUVTopologyHandle UWetClothingAsset::AcquireOriginalUVTopologyForLOD(
+    const int32 LODIndex,
+    FString* OutErrorMessage) const
+{
+    if (FindOriginalUVTopologyDescriptorForLOD(LODIndex) == nullptr)
+    {
+        DWC::Error::SetMessage(
+            OutErrorMessage,
+            FString::Printf(TEXT("No Original UV topology descriptor is stored for LOD%d."), LODIndex));
+        return FDWCEditorUVTopologyHandle();
+    }
+    if (!LoadOriginalUVTopologiesFromBulkData(OutErrorMessage))
+    {
+        return FDWCEditorUVTopologyHandle();
+    }
+
+    FDWCEditorUVTopologyHandle Handle(LoadedOriginalUVTopologies, LODIndex);
+    if (!Handle.IsValid())
+    {
+        DWC::Error::SetMessage(
+            OutErrorMessage,
+            FString::Printf(TEXT("The Original UV topology bulk payload has no LOD%d record."), LODIndex));
+        return FDWCEditorUVTopologyHandle();
+    }
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+    return Handle;
+}
+
+bool UWetClothingAsset::CopyOriginalUVTopologiesForEditor(
+    TArray<FDWCEditorUVTopologyData>& OutTopologies,
+    FString* OutErrorMessage) const
+{
+    OutTopologies.Reset();
+    if (!LoadOriginalUVTopologiesFromBulkData(OutErrorMessage))
+    {
+        return false;
+    }
+    OutTopologies = *LoadedOriginalUVTopologies;
+    return true;
+}
+
+uint64 UWetClothingAsset::GetResidentOriginalUVTopologyBytesForEditor() const
+{
+    if (!LoadedOriginalUVTopologies.IsValid())
+    {
+        return 0;
+    }
+
+    uint64 Bytes = LoadedOriginalUVTopologies->GetAllocatedSize();
+    for (const FDWCEditorUVTopologyData& Topology : *LoadedOriginalUVTopologies)
+    {
+        Bytes += Topology.BuildSignature.GetAllocatedSize();
+        Bytes += Topology.Islands.GetAllocatedSize();
+        for (const FDWCOriginalUVIslandTopology& Island : Topology.Islands)
+        {
+            Bytes += Island.TriangleIndices.GetAllocatedSize();
+        }
+    }
+    return Bytes;
+}
+
+int64 UWetClothingAsset::GetSerializedOriginalUVTopologyBytesForEditor() const
+{
+    return OriginalUVTopologyBulkData.GetBulkDataSize();
+}
+
+uint64 UWetClothingAsset::GetReclaimableOriginalUVTopologyBytesForEditor() const
+{
+    return LoadedOriginalUVTopologies.IsValid() && LoadedOriginalUVTopologies.IsUnique()
+        ? GetResidentOriginalUVTopologyBytesForEditor()
+        : 0;
+}
+
+uint64 UWetClothingAsset::ReclaimOriginalUVTopologyBytesForEditor()
+{
+    const uint64 ReclaimableBytes = GetReclaimableOriginalUVTopologyBytesForEditor();
+    if (ReclaimableBytes > 0)
+    {
+        ReleaseLoadedOriginalUVTopologiesForEditor();
+    }
+    return ReclaimableBytes;
+}
+
+void UWetClothingAsset::ReleaseLoadedOriginalUVTopologiesForEditor()
+{
+    LoadedOriginalUVTopologies.Reset();
+    bOriginalUVTopologyBulkLoaded = OriginalUVTopologyBulkData.GetBulkDataSize() <= 0;
+    bOriginalUVTopologyBulkLoadFailed = false;
+}
+
+void UWetClothingAsset::ClearOriginalUVTopologyBulkData()
+{
+    OriginalUVTopologyBulkData.RemoveBulkData();
+    LoadedOriginalUVTopologies.Reset();
+    Derived.Inline.OriginalUVTopologyDescriptors.Reset();
+    Derived.Inline.OriginalUVTopologies.Reset();
+    bOriginalUVTopologyBulkLoaded = true;
+    bOriginalUVTopologyBulkLoadFailed = false;
 }
 
 void UWetClothingAsset::SetValidationSummary(const FDWCTriangleValidationSummary& InSummary)
@@ -4326,7 +5168,9 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
     Derived.Bulk.NeighborRuntimeData.DataVersion = CurrentPrecomputedSimulationDataVersion;
     Derived.Bulk.NeighborRuntimeData.Vertices.SetNum(Derived.Bulk.NeighborRuntimeData.VertexCount);
 
-    const FDWCEditorUVTopologyData* OriginalUVTopology = FindOriginalUVTopologyForLOD(LODIndex);
+    const FDWCEditorUVTopologyHandle OriginalUVTopologyHandle =
+        AcquireOriginalUVTopologyForLOD(LODIndex, OutErrorMessage);
+    const FDWCEditorUVTopologyData* OriginalUVTopology = OriginalUVTopologyHandle.Get();
     const FString CurrentTopologySignature = BuildMeshContentSignature(
         RuntimeMesh,
         LODIndex,

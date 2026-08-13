@@ -36,6 +36,9 @@ bool HasLegacyAuthoringEvidence(const FWetClothingTransparencyLayerData& Layer)
            !Layer.ExternalMeshSource.SourcePriority.IsEmpty() ||
            Layer.ExternalMeshSource.SkeletalMesh != nullptr ||
            !Layer.ExternalMeshSource.SourceSlotPriority.IsEmpty() ||
+           (Layer.EditorStrokeHistory != nullptr &&
+               (!Layer.EditorStrokeHistory->AlphaStrokes.IsEmpty() ||
+                !Layer.EditorStrokeHistory->RevealColorStrokes.IsEmpty())) ||
            !Layer.EditableStrokes.IsEmpty() ||
            !Layer.RevealColorPaintStrokes.IsEmpty() ||
            Layer.AutoBakeMetadata.AutoBakeGuid.IsValid() ||
@@ -68,6 +71,196 @@ FGuid BuildStableLegacyLayerGuid(
 }
 #endif
 } // namespace
+
+FDWCTransparencyCompactBrushSample FDWCTransparencyCompactBrushSample::Encode(
+    const FDWCTransparencyBrushSample& Sample)
+{
+    FDWCTransparencyCompactBrushSample Compact;
+    Compact.PositionUV = FVector2f(Sample.PositionUV);
+    Compact.UVIslandID = Sample.UVIslandID;
+    Compact.RadiusUV = Sample.RadiusUV;
+    Compact.Strength = Sample.Strength;
+    return Compact;
+}
+
+FDWCTransparencyBrushSample FDWCTransparencyCompactBrushSample::Decode() const
+{
+    FDWCTransparencyBrushSample Sample;
+    Sample.PositionUV = FVector2D(PositionUV);
+    Sample.UVIslandID = UVIslandID;
+    Sample.RadiusUV = RadiusUV;
+    Sample.Strength = Strength;
+    return Sample;
+}
+
+namespace
+{
+template <typename StrokeType>
+int32 GetStrokeSampleCount(const StrokeType& Stroke)
+{
+    return Stroke.CompactSamples.Num() + Stroke.Samples.Num();
+}
+
+template <typename StrokeType>
+uint64 GetStrokeSampleAllocatedSize(const StrokeType& Stroke)
+{
+    return Stroke.CompactSamples.GetAllocatedSize() + Stroke.Samples.GetAllocatedSize();
+}
+
+template <typename StrokeType>
+void DecodeStrokeSamples(const StrokeType& Stroke, TArray<FDWCTransparencyBrushSample>& OutSamples)
+{
+    OutSamples.Reset(GetStrokeSampleCount(Stroke));
+    for (const FDWCTransparencyCompactBrushSample& Compact : Stroke.CompactSamples)
+    {
+        OutSamples.Add(Compact.Decode());
+    }
+    OutSamples.Append(Stroke.Samples);
+}
+
+template <typename StrokeType>
+bool CompactStrokeSamples(StrokeType& Stroke)
+{
+    if (Stroke.Samples.IsEmpty())
+    {
+        return false;
+    }
+
+    Stroke.CompactSamples.Reserve(Stroke.CompactSamples.Num() + Stroke.Samples.Num());
+    for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
+    {
+        Stroke.CompactSamples.Add(FDWCTransparencyCompactBrushSample::Encode(Sample));
+    }
+    Stroke.Samples.Reset();
+    Stroke.Samples.Shrink();
+    return true;
+}
+
+template <typename StrokeType>
+void AddStrokeSample(StrokeType& Stroke, const FDWCTransparencyBrushSample& Sample)
+{
+    if (!Stroke.Samples.IsEmpty())
+    {
+        CompactStrokeSamples(Stroke);
+    }
+    Stroke.CompactSamples.Add(FDWCTransparencyCompactBrushSample::Encode(Sample));
+}
+} // namespace
+
+int32 FDWCTransparencyBrushStroke::GetSampleCount() const
+{
+    return GetStrokeSampleCount(*this);
+}
+
+bool FDWCTransparencyBrushStroke::HasSamples() const
+{
+    return GetSampleCount() > 0;
+}
+
+uint64 FDWCTransparencyBrushStroke::GetSampleAllocatedSize() const
+{
+    return GetStrokeSampleAllocatedSize(*this);
+}
+
+void FDWCTransparencyBrushStroke::AddSample(const FDWCTransparencyBrushSample& Sample)
+{
+    AddStrokeSample(*this, Sample);
+}
+
+void FDWCTransparencyBrushStroke::DecodeSamples(TArray<FDWCTransparencyBrushSample>& OutSamples) const
+{
+    DecodeStrokeSamples(*this, OutSamples);
+}
+
+bool FDWCTransparencyBrushStroke::CompactLegacySamples()
+{
+    return CompactStrokeSamples(*this);
+}
+
+int32 FDWCTransparencyRevealColorStroke::GetSampleCount() const
+{
+    return GetStrokeSampleCount(*this);
+}
+
+bool FDWCTransparencyRevealColorStroke::HasSamples() const
+{
+    return GetSampleCount() > 0;
+}
+
+uint64 FDWCTransparencyRevealColorStroke::GetSampleAllocatedSize() const
+{
+    return GetStrokeSampleAllocatedSize(*this);
+}
+
+void FDWCTransparencyRevealColorStroke::AddSample(const FDWCTransparencyBrushSample& Sample)
+{
+    AddStrokeSample(*this, Sample);
+}
+
+void FDWCTransparencyRevealColorStroke::DecodeSamples(TArray<FDWCTransparencyBrushSample>& OutSamples) const
+{
+    DecodeStrokeSamples(*this, OutSamples);
+}
+
+bool FDWCTransparencyRevealColorStroke::CompactLegacySamples()
+{
+    return CompactStrokeSamples(*this);
+}
+
+bool UDWCTransparencyLayerStrokeHistory::CompactLegacySamples()
+{
+    bool bChanged = false;
+    for (FDWCTransparencyBrushStroke& Stroke : AlphaStrokes)
+    {
+        bChanged |= Stroke.CompactLegacySamples();
+    }
+    for (FDWCTransparencyRevealColorStroke& Stroke : RevealColorStrokes)
+    {
+        bChanged |= Stroke.CompactLegacySamples();
+    }
+    return bChanged;
+}
+
+uint64 UDWCTransparencyLayerStrokeHistory::GetAllocatedSize() const
+{
+    uint64 Bytes = AlphaStrokes.GetAllocatedSize() + RevealColorStrokes.GetAllocatedSize();
+    for (const FDWCTransparencyBrushStroke& Stroke : AlphaStrokes)
+    {
+        Bytes += Stroke.DisplayName.GetAllocatedSize() + Stroke.GetSampleAllocatedSize();
+    }
+    for (const FDWCTransparencyRevealColorStroke& Stroke : RevealColorStrokes)
+    {
+        Bytes += Stroke.GetSampleAllocatedSize();
+    }
+    return Bytes;
+}
+
+#if WITH_EDITOR
+const TArray<FDWCTransparencyBrushStroke>& FWetClothingTransparencyLayerData::GetEditableStrokes() const
+{
+    return EditorStrokeHistory != nullptr ? EditorStrokeHistory->AlphaStrokes : EditableStrokes;
+}
+
+TArray<FDWCTransparencyBrushStroke>& FWetClothingTransparencyLayerData::GetMutableEditableStrokes()
+{
+    return EditorStrokeHistory != nullptr ? EditorStrokeHistory->AlphaStrokes : EditableStrokes;
+}
+
+const TArray<FDWCTransparencyRevealColorStroke>& FWetClothingTransparencyLayerData::GetRevealColorPaintStrokes() const
+{
+    return EditorStrokeHistory != nullptr ? EditorStrokeHistory->RevealColorStrokes : RevealColorPaintStrokes;
+}
+
+TArray<FDWCTransparencyRevealColorStroke>& FWetClothingTransparencyLayerData::GetMutableRevealColorPaintStrokes()
+{
+    return EditorStrokeHistory != nullptr ? EditorStrokeHistory->RevealColorStrokes : RevealColorPaintStrokes;
+}
+
+UDWCTransparencyLayerStrokeHistory* FWetClothingTransparencyLayerData::GetEditorStrokeHistory() const
+{
+    return EditorStrokeHistory;
+}
+#endif
 
 void FDWCTransparencyEditorStageCacheMetadata::MarkRevealStale()
 {
@@ -226,7 +419,8 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
     const USkeletalMesh* TargetMesh,
     const FWetClothingTransparencyLayerData& Layer,
     TArray<FString>& OutErrors,
-    int32 DWCDataUVChannelIndex)
+    int32 DWCDataUVChannelIndex,
+    const bool bValidateRenderPayload)
 {
     constexpr int32 LODIndex = 0;
     OutErrors.Reset();
@@ -251,22 +445,26 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
             *TargetSurface.OuterMaterialSlotName.ToString()));
     }
 
-    const FSkeletalMeshRenderData* RenderData = TargetMesh->GetResourceForRendering();
     int32 NumTexCoords = 0;
-    if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(LODIndex))
+    if (bValidateRenderPayload)
     {
-        OutErrors.Add(FString::Printf(TEXT("LOD %d render data is not available on the target mesh."), LODIndex));
-    }
-    else
-    {
-        NumTexCoords = RenderData->LODRenderData[LODIndex].StaticVertexBuffers.StaticMeshVertexBuffer.GetNumTexCoords();
-        if (DWCDataUVChannelIndex < 0 || DWCDataUVChannelIndex >= NumTexCoords)
+        const FSkeletalMeshRenderData* RenderData = TargetMesh->GetResourceForRendering();
+        if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(LODIndex))
         {
-            OutErrors.Add(FString::Printf(
-                TEXT("DWC Data UV Channel %d is invalid for LOD %d, which has %d UV channel(s)."),
-                DWCDataUVChannelIndex,
-                LODIndex,
-                NumTexCoords));
+            OutErrors.Add(FString::Printf(TEXT("LOD %d render data is not available on the target mesh."), LODIndex));
+        }
+        else
+        {
+            NumTexCoords = RenderData->LODRenderData[LODIndex]
+                .StaticVertexBuffers.StaticMeshVertexBuffer.GetNumTexCoords();
+            if (DWCDataUVChannelIndex < 0 || DWCDataUVChannelIndex >= NumTexCoords)
+            {
+                OutErrors.Add(FString::Printf(
+                    TEXT("DWC Data UV Channel %d is invalid for LOD %d, which has %d UV channel(s)."),
+                    DWCDataUVChannelIndex,
+                    LODIndex,
+                    NumTexCoords));
+            }
         }
     }
 

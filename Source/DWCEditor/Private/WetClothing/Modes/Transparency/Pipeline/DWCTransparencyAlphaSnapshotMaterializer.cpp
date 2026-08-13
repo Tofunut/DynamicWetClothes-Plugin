@@ -118,6 +118,7 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
     TArray<FIntPoint> OutputTiles;
     TArray<FIntPoint> SnapshotTiles;
     TArray<FDWCTransparencyAlphaTilePayload> Payloads;
+    TArray<FDWCTransparencyBrushSample> DecodedSamples;
     for (int32 StrokeIndex = FirstStroke; StrokeIndex < Input.FallbackStrokes.Num(); ++StrokeIndex)
     {
         if (CancellationToken != nullptr && CancellationToken->IsCanceled())
@@ -126,17 +127,18 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
             return false;
         }
         const FDWCTransparencyBrushStroke& Stroke = Input.FallbackStrokes[StrokeIndex];
-        if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != AlphaDomain.MaterialSlotIndex || Stroke.Samples.IsEmpty())
+        if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != AlphaDomain.MaterialSlotIndex || !Stroke.HasSamples())
         {
             continue;
         }
         StrokeRegions.Reset();
-        for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
-        {
-            FDWCTransparencyBrushRasterizer::BuildSampleRegions(
-                Sample, AlphaDomain.Resolution, Stroke.UVAddressMode, SampleRegions);
-            StrokeRegions.Append(SampleRegions);
-        }
+        Stroke.ForEachSample(
+            [&StrokeRegions, &SampleRegions, &AlphaDomain, &Stroke](const FDWCTransparencyBrushSample& Sample)
+            {
+                FDWCTransparencyBrushRasterizer::BuildSampleRegions(
+                    Sample, AlphaDomain.Resolution, Stroke.UVAddressMode, SampleRegions);
+                StrokeRegions.Append(SampleRegions);
+            });
         const bool bWrap = Stroke.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap;
         Store.GatherTileCoordinates(StrokeRegions, false, bWrap, OutputTiles);
         Store.GatherTileCoordinates(
@@ -149,10 +151,11 @@ bool FDWCTransparencyAlphaSnapshotMaterializer::Materialize(
             continue;
         }
         Store.SnapshotTiles(SnapshotTiles, Payloads);
+        Stroke.DecodeSamples(DecodedSamples);
         if (FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
                 FDWCTransparencyAlphaRasterContext::FromAlphaDomain(AlphaDomain),
                 Stroke,
-                Stroke.Samples,
+                DecodedSamples,
                 OutputTiles,
                 Payloads) &&
             !Store.Commit(Store.GetRevision(), Payloads))

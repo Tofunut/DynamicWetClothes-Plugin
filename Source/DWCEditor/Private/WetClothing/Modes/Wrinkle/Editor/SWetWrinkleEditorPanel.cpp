@@ -40,6 +40,7 @@
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
 #include "WetClothing/Foundation/Preview/Layers/DWCEditorPreviewLayerResolver.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
 #include "WetClothing/Modes/Part/Partition/WetPartEditingService.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
@@ -2019,7 +2020,8 @@ void SWetWrinkleEditorPanel::RefreshWrinkleUVView()
             TopologySignature = DataUVMetadata->DataUVOutputSignature;
         }
 #if WITH_EDITORONLY_DATA
-        else if (const FDWCEditorUVTopologyData* OriginalUVTopology = Asset->FindOriginalUVTopologyForLOD(0);
+        else if (const FDWCEditorUVTopologyDescriptor* OriginalUVTopology =
+                     Asset->FindOriginalUVTopologyDescriptorForLOD(0);
                  OriginalUVTopology != nullptr && OriginalUVTopology->UVChannelIndex == UVChannelIndex)
         {
             TopologySignature = OriginalUVTopology->BuildSignature;
@@ -2635,6 +2637,10 @@ void SWetWrinkleEditorPanel::ApplyMaterialSlotSelection(
         return;
     }
 
+    FDWCEditorAuthoringOperationScope DiagnosticScope(
+        TEXT("Wrinkle.SelectMaterialSlot"),
+        WetClothingAsset.Get());
+
     TGuardValue<bool> SynchronizationGuard(bSynchronizingMaterialSlotSelection, true);
     if (AuthoringController.IsValid())
     {
@@ -2880,7 +2886,7 @@ FText SWetWrinkleEditorPanel::GetRuntimeNormalCoverageText() const
     }
     const FWetWrinkleBakedMapSet* BakedMap =
         Asset->Authored.WrinkleData.FindBakedWrinkleMap(BrushSettings.MaterialSlotIndex);
-    return BakedMap != nullptr && BakedMap->BakedWrinkleMask != nullptr
+    return BakedMap != nullptr && BakedMap->HasBakedWrinkleMask()
                ? LOCTEXT("RuntimeNormalCoverageSeparateMask", "Separate baked mask")
                : LOCTEXT("RuntimeNormalCoverageUnused", "None");
 }

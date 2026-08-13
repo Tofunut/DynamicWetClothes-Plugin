@@ -16,7 +16,10 @@
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionEvaluator.h"
 #include "WetClothing/Foundation/Build/DWCTransparencyBuildTargetResolver.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationReportAdapter.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationSectionRegistry.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationFixConvergence.h"
 #include "WetClothing/Foundation/Diagnostics/DWCEditorMemoryDiagnostics.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
 #include "WetClothing/WCAEditor/Build/WCAEditorCanonicalStateProvider.h"
 #include "WetClothing/WCAEditor/Build/WCAEditorBuildStatusProvider.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
@@ -107,6 +110,18 @@ namespace
         return Asset != nullptr &&
                Asset->HasLockedDataUVLayout() &&
                Asset->GetRuntimeSkeletalMesh() == nullptr;
+    }
+
+    bool HasReadyDataUVMetadata(const UWetClothingAsset& Asset)
+    {
+        const FDWCDataUVLODMetadata* Metadata =
+            Asset.FindDataUVMetadataForLOD(Asset.GetSimulationLODIndex());
+        return Asset.GetRuntimeSkeletalMesh() != nullptr &&
+               Metadata != nullptr &&
+               Metadata->bIsValid &&
+               Metadata->UVChannelIndex == Asset.GetDWCDataUVChannelIndex() &&
+               Metadata->GeneratorVersion == DWCGeneratedDataVersion::DataUV &&
+               Metadata->RenderVertexCount > 0;
     }
 
     bool ConfirmMissingPreparedMeshRecovery(const UWetClothingAsset& Asset)
@@ -547,16 +562,6 @@ namespace
             "Mode: Prepared Mesh. DWC creates or updates a dedicated skeletal mesh copy and stores generated UV/topology data only on that copy.");
     }
 
-    bool HasWrinkleValidationData(const UWetClothingAsset& Asset)
-    {
-        if (!Asset.Authored.WrinkleData.BakedWrinkleMaps.IsEmpty())
-        {
-            return true;
-        }
-        return !Asset.Authored.WrinkleData.EditablePatches.IsEmpty() ||
-               !Asset.Authored.WrinkleData.EditableProceduralRidgeStrokes.IsEmpty();
-    }
-
     bool IsValidationActionRequiredStatus(const EDWCBakeStatus Status)
     {
         return Status == EDWCBakeStatus::Required ||
@@ -589,11 +594,13 @@ namespace
 
     struct FDWCValidationSectionView
     {
-        EWCAValidationSection Section = EWCAValidationSection::DataUV;
+        EWCAValidationSection Section = EWCAValidationSection::Asset;
         TArray<const FWCAValidationIssue*> Issues;
-        EWCAValidationSeverity MaxSeverity = EWCAValidationSeverity::Info;
         FText NotApplicableReason;
-        bool bApplicable = true;
+        EDWCEditorValidationOverallState OverallState = EDWCEditorValidationOverallState::NotApplicable;
+        EDWCValidationPresentationState PresentationState = EDWCValidationPresentationState::Neutral;
+        TArray<EDWCEditorBuildAction> SuggestedActions;
+        bool bApplicable = false;
     };
 
     struct FDWCValidationIssueDisplay
@@ -625,17 +632,7 @@ namespace
                 continue;
             }
 
-            const bool bMergedGPURuntimeIssue =
-                View.Section == EWCAValidationSection::RuntimeData &&
-                Issue->Section == EWCAValidationSection::GPUSimulationMaps;
-            const FText DisplayTitle = bMergedGPURuntimeIssue
-                ? LOCTEXT("ValidationMergedGPURuntimeDataTitle", "GPU Runtime Data")
-                : Issue->Title;
-            const FString Key = FString::Printf(
-                TEXT("%d|%d|%s"),
-                static_cast<int32>(Issue->Section),
-                static_cast<int32>(Issue->Remediation),
-                *Issue->IssueId.ToString());
+            const FString Key = Issue->BuildDisplayGroupKey();
 
             int32* ExistingIndex = KeyToIndex.Find(Key);
             if (ExistingIndex == nullptr)
@@ -643,11 +640,9 @@ namespace
                 FDWCValidationIssueDisplay Display;
                 Display.Representative = Issue;
                 Display.GroupedIssues.Add(Issue);
-                Display.Title = DisplayTitle;
+                Display.Title = Issue->Title;
                 Display.Status = Issue->Status;
-                Display.RequiredAction = bMergedGPURuntimeIssue
-                    ? LOCTEXT("ValidationMergedGPURuntimeDataAction", "Use Build for Runtime > Build GPU Runtime Data.")
-                    : Issue->RequiredAction;
+                Display.RequiredAction = Issue->RequiredAction;
                 Display.Severity = Issue->Severity;
                 Display.Remediation = Issue->Remediation;
                 Result.Add(MoveTemp(Display));
@@ -756,106 +751,36 @@ namespace
         return Result;
     }
 
-    bool IsValidationSectionApplicable(
-        const UWetClothingAsset& Asset,
-        const EWCAValidationSection Section,
-        const bool bHasIssues)
-    {
-        if (bHasIssues)
-        {
-            return true;
-        }
-
-        const FDWCWetClothingAssetSetupSettings& Setup = Asset.GetSetupSettings();
-        switch (Section)
-        {
-        case EWCAValidationSection::DataUV:
-            return true;
-        case EWCAValidationSection::RuntimeData:
-            return Setup.bBuildCPUVertexSimulationData ||
-                   Setup.bBuildGPUWetnessMapSimulationData ||
-                   Asset.HasCPURuntimeDataPayload() ||
-                   Asset.HasGPURuntimeDataPayload();
-        case EWCAValidationSection::GeneratedMaterials:
-        case EWCAValidationSection::RenderProfileData:
-            return Asset.HasAnyWettableMaterialSlot();
-        case EWCAValidationSection::GPUSimulationMaps:
-            return Setup.bBuildGPUWetnessMapSimulationData;
-        case EWCAValidationSection::WrinkleMaps:
-            return HasWrinkleValidationData(Asset);
-        case EWCAValidationSection::TransparencyMaps:
-            return Asset.HasTransparencyBakeContent();
-        case EWCAValidationSection::FailureDetails:
-            return bHasIssues;
-        default:
-            return true;
-        }
-    }
-
-    FText GetValidationSectionNotApplicableReason(const EWCAValidationSection Section)
-    {
-        switch (Section)
-        {
-        case EWCAValidationSection::RuntimeData:
-            return LOCTEXT("ValidationRuntimeNotApplicable", "CPU and GPU runtime-data generation are disabled for this asset.");
-        case EWCAValidationSection::GeneratedMaterials:
-            return LOCTEXT("ValidationMaterialsNotApplicable", "No material slots are marked Wettable.");
-        case EWCAValidationSection::GPUSimulationMaps:
-            return LOCTEXT("ValidationGPUDataNotApplicable", "GPU Runtime Data generation is disabled for this asset.");
-        case EWCAValidationSection::RenderProfileData:
-            return LOCTEXT("ValidationRenderProfileNotApplicable", "No wettable material slots require a Render Profile Lookup Texture.");
-        case EWCAValidationSection::WrinkleMaps:
-            return LOCTEXT("ValidationWrinkleNotApplicable", "This asset has no authored or baked wrinkle textures.");
-        case EWCAValidationSection::TransparencyMaps:
-            return LOCTEXT("ValidationTransparencyNotApplicable", "This asset has no transparency layers or textures to validate.");
-        case EWCAValidationSection::FailureDetails:
-            return LOCTEXT("ValidationFailureNotApplicable", "No unclassified internal failures were recorded.");
-        default:
-            return LOCTEXT("ValidationSectionNotApplicableGeneric", "This validation section is not applicable to the current asset configuration.");
-        }
-    }
-
     TArray<FDWCValidationSectionView> BuildValidationSectionViews(
-        const FWCAValidationReport& Report,
-        const UWetClothingAsset& Asset)
+        const FWCAValidationReport& Report)
     {
-        static const EWCAValidationSection SectionOrder[] = {
-            EWCAValidationSection::DataUV,
-            EWCAValidationSection::RuntimeData,
-            EWCAValidationSection::GeneratedMaterials,
-            EWCAValidationSection::RenderProfileData,
-            EWCAValidationSection::WrinkleMaps,
-            EWCAValidationSection::TransparencyMaps,
-            EWCAValidationSection::FailureDetails
-        };
-
         TArray<FDWCValidationSectionView> Result;
-        for (const EWCAValidationSection Section : SectionOrder)
+        Result.Reserve(Report.Sections.Num());
+        for (const FWCAValidationSectionResult& SectionResult : Report.Sections)
         {
             FDWCValidationSectionView View;
-            View.Section = Section;
-            for (const FWCAValidationIssue& Issue : Report.Issues)
+            View.Section = SectionResult.Section;
+            View.OverallState = SectionResult.OverallState;
+            View.PresentationState = SectionResult.PresentationState;
+            View.SuggestedActions = SectionResult.SuggestedActions;
+            View.bApplicable = SectionResult.bApplicable;
+            for (const int32 IssueIndex : SectionResult.IssueIndices)
             {
-                const bool bBelongsToRuntimeData =
-                    Section == EWCAValidationSection::RuntimeData &&
-                    (Issue.Section == EWCAValidationSection::RuntimeData ||
-                     Issue.Section == EWCAValidationSection::GPUSimulationMaps);
-                if (!bBelongsToRuntimeData && Issue.Section != Section)
+                if (!Report.Issues.IsValidIndex(IssueIndex))
                 {
                     continue;
                 }
-
+                const FWCAValidationIssue& Issue = Report.Issues[IssueIndex];
                 View.Issues.Add(&Issue);
-                if (static_cast<uint8>(Issue.Severity) > static_cast<uint8>(View.MaxSeverity))
-                {
-                    View.MaxSeverity = Issue.Severity;
-                }
             }
 
-            View.bApplicable = IsValidationSectionApplicable(Asset, Section, !View.Issues.IsEmpty());
             if (!View.bApplicable)
             {
-                View.NotApplicableReason = GetValidationSectionNotApplicableReason(Section);
+                if (const FDWCValidationSectionDescriptor* Descriptor =
+                    FDWCEditorValidationSectionRegistry::Find(View.Section))
+                {
+                    View.NotApplicableReason = Descriptor->NotApplicableReason;
+                }
             }
 
             Result.Add(MoveTemp(View));
@@ -896,10 +821,11 @@ namespace
         Asset->RefreshBakeState(false);
         if (!DWCBuildStatus::IsUsable(Asset->GetBakeState().GPURuntimeData))
         {
-            const FString LastFailure = Asset->GetBakeState().LastFailure;
-            OutFailure = LastFailure.IsEmpty()
+            const FString Failure =
+                Asset->GetBakeOutputFailureMessage(DWCBakeOutput::GPURuntimeData);
+            OutFailure = Failure.IsEmpty()
                              ? TEXT("GPU Runtime Data is still missing or out of date after rebuilding.")
-                             : FString::Printf(TEXT("GPU Runtime Data: %s"), *LastFailure);
+                             : FString::Printf(TEXT("GPU Runtime Data: %s"), *Failure);
             return false;
         }
 
@@ -908,55 +834,43 @@ namespace
 
     FText GetValidationSectionTitle(const EWCAValidationSection Section)
     {
-        switch (Section)
+        if (const FDWCValidationSectionDescriptor* Descriptor =
+            FDWCEditorValidationSectionRegistry::Find(Section))
         {
-        case EWCAValidationSection::DataUV: return LOCTEXT("ValidationSectionDataUV", "Prepared Mesh UV Layout");
-        case EWCAValidationSection::RuntimeData: return LOCTEXT("ValidationSectionRuntimeData", "Runtime Data");
-        case EWCAValidationSection::GeneratedMaterials: return LOCTEXT("ValidationSectionGeneratedMaterials", "Generated Materials");
-        case EWCAValidationSection::GPUSimulationMaps: return LOCTEXT("ValidationSectionGPUData", "GPU Runtime Data");
-        case EWCAValidationSection::RenderProfileData: return LOCTEXT("ValidationSectionRenderProfileData", "Render Profile Lookup Texture");
-        case EWCAValidationSection::WrinkleMaps: return LOCTEXT("ValidationSectionWrinkleTextures", "Wrinkle Textures");
-        case EWCAValidationSection::TransparencyMaps: return LOCTEXT("ValidationSectionTransparencyTextures", "Transparency Textures");
-        case EWCAValidationSection::FailureDetails: return LOCTEXT("ValidationSectionInternalFailure", "Internal Failure");
-        default: return LOCTEXT("ValidationSectionUnknown", "Validation");
+            return Descriptor->Title;
         }
+        return LOCTEXT("ValidationSectionUnknown", "Validation");
     }
 
     const FSlateBrush* GetValidationSectionIcon(const EWCAValidationSection Section)
     {
-        switch (Section)
+        const FDWCValidationSectionDescriptor* Descriptor =
+            FDWCEditorValidationSectionRegistry::Find(Section);
+        if (Descriptor == nullptr)
         {
-        case EWCAValidationSection::DataUV:
-            return FAppStyle::GetBrush(TEXT("ClassIcon.SkeletalMesh"));
-        case EWCAValidationSection::RuntimeData:
-        case EWCAValidationSection::GPUSimulationMaps:
-            return FAppStyle::GetBrush(TEXT("ClassIcon.DataAsset"));
-        case EWCAValidationSection::GeneratedMaterials:
-            return FAppStyle::GetBrush(TEXT("ClassIcon.Material"));
-        case EWCAValidationSection::RenderProfileData:
-        case EWCAValidationSection::WrinkleMaps:
-        case EWCAValidationSection::TransparencyMaps:
-            return FAppStyle::GetBrush(TEXT("ClassIcon.Texture2D"));
-        case EWCAValidationSection::FailureDetails:
-            return FDWCEditorStyle::GetBrush(TEXT("DWCEditor.Validation.Failure"));
-        default:
             return FDWCEditorStyle::GetBrush(TEXT("DWCEditor.Validation.Diagnostics"));
         }
+        return Descriptor->bUseDWCStyle
+            ? FDWCEditorStyle::GetBrush(Descriptor->IconName)
+            : FAppStyle::GetBrush(Descriptor->IconName);
     }
 
     const FSlateBrush* GetValidationSectionStateIcon(const FDWCValidationSectionView& View)
     {
-        if (!View.bApplicable)
+        switch (View.PresentationState)
         {
+        case EDWCValidationPresentationState::Neutral:
             return FAppStyle::GetBrush(TEXT("Icons.Minus"));
-        }
-        if (View.Issues.IsEmpty())
-        {
+        case EDWCValidationPresentationState::Success:
             return FAppStyle::GetBrush(TEXT("Icons.SuccessWithColor"));
+        case EDWCValidationPresentationState::Info:
+            return FAppStyle::GetBrush(TEXT("Icons.InfoWithColor"));
+        case EDWCValidationPresentationState::Warning:
+            return FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"));
+        case EDWCValidationPresentationState::Error:
+        default:
+            return FDWCEditorStyle::GetBrush(TEXT("DWCEditor.Status.Error"));
         }
-        return View.MaxSeverity == EWCAValidationSeverity::Error
-            ? FDWCEditorStyle::GetBrush(TEXT("DWCEditor.Status.Error"))
-            : FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"));
     }
 
     FSlateColor GetValidationSeverityColor(const EWCAValidationSeverity Severity)
@@ -975,15 +889,20 @@ namespace
 
     FSlateColor GetValidationSectionColor(const FDWCValidationSectionView& View)
     {
-        if (!View.bApplicable)
+        switch (View.PresentationState)
         {
+        case EDWCValidationPresentationState::Neutral:
             return FSlateColor(FLinearColor(0.42f, 0.44f, 0.48f, 1.0f));
-        }
-        if (View.Issues.IsEmpty())
-        {
+        case EDWCValidationPresentationState::Success:
             return FSlateColor(FLinearColor(0.24f, 0.78f, 0.38f, 1.0f));
+        case EDWCValidationPresentationState::Info:
+            return GetValidationSeverityColor(EWCAValidationSeverity::Info);
+        case EDWCValidationPresentationState::Warning:
+            return GetValidationSeverityColor(EWCAValidationSeverity::Warning);
+        case EDWCValidationPresentationState::Error:
+        default:
+            return GetValidationSeverityColor(EWCAValidationSeverity::Error);
         }
-        return GetValidationSeverityColor(View.MaxSeverity);
     }
 
     FText GetValidationSectionCountText(const FDWCValidationSectionView& View)
@@ -999,12 +918,13 @@ namespace
         {
             return View.NotApplicableReason;
         }
-        if (View.Issues.IsEmpty())
+        if (View.Issues.IsEmpty() && View.OverallState == EDWCEditorValidationOverallState::Current)
         {
             return LOCTEXT("ValidationSectionNoActiveIssuesTooltip", "No active issues.");
         }
         return FText::Format(
-            LOCTEXT("ValidationSectionActiveIssueCountTooltip", "{0} active validation issue(s)."),
+            LOCTEXT("ValidationSectionStateCountTooltip", "{0}: {1} active validation issue(s)."),
+            FDWCEditorValidationSectionRegistry::GetStateLabel(View.OverallState),
             FText::AsNumber(BuildValidationIssueDisplays(View).Num()));
     }
 
@@ -1021,68 +941,12 @@ namespace
 
     TArray<FText> GetValidationSectionChecks(const EWCAValidationSection Section)
     {
-        TArray<FText> Checks;
-        switch (Section)
+        if (const FDWCValidationSectionDescriptor* Descriptor =
+            FDWCEditorValidationSectionRegistry::Find(Section))
         {
-        case EWCAValidationSection::DataUV:
-            Checks = {
-                LOCTEXT("ValidationCheckDataUVAvailability", "Prepared mesh UV layout availability and build version"),
-                LOCTEXT("ValidationCheckOriginalUVTopology", "Original UV topology data"),
-                LOCTEXT("ValidationCheckPreparedMeshCompatibility", "Prepared mesh and UV-channel compatibility")
-            };
-            break;
-        case EWCAValidationSection::RuntimeData:
-            Checks = {
-                LOCTEXT("ValidationCheckCPURuntimeData", "CPU runtime data availability and freshness"),
-                LOCTEXT("ValidationCheckGPURuntimeData", "GPU runtime data availability and freshness, including simulation lookup data"),
-                LOCTEXT("ValidationCheckRuntimeSaveState", "Unsaved runtime payload changes")
-            };
-            break;
-        case EWCAValidationSection::GeneratedMaterials:
-            Checks = {
-                LOCTEXT("ValidationCheckGeneratedMaterialAvailability", "Generated material and CPU/GPU instance availability"),
-                LOCTEXT("ValidationCheckGeneratedMaterialSource", "Source material changes and parent consistency"),
-                LOCTEXT("ValidationCheckGeneratedMaterialFunctions", "Required material functions and runtime parameters")
-            };
-            break;
-        case EWCAValidationSection::GPUSimulationMaps:
-            Checks = {
-                LOCTEXT("ValidationCheckGPUDataAvailability", "GPU Runtime Data simulation lookup availability"),
-                LOCTEXT("ValidationCheckGPUDataSignature", "Build signature and DWC UV Channel compatibility"),
-                LOCTEXT("ValidationCheckGPUDataSaveState", "Unsaved GPU Runtime Data simulation lookup")
-            };
-            break;
-        case EWCAValidationSection::RenderProfileData:
-            Checks = {
-                LOCTEXT("ValidationCheckWetPartDataTexture", "Wet Part Data Texture and local profile mapping"),
-                LOCTEXT("ValidationCheckSurfaceWaterInputs", "Surface Water profile inputs"),
-                LOCTEXT("ValidationCheckPreparedDropletTextures", "Prepared Droplet Normal and Mask references"),
-                LOCTEXT("ValidationCheckRenderProfileSlots", "Material slot connections")
-            };
-            break;
-        case EWCAValidationSection::WrinkleMaps:
-            Checks = {
-                LOCTEXT("ValidationCheckWrinkleTextures", "Baked wrinkle texture availability and freshness"),
-                LOCTEXT("ValidationCheckCustomWrinkleTextures", "Custom wrinkle texture assignments"),
-                LOCTEXT("ValidationCheckWrinkleSlots", "Per-slot wrinkle texture output state")
-            };
-            break;
-        case EWCAValidationSection::TransparencyMaps:
-            Checks = {
-                LOCTEXT("ValidationCheckTransparencyInputs", "Transparency layer inputs"),
-                LOCTEXT("ValidationCheckTransparencySlots", "Source and target material slot relationships"),
-                LOCTEXT("ValidationCheckTransparencyOutputs", "Stored transparency texture availability and freshness")
-            };
-            break;
-        case EWCAValidationSection::FailureDetails:
-            Checks = {
-                LOCTEXT("ValidationCheckRecentFailures", "Unclassified internal build and validation failures")
-            };
-            break;
-        default:
-            break;
+            return Descriptor->Checks;
         }
-        return Checks;
+        return {};
     }
 
     TSharedRef<SWidget> BuildValidationEmptySectionBody(const FDWCValidationSectionView& View)
@@ -1093,9 +957,20 @@ namespace
         .AutoHeight()
         [
             SNew(STextBlock)
-            .Text(View.bApplicable
-                ? LOCTEXT("ValidationSectionReadyDetail", "No active issues. All checks in this section passed.")
-                : View.NotApplicableReason)
+            .Text([&View]()
+            {
+                if (!View.bApplicable)
+                {
+                    return View.NotApplicableReason;
+                }
+                const FText Description =
+                    FDWCEditorValidationSectionRegistry::GetStateDescription(View.OverallState);
+                return Description.IsEmpty()
+                    ? FText::Format(
+                        LOCTEXT("ValidationSectionCanonicalStateDetail", "Canonical state: {0}."),
+                        FDWCEditorValidationSectionRegistry::GetStateLabel(View.OverallState))
+                    : Description;
+            }())
             .AutoWrapText(true)
             .ColorAndOpacity(StateColor)
         ];
@@ -1133,7 +1008,7 @@ namespace
         return SNew(SBorder)
             .Padding(FMargin(10.0f, 9.0f))
             .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Header")))
-            .BorderBackgroundColor(View.bApplicable
+            .BorderBackgroundColor(View.PresentationState == EDWCValidationPresentationState::Success
                 ? FLinearColor(0.035f, 0.12f, 0.05f, 1.0f)
                 : FLinearColor(0.055f, 0.06f, 0.07f, 1.0f))
             [
@@ -1247,6 +1122,16 @@ namespace
             .VAlign(VAlign_Center)
             .Padding(12.0f, 0.0f, 0.0f, 0.0f)
             [
+                SNew(STextBlock)
+                .Text(FDWCEditorValidationSectionRegistry::GetStateLabel(View.OverallState))
+                .ColorAndOpacity(SectionColor)
+                .Font(MakeValidationFont(10, true))
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+            [
                 SNew(SBox)
                 .WidthOverride(36.0f)
                 .ToolTipText(CountTooltip)
@@ -1309,6 +1194,42 @@ namespace
             [
                 Rows
             ];
+        }
+        else
+        {
+            Section->AddSlot()
+            .AutoHeight()
+            .Padding(26.0f, 6.0f, 0.0f, 0.0f)
+            [
+                BuildValidationEmptySectionBody(View)
+            ];
+        }
+
+        if (!View.SuggestedActions.IsEmpty())
+        {
+            TArray<FString> ActionNames;
+            for (const EDWCEditorBuildAction Action : View.SuggestedActions)
+            {
+                if (const FDWCEditorBuildActionDescriptor* Descriptor =
+                    FDWCEditorBuildActionRegistry::Find(Action))
+                {
+                    ActionNames.AddUnique(Descriptor->DisplayName.ToString());
+                }
+            }
+            if (!ActionNames.IsEmpty())
+            {
+                Section->AddSlot()
+                .AutoHeight()
+                .Padding(26.0f, 6.0f, 0.0f, 0.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(FText::Format(
+                        LOCTEXT("ValidationSectionSuggestedActions", "Build actions: {0}"),
+                        FText::FromString(FString::Join(ActionNames, TEXT(", ")))))
+                    .AutoWrapText(true)
+                    .ColorAndOpacity(GetValidationSectionColor(View))
+                ];
+            }
         }
 
         return Section;
@@ -1429,14 +1350,13 @@ namespace
     }
 
     TSharedRef<SWidget> BuildValidationDialogContent(
-        const UWetClothingAsset& Asset,
         const FWCAValidationReport& Report,
         const FDWCEditorBuildPlan& AutomaticPlan,
         const FString& Examples,
         const FOnClicked& OnResolveClicked,
         const FOnClicked& OnRefreshClicked)
     {
-        const TArray<FDWCValidationSectionView> SectionViews = BuildValidationSectionViews(Report, Asset);
+        const TArray<FDWCValidationSectionView> SectionViews = BuildValidationSectionViews(Report);
         int32 ErrorCount = 0;
         int32 WarningCount = 0;
         int32 DisplayIssueCount = 0;
@@ -1444,7 +1364,10 @@ namespace
         for (const FDWCValidationSectionView& View : SectionViews)
         {
             const TArray<FDWCValidationIssueDisplay> Displays = BuildValidationIssueDisplays(View);
-            if (!Displays.IsEmpty())
+            const bool bSectionNeedsAttention = !Displays.IsEmpty() ||
+                View.PresentationState == EDWCValidationPresentationState::Warning ||
+                View.PresentationState == EDWCValidationPresentationState::Error;
+            if (bSectionNeedsAttention)
             {
                 ++AttentionSectionCount;
             }
@@ -1454,9 +1377,15 @@ namespace
                 ErrorCount += Display.Severity == EWCAValidationSeverity::Error ? 1 : 0;
                 WarningCount += Display.Severity == EWCAValidationSeverity::Warning ? 1 : 0;
             }
+            if (Displays.IsEmpty())
+            {
+                DisplayIssueCount += bSectionNeedsAttention ? 1 : 0;
+                ErrorCount += View.PresentationState == EDWCValidationPresentationState::Error ? 1 : 0;
+                WarningCount += View.PresentationState == EDWCValidationPresentationState::Warning ? 1 : 0;
+            }
         }
 
-        const bool bHasIssues = DisplayIssueCount > 0;
+        const bool bHasIssues = AttentionSectionCount > 0;
         const bool bHasErrors = ErrorCount > 0;
         const bool bCanResolveAutomatically =
             AutomaticPlan.IsExecutable() && !AutomaticPlan.Steps.IsEmpty() && OnResolveClicked.IsBound();
@@ -1492,50 +1421,33 @@ namespace
             ];
         };
 
-        const FDWCValidationSectionView* DataUVView =
-            FindValidationSectionView(SectionViews, EWCAValidationSection::DataUV);
-        const FDWCValidationSectionView* RuntimeDataView =
-            FindValidationSectionView(SectionViews, EWCAValidationSection::RuntimeData);
-        const FDWCValidationSectionView* MaterialsView =
-            FindValidationSectionView(SectionViews, EWCAValidationSection::GeneratedMaterials);
-        const FDWCValidationSectionView* RenderProfileView =
-            FindValidationSectionView(SectionViews, EWCAValidationSection::RenderProfileData);
-        const FDWCValidationSectionView* WrinkleTexturesView =
-            FindValidationSectionView(SectionViews, EWCAValidationSection::WrinkleMaps);
-        const FDWCValidationSectionView* TransparencyTexturesView =
-            FindValidationSectionView(SectionViews, EWCAValidationSection::TransparencyMaps);
-        const FDWCValidationSectionView* InternalFailureView =
-            FindValidationSectionView(SectionViews, EWCAValidationSection::FailureDetails);
-
         TSharedRef<SVerticalBox> ValidationBody = SNew(SVerticalBox);
-        ValidationBody->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-        [
-            BuildValidationSubsectionLabel(LOCTEXT("ValidationRuntimeDataGroup", "RUNTIME DATA"))
-        ];
-        AddValidationSection(ValidationBody, RuntimeDataView);
+        TOptional<EDWCValidationSectionGroup> PreviousGroup;
+        for (const FDWCValidationSectionDescriptor& Descriptor :
+             FDWCEditorValidationSectionRegistry::GetSections())
+        {
+            const FDWCValidationSectionView* View =
+                FindValidationSectionView(SectionViews, Descriptor.Section);
+            if (View == nullptr ||
+                (Descriptor.Group == EDWCValidationSectionGroup::Internal && View->Issues.IsEmpty()))
+            {
+                continue;
+            }
 
-        ValidationBody->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 6.0f, 0.0f, 6.0f)
-        [
-            BuildValidationSubsectionLabel(LOCTEXT("ValidationGeneratedAssetsGroup", "GENERATED ASSETS"))
-        ];
-        AddValidationSection(ValidationBody, MaterialsView);
-        AddValidationSection(ValidationBody, RenderProfileView);
-        AddValidationSection(ValidationBody, WrinkleTexturesView);
-        AddValidationSection(ValidationBody, TransparencyTexturesView);
-
-        ValidationBody->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 2.0f, 0.0f, 6.0f)
-        [
-            BuildValidationSubsectionLabel(
-                LOCTEXT("ValidationGroupMeshUV", "MESH & UV"),
-                true)
-        ];
-        AddValidationSection(ValidationBody, DataUVView);
+            if (!PreviousGroup.IsSet() || PreviousGroup.GetValue() != Descriptor.Group)
+            {
+                ValidationBody->AddSlot()
+                .AutoHeight()
+                .Padding(0.0f, PreviousGroup.IsSet() ? 2.0f : 0.0f, 0.0f, 6.0f)
+                [
+                    BuildValidationSubsectionLabel(
+                        FDWCEditorValidationSectionRegistry::GetGroupTitle(Descriptor.Group),
+                        PreviousGroup.IsSet())
+                ];
+                PreviousGroup = Descriptor.Group;
+            }
+            AddValidationSection(ValidationBody, View);
+        }
 
         ValidationBody->AddSlot()
         .AutoHeight()
@@ -1549,16 +1461,6 @@ namespace
         [
             ValidationBody
         ];
-
-        if (InternalFailureView != nullptr && !InternalFailureView->Issues.IsEmpty())
-        {
-            Sections->AddSlot()
-            .AutoHeight()
-            .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-            [
-                BuildValidationIssueSection(*InternalFailureView)
-            ];
-        }
 
         TSharedRef<SHorizontalBox> ButtonRow = SNew(SHorizontalBox);
         if (bCanResolveAutomatically)
@@ -1702,6 +1604,8 @@ namespace
                    PropertyName == FName(TEXT("LODVertexColorRuntimeData")) ||
                    PropertyName == FName(TEXT("BakedGPUWetMapLODs")) ||
                    PropertyName == FName(TEXT("OriginalUVTopologiesPerLOD")) ||
+                   PropertyName == FName(TEXT("OriginalUVTopologies")) ||
+                   PropertyName == FName(TEXT("OriginalUVTopologyDescriptors")) ||
                    PropertyName == FName(TEXT("DataUVMetadataPerLOD")) ||
                    PropertyName == FName(TEXT("BakeState")) ||
                    PropertyName == FName(TEXT("ValidationSummary")) ||
@@ -1949,7 +1853,7 @@ namespace
                 {
                     return LOCTEXT("AssetSetupDataUVRelocation", "Relocation Required");
                 }
-                return Asset.HasValidDataUVForLOD(Asset.GetSimulationLODIndex())
+                return HasReadyDataUVMetadata(Asset)
                     ? LOCTEXT("AssetSetupDataUVReady", "Ready")
                     : LOCTEXT("AssetSetupDataUVMissing", "Missing");
             })
@@ -1959,7 +1863,7 @@ namespace
                 {
                     return WarningColor;
                 }
-                return Asset.HasValidDataUVForLOD(Asset.GetSimulationLODIndex()) ? ReadyColor : MissingColor;
+                return HasReadyDataUVMetadata(Asset) ? ReadyColor : MissingColor;
             })
         ];
 
@@ -2525,7 +2429,8 @@ namespace
         TArray<FString> WarningMessages;
         int32 BakedLayerCount = 0;
         const FDWCTransparencyBuildTargetSnapshot BuildTargets =
-            FDWCTransparencyBuildTargetResolver::Resolve(Asset, true);
+            FDWCTransparencyBuildTargetResolver::Resolve(
+                Asset, EDWCEditorValidationAccess::ExactPayload);
         TMap<FGuid, EDWCTransparencyBuildRequirement> RequiredLayers;
         for (const FDWCTransparencyBuildTarget& Target : BuildTargets.Targets)
         {
@@ -2698,10 +2603,15 @@ namespace
                 .SupportsMinimize(false);
 
         auto BuildIssueSummaryCard = [](
-            const EWCAValidationSection Section,
+            const FWCAValidationSectionResult& SectionResult,
             const TArray<const FWCAValidationIssue*>& Issues) -> TSharedRef<SWidget>
         {
-            EWCAValidationSeverity Severity = EWCAValidationSeverity::Info;
+            EWCAValidationSeverity Severity =
+                SectionResult.PresentationState == EDWCValidationPresentationState::Error
+                    ? EWCAValidationSeverity::Error
+                    : SectionResult.PresentationState == EDWCValidationPresentationState::Warning
+                        ? EWCAValidationSeverity::Warning
+                        : EWCAValidationSeverity::Info;
             for (const FWCAValidationIssue* Issue : Issues)
             {
                 if (Issue != nullptr &&
@@ -2713,6 +2623,27 @@ namespace
             const bool bFailed = Severity == EWCAValidationSeverity::Error;
 
             TSharedRef<SVerticalBox> DetailLines = SNew(SVerticalBox);
+            if (Issues.IsEmpty())
+            {
+                const FText StateDescription =
+                    FDWCEditorValidationSectionRegistry::GetStateDescription(
+                        SectionResult.OverallState);
+                DetailLines->AddSlot()
+                .AutoHeight()
+                .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(StateDescription.IsEmpty()
+                        ? FText::Format(
+                            LOCTEXT("DWCCloseCanonicalState", "Canonical state: {0}."),
+                            FDWCEditorValidationSectionRegistry::GetStateLabel(
+                                SectionResult.OverallState))
+                        : StateDescription)
+                    .AutoWrapText(true)
+                    .Font(MakeValidationFont())
+                    .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
+                ];
+            }
             for (const FWCAValidationIssue* Issue : Issues)
             {
                 if (Issue == nullptr)
@@ -2761,7 +2692,7 @@ namespace
                             .HeightOverride(18.0f)
                             [
                                 SNew(SImage)
-                                .Image(GetValidationSectionIcon(Section))
+                                .Image(GetValidationSectionIcon(SectionResult.Section))
                                 .ColorAndOpacity(FLinearColor::White)
                             ]
                         ]
@@ -2770,7 +2701,7 @@ namespace
                         .VAlign(VAlign_Center)
                         [
                             SNew(STextBlock)
-                            .Text(GetValidationSectionTitle(Section))
+                            .Text(GetValidationSectionTitle(SectionResult.Section))
                             .Font(MakeValidationFont(10, true))
                             .AutoWrapText(true)
                         ]
@@ -2803,27 +2734,20 @@ namespace
         };
 
         TSharedRef<SVerticalBox> IssueCards = SNew(SVerticalBox);
-        static const EWCAValidationSection SectionOrder[] = {
-            EWCAValidationSection::RuntimeData,
-            EWCAValidationSection::GeneratedMaterials,
-            EWCAValidationSection::RenderProfileData,
-            EWCAValidationSection::WrinkleMaps,
-            EWCAValidationSection::TransparencyMaps,
-            EWCAValidationSection::DataUV,
-            EWCAValidationSection::FailureDetails};
-        for (const EWCAValidationSection Section : SectionOrder)
+        for (const FWCAValidationSectionResult& SectionResult : Report.Sections)
         {
             TArray<const FWCAValidationIssue*> SectionIssues;
-            for (const FWCAValidationIssue& Issue : Report.Issues)
+            for (const int32 IssueIndex : SectionResult.IssueIndices)
             {
-                if (Issue.Section == Section ||
-                    (Section == EWCAValidationSection::RuntimeData &&
-                     Issue.Section == EWCAValidationSection::GPUSimulationMaps))
+                if (Report.Issues.IsValidIndex(IssueIndex))
                 {
-                    SectionIssues.Add(&Issue);
+                    SectionIssues.Add(&Report.Issues[IssueIndex]);
                 }
             }
-            if (SectionIssues.IsEmpty())
+            const bool bNeedsAttention = !SectionIssues.IsEmpty() ||
+                SectionResult.PresentationState == EDWCValidationPresentationState::Warning ||
+                SectionResult.PresentationState == EDWCValidationPresentationState::Error;
+            if (!bNeedsAttention)
             {
                 continue;
             }
@@ -2832,7 +2756,7 @@ namespace
             .AutoHeight()
             .Padding(0.0f, 0.0f, 0.0f, 8.0f)
             [
-                BuildIssueSummaryCard(Section, SectionIssues)
+                BuildIssueSummaryCard(SectionResult, SectionIssues)
             ];
         }
 
@@ -2945,9 +2869,11 @@ void FWCAEditor::Initialize(const EToolkitMode::Type Mode, const TSharedPtr<IToo
 {
     check(InWetClothingAsset != nullptr);
 
+    FDWCEditorAuthoringOperationScope DiagnosticScope(TEXT("WCAEditor.Initialize"), InWetClothingAsset);
     const double InitializeStartTime = FPlatformTime::Seconds();
     WetClothingAsset = InWetClothingAsset;
     InWetClothingAsset->ReleaseLoadedRuntimeBulkPayloadForEditor();
+    InWetClothingAsset->ReleaseLoadedOriginalUVTopologiesForEditor();
 
     FPropertyEditorModule& PropertyEditorModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
 
@@ -3044,7 +2970,9 @@ bool FWCAEditor::OnRequestClose(EAssetEditorCloseReason InCloseReason)
         const FWCAEditorCanonicalStateSnapshot CanonicalState =
             BuildCanonicalStateSnapshot(false);
         const FWCAValidationReport ValidationReport =
-            FDWCEditorValidationReportAdapter::BuildReport(CanonicalState.Validation);
+            FDWCEditorValidationReportAdapter::BuildReport(
+                CanonicalState.Validation,
+                &CanonicalState.BuildStatus);
         if (ValidationReport.HasIssues())
         {
             CloseConfirmationState = ECloseConfirmationState::PromptOpen;
@@ -3143,10 +3071,6 @@ void FWCAEditor::HandleDWCEditorAssetSaveAttemptFinished(UObject* SavedAsset, co
     {
         EditorPanel->RefreshStatusFromAsset();
     }
-    else if (UWetClothingAsset* Asset = WetClothingAsset.Get())
-    {
-        Asset->RefreshBakeState(false);
-    }
 
     // The Validation toolbar button stores its label and icon when the toolbar
     // is built. Refresh it after an asset save without rebuilding the active
@@ -3219,21 +3143,16 @@ void FWCAEditor::FillAssetToolbar(FToolBarBuilder& ToolbarBuilder)
 #if WITH_EDITORONLY_DATA
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
+        const FWCAEditorCanonicalStateSnapshot CanonicalState =
+            BuildCanonicalStateSnapshot(false);
         const FWCAValidationReport ValidationReport =
-            BuildWCAValidationReport(*Asset, EWCAValidationMode::Fast, false);
-        const TArray<FDWCValidationSectionView> ValidationViews = BuildValidationSectionViews(ValidationReport, *Asset);
-        int32 ActionRequiredCount = 0;
-        for (const FDWCValidationSectionView& View : ValidationViews)
-        {
-            ActionRequiredCount += BuildValidationIssueDisplays(View).Num();
-        }
+            FDWCEditorValidationReportAdapter::BuildReport(
+                CanonicalState.Validation,
+                &CanonicalState.BuildStatus);
+        const int32 ActionRequiredCount = ValidationReport.GetDisplayIssueCount();
         if (ActionRequiredCount > 0)
         {
-            const bool bHasFailedState = ValidationReport.Issues.ContainsByPredicate(
-                [](const FWCAValidationIssue& Issue)
-                {
-                    return Issue.Severity == EWCAValidationSeverity::Error;
-                });
+            const bool bHasFailedState = ValidationReport.HasErrors();
             ValidationLabel = FText::Format(
                 LOCTEXT("ValidationToolbarWarningLabel", "Validation ({0})"),
                 FText::AsNumber(ActionRequiredCount));
@@ -3482,7 +3401,9 @@ void FWCAEditor::HandleAssetSetupClicked()
             Report.GeneratedLODIndices.Reset();
             Report.ReusedLODIndices.Reset();
             Report.RemovedLODIndices.Reset();
-            Asset->SetLastBakeFailure(TEXT("The requested LOD range was not activated because one or more LODs failed DWC UV generation."));
+            const FString Failure = TEXT("The requested LOD range was not activated because one or more LODs failed DWC UV generation.");
+            Asset->SetBakeOutputStatus(DWCBakeOutput::GeneratedDataUV, EDWCBakeStatus::Failed, Failure);
+            Asset->SetBakeOutputStatus(DWCBakeOutput::OriginalUVTopology, EDWCBakeStatus::Failed, Failure);
             RefreshAssetStateAndEditor();
             WCAReportDialogs::OpenLODRangeUpdateDialog(Report);
             return;
@@ -3531,7 +3452,14 @@ void FWCAEditor::HandleAssetSetupClicked()
         {
             FString RevertSummary;
             Asset->ApplySetupSettings(PreviousSettings, &RevertSummary);
-            Asset->SetLastBakeFailure(RangeSyncResult.Message);
+            Asset->SetBakeOutputStatus(
+                DWCBakeOutput::GeneratedDataUV,
+                EDWCBakeStatus::Failed,
+                RangeSyncResult.Message);
+            Asset->SetBakeOutputStatus(
+                DWCBakeOutput::OriginalUVTopology,
+                EDWCBakeStatus::Failed,
+                RangeSyncResult.Message);
             RefreshAssetStateAndEditor();
             WCAReportDialogs::OpenDWCDataUVBuildFailureDialog(
                 RangeSyncResult,
@@ -3569,7 +3497,10 @@ void FWCAEditor::HandleAssetSetupClicked()
             bAllowOverwriteExistingDataUVChannel);
         if (!RelocationResult.bSucceeded)
         {
-            Asset->SetLastBakeFailure(RelocationResult.Message);
+            Asset->SetBakeOutputStatus(
+                DWCBakeOutput::GeneratedDataUV,
+                EDWCBakeStatus::Failed,
+                RelocationResult.Message);
             RefreshAssetStateAndEditor();
             FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(RelocationResult.Message));
             return;
@@ -3689,7 +3620,14 @@ void FWCAEditor::InitializeGeneratedDataUV(
         IncludedMaterialSlotIndices);
     if (!Result.bSucceeded)
     {
-        Asset->SetLastBakeFailure(Result.Message);
+        Asset->SetBakeOutputStatus(
+            DWCBakeOutput::GeneratedDataUV,
+            EDWCBakeStatus::Failed,
+            Result.Message);
+        Asset->SetBakeOutputStatus(
+            DWCBakeOutput::OriginalUVTopology,
+            EDWCBakeStatus::Failed,
+            Result.Message);
         // Generate() already invalidated transient derived data. Refresh the editor as well so
         // panels do not keep local copies of pre-initialization UV view data after a failed initial build.
         RefreshAssetStateAndEditor();
@@ -3752,7 +3690,6 @@ void FWCAEditor::RefreshValidationDialogContent(const TSharedRef<SWindow>& Dialo
 
     // Explicit validation is the only routine editor action that performs full
     // runtime/map signature and generated-material graph validation.
-    Asset->RefreshBakeState(true);
     if (EditorPanel.IsValid())
     {
         EditorPanel->RefreshStatusFromAsset();
@@ -3760,9 +3697,12 @@ void FWCAEditor::RefreshValidationDialogContent(const TSharedRef<SWindow>& Dialo
     RegenerateMenusAndToolbars();
 
 #if WITH_EDITORONLY_DATA
-    const FWCAEditorCanonicalStateSnapshot CanonicalState = BuildCanonicalStateSnapshot(true);
+    const FWCAEditorCanonicalStateSnapshot CanonicalState =
+        BuildCanonicalStateSnapshot(true);
     const FWCAValidationReport ValidationReport =
-        FDWCEditorValidationReportAdapter::BuildReport(CanonicalState.Validation);
+        FDWCEditorValidationReportAdapter::BuildReport(
+            CanonicalState.Validation,
+            &CanonicalState.BuildStatus);
     const FDWCEditorBuildPlan AutomaticPlan =
         FDWCEditorBuildPlanResolver::ResolveValidationSuggested(
             CanonicalState.BuildStatus,
@@ -3786,7 +3726,6 @@ void FWCAEditor::RefreshValidationDialogContent(const TSharedRef<SWindow>& Dialo
     const TWeakPtr<SWindow> WeakDialogWindow(DialogWindow);
 
     DialogWindow->SetContent(BuildValidationDialogContent(
-        *Asset,
         ValidationReport,
         AutomaticPlan,
         Examples,
@@ -3868,13 +3807,9 @@ void FWCAEditor::ExecuteValidationResolveExclusive(TWeakPtr<SWindow> DialogWindo
 
 TSharedRef<SWidget> FWCAEditor::BuildRuntimeBuildMenu()
 {
-    if (UWetClothingAsset* Asset = WetClothingAsset.Get())
-    {
-        Asset->RefreshBakeState(false);
-    }
-
     FWCARuntimeBuildMenuArgs Args;
-    const FWCAEditorCanonicalStateSnapshot CanonicalState = BuildCanonicalStateSnapshot(false);
+    const FWCAEditorCanonicalStateSnapshot CanonicalState =
+        BuildCanonicalStateSnapshot(false);
     Args.Snapshot = CanonicalState.BuildStatus;
     Args.RequiredPlan = FDWCEditorBuildPlanResolver::ResolveRequired(Args.Snapshot);
     switch (CurrentMode)
@@ -3941,8 +3876,7 @@ FWCAEditorCanonicalStateSnapshot FWCAEditor::BuildCanonicalStateSnapshot(
         *Asset,
         EditorPanel.Get(),
         SurfaceMode,
-        bDeepValidation,
-        false);
+        bDeepValidation);
 }
 
 bool FWCAEditor::CanExecuteBuildAction(const EDWCEditorBuildAction Action) const
@@ -4589,11 +4523,8 @@ bool FWCAEditor::ResolveIssuesAndSave(
     SlowTask.MakeDialog(true);
 
     TArray<FString> ResolveSummaries;
-    TMap<EDWCEditorBuildAction, int32> AttemptCounts;
-    bool bEncounteredManualIssues = false;
-    bool bCompleted = false;
-
-    for (int32 Iteration = 0; Iteration < 32; ++Iteration)
+    FDWCEditorValidationFixConvergence FixConvergence(32, 3);
+    while (true)
     {
         if (SlowTask.ShouldCancel())
         {
@@ -4602,7 +4533,8 @@ bool FWCAEditor::ResolveIssuesAndSave(
         }
 
         MemoryTrace.BeginPhase(TEXT("Revalidate and Plan"));
-        const FWCAEditorCanonicalStateSnapshot State = BuildCanonicalStateSnapshot(true);
+        const FWCAEditorCanonicalStateSnapshot State =
+            BuildCanonicalStateSnapshot(true);
         FDWCEditorBuildPlan Plan;
         if (PlanPolicy == EDWCEditorBuildPlanPolicy::ValidationSuggested)
         {
@@ -4624,31 +4556,37 @@ bool FWCAEditor::ResolveIssuesAndSave(
         {
             Plan = FDWCEditorBuildPlanResolver::ResolveRequired(State.BuildStatus);
         }
-        bEncounteredManualIssues |= !Plan.ManualDiagnosticCodes.IsEmpty();
-
-        if (!Plan.IsExecutable())
+        const FDWCEditorValidationFixDecisionResult FixDecision =
+            FixConvergence.Observe(State.Validation, State.BuildStatus, Plan);
+        if (FixDecision.Decision == EDWCEditorValidationFixDecision::Blocked)
         {
             OutFailure = DescribeBlockedBuildPlan(Plan, State.BuildStatus);
             return false;
         }
-        if (Plan.Steps.IsEmpty())
+        if (FixDecision.Decision == EDWCEditorValidationFixDecision::Complete)
         {
-            bCompleted = true;
             break;
         }
-
-        const FDWCEditorBuildPlanStep Step = Plan.Steps[0];
-        int32& AttemptCount = AttemptCounts.FindOrAdd(Step.Action);
-        ++AttemptCount;
-        if (AttemptCount > 3)
+        if (FixDecision.Decision == EDWCEditorValidationFixDecision::IterationLimit)
         {
+            OutFailure = FixDecision.Failure;
+            return false;
+        }
+        if (FixDecision.Decision == EDWCEditorValidationFixDecision::NoProgress)
+        {
+            const EDWCEditorBuildAction Action = FixDecision.Step.IsSet()
+                ? FixDecision.Step->Action
+                : EDWCEditorBuildAction::Count;
             const FDWCEditorBuildActionDescriptor* Descriptor =
-                FDWCEditorBuildActionRegistry::Find(Step.Action);
+                FDWCEditorBuildActionRegistry::Find(Action);
             OutFailure = FString::Printf(
                 TEXT("The automatic Build made no state progress after repeatedly executing '%s'."),
                 Descriptor != nullptr ? *Descriptor->DisplayName.ToString() : TEXT("Unknown action"));
             return false;
         }
+
+        check(FixDecision.Step.IsSet());
+        const FDWCEditorBuildPlanStep Step = FixDecision.Step.GetValue();
 
         const FDWCEditorBuildActionDescriptor* Descriptor =
             FDWCEditorBuildActionRegistry::Find(Step.Action);
@@ -4672,7 +4610,14 @@ bool FWCAEditor::ResolveIssuesAndSave(
                 CollectWettableMaterialSlotIndices(*Asset));
             if (!Result.bSucceeded)
             {
-                Asset->SetLastBakeFailure(Result.Message);
+                Asset->SetBakeOutputStatus(
+                    DWCBakeOutput::GeneratedDataUV,
+                    EDWCBakeStatus::Failed,
+                    Result.Message);
+                Asset->SetBakeOutputStatus(
+                    DWCBakeOutput::OriginalUVTopology,
+                    EDWCBakeStatus::Failed,
+                    Result.Message);
                 OutFailure = Result.Message;
                 return false;
             }
@@ -4780,21 +4725,17 @@ bool FWCAEditor::ResolveIssuesAndSave(
             return false;
         }
 
-        Asset->RefreshBakeState(true);
         EditorPanel->RequestRefreshFromAsset(false);
     }
 
-    if (!bCompleted)
-    {
-        OutFailure = TEXT("The automatic Build exceeded its bounded replanning limit.");
-        return false;
-    }
-
     MemoryTrace.BeginPhase(TEXT("Final Validation"));
-    const FWCAEditorCanonicalStateSnapshot FinalState = BuildCanonicalStateSnapshot(true);
+    const FWCAEditorCanonicalStateSnapshot FinalState =
+        BuildCanonicalStateSnapshot(true);
     const FWCAValidationReport FinalReport =
-        FDWCEditorValidationReportAdapter::BuildReport(FinalState.Validation);
-    if (bEncounteredManualIssues || FinalReport.HasManualIssues())
+        FDWCEditorValidationReportAdapter::BuildReport(
+            FinalState.Validation,
+            &FinalState.BuildStatus);
+    if (FinalReport.HasManualIssues())
     {
         ResolveSummaries.Add(TEXT("Automatic issues were resolved. Manual Fix items still require user input."));
     }
@@ -4867,6 +4808,7 @@ void FWCAEditor::SetEditorMode(EWCAEditorMode NewMode)
         return;
     }
 
+    FDWCEditorAuthoringOperationScope DiagnosticScope(TEXT("WCAEditor.SetEditorMode"), WetClothingAsset.Get());
     CurrentMode = NewMode;
 
     if (EditorPanel.IsValid())

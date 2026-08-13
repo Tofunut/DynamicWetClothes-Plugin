@@ -18,6 +18,7 @@ namespace
     {
         constexpr int32 Size = FDWCTransparencyAlphaTileStore::TileSize;
         TSharedRef<FDWCTransparencySourcePayload> Result = MakeShared<FDWCTransparencySourcePayload>();
+        Result->MaterialSlotIndex = ReplayTestSlot;
         Result->Resolution = FIntPoint(Size, Size);
         const int32 PixelCount = Size * Size;
         Result->InnerColorBuffer.Init(FColor(32, 64, 96, 255), PixelCount);
@@ -97,7 +98,9 @@ bool FDWCTransparencyAlphaDirtyTileReplayParityTest::RunTest(const FString&)
     Input.Target = EDWCTransparencyDirtyReplayTarget::Alpha;
     Input.SourcePayload = SourcePayload;
     Input.MaterialSlotIndex = ReplayTestSlot;
-    Input.AlphaStrokes = {SurvivingStroke};
+    FDWCTransparencyBrushStroke CompactStroke = SurvivingStroke;
+    TestTrue(TEXT("The replay fixture converts legacy samples to compact storage"), CompactStroke.CompactLegacySamples());
+    Input.AlphaStrokes = {MoveTemp(CompactStroke)};
     Input.DirtyTileCoordinates = {FIntPoint::ZeroValue};
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> Token =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();
@@ -150,7 +153,9 @@ bool FDWCTransparencyRevealColorDirtyTileReplayParityTest::RunTest(const FString
     Input.SourcePayload = SourcePayload;
     Input.MaterialSlotIndex = ReplayTestSlot;
     Input.BaseRevealColor = BaseRevealColor;
-    Input.RevealColorStrokes = {SurvivingStroke};
+    FDWCTransparencyRevealColorStroke CompactStroke = SurvivingStroke;
+    TestTrue(TEXT("The reveal fixture converts legacy samples to compact storage"), CompactStroke.CompactLegacySamples());
+    Input.RevealColorStrokes = {MoveTemp(CompactStroke)};
     Input.DirtyTileCoordinates = {FIntPoint::ZeroValue};
     const TSharedRef<FDWCEditorCancellationToken, ESPMode::ThreadSafe> Token =
         MakeShared<FDWCEditorCancellationToken, ESPMode::ThreadSafe>();

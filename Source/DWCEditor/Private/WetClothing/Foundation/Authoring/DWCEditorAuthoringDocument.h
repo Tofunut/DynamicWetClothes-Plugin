@@ -7,6 +7,7 @@
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringTypes.h"
 
 class FScopedTransaction;
+class UObject;
 class UWetClothingAsset;
 
 /**
@@ -32,10 +33,20 @@ class FDWCEditorAuthoringDocument final
         const FText&                           TransactionText,
         FDWCEditorAuthoringChange              Change,
         TFunctionRef<bool(UWetClothingAsset&)> Mutation);
+    FDWCEditorAuthoringResult Edit(
+        const FText&                           TransactionText,
+        FDWCEditorAuthoringChange              Change,
+        UObject*                               AdditionalTransactionTarget,
+        TFunctionRef<bool(UWetClothingAsset&)> Mutation);
 
     bool BeginInteractiveEdit(
         const FText&              TransactionText,
         FDWCEditorAuthoringChange Change,
+        FString*                  OutError = nullptr);
+    bool BeginInteractiveEdit(
+        const FText&              TransactionText,
+        FDWCEditorAuthoringChange Change,
+        UObject*                  AdditionalTransactionTarget,
         FString*                  OutError = nullptr);
     FDWCEditorAuthoringResult UpdateInteractiveEdit(
         FDWCEditorAuthoringChange              Change,

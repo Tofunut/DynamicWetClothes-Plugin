@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationTypes.h"
 
 class UWetClothingAsset;
 
@@ -70,5 +71,5 @@ class FDWCWrinkleBuildTargetResolver
 public:
     static FDWCWrinkleBuildTargetSnapshot Resolve(
         const UWetClothingAsset& Asset,
-        bool bDeepValidation);
+        EDWCEditorValidationAccess Access);
 };

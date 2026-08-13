@@ -283,8 +283,9 @@ namespace
         }
 
 #if WITH_EDITORONLY_DATA
-        const FDWCEditorUVTopologyData* OriginalTopology =
-            WetClothingAsset.FindOriginalUVTopologyForLOD(LODIndex);
+        const FDWCEditorUVTopologyHandle OriginalTopologyHandle =
+            WetClothingAsset.AcquireOriginalUVTopologyForLOD(LODIndex, &OutErrorMessage);
+        const FDWCEditorUVTopologyData* OriginalTopology = OriginalTopologyHandle.Get();
         if (OriginalTopology == nullptr || !OriginalTopology->bIsValid ||
             OriginalTopology->LODIndex != LODIndex ||
             OriginalTopology->UVChannelIndex != WetClothingAsset.GetOriginalUVChannelIndex())
@@ -640,6 +641,7 @@ void FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
     }
 
     const auto WrapIndex = [](int32 Value, int32 Size) { return (Value % Size + Size) % Size; };
+    TArray<FDWCTransparencyBrushSample> DecodedSamples;
     for (const FDWCTransparencyRevealColorStroke& Stroke : Strokes)
     {
         if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != MaterialSlotIndex)
@@ -649,7 +651,8 @@ void FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
 
         const bool bWrap = Stroke.UVAddressMode == EDWCTransparencyUVAddressMode::Wrap;
         const FLinearColor PaintColor = Stroke.PaintColor.CopyWithNewOpacity(1.0f);
-        for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
+        Stroke.DecodeSamples(DecodedSamples);
+        for (const FDWCTransparencyBrushSample& Sample : DecodedSamples)
         {
             const float RadiusX = FMath::Max(Sample.RadiusUV * Width, 1.0f);
             const float RadiusY = FMath::Max(Sample.RadiusUV * Height, 1.0f);

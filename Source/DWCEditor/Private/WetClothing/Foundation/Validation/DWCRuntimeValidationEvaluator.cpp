@@ -57,24 +57,46 @@ void EvaluateTarget(
         Node.Artifact = Spec.bHasPayload
             ? EDWCEditorValidationArtifactState::Stale
             : EDWCEditorValidationArtifactState::Missing;
+        const bool bRuntimeMeshMissing = Context.RuntimeMesh == nullptr;
         const EDWCEditorBuildAction BlockingAction = EDWCEditorBuildAction::InitializeDataUV;
-        DWCEditorValidation::SetActionState(
-            Snapshot,
-            Spec.Action,
-            EDWCEditorBuildActionState::Blocked,
-            &Node.Key,
-            MakeArrayView(&BlockingAction, 1));
+        if (bRuntimeMeshMissing)
+        {
+            DWCEditorValidation::SetActionState(
+                Snapshot,
+                Spec.Action,
+                EDWCEditorBuildActionState::Blocked,
+                &Node.Key);
+        }
+        else
+        {
+            DWCEditorValidation::SetActionState(
+                Snapshot,
+                Spec.Action,
+                EDWCEditorBuildActionState::Required,
+                &Node.Key,
+                MakeArrayView(&BlockingAction, 1));
+        }
         DWCEditorValidation::AddDiagnostic(
             Snapshot,
             Node,
             FName(*FString::Printf(TEXT("%sPrerequisite"), *Spec.SubResource.ToString())),
             EDWCEditorValidationSeverity::Warning,
             Spec.Title,
-            NSLOCTEXT("DWCRuntimeValidation", "Blocked", "Blocked"),
-            NSLOCTEXT("DWCRuntimeValidation", "PrerequisiteDetail", "The prepared mesh and DWC UV prerequisites are not current."),
-            NSLOCTEXT("DWCRuntimeValidation", "PrerequisiteAction", "Initialize the DWC data UV layout, then rebuild runtime data."),
-            EDWCEditorValidationRemediation::BuildAction,
-            Spec.Action);
+            bRuntimeMeshMissing
+                ? NSLOCTEXT("DWCRuntimeValidation", "Blocked", "Blocked")
+                : NSLOCTEXT("DWCRuntimeValidation", "PrerequisiteRequired", "Prerequisite Required"),
+            bRuntimeMeshMissing
+                ? NSLOCTEXT("DWCRuntimeValidation", "RuntimeMeshMissingDetail", "Runtime data requires a DWC runtime mesh.")
+                : NSLOCTEXT("DWCRuntimeValidation", "PrerequisiteDetail", "The prepared mesh and DWC UV prerequisites are not current."),
+            bRuntimeMeshMissing
+                ? NSLOCTEXT("DWCRuntimeValidation", "RuntimeMeshMissingAction", "Assign or generate the DWC runtime mesh first.")
+                : NSLOCTEXT("DWCRuntimeValidation", "PrerequisiteAction", "Initialize the DWC data UV layout, then rebuild runtime data."),
+            bRuntimeMeshMissing
+                ? EDWCEditorValidationRemediation::Manual
+                : EDWCEditorValidationRemediation::BuildAction,
+            bRuntimeMeshMissing
+                ? TOptional<EDWCEditorBuildAction>()
+                : TOptional<EDWCEditorBuildAction>(Spec.Action));
         return;
     }
 

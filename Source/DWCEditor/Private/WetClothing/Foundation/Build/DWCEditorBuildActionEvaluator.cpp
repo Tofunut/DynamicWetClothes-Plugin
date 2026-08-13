@@ -2,6 +2,7 @@
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionEvaluator.h"
 
 #include "DataAssets/WetClothingAsset.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationEvaluationContext.h"
 #include "UObject/Package.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionRegistry.h"
 
@@ -121,18 +122,19 @@ namespace
 }
 
 FDWCEditorBuildEvaluationInput FDWCEditorBuildActionEvaluator::CaptureAssetState(
-    const UWetClothingAsset& Asset,
+    const FDWCEditorValidationEvaluationContext& Context,
     const EDWCEditorBuildSurfaceMode SurfaceMode,
     FDWCEditorBuildEvaluationInput ServiceState)
 {
+    const UWetClothingAsset& Asset = Context.Asset;
     const FDWCAssetBakeState& BakeState = Asset.GetBakeState();
     const FDWCWetClothingAssetSetupSettings& Setup = Asset.GetSetupSettings();
 
     ServiceState.bHasAsset = true;
     ServiceState.bAssetDirty = Asset.GetOutermost() != nullptr && Asset.GetOutermost()->IsDirty();
-    ServiceState.bHasRuntimeMesh = Asset.GetRuntimeSkeletalMesh() != nullptr;
+    ServiceState.bHasRuntimeMesh = Context.RuntimeMesh != nullptr;
     ServiceState.bHasWettableSlots = Asset.HasAnyWettableMaterialSlot();
-    ServiceState.bHasValidDataUV = Asset.HasValidDataUVForLOD(Asset.GetSimulationLODIndex());
+    ServiceState.bHasValidDataUV = Context.bDataUVReady;
     ServiceState.bCPUBackendEnabled = Setup.bBuildCPUVertexSimulationData;
     ServiceState.bGPUBackendEnabled = Setup.bBuildGPUWetnessMapSimulationData;
     if (!ServiceState.bWrinkleTargetStateProvided)

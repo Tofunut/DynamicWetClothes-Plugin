@@ -2,9 +2,9 @@
 #include "WetClothing/WCAEditor/Build/WCAEditorBuildStatusProvider.h"
 
 #include "DataAssets/WetClothingAsset.h"
-#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionEvaluator.h"
+#include "WetClothing/Foundation/Build/DWCRenderProfileBuildTargetResolver.h"
 #include "WetClothing/Foundation/Build/DWCTransparencyBuildTargetResolver.h"
 #include "WetClothing/Foundation/Build/DWCWrinkleBuildTargetResolver.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationEvaluationContext.h"
@@ -40,7 +40,8 @@ namespace
             DWCBakeOutput::GPURuntimeData |
             DWCBakeOutput::GPUMaps |
             DWCBakeOutput::WrinkleMaps |
-            DWCBakeOutput::TransparencyMaps;
+            DWCBakeOutput::TransparencyMaps |
+            DWCBakeOutput::RenderProfileData;
         return Asset.IsBakeOutputSavePending(AllOutputs);
     }
 }
@@ -54,11 +55,15 @@ FDWCEditorBuildStatusSnapshot FWCAEditorBuildStatusProvider::BuildSnapshot(
 {
     FDWCEditorBuildEvaluationInput ServiceState;
     ServiceState.SurfaceMode = SurfaceMode;
+    const FDWCEditorValidationEvaluationContext ValidationContext(
+        Asset,
+        bDeepValidation
+            ? EDWCEditorValidationAccess::ExactPayload
+            : EDWCEditorValidationAccess::MetadataOnly);
 
     FWCAEditorValidationSnapshot LocalValidationSnapshot;
     if (ValidationSnapshot == nullptr)
     {
-        const FDWCEditorValidationEvaluationContext ValidationContext(Asset, bDeepValidation);
         FDWCGeneratedMaterialValidationEvaluator::AppendToSnapshot(
             ValidationContext,
             LocalValidationSnapshot);
@@ -68,12 +73,20 @@ FDWCEditorBuildStatusSnapshot FWCAEditorBuildStatusProvider::BuildSnapshot(
         ValidationSnapshot = &LocalValidationSnapshot;
     }
 
-    if (Asset.HasAnyWettableMaterialSlot())
+    if (const FDWCEditorValidationActionState* RenderProfileAction =
+            ValidationSnapshot->FindAction(EDWCEditorBuildAction::BakeRenderProfileData))
     {
-        ServiceState.RenderProfileState =
-            FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(&Asset, nullptr)
-                ? EDWCEditorBuildActionState::Required
-                : EDWCEditorBuildActionState::UpToDate;
+        ServiceState.RenderProfileState = RenderProfileAction->State;
+        ServiceState.RenderProfileReason = FindActionReason(
+            *ValidationSnapshot,
+            EDWCEditorBuildAction::BakeRenderProfileData);
+    }
+    else
+    {
+        const FDWCRenderProfileValidationSnapshot RenderProfile =
+            FDWCRenderProfileBuildTargetResolver::Resolve(&Asset);
+        ServiceState.RenderProfileState = RenderProfile.BakeState;
+        ServiceState.RenderProfileReason = RenderProfile.BakeReason;
     }
 
     if (const FDWCEditorValidationActionState* MaterialAction =
@@ -85,31 +98,78 @@ FDWCEditorBuildStatusSnapshot FWCAEditorBuildStatusProvider::BuildSnapshot(
             EDWCEditorBuildAction::GenerateMaterials);
     }
 
-    const FDWCTransparencyBuildTargetSnapshot TransparencyTargets =
-        FDWCTransparencyBuildTargetResolver::Resolve(Asset, bDeepValidation);
     ServiceState.bTransparencyTargetStateProvided = true;
-    ServiceState.bHasTransparencyContent = TransparencyTargets.HasEnabledLayers();
-    ServiceState.TransparencyTexturesState = TransparencyTargets.FullBakeState;
-    ServiceState.TransparencyTexturesReason = TransparencyTargets.FullBakeReason;
-    ServiceState.AffectedTransparencyState = TransparencyTargets.AffectedStage4State;
-    ServiceState.AffectedTransparencyReason = TransparencyTargets.AffectedStage4Reason;
-    for (const FDWCTransparencyBuildTarget& Target : TransparencyTargets.Targets)
+    ServiceState.bHasTransparencyContent = ValidationSnapshot->Nodes.ContainsByPredicate(
+        [](const FDWCEditorValidationNode& Node)
+        {
+            return Node.Key.Domain == EDWCEditorValidationDomain::Transparency &&
+                   Node.Intent == EDWCEditorValidationIntentState::Enabled;
+        });
+    const FDWCEditorValidationActionState* TransparencyAction =
+        ValidationSnapshot->FindAction(EDWCEditorBuildAction::BakeTransparencyTextures);
+    const FDWCEditorValidationActionState* AffectedAction =
+        ValidationSnapshot->FindAction(EDWCEditorBuildAction::RebakeAffectedTransparencyMaps);
+    if (TransparencyAction != nullptr && AffectedAction != nullptr)
     {
-        if (Target.Requirement == EDWCTransparencyBuildRequirement::FullBake && Target.IsBuildable())
+        ServiceState.TransparencyTexturesState = TransparencyAction->State;
+        ServiceState.TransparencyTexturesReason = FindActionReason(
+            *ValidationSnapshot,
+            EDWCEditorBuildAction::BakeTransparencyTextures);
+        ServiceState.AffectedTransparencyState = AffectedAction->State;
+        ServiceState.AffectedTransparencyReason = FindActionReason(
+            *ValidationSnapshot,
+            EDWCEditorBuildAction::RebakeAffectedTransparencyMaps);
+        for (const FDWCEditorValidationTargetKey& Target : TransparencyAction->Targets)
         {
-            ServiceState.TransparencyMaterialSlotIndices.AddUnique(Target.MaterialSlotIndex);
-            ServiceState.TransparencyLayerGuids.AddUnique(Target.LayerGuid);
+            if (Target.LayerGuid.IsValid())
+            {
+                ServiceState.TransparencyMaterialSlotIndices.AddUnique(Target.MaterialSlotIndex);
+                ServiceState.TransparencyLayerGuids.AddUnique(Target.LayerGuid);
+            }
         }
-        else if (Target.Requirement == EDWCTransparencyBuildRequirement::AffectedStage4 &&
-                 Target.IsBuildable())
+        for (const FDWCEditorValidationTargetKey& Target : AffectedAction->Targets)
         {
-            ServiceState.AffectedMaterialSlotIndices.AddUnique(Target.MaterialSlotIndex);
-            ServiceState.AffectedLayerGuids.AddUnique(Target.LayerGuid);
+            if (Target.LayerGuid.IsValid())
+            {
+                ServiceState.AffectedMaterialSlotIndices.AddUnique(Target.MaterialSlotIndex);
+                ServiceState.AffectedLayerGuids.AddUnique(Target.LayerGuid);
+            }
+        }
+    }
+    else
+    {
+        const FDWCTransparencyBuildTargetSnapshot TransparencyTargets =
+            FDWCTransparencyBuildTargetResolver::Resolve(
+                Asset,
+                bDeepValidation
+                    ? EDWCEditorValidationAccess::ExactPayload
+                    : EDWCEditorValidationAccess::MetadataOnly);
+        ServiceState.bHasTransparencyContent = TransparencyTargets.HasEnabledLayers();
+        ServiceState.TransparencyTexturesState = TransparencyTargets.FullBakeState;
+        ServiceState.TransparencyTexturesReason = TransparencyTargets.FullBakeReason;
+        ServiceState.AffectedTransparencyState = TransparencyTargets.AffectedStage4State;
+        ServiceState.AffectedTransparencyReason = TransparencyTargets.AffectedStage4Reason;
+        for (const FDWCTransparencyBuildTarget& Target : TransparencyTargets.Targets)
+        {
+            if (Target.Requirement == EDWCTransparencyBuildRequirement::FullBake && Target.IsBuildable())
+            {
+                ServiceState.TransparencyMaterialSlotIndices.AddUnique(Target.MaterialSlotIndex);
+                ServiceState.TransparencyLayerGuids.AddUnique(Target.LayerGuid);
+            }
+            else if (Target.Requirement == EDWCTransparencyBuildRequirement::AffectedStage4 && Target.IsBuildable())
+            {
+                ServiceState.AffectedMaterialSlotIndices.AddUnique(Target.MaterialSlotIndex);
+                ServiceState.AffectedLayerGuids.AddUnique(Target.LayerGuid);
+            }
         }
     }
 
     const FDWCWrinkleBuildTargetSnapshot WrinkleTargets =
-        FDWCWrinkleBuildTargetResolver::Resolve(Asset, bDeepValidation);
+        FDWCWrinkleBuildTargetResolver::Resolve(
+            Asset,
+            bDeepValidation
+                ? EDWCEditorValidationAccess::ExactPayload
+                : EDWCEditorValidationAccess::MetadataOnly);
     ServiceState.bWrinkleTargetStateProvided = true;
     ServiceState.bHasWrinkleContent = WrinkleTargets.HasBakedAuthoringTargets();
     ServiceState.WrinkleTexturesState = WrinkleTargets.BakeState;
@@ -125,7 +185,7 @@ FDWCEditorBuildStatusSnapshot FWCAEditorBuildStatusProvider::BuildSnapshot(
     }
 
     FDWCEditorBuildEvaluationInput Input = FDWCEditorBuildActionEvaluator::CaptureAssetState(
-        Asset, SurfaceMode, MoveTemp(ServiceState));
+        ValidationContext, SurfaceMode, MoveTemp(ServiceState));
     if (const FDWCEditorValidationActionState* CPUAction =
             ValidationSnapshot->FindAction(EDWCEditorBuildAction::BuildCPURuntimeData))
     {

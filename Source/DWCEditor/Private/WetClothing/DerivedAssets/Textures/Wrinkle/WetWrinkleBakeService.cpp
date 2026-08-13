@@ -5,6 +5,7 @@
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionCacheService.h"
+#include "WetClothing/Modes/Wrinkle/Authoring/DWCEditorWrinkleTextureResolver.h"
 
 namespace
 {
@@ -43,6 +44,7 @@ void FWetWrinkleBakeService::CollectAuthoredSlotStates(
     TArray<FWetWrinkleAuthoredSlotState>& OutStates)
 {
     TMap<int32, FWetWrinkleAuthoredSlotState> States;
+    TMap<FSoftObjectPath, EDWCEditorWrinkleTextureResolveStatus> SourceStatusByPath;
     const FWetClothingWrinkleData& WrinkleData = WetClothingAsset.Authored.WrinkleData;
 
     for (const FWetWrinklePatchPlacement& Patch : WrinkleData.EditablePatches)
@@ -54,12 +56,30 @@ void FWetWrinkleBakeService::CollectAuthoredSlotStates(
         FWetWrinkleAuthoredSlotState& State = FindOrAddSlotState(
             States, WetClothingAsset, Patch.MaterialSlotIndex);
         ++State.PatchCount;
-        if (Patch.WrinkleNormalTexture == nullptr)
+        if (!Patch.HasWrinkleNormalTexture())
         {
             ++State.MissingPatchTextureCount;
+            continue;
         }
-        else if (!Patch.HasValidSurfaceAnchor() || !Patch.HasValidSurfaceFrame() ||
-                 !Patch.HasValidSurfaceFootprint())
+        else
+        {
+            const FSoftObjectPath SourcePath = Patch.GetWrinkleNormalTexturePath();
+            EDWCEditorWrinkleTextureResolveStatus* CachedStatus = SourceStatusByPath.Find(SourcePath);
+            if (CachedStatus == nullptr)
+            {
+                const FDWCEditorWrinkleTextureReferenceSnapshot SourceReference =
+                    FDWCEditorWrinkleTextureResolver::InspectSource(Patch);
+                CachedStatus = &SourceStatusByPath.Add(SourcePath, SourceReference.Status);
+            }
+            if (*CachedStatus == EDWCEditorWrinkleTextureResolveStatus::Missing ||
+                *CachedStatus == EDWCEditorWrinkleTextureResolveStatus::WrongType)
+            {
+                ++State.InvalidPatchTextureCount;
+                continue;
+            }
+        }
+        if (!Patch.HasValidSurfaceAnchor() || !Patch.HasValidSurfaceFrame() ||
+            !Patch.HasValidSurfaceFootprint())
         {
             ++State.InvalidPatchPlacementCount;
         }

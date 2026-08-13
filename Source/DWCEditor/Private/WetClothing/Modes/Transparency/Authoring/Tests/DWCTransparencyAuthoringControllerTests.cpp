@@ -92,14 +92,35 @@ bool FDWCTransparencyAuthoringControllerStrokeTest::RunTest(const FString& Param
 
     const FWetClothingTransparencyLayerData& LiveLayer =
         Fixture.Asset->Authored.TransparencyData.TransparencyLayers[0];
-    TestEqual(TEXT("Live drag does not mutate the asset stroke list"), LiveLayer.EditableStrokes.Num(), 0);
+    TestEqual(TEXT("Live drag does not mutate the asset stroke list"), LiveLayer.GetEditableStrokes().Num(), 0);
     TestFalse(TEXT("Live drag does not open an asset transaction"), Fixture.Document->HasInteractiveEdit());
     Fixture.Controller->EndSurfaceInteraction();
 
     const FWetClothingTransparencyLayerData& Layer =
         Fixture.Asset->Authored.TransparencyData.TransparencyLayers[0];
-    TestEqual(TEXT("One alpha stroke is committed"), Layer.EditableStrokes.Num(), 1);
-    TestTrue(TEXT("Drag spacing creates continuous samples"), Layer.EditableStrokes[0].Samples.Num() > 1);
+    TestEqual(TEXT("One alpha stroke is committed"), Layer.GetEditableStrokes().Num(), 1);
+    TestTrue(TEXT("Drag spacing creates continuous samples"), Layer.GetEditableStrokes()[0].GetSampleCount() > 1);
+    TestTrue(TEXT("Committed samples use compact storage"), Layer.GetEditableStrokes()[0].Samples.IsEmpty());
+    TestFalse(TEXT("Committed compact storage is populated"), Layer.GetEditableStrokes()[0].CompactSamples.IsEmpty());
+    TestTrue(
+        TEXT("Compact samples are smaller than authoring samples"),
+        sizeof(FDWCTransparencyCompactBrushSample) < sizeof(FDWCTransparencyBrushSample));
+    TArray<FDWCTransparencyBrushSample> DecodedSamples;
+    Layer.GetEditableStrokes()[0].DecodeSamples(DecodedSamples);
+    TestEqual(
+        TEXT("Compact storage preserves the semantic sample count"),
+        DecodedSamples.Num(),
+        Layer.GetEditableStrokes()[0].GetSampleCount());
+    TestTrue(
+        TEXT("Compact storage preserves the first sample UV"),
+        DecodedSamples.IsValidIndex(0) && DecodedSamples[0].PositionUV.Equals(FVector2D(0.1, 0.25), UE_KINDA_SMALL_NUMBER));
+    FDWCTransparencyBrushStroke MixedStorageStroke;
+    MixedStorageStroke.AddSample(DecodedSamples[0]);
+    MixedStorageStroke.Samples.Add(DecodedSamples.Last());
+    MixedStorageStroke.CompactLegacySamples();
+    TestEqual(TEXT("Mixed compact and legacy storage is merged without loss"), MixedStorageStroke.GetSampleCount(), 2);
+    TestTrue(TEXT("Mixed storage releases the legacy allocation"), MixedStorageStroke.Samples.IsEmpty());
+    TestNotNull(TEXT("The layer owns a scoped transaction history"), Layer.GetEditorStrokeHistory());
     TestFalse(TEXT("Mouse-up ends the transaction"), Fixture.Controller->IsInteracting());
     TestTrue(TEXT("The authoring document advances after commit"), Fixture.Document->GetRevision() > 0);
     return true;
@@ -120,7 +141,7 @@ bool FDWCTransparencyAuthoringControllerRevealCancelTest::RunTest(const FString&
 
     const FWetClothingTransparencyLayerData& LiveLayer =
         Fixture.Asset->Authored.TransparencyData.TransparencyLayers[0];
-    TestEqual(TEXT("Live reveal drag does not mutate the asset stroke list"), LiveLayer.RevealColorPaintStrokes.Num(), 0);
+    TestEqual(TEXT("Live reveal drag does not mutate the asset stroke list"), LiveLayer.GetRevealColorPaintStrokes().Num(), 0);
     TestFalse(TEXT("Live reveal drag does not open an asset transaction"), Fixture.Document->HasInteractiveEdit());
 
     FDWCSetTransparencyEditContextAction DisableAction;
@@ -130,7 +151,7 @@ bool FDWCTransparencyAuthoringControllerRevealCancelTest::RunTest(const FString&
     const FWetClothingTransparencyLayerData& Layer =
         Fixture.Asset->Authored.TransparencyData.TransparencyLayers[0];
     TestFalse(TEXT("Changing context cancels reveal paint"), Fixture.Controller->IsInteracting());
-    TestEqual(TEXT("Canceled reveal stroke is removed"), Layer.RevealColorPaintStrokes.Num(), 0);
+    TestEqual(TEXT("Canceled reveal stroke is removed"), Layer.GetRevealColorPaintStrokes().Num(), 0);
     TestFalse(TEXT("Cancel leaves no asset transaction"), Fixture.Document->HasInteractiveEdit());
     return true;
 }

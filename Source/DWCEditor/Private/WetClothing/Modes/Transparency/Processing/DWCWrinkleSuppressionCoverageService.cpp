@@ -6,6 +6,7 @@
 #include "Engine/Texture2D.h"
 #include "Misc/SecureHash.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
+#include "WetClothing/Modes/Wrinkle/Authoring/DWCEditorWrinkleTextureResolver.h"
 
 namespace
 {
@@ -25,7 +26,7 @@ bool FDWCWrinkleSuppressionDependencySnapshot::IsAvailable() const
 {
     return Status == EDWCWrinkleSuppressionDependencyStatus::Ready &&
         MaterialSlotIndex != INDEX_NONE && DataUVChannelIndex >= 0 && LODIndex == 0 &&
-        MaskTexture.IsValid() && !MaskTexturePath.IsEmpty() &&
+        !MaskTexture.IsNull() && !MaskTexturePath.IsEmpty() &&
         !BuildSignature.IsEmpty() && BakeGuid.IsValid() && TextureSourceId.IsValid() &&
         SourceResolution.X > 0 && SourceResolution.Y > 0;
 }
@@ -47,7 +48,12 @@ bool FDWCWrinkleSuppressionDependencySnapshot::IsValid(FString* OutError) const
 
 UTexture2D* FDWCWrinkleSuppressionDependencySnapshot::ResolveTexture() const
 {
-    return IsAvailable() ? MaskTexture.Get() : nullptr;
+    check(IsInGameThread());
+    if (!IsAvailable())
+    {
+        return nullptr;
+    }
+    return FDWCEditorWrinkleTextureResolver::ResolveEditorMaskReference(MaskTexture).Texture.Get();
 }
 
 FString FDWCWrinkleSuppressionDependencySnapshot::BuildCacheSignature() const
@@ -147,7 +153,7 @@ FDWCWrinkleSuppressionCoverageService::ResolveDependency(
             [MaterialSlotIndex](const FWetWrinkleBakedMapSet& Candidate)
             {
                 return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                    Candidate.BakedWrinkleMask != nullptr;
+                    Candidate.HasBakedWrinkleMask();
             });
     if (BakedMap == nullptr)
     {
@@ -166,19 +172,22 @@ FDWCWrinkleSuppressionCoverageService::ResolveDependency(
             : Currentness.Detail;
         return Result;
     }
-    UTexture2D* Texture = BakedMap->BakedWrinkleMask.Get();
-    Result.MaskTexture = Texture;
-    Result.MaskTexturePath = Texture != nullptr ? Texture->GetPathName() : FString();
+    const FDWCEditorWrinkleTextureReferenceSnapshot MaskReference =
+        FDWCEditorWrinkleTextureResolver::ResolveEditorMask(*BakedMap);
+    Result.MaskTexture = BakedMap->BakedWrinkleMask;
+    Result.MaskTexturePath = MaskReference.ObjectPath.ToString();
     Result.BuildSignature = BakedMap->BuildSignature;
     Result.BakeGuid = BakedMap->BakeGuid;
-    if (Texture == nullptr || !Texture->Source.IsValid())
+    if (!MaskReference.IsReady())
     {
         Result.Status = EDWCWrinkleSuppressionDependencyStatus::Unreadable;
-        Result.Detail = TEXT("The baked wrinkle coverage mask has no readable source data.");
+        Result.Detail = MaskReference.Detail.IsEmpty()
+            ? TEXT("The baked wrinkle coverage mask has no readable source data.")
+            : MaskReference.Detail;
         return Result;
     }
-    Result.TextureSourceId = Texture->Source.GetId();
-    Result.SourceResolution = FIntPoint(Texture->Source.GetSizeX(), Texture->Source.GetSizeY());
+    Result.TextureSourceId = MaskReference.SourceId;
+    Result.SourceResolution = MaskReference.SourceSize;
     Result.Status = EDWCWrinkleSuppressionDependencyStatus::Ready;
     Result.Detail.Reset();
     return Result;
@@ -186,12 +195,13 @@ FDWCWrinkleSuppressionCoverageService::ResolveDependency(
 
 FDWCEditorCacheKey FDWCWrinkleSuppressionCoverageService::BuildCacheKey(
     const UWetClothingAsset& Asset,
-    const FDWCWrinkleSuppressionDependencySnapshot& Dependency)
+    const FDWCWrinkleSuppressionDependencySnapshot& Dependency,
+    const UTexture2D& Texture)
 {
     FDWCEditorCacheKey Key;
     Key.Namespace = CacheNamespace();
     Key.Owner = FObjectKey(&Asset);
-    Key.ResourceIdentity = Dependency.ResolveTexture();
+    Key.ResourceIdentity = &Texture;
     Key.LODIndex = Dependency.LODIndex;
     Key.UVChannelIndex = Dependency.DataUVChannelIndex;
     Key.MaterialSlotIndex = Dependency.MaterialSlotIndex;
@@ -215,7 +225,15 @@ bool FDWCWrinkleSuppressionCoverageService::AcquireCoverage(
             : Dependency.Detail;
         return false;
     }
-    const FDWCEditorCacheKey Key = BuildCacheKey(Asset, Dependency);
+    UTexture2D* Texture = Dependency.ResolveTexture();
+    if (Texture == nullptr)
+    {
+        OutError = FString::Printf(
+            TEXT("The wrinkle coverage mask '%s' could not be loaded."),
+            *Dependency.MaskTexturePath);
+        return false;
+    }
+    const FDWCEditorCacheKey Key = BuildCacheKey(Asset, Dependency, *Texture);
     OutLease = CacheStore->FindLease<FDWCWrinkleCoverageCacheValue>(Key);
     if (OutLease.IsValid())
     {
@@ -224,7 +242,7 @@ bool FDWCWrinkleSuppressionCoverageService::AcquireCoverage(
 
     FWetClothingTextureReadback Readback;
     if (!FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
-            Dependency.ResolveTexture(), Readback, OutError))
+            Texture, Readback, OutError))
     {
         return false;
     }

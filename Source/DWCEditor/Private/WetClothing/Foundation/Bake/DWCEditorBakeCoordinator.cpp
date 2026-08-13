@@ -103,13 +103,13 @@ namespace
     uint64 EstimateAuthoredAlphaSnapshotBytes(
         const FWetClothingTransparencyLayerData& Layer)
     {
-        uint64 Bytes = static_cast<uint64>(Layer.EditableStrokes.Num()) *
-            sizeof(FDWCTransparencyBrushStroke);
-        for (const FDWCTransparencyBrushStroke& Stroke : Layer.EditableStrokes)
+        const TArray<FDWCTransparencyBrushStroke>& Strokes = Layer.GetEditableStrokes();
+        uint64 Bytes = static_cast<uint64>(Strokes.Num()) *
+                       sizeof(FDWCTransparencyBrushStroke);
+        for (const FDWCTransparencyBrushStroke& Stroke : Strokes)
         {
             Bytes += static_cast<uint64>(Stroke.DisplayName.Len() + 1) * sizeof(TCHAR);
-            Bytes += static_cast<uint64>(Stroke.Samples.Num()) *
-                sizeof(FDWCTransparencyBrushSample);
+            Bytes += Stroke.GetSampleAllocatedSize();
         }
         return Bytes;
     }
@@ -117,12 +117,12 @@ namespace
     uint64 EstimateRevealColorAuthoringBytes(
         const FWetClothingTransparencyLayerData& Layer)
     {
-        uint64 Bytes = static_cast<uint64>(Layer.RevealColorPaintStrokes.Num()) *
-            sizeof(FDWCTransparencyRevealColorStroke);
-        for (const FDWCTransparencyRevealColorStroke& Stroke : Layer.RevealColorPaintStrokes)
+        const TArray<FDWCTransparencyRevealColorStroke>& Strokes = Layer.GetRevealColorPaintStrokes();
+        uint64 Bytes = static_cast<uint64>(Strokes.Num()) *
+                       sizeof(FDWCTransparencyRevealColorStroke);
+        for (const FDWCTransparencyRevealColorStroke& Stroke : Strokes)
         {
-            Bytes += static_cast<uint64>(Stroke.Samples.Num()) *
-                sizeof(FDWCTransparencyBrushSample);
+            Bytes += Stroke.GetSampleAllocatedSize();
         }
         return Bytes;
     }
@@ -1641,7 +1641,8 @@ void FDWCEditorBakeCoordinator::FinalizeTransparencyBatch(
         if (Batch->BakedMapCount > 0)
         {
             const FDWCTransparencyBuildTargetSnapshot RemainingTargets =
-                FDWCTransparencyBuildTargetResolver::Resolve(*TargetAsset, true);
+                FDWCTransparencyBuildTargetResolver::Resolve(
+                    *TargetAsset, EDWCEditorValidationAccess::ExactPayload);
             const bool bHasRemainingRequiredOutput =
                 RemainingTargets.FullBakeState == EDWCEditorBuildActionState::Required ||
                 RemainingTargets.FullBakeState == EDWCEditorBuildActionState::Blocked ||

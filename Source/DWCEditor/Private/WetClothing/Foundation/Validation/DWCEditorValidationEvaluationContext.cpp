@@ -7,11 +7,12 @@
 
 FDWCEditorValidationEvaluationContext::FDWCEditorValidationEvaluationContext(
     const UWetClothingAsset& InAsset,
-    const bool bInDeepValidation)
+    const EDWCEditorValidationAccess InAccess)
     : Asset(InAsset)
     , Setup(InAsset.GetSetupSettings())
     , RuntimeMesh(InAsset.GetRuntimeSkeletalMesh())
-    , bDeepValidation(bInDeepValidation)
+    , Access(InAccess)
+    , bDeepValidation(InAccess == EDWCEditorValidationAccess::ExactPayload)
     , bAssetDirty(InAsset.GetOutermost() != nullptr && InAsset.GetOutermost()->IsDirty())
     , bHasWettableSlots(InAsset.HasAnyWettableMaterialSlot())
     , bCPUBackendEnabled(Setup.bBuildCPUVertexSimulationData)
@@ -29,12 +30,39 @@ FDWCEditorValidationEvaluationContext::FDWCEditorValidationEvaluationContext(
            DataUVMetadata->GeneratorVersion == DWCGeneratedDataVersion::DataUV &&
            DataUVMetadata->RenderVertexCount > 0);
 
-    const FDWCEditorUVTopologyData* Topology = InAsset.FindOriginalUVTopologyForLOD(RuntimeLODIndex);
-    bOriginalUVTopologyReady =
+    const FDWCEditorUVTopologyDescriptor* Topology =
+        InAsset.FindOriginalUVTopologyDescriptorForLOD(RuntimeLODIndex);
+    const bool bHasSerializedTopologyBulk =
+        InAsset.GetSerializedOriginalUVTopologyBytesForEditor() > 0;
+    bHasOriginalUVTopologyPayload = Topology != nullptr && bHasSerializedTopologyBulk;
+    bOriginalUVTopologyMetadataValid =
         Topology != nullptr &&
         Topology->bIsValid &&
         Topology->LODIndex == RuntimeLODIndex &&
-        Topology->UVChannelIndex == InAsset.GetOriginalUVChannelIndex();
+        Topology->UVChannelIndex == InAsset.GetOriginalUVChannelIndex() &&
+        Topology->GeneratorVersion == DWCGeneratedDataVersion::OriginalUVTopology &&
+        !Topology->BuildSignature.IsEmpty() &&
+        Topology->IslandCount > 0 &&
+        Topology->TriangleReferenceCount > 0 &&
+        Topology->SerializedPayloadBytes > 0 &&
+        bHasSerializedTopologyBulk;
+    bOriginalUVTopologySignatureCurrent = bOriginalUVTopologyMetadataValid;
+    if (bOriginalUVTopologyMetadataValid && bDeepValidation)
+    {
+        const FDWCEditorUVTopologyHandle TopologyHandle =
+            InAsset.AcquireOriginalUVTopologyForLOD(RuntimeLODIndex);
+        const FString CurrentSignature = UWetClothingAsset::BuildMeshContentSignature(
+            RuntimeMesh,
+            RuntimeLODIndex,
+            InAsset.GetOriginalUVChannelIndex());
+        bOriginalUVTopologySignatureCurrent =
+            TopologyHandle.IsValid() &&
+            !TopologyHandle->Islands.IsEmpty() &&
+            !CurrentSignature.IsEmpty() &&
+            Topology->BuildSignature == CurrentSignature;
+    }
+    bOriginalUVTopologyReady =
+        bOriginalUVTopologyMetadataValid && bOriginalUVTopologySignatureCurrent;
 
     for (const FWetClothingAuthoredMaterialSlot& Slot :
          InAsset.Authored.PartData.EditableWetPartData.MaterialSlots)

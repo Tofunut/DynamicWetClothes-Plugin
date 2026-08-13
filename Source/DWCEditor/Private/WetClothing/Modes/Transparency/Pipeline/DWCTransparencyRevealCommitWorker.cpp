@@ -23,7 +23,7 @@ FDWCEditorWorkerMemoryEstimate FDWCTransparencyRevealCommitWorker::EstimateMemor
     Estimate.SnapshotBytes += Input.FallbackStrokes.GetAllocatedSize();
     for (const FDWCTransparencyRevealColorStroke& Stroke : Input.FallbackStrokes)
     {
-        Estimate.SnapshotBytes += Stroke.Samples.GetAllocatedSize();
+        Estimate.SnapshotBytes += Stroke.GetSampleAllocatedSize();
     }
     return Estimate;
 }

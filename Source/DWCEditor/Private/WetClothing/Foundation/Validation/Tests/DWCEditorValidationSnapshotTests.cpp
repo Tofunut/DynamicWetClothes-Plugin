@@ -5,6 +5,7 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationReportAdapter.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationSectionRegistry.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationSnapshot.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationEvaluatorUtils.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationEvaluationContext.h"
@@ -65,6 +66,38 @@ bool FDWCEditorValidationStateContractTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorValidationDisplayGroupingTest,
+    "DWC.Editor.Foundation.Validation.DisplayGrouping",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorValidationDisplayGroupingTest::RunTest(const FString& Parameters)
+{
+    FWCAValidationReport Report;
+    FWCAValidationIssue& First = Report.Issues.AddDefaulted_GetRef();
+    First.IssueId = TEXT("Transparency.Output.Stale");
+    First.Section = EWCAValidationSection::TransparencyMaps;
+    First.Remediation = EDWCEditorValidationRemediation::BuildAction;
+    First.BuildAction = EDWCEditorBuildAction::BakeTransparencyTextures;
+    First.Severity = EWCAValidationSeverity::Warning;
+    First.Status = FText::FromString(TEXT("Out of Date"));
+    First.Detail = FText::FromString(TEXT("The output signature is stale."));
+    First.RequiredAction = FText::FromString(TEXT("Bake Transparency Textures."));
+    First.Target.MaterialSlotIndex = 3;
+
+    FWCAValidationIssue Second = First;
+    Second.Target.MaterialSlotIndex = 7;
+    Report.Issues.Add(Second);
+    TestEqual(TEXT("Identical issue meaning is grouped across slot contexts"),
+        Report.GetDisplayIssueCount(), 1);
+
+    Report.Issues.Last().Detail =
+        FText::FromString(TEXT("The canonical Stage 2 artifact is missing."));
+    TestEqual(TEXT("Different details remain separate validation rows"),
+        Report.GetDisplayIssueCount(), 2);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorValidationSnapshotPurityTest,
     "DWC.Editor.Foundation.Validation.CanonicalCaptureIsReadOnly",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -83,9 +116,13 @@ bool FDWCEditorValidationSnapshotPurityTest::RunTest(const FString& Parameters)
     const bool bPackageDirtyBefore = Asset->GetOutermost()->IsDirty();
 
     const FWCAEditorValidationSnapshot Snapshot =
-        BuildWCAValidationSnapshot(*Asset, EWCAValidationMode::Fast, false);
+        BuildWCAValidationSnapshot(*Asset, EWCAValidationMode::MetadataOnly);
 
     TestEqual(TEXT("Snapshot identifies its source asset"), Snapshot.AssetPath, Asset->GetPathName());
+    TestEqual(TEXT("Routine validation records metadata-only access"),
+        Snapshot.Access, EDWCEditorValidationAccess::MetadataOnly);
+    TestFalse(TEXT("Routine validation does not claim exact payload access"),
+        Snapshot.bDeepValidation);
     TestEqual(TEXT("Transparency layer count is unchanged"),
         Asset->Authored.TransparencyData.TransparencyLayers.Num(), LayerCountBefore);
     TestEqual(TEXT("Bake status is unchanged"),
@@ -93,6 +130,199 @@ bool FDWCEditorValidationSnapshotPurityTest::RunTest(const FString& Parameters)
         static_cast<uint8>(BakeStateBefore.TransparencyMaps));
     TestEqual(TEXT("Package dirty state is unchanged"),
         Asset->GetOutermost()->IsDirty(), bPackageDirtyBefore);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorBakeOutputFailureOwnershipTest,
+    "DWC.Editor.Foundation.Validation.BakeOutputFailureOwnership",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorBakeOutputFailureOwnershipTest::RunTest(const FString& Parameters)
+{
+    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    TestNotNull(TEXT("Transient WCA was created"), Asset);
+    if (Asset == nullptr)
+    {
+        return false;
+    }
+
+    Asset->SetWrinkleBakeStatus(EDWCBakeStatus::Failed, TEXT("Wrinkle bake failed."));
+    Asset->SetTransparencyBakeStatus(EDWCBakeStatus::Failed, TEXT("Transparency bake failed."));
+
+    TestEqual(
+        TEXT("Wrinkle owns its failure message"),
+        Asset->GetBakeOutputFailureMessage(DWCBakeOutput::WrinkleMaps),
+        FString(TEXT("Wrinkle bake failed.")));
+    TestEqual(
+        TEXT("Transparency owns its failure message"),
+        Asset->GetBakeOutputFailureMessage(DWCBakeOutput::TransparencyMaps),
+        FString(TEXT("Transparency bake failed.")));
+
+    const FWCAEditorValidationSnapshot FailureSnapshot =
+        BuildWCAValidationSnapshot(*Asset, EWCAValidationMode::MetadataOnly);
+    TestTrue(
+        TEXT("Validation independently exposes the wrinkle failure"),
+        FailureSnapshot.Diagnostics.ContainsByPredicate(
+            [](const FDWCEditorValidationDiagnostic& Diagnostic)
+            {
+                return Diagnostic.bFailed &&
+                       Diagnostic.Target.SubResource == TEXT("WrinkleMaps") &&
+                       Diagnostic.Presentation.Detail.ToString() == TEXT("Wrinkle bake failed.");
+            }));
+    TestTrue(
+        TEXT("Validation independently exposes the transparency failure"),
+        FailureSnapshot.Diagnostics.ContainsByPredicate(
+            [](const FDWCEditorValidationDiagnostic& Diagnostic)
+            {
+                return Diagnostic.bFailed &&
+                       Diagnostic.Target.SubResource == TEXT("TransparencyMaps") &&
+                       Diagnostic.Presentation.Detail.ToString() == TEXT("Transparency bake failed.");
+            }));
+
+    Asset->SetTransparencyBakeStatus(EDWCBakeStatus::Valid);
+    TestFalse(
+        TEXT("A successful transparency output clears only its own failure"),
+        Asset->HasBakeOutputFailure(DWCBakeOutput::TransparencyMaps));
+    TestTrue(
+        TEXT("A successful transparency output preserves the wrinkle failure"),
+        Asset->HasBakeOutputFailure(DWCBakeOutput::WrinkleMaps));
+    TestEqual(
+        TEXT("The preserved wrinkle status remains failed"),
+        Asset->GetBakeOutputStatus(DWCBakeOutput::WrinkleMaps),
+        EDWCBakeStatus::Failed);
+
+    Asset->ClearBakeOutputFailure(DWCBakeOutput::WrinkleMaps);
+    TestFalse(
+        TEXT("Targeted failure cleanup removes the requested output"),
+        Asset->HasBakeOutputFailure(DWCBakeOutput::WrinkleMaps));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorEvaluatorOutputOwnershipTest,
+    "DWC.Editor.Foundation.Validation.EvaluatorOutputOwnership",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorEvaluatorOutputOwnershipTest::RunTest(const FString& Parameters)
+{
+    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    if (!TestNotNull(TEXT("Transient WCA was created"), Asset))
+    {
+        return false;
+    }
+
+    const FString SharedFailure = TEXT("A deliberately shared failure message.");
+    Asset->SetBakeOutputStatus(
+        DWCBakeOutput::OriginalUVTopology,
+        EDWCBakeStatus::Failed,
+        SharedFailure);
+    Asset->SetTransparencyBakeStatus(EDWCBakeStatus::Failed, SharedFailure);
+    Asset->SetRenderProfileBakeStatus(EDWCBakeStatus::Failed, SharedFailure);
+
+    const FWCAEditorValidationSnapshot Snapshot =
+        BuildWCAValidationSnapshot(*Asset, EWCAValidationMode::MetadataOnly);
+    for (const int32 Output : {
+             DWCBakeOutput::OriginalUVTopology,
+             DWCBakeOutput::TransparencyMaps,
+             DWCBakeOutput::RenderProfileData})
+    {
+        int32 OwnerCount = 0;
+        for (const FDWCEditorValidationDiagnostic& Diagnostic : Snapshot.Diagnostics)
+        {
+            if (Diagnostic.bFailed && Diagnostic.OwnedBakeOutput == Output)
+            {
+                ++OwnerCount;
+            }
+        }
+        TestEqual(
+            *FString::Printf(TEXT("Output %d has exactly one canonical failure owner"), Output),
+            OwnerCount,
+            1);
+    }
+
+    TestFalse(
+        TEXT("Owned evaluator failures do not fall through to Internal Failure"),
+        Snapshot.Diagnostics.ContainsByPredicate(
+            [](const FDWCEditorValidationDiagnostic& Diagnostic)
+            {
+                return Diagnostic.Target.Domain == EDWCEditorValidationDomain::Failure &&
+                       (Diagnostic.OwnedBakeOutput == DWCBakeOutput::OriginalUVTopology ||
+                        Diagnostic.OwnedBakeOutput == DWCBakeOutput::TransparencyMaps ||
+                        Diagnostic.OwnedBakeOutput == DWCBakeOutput::RenderProfileData);
+            }));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorBakeOutputCatalogTest,
+    "DWC.Editor.Foundation.Validation.BakeOutputCatalog",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorBakeOutputCatalogTest::RunTest(const FString& Parameters)
+{
+    int32 CombinedMask = 0;
+    for (const int32 Output : DWCBakeOutput::GetOutputs())
+    {
+        TestTrue(TEXT("Every catalog entry is a single bit"), Output > 0 && (Output & (Output - 1)) == 0);
+        TestFalse(TEXT("Bake output catalog contains no duplicates"), DWCBakeOutput::Has(CombinedMask, Output));
+        CombinedMask |= Output;
+    }
+    TestEqual(TEXT("Bake output catalog matches DWCBakeOutput::All"), CombinedMask, DWCBakeOutput::All);
+    TestTrue(TEXT("Render Profile is a first-class bake output"),
+        DWCBakeOutput::Has(CombinedMask, DWCBakeOutput::RenderProfileData));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCRenderProfileBakeContentContractTest,
+    "DWC.Editor.Foundation.Validation.RenderProfileBakeContentContract",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCRenderProfileBakeContentContractTest::RunTest(const FString& Parameters)
+{
+    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    if (!TestNotNull(TEXT("Transient WCA was created"), Asset))
+    {
+        return false;
+    }
+
+    FWetClothingAuthoredMaterialSlot& Slot =
+        Asset->Authored.PartData.EditableWetPartData.MaterialSlots.AddDefaulted_GetRef();
+    Slot.MaterialSlotIndex = 4;
+    Slot.bIsWettableSlot = true;
+    Asset->MarkRenderProfileBakeOutOfDate();
+    TestFalse(TEXT("A wettable slot without an assigned Wet Part is not bakeable"),
+        Asset->HasRenderProfileBakeContent());
+    TestEqual(TEXT("A non-bakeable Render Profile output is disabled"),
+        Asset->GetBakeOutputStatus(DWCBakeOutput::RenderProfileData),
+        EDWCBakeStatus::Disabled);
+
+    FWetClothingWetPartEntry& Entry = Slot.WetPartEntries.AddDefaulted_GetRef();
+    Entry.WetPartID = 1;
+    Asset->MarkRenderProfileBakeOutOfDate();
+    TestFalse(TEXT("A Wet Part without assigned UV islands is not bakeable"),
+        Asset->HasRenderProfileBakeContent());
+
+    Entry.AssignedUVIslandIDs.Add(7);
+    Asset->MarkRenderProfileBakeOutOfDate();
+    TestTrue(TEXT("An assigned Wet Part requires Render Profile data"),
+        Asset->HasRenderProfileBakeContent());
+    TestEqual(TEXT("The first Render Profile build is required"),
+        Asset->GetBakeOutputStatus(DWCBakeOutput::RenderProfileData),
+        EDWCBakeStatus::Required);
+
+    Asset->MarkBakeOutputGenerated(DWCBakeOutput::RenderProfileData);
+    TestTrue(TEXT("A generated Render Profile output is save-pending"),
+        Asset->IsBakeOutputSavePending(DWCBakeOutput::RenderProfileData));
+    Asset->MarkBakeOutputsSaved(DWCBakeOutput::RenderProfileData);
+    TestFalse(TEXT("A saved Render Profile output is no longer save-pending"),
+        Asset->IsBakeOutputSavePending(DWCBakeOutput::RenderProfileData));
+
+    Asset->MarkRenderProfileBakeOutOfDate();
+    TestEqual(TEXT("An authored change makes a prior Render Profile output stale"),
+        Asset->GetBakeOutputStatus(DWCBakeOutput::RenderProfileData),
+        EDWCBakeStatus::OutOfDate);
     return true;
 }
 
@@ -235,7 +465,8 @@ bool FDWCWetPartCanonicalValidationTest::RunTest(const FString& Parameters)
     Duplicate.ProfileIndex = 0;
     Duplicate.AssignedUVIslandIDs.Add(3);
 
-    FDWCEditorValidationEvaluationContext Context(*Asset, false);
+    FDWCEditorValidationEvaluationContext Context(
+        *Asset, EDWCEditorValidationAccess::MetadataOnly);
     FWCAEditorValidationSnapshot Snapshot;
     FDWCWetPartValidationEvaluator::AppendToSnapshot(Context, Snapshot);
 
@@ -291,6 +522,46 @@ bool FDWCGeneratedMaterialStructuredOwnershipTest::RunTest(const FString& Parame
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCGeneratedMaterialRetryablePrerequisiteTest,
+    "DWC.Editor.Foundation.Validation.GeneratedMaterialRetryablePrerequisite",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCGeneratedMaterialRetryablePrerequisiteTest::RunTest(const FString& Parameters)
+{
+    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    USkeletalMesh* Mesh = NewObject<USkeletalMesh>(GetTransientPackage());
+    Asset->Metadata.DWCSkeletalMesh = Mesh;
+    Asset->Metadata.SetupSettings.bBuildCPUVertexSimulationData = true;
+    FWetClothingAuthoredMaterialSlot& Slot =
+        Asset->Authored.PartData.EditableWetPartData.MaterialSlots.AddDefaulted_GetRef();
+    Slot.MaterialSlotIndex = 0;
+    Slot.bIsWettableSlot = true;
+
+    const FDWCEditorValidationEvaluationContext Context(
+        *Asset, EDWCEditorValidationAccess::MetadataOnly);
+    FWCAEditorValidationSnapshot Snapshot;
+    FDWCGeneratedMaterialValidationEvaluator::AppendToSnapshot(Context, Snapshot);
+
+    const FDWCEditorValidationActionState* Action =
+        Snapshot.FindAction(EDWCEditorBuildAction::GenerateMaterials);
+    if (TestNotNull(TEXT("Generated Material action state exists"), Action))
+    {
+        TestEqual(TEXT("Missing Data UV is retryable"), Action->State,
+            EDWCEditorBuildActionState::Required);
+        TestTrue(TEXT("Data UV initialization is retained as the prerequisite"),
+            Action->BlockingActions.Contains(EDWCEditorBuildAction::InitializeDataUV));
+    }
+    TestTrue(TEXT("The retryable issue remains automatically resolvable"),
+        Snapshot.Diagnostics.ContainsByPredicate(
+            [](const FDWCEditorValidationDiagnostic& Diagnostic)
+            {
+                return Diagnostic.SuggestedAction == EDWCEditorBuildAction::GenerateMaterials &&
+                       Diagnostic.Remediation == EDWCEditorValidationRemediation::BuildAction;
+            }));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCRuntimeDisabledBackendValidationTest,
     "DWC.Editor.Foundation.Validation.RuntimeDisabledBackends",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -305,7 +576,8 @@ bool FDWCRuntimeDisabledBackendValidationTest::RunTest(const FString& Parameters
     Slot.MaterialSlotIndex = 0;
     Slot.bIsWettableSlot = true;
 
-    FDWCEditorValidationEvaluationContext Context(*Asset, false);
+    FDWCEditorValidationEvaluationContext Context(
+        *Asset, EDWCEditorValidationAccess::MetadataOnly);
     FWCAEditorValidationSnapshot Snapshot;
     FDWCRuntimeValidationEvaluator::AppendToSnapshot(Context, Snapshot);
 
@@ -328,6 +600,40 @@ bool FDWCRuntimeDisabledBackendValidationTest::RunTest(const FString& Parameters
             EDWCEditorBuildActionState::Unavailable);
     }
     TestEqual(TEXT("Disabled backends emit no diagnostics"), Snapshot.Diagnostics.Num(), 0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCRuntimeRetryablePrerequisiteTest,
+    "DWC.Editor.Foundation.Validation.RuntimeRetryablePrerequisite",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCRuntimeRetryablePrerequisiteTest::RunTest(const FString& Parameters)
+{
+    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(GetTransientPackage());
+    USkeletalMesh* Mesh = NewObject<USkeletalMesh>(GetTransientPackage());
+    Asset->Metadata.DWCSkeletalMesh = Mesh;
+    Asset->Metadata.SetupSettings.bBuildCPUVertexSimulationData = false;
+    Asset->Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData = true;
+    FWetClothingAuthoredMaterialSlot& Slot =
+        Asset->Authored.PartData.EditableWetPartData.MaterialSlots.AddDefaulted_GetRef();
+    Slot.MaterialSlotIndex = 0;
+    Slot.bIsWettableSlot = true;
+
+    const FDWCEditorValidationEvaluationContext Context(
+        *Asset, EDWCEditorValidationAccess::MetadataOnly);
+    FWCAEditorValidationSnapshot Snapshot;
+    FDWCRuntimeValidationEvaluator::AppendToSnapshot(Context, Snapshot);
+
+    const FDWCEditorValidationActionState* Action =
+        Snapshot.FindAction(EDWCEditorBuildAction::BuildGPURuntimeData);
+    if (TestNotNull(TEXT("GPU Runtime action state exists"), Action))
+    {
+        TestEqual(TEXT("Missing Data UV is retryable"), Action->State,
+            EDWCEditorBuildActionState::Required);
+        TestTrue(TEXT("Data UV initialization is retained as the prerequisite"),
+            Action->BlockingActions.Contains(EDWCEditorBuildAction::InitializeDataUV));
+    }
     return true;
 }
 
@@ -357,7 +663,8 @@ bool FDWCRuntimeGPURebuildAdmissionTest::RunTest(const FString& Parameters)
     Slot.MaterialSlotIndex = 0;
     Slot.bIsWettableSlot = true;
 
-    FDWCEditorValidationEvaluationContext Context(*Asset, false);
+    FDWCEditorValidationEvaluationContext Context(
+        *Asset, EDWCEditorValidationAccess::MetadataOnly);
     FWCAEditorValidationSnapshot Snapshot;
     FDWCRuntimeValidationEvaluator::AppendToSnapshot(Context, Snapshot);
 
@@ -397,11 +704,16 @@ bool FDWCTransparencyIntentValidationTest::RunTest(const FString& Parameters)
 
     FWCAEditorValidationSnapshot Snapshot;
     FDWCTransparencyLayerValidationEvaluator::AppendToSnapshot(*Asset, false, Snapshot);
-    TestEqual(TEXT("An unconfigured Wettable slot owns one validation node"), Snapshot.Nodes.Num(), 1);
-    TestEqual(TEXT("No layer is a healthy NotConfigured state"), Snapshot.Nodes[0].Intent,
-        EDWCEditorValidationIntentState::NotConfigured);
-    TestEqual(TEXT("No layer requires no runtime artifact"), Snapshot.Nodes[0].Artifact,
-        EDWCEditorValidationArtifactState::NotRequired);
+    TestEqual(TEXT("Transparency owns one root node and one Wettable slot node"), Snapshot.Nodes.Num(), 2);
+    TArray<const FDWCEditorValidationNode*> SlotNodes = Snapshot.FindMaterialSlotNodes(0);
+    TestEqual(TEXT("An unconfigured Wettable slot owns one target node"), SlotNodes.Num(), 1);
+    if (SlotNodes.Num() == 1)
+    {
+        TestEqual(TEXT("No layer is a healthy NotConfigured state"), SlotNodes[0]->Intent,
+            EDWCEditorValidationIntentState::NotConfigured);
+        TestEqual(TEXT("No layer requires no runtime artifact"), SlotNodes[0]->Artifact,
+            EDWCEditorValidationArtifactState::NotRequired);
+    }
     TestEqual(TEXT("No layer emits no validation diagnostic"), Snapshot.Diagnostics.Num(), 0);
 
     FWetClothingTransparencyLayerData& Layer =
@@ -411,10 +723,19 @@ bool FDWCTransparencyIntentValidationTest::RunTest(const FString& Parameters)
     Layer.Intent = EDWCTransparencyLayerIntent::Draft;
     Snapshot = {};
     FDWCTransparencyLayerValidationEvaluator::AppendToSnapshot(*Asset, false, Snapshot);
-    TestEqual(TEXT("Explicit unfinished authoring is Draft"), Snapshot.Nodes[0].Intent,
-        EDWCEditorValidationIntentState::Draft);
-    TestFalse(TEXT("Draft content does not trigger a build action"),
-        Snapshot.Actions.Contains(EDWCEditorBuildAction::BakeTransparencyTextures));
+    SlotNodes = Snapshot.FindMaterialSlotNodes(0);
+    TestEqual(TEXT("Draft authoring owns one target node"), SlotNodes.Num(), 1);
+    if (SlotNodes.Num() == 1)
+    {
+        TestEqual(TEXT("Explicit unfinished authoring is Draft"), SlotNodes[0]->Intent,
+            EDWCEditorValidationIntentState::Draft);
+    }
+    const FDWCEditorValidationActionState* DraftAction =
+        Snapshot.FindAction(EDWCEditorBuildAction::BakeTransparencyTextures);
+    TestTrue(TEXT("Draft content does not require a build action"),
+        DraftAction == nullptr ||
+        (DraftAction->State != EDWCEditorBuildActionState::Required &&
+         DraftAction->State != EDWCEditorBuildActionState::Failed));
     TestFalse(TEXT("Draft content does not count as runtime bake content"),
         Asset->HasTransparencyBakeContent());
 
@@ -429,8 +750,13 @@ bool FDWCTransparencyIntentValidationTest::RunTest(const FString& Parameters)
     BakedMap.bContainsTransparencyAlpha = true;
     Snapshot = {};
     FDWCTransparencyLayerValidationEvaluator::AppendToSnapshot(*Asset, false, Snapshot);
-    TestEqual(TEXT("Disabled authored content remains disabled"), Snapshot.Nodes[0].Intent,
-        EDWCEditorValidationIntentState::Disabled);
+    SlotNodes = Snapshot.FindMaterialSlotNodes(0);
+    TestEqual(TEXT("Disabled authoring owns one target node"), SlotNodes.Num(), 1);
+    if (SlotNodes.Num() == 1)
+    {
+        TestEqual(TEXT("Disabled authored content remains disabled"), SlotNodes[0]->Intent,
+            EDWCEditorValidationIntentState::Disabled);
+    }
     TestFalse(TEXT("Disabled content does not count as runtime bake content"),
         Asset->HasTransparencyBakeContent());
     TestNull(TEXT("Disabled content is excluded from runtime lookup"),
@@ -442,9 +768,14 @@ bool FDWCTransparencyIntentValidationTest::RunTest(const FString& Parameters)
     TestNotNull(TEXT("Enabled valid content participates in runtime lookup"),
         Asset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(0));
     Snapshot = {};
-    FDWCTransparencyLayerValidationEvaluator::AppendToSnapshot(*Asset, false, Snapshot);
-    TestEqual(TEXT("Invalid enabled input is reported"), Snapshot.Nodes[0].Input,
-        EDWCEditorValidationInputState::Invalid);
+    FDWCTransparencyLayerValidationEvaluator::AppendToSnapshot(*Asset, true, Snapshot);
+    SlotNodes = Snapshot.FindMaterialSlotNodes(0);
+    TestEqual(TEXT("Enabled authoring owns one target node"), SlotNodes.Num(), 1);
+    if (SlotNodes.Num() == 1)
+    {
+        TestEqual(TEXT("Invalid enabled input is reported"), SlotNodes[0]->Input,
+            EDWCEditorValidationInputState::Invalid);
+    }
     TestTrue(TEXT("Invalid enabled input emits a blocking diagnostic"),
         Snapshot.HasBlockingErrors());
     return true;
@@ -525,7 +856,8 @@ bool FDWCWrinkleCanonicalSourceAndOutputTest::RunTest(const FString& Parameters)
     Wettable.bIsWettableSlot = true;
 
     FDWCWrinkleBuildTargetSnapshot Targets =
-        FDWCWrinkleBuildTargetResolver::Resolve(*Asset, false);
+        FDWCWrinkleBuildTargetResolver::Resolve(
+            *Asset, EDWCEditorValidationAccess::MetadataOnly);
     TestEqual(TEXT("Unconfigured wrinkle bake is unavailable"),
         Targets.BakeState, EDWCEditorBuildActionState::Unavailable);
     TestEqual(TEXT("A Wettable slot still owns a canonical target"), Targets.Targets.Num(), 1);
@@ -534,14 +866,16 @@ bool FDWCWrinkleCanonicalSourceAndOutputTest::RunTest(const FString& Parameters)
         Asset->Authored.WrinkleData.RuntimeNormalSources.AddDefaulted_GetRef();
     Custom.MaterialSlotIndex = 0;
     Custom.Source = EDWCWrinkleNormalSource::CustomTexture;
-    Targets = FDWCWrinkleBuildTargetResolver::Resolve(*Asset, false);
+    Targets = FDWCWrinkleBuildTargetResolver::Resolve(
+        *Asset, EDWCEditorValidationAccess::MetadataOnly);
     TestEqual(TEXT("Missing custom normal requires manual repair"),
         Targets.Targets[0].Requirement, EDWCWrinkleBuildRequirement::ManualRepair);
     TestEqual(TEXT("A custom-only slot does not request wrinkle baking"),
         Targets.BakeState, EDWCEditorBuildActionState::Unavailable);
 
     Custom.CustomWrinkleNormalMap = NewObject<UTexture2D>(GetTransientPackage());
-    Targets = FDWCWrinkleBuildTargetResolver::Resolve(*Asset, false);
+    Targets = FDWCWrinkleBuildTargetResolver::Resolve(
+        *Asset, EDWCEditorValidationAccess::MetadataOnly);
     TestTrue(TEXT("A valid custom normal is runtime-ready"), Targets.Targets[0].bHasRuntimeNormal);
     TestEqual(TEXT("A valid custom normal needs no baked output"),
         Targets.BakeState, EDWCEditorBuildActionState::Unavailable);
@@ -560,7 +894,8 @@ bool FDWCWrinkleCanonicalSourceAndOutputTest::RunTest(const FString& Parameters)
     Patch.bHasSurfaceFootprint = true;
     Patch.SurfaceHalfExtentLocal = FVector2f(1.0f, 1.0f);
 
-    Targets = FDWCWrinkleBuildTargetResolver::Resolve(*Asset, false);
+    Targets = FDWCWrinkleBuildTargetResolver::Resolve(
+        *Asset, EDWCEditorValidationAccess::MetadataOnly);
     TestEqual(TEXT("Valid authored patches require a missing bake"),
         Targets.BakeState, EDWCEditorBuildActionState::Required);
     TestEqual(TEXT("Missing outputs are buildable"),
@@ -576,7 +911,8 @@ bool FDWCWrinkleCanonicalSourceAndOutputTest::RunTest(const FString& Parameters)
     Baked.BuildSignature = TEXT("FastValidationIdentity");
     Baked.BakeGuid = FGuid::NewGuid();
     Asset->SetWrinkleBakeStatus(EDWCBakeStatus::Valid);
-    Targets = FDWCWrinkleBuildTargetResolver::Resolve(*Asset, false);
+    Targets = FDWCWrinkleBuildTargetResolver::Resolve(
+        *Asset, EDWCEditorValidationAccess::MetadataOnly);
     TestEqual(TEXT("Fast validation accepts complete identified outputs"),
         Targets.BakeState, EDWCEditorBuildActionState::UpToDate);
 
@@ -663,7 +999,8 @@ bool FDWCTransparencyDuplicateTargetContractTest::RunTest(const FString& Paramet
     }
 
     const FDWCTransparencyBuildTargetSnapshot Targets =
-        FDWCTransparencyBuildTargetResolver::Resolve(*Asset, false);
+        FDWCTransparencyBuildTargetResolver::Resolve(
+            *Asset, EDWCEditorValidationAccess::MetadataOnly);
     TestEqual(TEXT("Both duplicate layers are retained as separate targets"),
         Targets.Targets.Num(), 2);
     TestEqual(TEXT("Duplicate enabled layers block automatic full bake"),
@@ -833,6 +1170,122 @@ bool FDWCEditorValidationRemediationMatrixTest::RunTest(const FString& Parameter
         Report.Issues[1].BuildAction.IsSet());
     TestTrue(TEXT("Typed automatic remediation remains auto-resolvable"),
         Report.Issues[2].BuildAction.IsSet());
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorValidationSectionRegistryTest,
+    "DWC.Editor.Foundation.Validation.SectionRegistry",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorValidationSectionRegistryTest::RunTest(const FString& Parameters)
+{
+    TestEqual(TEXT("Asset owns its own presentation section"),
+        FDWCEditorValidationSectionRegistry::MapDomain(EDWCEditorValidationDomain::Asset),
+        EWCAValidationSection::Asset);
+    TestEqual(TEXT("Wet Part no longer aliases Render Profile"),
+        FDWCEditorValidationSectionRegistry::MapDomain(EDWCEditorValidationDomain::WetPart),
+        EWCAValidationSection::WetPart);
+    TestEqual(TEXT("GPU simulation lookup is presented with runtime data"),
+        FDWCEditorValidationSectionRegistry::MapDomain(EDWCEditorValidationDomain::GPUSimulationMap),
+        EWCAValidationSection::RuntimeData);
+    TestEqual(TEXT("Save action belongs to asset state"),
+        FDWCEditorValidationSectionRegistry::MapAction(EDWCEditorBuildAction::SaveAsset),
+        EWCAValidationSection::Asset);
+    TestEqual(TEXT("Affected transparency rebuild belongs to transparency"),
+        FDWCEditorValidationSectionRegistry::MapAction(
+            EDWCEditorBuildAction::RebakeAffectedTransparencyMaps),
+        EWCAValidationSection::TransparencyMaps);
+    TestEqual(TEXT("Every canonical section has one descriptor"),
+        FDWCEditorValidationSectionRegistry::GetSections().Num(), 9);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorValidationSectionAggregationTest,
+    "DWC.Editor.Foundation.Validation.SectionAggregation",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorValidationSectionAggregationTest::RunTest(const FString& Parameters)
+{
+    FWCAEditorValidationSnapshot Snapshot;
+
+    FDWCEditorValidationNode& AssetNode = DWCEditorValidation::FindOrAddNode(
+        Snapshot,
+        {EDWCEditorValidationDomain::Asset});
+    AssetNode.Intent = EDWCEditorValidationIntentState::Enabled;
+
+    FDWCEditorValidationNode& WetPartNode = DWCEditorValidation::FindOrAddNode(
+        Snapshot,
+        {EDWCEditorValidationDomain::WetPart, 2});
+    WetPartNode.Intent = EDWCEditorValidationIntentState::NotConfigured;
+    WetPartNode.Artifact = EDWCEditorValidationArtifactState::NotRequired;
+
+    FDWCEditorValidationNode& GPURuntimeNode = DWCEditorValidation::FindOrAddNode(
+        Snapshot,
+        {EDWCEditorValidationDomain::GPUSimulationMap});
+    GPURuntimeNode.Intent = EDWCEditorValidationIntentState::Enabled;
+    GPURuntimeNode.Artifact = EDWCEditorValidationArtifactState::Stale;
+    DWCEditorValidation::AddDiagnostic(
+        Snapshot,
+        GPURuntimeNode,
+        TEXT("Runtime.GPU.Stale"),
+        EDWCEditorValidationSeverity::Warning,
+        FText::FromString(TEXT("Presentation text does not define ownership")),
+        FText::GetEmpty(),
+        FText::GetEmpty(),
+        FText::GetEmpty(),
+        EDWCEditorValidationRemediation::BuildAction,
+        EDWCEditorBuildAction::BuildGPURuntimeData);
+
+    FDWCEditorBuildStatusSnapshot BuildStatus;
+    FDWCEditorBuildActionStatus& WrinkleStatus =
+        BuildStatus.Actions.Add(EDWCEditorBuildAction::BakeWrinkleTextures);
+    WrinkleStatus.Action = EDWCEditorBuildAction::BakeWrinkleTextures;
+    WrinkleStatus.State = EDWCEditorBuildActionState::Running;
+
+    const FWCAValidationReport Report =
+        FDWCEditorValidationReportAdapter::BuildReport(Snapshot, &BuildStatus);
+    const FWCAValidationSectionResult* AssetSection =
+        Report.FindSection(EWCAValidationSection::Asset);
+    const FWCAValidationSectionResult* WetPartSection =
+        Report.FindSection(EWCAValidationSection::WetPart);
+    const FWCAValidationSectionResult* RuntimeSection =
+        Report.FindSection(EWCAValidationSection::RuntimeData);
+    const FWCAValidationSectionResult* WrinkleSection =
+        Report.FindSection(EWCAValidationSection::WrinkleMaps);
+
+    TestNotNull(TEXT("Asset section exists"), AssetSection);
+    TestNotNull(TEXT("Wet Part section exists"), WetPartSection);
+    TestNotNull(TEXT("Runtime section exists"), RuntimeSection);
+    TestNotNull(TEXT("Wrinkle section exists"), WrinkleSection);
+    if (AssetSection != nullptr)
+    {
+        TestEqual(TEXT("Current asset state remains current"), AssetSection->OverallState,
+            EDWCEditorValidationOverallState::Current);
+        TestEqual(TEXT("Current asset uses success presentation"), AssetSection->PresentationState,
+            EDWCValidationPresentationState::Success);
+    }
+    if (WetPartSection != nullptr)
+    {
+        TestTrue(TEXT("Not-configured Wet Part is still an explicit applicable state"),
+            WetPartSection->bApplicable);
+        TestEqual(TEXT("Wet Part state is not configured"), WetPartSection->OverallState,
+            EDWCEditorValidationOverallState::NotConfigured);
+    }
+    if (RuntimeSection != nullptr)
+    {
+        TestEqual(TEXT("GPU lookup stale state is aggregated into Runtime Data"),
+            RuntimeSection->OverallState, EDWCEditorValidationOverallState::Stale);
+        TestEqual(TEXT("Runtime owns the GPU diagnostic"), RuntimeSection->IssueIndices.Num(), 1);
+    }
+    if (WrinkleSection != nullptr)
+    {
+        TestEqual(TEXT("Build-status-only running state is presented"),
+            WrinkleSection->OverallState, EDWCEditorValidationOverallState::Running);
+        TestTrue(TEXT("Running build action marks the section applicable"),
+            WrinkleSection->bApplicable);
+    }
     return true;
 }
 

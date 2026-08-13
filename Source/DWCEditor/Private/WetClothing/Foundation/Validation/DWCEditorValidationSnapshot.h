@@ -24,6 +24,8 @@ struct FDWCEditorValidationDiagnostic
     TArray<EDWCEditorBuildAction> BlockingActions;
     FDWCEditorValidationPresentation Presentation;
     bool bFailed = false;
+    /** Exactly one DWCBakeOutput bit whose operation failure is represented here. */
+    int32 OwnedBakeOutput = 0;
 };
 
 struct FDWCEditorValidationNode
@@ -54,6 +56,7 @@ struct FWCAEditorValidationSnapshot
     FString AssetPath;
     bool bAssetDirty = false;
     bool bDeepValidation = false;
+    EDWCEditorValidationAccess Access = EDWCEditorValidationAccess::MetadataOnly;
     TArray<FDWCEditorValidationNode> Nodes;
     TArray<FDWCEditorValidationDiagnostic> Diagnostics;
     TMap<EDWCEditorBuildAction, FDWCEditorValidationActionState> Actions;

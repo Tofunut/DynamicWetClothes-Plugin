@@ -16,6 +16,7 @@
 #include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjector.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSurfacePatchProjectionVersion.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
+#include "WetClothing/Modes/Wrinkle/Authoring/DWCEditorWrinkleTextureResolver.h"
 #include "WetClothing/Foundation/TextureAccess/WetWrinkleTextureRasterUtils.h"
 #include "WetClothing/Modes/Wrinkle/Stroke/WetProceduralRidgeRasterizer.h"
 #include "WetClothing/Modes/Wrinkle/Authoring/WetWrinklePatchDescriptor.h"
@@ -619,7 +620,7 @@ bool FWetWrinkleNormalMapBaker::BuildMaterialSlotSnapshot(
             continue;
         }
         ++MatchingStampCount;
-        if (Stamp.WrinkleNormalTexture == nullptr)
+        if (!Stamp.HasWrinkleNormalTexture())
         {
             ++MissingTextureCount;
             continue;
@@ -713,7 +714,7 @@ FWetWrinkleMaterialSlotBakeState FWetWrinkleNormalMapBaker::EvaluateMaterialSlot
         {
             if ((!Stamp.bEnabled && !Settings.bIncludeDisabledPatches) ||
                 Stamp.MaterialSlotIndex != MaterialSlotIndex ||
-                Stamp.WrinkleNormalTexture == nullptr)
+                !Stamp.HasWrinkleNormalTexture())
             {
                 continue;
             }
@@ -749,7 +750,14 @@ FWetWrinkleMaterialSlotBakeState FWetWrinkleNormalMapBaker::EvaluateMaterialSlot
                 return Candidate.MaterialSlotIndex == MaterialSlotIndex;
             });
     Result.bNormalExists = BakedMap != nullptr && BakedMap->BakedWrinkleNormalMap != nullptr;
-    Result.bCoverageMaskExists = BakedMap != nullptr && BakedMap->BakedWrinkleMask != nullptr;
+    if (BakedMap != nullptr)
+    {
+        const FDWCEditorWrinkleTextureReferenceSnapshot MaskReference =
+            FDWCEditorWrinkleTextureResolver::InspectEditorMask(*BakedMap);
+        Result.bCoverageMaskExists =
+            MaskReference.Status == EDWCEditorWrinkleTextureResolveStatus::Unloaded ||
+            MaskReference.Status == EDWCEditorWrinkleTextureResolveStatus::Ready;
+    }
     if (!Result.bNormalExists)
     {
         Result.Issue = EWetWrinkleBakeCurrentnessIssue::NormalMissing;
@@ -885,12 +893,20 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
             return false;
         }
         const FDWCEditorWrinklePatchDescriptor& PatchDescriptor = PatchValidation.Descriptor;
-        UTexture2D* CorrectedNormalTexture = Stamp.WrinkleNormalTexture;
-        const FGuid SourceId = CorrectedNormalTexture != nullptr
-            ? CorrectedNormalTexture->Source.GetId()
-            : FGuid();
-        const bool bFlipGreenChannel =
-            CorrectedNormalTexture != nullptr && CorrectedNormalTexture->bFlipGreenChannel;
+        const FDWCEditorWrinkleTextureReferenceSnapshot SourceReference =
+            FDWCEditorWrinkleTextureResolver::ResolveSource(Stamp);
+        if (!SourceReference.IsReady())
+        {
+            OutErrorMessage = SourceReference.Detail.IsEmpty()
+                ? FString::Printf(
+                    TEXT("Could not resolve the wrinkle source for patch '%s'."),
+                    Stamp.DisplayName.IsEmpty() ? TEXT("Unnamed Patch") : *Stamp.DisplayName)
+                : SourceReference.Detail;
+            return false;
+        }
+        UTexture2D* CorrectedNormalTexture = SourceReference.Texture.Get();
+        const FGuid SourceId = SourceReference.SourceId;
+        const bool bFlipGreenChannel = SourceReference.bFlipGreenChannel;
         const FWetWrinkleBakeSourceCacheEntry* NormalSource = nullptr;
         FDWCEditorCacheLease SourceLease;
         const FDWCEditorCacheKey SourceCacheKey = MakeWrinkleBakeSourceCacheKey(
@@ -1677,7 +1693,8 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
             continue;
         }
 
-        const UTexture2D* NormalTexture = Stamp->WrinkleNormalTexture;
+        const FDWCEditorWrinkleTextureReferenceSnapshot SourceReference =
+            FDWCEditorWrinkleTextureResolver::ResolveSource(*Stamp);
         const FDWCEditorSurfacePatchProjectionSettings ProjectionSettings =
             FDWCEditorWrinklePatchDescriptorBuilder::BuildProjectionSettings(
                 Stamp->ProjectionMode,
@@ -1685,6 +1702,12 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
                 Stamp->MaxSurfaceAngleDegrees,
                 Stamp->ProjectionDepthSoftness,
                 Stamp->ProjectionAngleSoftness);
+        const FString NormalSourceSignature = SourceReference.IsReady()
+            ? FString::Printf(
+                TEXT("%s@%s"),
+                *SourceReference.ObjectPath.ToString(),
+                *SourceReference.SourceId.ToString(EGuidFormats::Digits))
+            : SourceReference.ObjectPath.ToString();
         Canonical += FString::Printf(
             TEXT("|Stamp:%s;Mode=%d;CoreMode=%d;Boundary=%d;Depth=%.9g;Angle=%.9g;DepthSoft=%.9g;AngleSoft=%.9g;HasAnchor=%d;Anchor=%d,%.9g,%.9g,%.9g;HasFrame=%d;FrameU=%.9g,%.9g,%.9g;FrameV=%.9g,%.9g,%.9g;HasFootprint=%d;HalfExtent=%.9g,%.9g;Rot=%.9g;Scale=%.9g,%.9g;Strength=%.9g;Falloff=%.9g;NormalSource=%s"),
             *Stamp->PatchGuid.ToString(EGuidFormats::Digits),
@@ -1715,7 +1738,7 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
             Stamp->Scale.Y,
             Stamp->Strength,
             Stamp->Falloff,
-            NormalTexture != nullptr ? *NormalTexture->Source.GetId().ToString(EGuidFormats::Digits) : TEXT(""));
+            *NormalSourceSignature);
     }
 
     for (const FWetProceduralRidgeStroke* Stroke : Group.ProceduralRidgeStrokes)

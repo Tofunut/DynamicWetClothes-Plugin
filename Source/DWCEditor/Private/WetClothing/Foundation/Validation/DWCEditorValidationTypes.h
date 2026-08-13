@@ -4,6 +4,19 @@
 #include "CoreMinimal.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
 
+/**
+ * Declares the strongest data access a validation pass may perform.
+ * Metadata-only evaluation is used by automatic editor status refreshes and
+ * must not load packages, decode bulk payloads, read texture source data, or
+ * mutate the WCA. Exact payload access is reserved for explicit validation and
+ * build admission.
+ */
+enum class EDWCEditorValidationAccess : uint8
+{
+    MetadataOnly,
+    ExactPayload
+};
+
 enum class EDWCEditorValidationDomain : uint8
 {
     Asset,

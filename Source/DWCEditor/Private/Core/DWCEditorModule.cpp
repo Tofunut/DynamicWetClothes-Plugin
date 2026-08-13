@@ -11,6 +11,7 @@
 #include "PropertyEditorModule.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "WetnessProfile/Editor/WetnessProfileDetailsCustomization.h"
@@ -22,6 +23,7 @@ class FDWCEditorModule : public IModuleInterface
     virtual void StartupModule() override
     {
         FDWCEditorStyle::Initialize();
+        FDWCEditorAuthoringPayloadDiagnostics::Initialize();
         FWetClothingTextureReadbackUtils::InitializeResourceBroker();
 
         FPropertyEditorModule& PropertyEditorModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
@@ -41,6 +43,7 @@ class FDWCEditorModule : public IModuleInterface
 
     virtual void ShutdownModule() override
     {
+        FDWCEditorAuthoringPayloadDiagnostics::Shutdown();
         FWetClothingTextureReadbackUtils::ShutdownResourceBroker();
 
         if (ObjectPropertyChangedHandle.IsValid())

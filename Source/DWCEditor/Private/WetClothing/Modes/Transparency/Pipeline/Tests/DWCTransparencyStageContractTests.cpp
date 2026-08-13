@@ -115,6 +115,73 @@ bool FDWCTransparencyStageSignatureDependencyTest::RunTest(const FString& Parame
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyStrokeStorageSignatureParityTest,
+    "DWC.Transparency.Pipeline.StrokeStorageSignatureParity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyStrokeStorageSignatureParityTest::RunTest(const FString&)
+{
+    FWetClothingTransparencyLayerData LegacyLayer;
+    LegacyLayer.LayerGuid = FGuid::NewGuid();
+    LegacyLayer.TargetSurface.OuterMaterialSlotIndex = 3;
+
+    FDWCTransparencyBrushSample AlphaSample;
+    AlphaSample.PositionUV = FVector2D(0.123456789123, 0.876543210987);
+    AlphaSample.UVIslandID = 7;
+    AlphaSample.RadiusUV = 0.0375f;
+    AlphaSample.Strength = 0.8125f;
+    FDWCTransparencyBrushStroke& AlphaStroke = LegacyLayer.EditableStrokes.AddDefaulted_GetRef();
+    AlphaStroke.StrokeGuid = FGuid::NewGuid();
+    AlphaStroke.MaterialSlotIndex = 3;
+    AlphaStroke.BrushMode = EDWCTransparencyBrushMode::SetValue;
+    AlphaStroke.TargetAlpha = 0.65f;
+    AlphaStroke.Samples.Add(AlphaSample);
+
+    FDWCTransparencyBrushSample RevealSample = AlphaSample;
+    RevealSample.PositionUV = FVector2D(0.333333333333, 0.666666666667);
+    FDWCTransparencyRevealColorStroke& RevealStroke =
+        LegacyLayer.RevealColorPaintStrokes.AddDefaulted_GetRef();
+    RevealStroke.StrokeGuid = FGuid::NewGuid();
+    RevealStroke.MaterialSlotIndex = 3;
+    RevealStroke.PaintColor = FLinearColor(0.2f, 0.4f, 0.8f, 1.0f);
+    RevealStroke.Samples.Add(RevealSample);
+
+    const FString LegacyAlphaSignature =
+        FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(LegacyLayer);
+    const FString LegacyRevealSignature =
+        FDWCTransparencySignatureService::BuildRevealSignature(TEXT("Source"), LegacyLayer, 0.35f);
+
+    FWetClothingTransparencyLayerData CompactLayer = LegacyLayer;
+    TestTrue(TEXT("Alpha legacy samples compact."),
+        CompactLayer.EditableStrokes[0].CompactLegacySamples());
+    TestTrue(TEXT("Reveal legacy samples compact."),
+        CompactLayer.RevealColorPaintStrokes[0].CompactLegacySamples());
+    TestEqual(TEXT("Alpha signature is independent of persisted sample representation."),
+        FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(CompactLayer),
+        LegacyAlphaSignature);
+    TestEqual(TEXT("Reveal signature is independent of persisted sample representation."),
+        FDWCTransparencySignatureService::BuildRevealSignature(TEXT("Source"), CompactLayer, 0.35f),
+        LegacyRevealSignature);
+
+    FDWCTransparencyBrushSample AppendedSample = AlphaSample;
+    AppendedSample.PositionUV = FVector2D(0.75, 0.25);
+    CompactLayer.EditableStrokes[0].Samples.Add(AppendedSample);
+    const FString MixedStorageSignature =
+        FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(CompactLayer);
+    TestTrue(TEXT("Mixed storage merges its legacy tail."),
+        CompactLayer.EditableStrokes[0].CompactLegacySamples());
+    TestEqual(TEXT("Compacting mixed storage does not change its signature."),
+        FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(CompactLayer),
+        MixedStorageSignature);
+
+    CompactLayer.EditableStrokes[0].CompactSamples[0].Strength = 0.25f;
+    TestNotEqual(TEXT("A semantic sample edit still changes the signature."),
+        FDWCTransparencySignatureService::BuildAlphaAuthoringSignature(CompactLayer),
+        MixedStorageSignature);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyStageArtifactSetContractTest,
     "DWC.Transparency.Pipeline.StageArtifactSetContract",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

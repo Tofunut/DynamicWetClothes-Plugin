@@ -113,12 +113,12 @@ namespace
         uint64 Bytes = Strokes.GetAllocatedSize() + RevealColorStrokes.GetAllocatedSize();
         for (const FDWCTransparencyBrushStroke& Stroke : Strokes)
         {
-            Bytes += Stroke.Samples.GetAllocatedSize();
+            Bytes += Stroke.GetSampleAllocatedSize();
             Bytes += Stroke.DisplayName.GetAllocatedSize();
         }
         for (const FDWCTransparencyRevealColorStroke& Stroke : RevealColorStrokes)
         {
-            Bytes += Stroke.Samples.GetAllocatedSize();
+            Bytes += Stroke.GetSampleAllocatedSize();
         }
         return Bytes;
     }
@@ -1344,12 +1344,12 @@ void SWetClothingTransparencyPreviewViewport::SetAutoBakePreviewResult(
         // The sparse store owns authored (pre-correction) color only. Rebuild
         // it from serialized strokes; the committed checkpoint already has
         // metallic correction baked in and must not be fed back into Stage 3.
-        bRevealColorRequiresWorkerRebuild = Layer->RevealColorPaintStrokes.ContainsByPredicate(
+        bRevealColorRequiresWorkerRebuild = Layer->GetRevealColorPaintStrokes().ContainsByPredicate(
             [this](const FDWCTransparencyRevealColorStroke& Stroke)
             {
                 return Stroke.bEnabled &&
                     Stroke.MaterialSlotIndex == SelectedMaterialSlotIndex &&
-                    !Stroke.Samples.IsEmpty();
+                    Stroke.HasSamples();
             });
     }
     if (bRevealColorRequiresWorkerRebuild)
@@ -2680,19 +2680,20 @@ void SWetClothingTransparencyPreviewViewport::ReplayAlphaStrokeHistory(
     FDWCEditorDirtyRegionSet DirtyRegions;
     for (const FDWCTransparencyBrushStroke& Stroke : InvalidatedStrokes)
     {
-        for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
-        {
-            TArray<FIntRect> Regions;
-            FDWCTransparencyBrushRasterizer::BuildSampleRegions(
-                Sample,
-                AutoBakePreviewResult->Resolution,
-                Stroke.UVAddressMode,
-                Regions);
-            for (const FIntRect& Region : Regions)
+        Stroke.ForEachSample(
+            [this, &Stroke, &DirtyRegions](const FDWCTransparencyBrushSample& Sample)
             {
-                DirtyRegions.Add(Region, AutoBakePreviewResult->Resolution, false);
-            }
-        }
+                TArray<FIntRect> Regions;
+                FDWCTransparencyBrushRasterizer::BuildSampleRegions(
+                    Sample,
+                    AutoBakePreviewResult->Resolution,
+                    Stroke.UVAddressMode,
+                    Regions);
+                for (const FIntRect& Region : Regions)
+                {
+                    DirtyRegions.Add(Region, AutoBakePreviewResult->Resolution, false);
+                }
+            });
     }
     for (const FIntRect& Region : DirtyRegions.GetRegions())
     {
@@ -2712,19 +2713,20 @@ void SWetClothingTransparencyPreviewViewport::ReplayRevealColorStrokeHistory(
     FDWCEditorDirtyRegionSet DirtyRegions;
     for (const FDWCTransparencyRevealColorStroke& Stroke : InvalidatedStrokes)
     {
-        for (const FDWCTransparencyBrushSample& Sample : Stroke.Samples)
-        {
-            TArray<FIntRect> Regions;
-            FDWCTransparencyBrushRasterizer::BuildSampleRegions(
-                Sample,
-                AutoBakePreviewResult->Resolution,
-                Stroke.UVAddressMode,
-                Regions);
-            for (const FIntRect& Region : Regions)
+        Stroke.ForEachSample(
+            [this, &Stroke, &DirtyRegions](const FDWCTransparencyBrushSample& Sample)
             {
-                DirtyRegions.Add(Region, AutoBakePreviewResult->Resolution, false);
-            }
-        }
+                TArray<FIntRect> Regions;
+                FDWCTransparencyBrushRasterizer::BuildSampleRegions(
+                    Sample,
+                    AutoBakePreviewResult->Resolution,
+                    Stroke.UVAddressMode,
+                    Regions);
+                for (const FIntRect& Region : Regions)
+                {
+                    DirtyRegions.Add(Region, AutoBakePreviewResult->Resolution, false);
+                }
+            });
     }
     for (const FIntRect& Region : DirtyRegions.GetRegions())
     {
@@ -2772,7 +2774,7 @@ bool SWetClothingTransparencyPreviewViewport::BuildRevealColorCommitInput(
         // The serialized strokes are the canonical fallback. Replaying them in
         // the admitted worker avoids blocking the game thread or losing an edit
         // whose incremental preview has not committed yet.
-        OutInput.FallbackStrokes = Layer->RevealColorPaintStrokes;
+        OutInput.FallbackStrokes = Layer->GetRevealColorPaintStrokes();
     }
     return true;
 }
@@ -2793,17 +2795,18 @@ bool SWetClothingTransparencyPreviewViewport::BuildAlphaWorkingSnapshot(
     }
 
     OutSnapshot.Resolution = AutoBakePreviewResult->Resolution;
+    const TArray<FDWCTransparencyBrushStroke>& EditableStrokes = Layer->GetEditableStrokes();
     OutSnapshot.BaselineStrokeCount = FMath::Clamp(
         AutoBakePreviewResult->BaselineStrokeCount,
         0,
-        Layer->EditableStrokes.Num());
-    OutSnapshot.AuthoredStrokeCount = Layer->EditableStrokes.Num();
+        EditableStrokes.Num());
+    OutSnapshot.AuthoredStrokeCount = EditableStrokes.Num();
     for (int32 StrokeIndex = OutSnapshot.BaselineStrokeCount;
-         StrokeIndex < Layer->EditableStrokes.Num();
+         StrokeIndex < EditableStrokes.Num();
          ++StrokeIndex)
     {
-        const FDWCTransparencyBrushStroke& Stroke = Layer->EditableStrokes[StrokeIndex];
-        OutSnapshot.AppliedSampleCount += Stroke.bEnabled ? Stroke.Samples.Num() : 0;
+        const FDWCTransparencyBrushStroke& Stroke = EditableStrokes[StrokeIndex];
+        OutSnapshot.AppliedSampleCount += Stroke.bEnabled ? Stroke.GetSampleCount() : 0;
     }
     const bool bSparseWorkingSetIsCurrent = ManualAlphaTileStore.IsValid() &&
         ManualAlphaTileStore.GetResolution() == AutoBakePreviewResult->Resolution &&
@@ -2822,7 +2825,7 @@ bool SWetClothingTransparencyPreviewViewport::BuildAlphaWorkingSnapshot(
         // Serialized strokes remain authoritative whenever incremental state is
         // pending, rebuilding, or actively edited.
         OutSnapshot.Mode = EDWCTransparencyAlphaSnapshotMode::StrokeReplay;
-        OutSnapshot.FallbackStrokes = Layer->EditableStrokes;
+        OutSnapshot.FallbackStrokes = EditableStrokes;
     }
     return OutSnapshot.IsValid(&OutError);
 }
@@ -3004,7 +3007,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
                 Viewport->TransparencyPreviewHandle->GetResourceGeneration();
             if (Target == EDWCTransparencyDirtyReplayTarget::Alpha)
             {
-                Input.AlphaStrokes = Layer->EditableStrokes;
+                Input.AlphaStrokes = Layer->GetEditableStrokes();
                 Input.BaselineStrokeCount = Input.SourcePayload->BaselineStrokeCount;
                 Input.ExpectedStoreRevision = Viewport->ManualAlphaTileStore.GetRevision();
                 if (!Viewport->BuildAlphaComposeTileSnapshots(DirtyTiles, Input.AlphaComposeTiles))
@@ -3015,7 +3018,7 @@ void SWetClothingTransparencyPreviewViewport::ScheduleDirtyTileReplay(
             }
             else
             {
-                Input.RevealColorStrokes = Layer->RevealColorPaintStrokes;
+                Input.RevealColorStrokes = Layer->GetRevealColorPaintStrokes();
                 Input.BaseRevealColor = Layer->ManualColorSource.BaseRevealColor;
                 Input.ExpectedStoreRevision = Viewport->RevealColorTileStore.GetRevision();
                 if (!Viewport->BuildRevealColorComposeTileSnapshots(DirtyTiles, Input.RevealComposeTiles))
@@ -3198,6 +3201,7 @@ void SWetClothingTransparencyPreviewViewport::QueueRevealColorIncrementalSample(
     FPendingRevealColorCommand& Command = PendingRevealColorCommands.AddDefaulted_GetRef();
     Command.Stroke = Stroke;
     Command.Stroke.Samples.Reset();
+    Command.Stroke.CompactSamples.Reset();
     Command.Sample = Sample;
     Command.Sequence = NextRevealColorCommandSequence++;
     RevealColorPreviewRecovery.MarkIncrementalPending();
@@ -3232,6 +3236,7 @@ void SWetClothingTransparencyPreviewViewport::QueueAlphaIncrementalSample(
     FPendingAlphaCommand& Command = PendingAlphaCommands.AddDefaulted_GetRef();
     Command.Stroke = Stroke;
     Command.Stroke.Samples.Reset();
+    Command.Stroke.CompactSamples.Reset();
     Command.Sample = Sample;
     Command.Sequence = NextAlphaCommandSequence++;
     AlphaPreviewRecovery.MarkIncrementalPending();
@@ -4211,10 +4216,10 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
         *AdmissionAutoResult,
         bRebuildRevealColor ? EmptyRevealColorTileStore : RevealColorTileStore,
         bRebuildManualOverrides
-            ? GetTransparencyStrokeSnapshotBytes(AdmissionLayer->EditableStrokes, EmptyRevealColorStrokes)
+            ? GetTransparencyStrokeSnapshotBytes(AdmissionLayer->GetEditableStrokes(), EmptyRevealColorStrokes)
             : ManualAlphaTileStore.GetAllocatedBytes(),
         OuterEdgeFeatherBuffer,
-        bRebuildRevealColor ? AdmissionLayer->RevealColorPaintStrokes : EmptyRevealColorStrokes,
+        bRebuildRevealColor ? AdmissionLayer->GetRevealColorPaintStrokes() : EmptyRevealColorStrokes,
         bRebuildManualOverrides,
         bRebuildRevealColor);
     Descriptor.DebugName = FString::Printf(
@@ -4293,7 +4298,7 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
             {
                 if (bRebuildRevealColor)
                 {
-                    Input.RevealColorPaintStrokes = Layer->RevealColorPaintStrokes;
+                    Input.RevealColorPaintStrokes = Layer->GetRevealColorPaintStrokes();
                 }
                 Input.BaselineStrokeCount = Input.SourcePayload->BaselineStrokeCount;
                 Input.BaseRevealColor = Layer->ManualColorSource.BaseRevealColor;
@@ -4558,7 +4563,7 @@ void SWetClothingTransparencyPreviewViewport::CollectDiagnosticMemoryStats(
         InteractiveQueue.UsedBytes = PendingRevealColorCommands.GetAllocatedSize();
         for (const FPendingRevealColorCommand& Command : PendingRevealColorCommands)
         {
-            InteractiveQueue.UsedBytes += Command.Stroke.Samples.GetAllocatedSize();
+            InteractiveQueue.UsedBytes += Command.Stroke.GetSampleAllocatedSize();
         }
         InteractiveQueue.EntryCount = PendingRevealColorCommands.Num();
         InteractiveQueue.GlobalCategory = EDWCEditorMemoryCategory::OperationPrivateCPU;

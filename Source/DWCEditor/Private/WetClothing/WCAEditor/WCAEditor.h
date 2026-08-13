@@ -56,7 +56,7 @@ class FWCAEditor : public FAssetEditorToolkit
     FReply               HandleValidationResolveClicked(TWeakPtr<SWindow> DialogWindow);
     void                 ExecuteValidationResolveExclusive(TWeakPtr<SWindow> DialogWindow);
     TSharedRef<SWidget>  BuildRuntimeBuildMenu();
-    FWCAEditorCanonicalStateSnapshot BuildCanonicalStateSnapshot(bool bDeepValidation = false) const;
+    FWCAEditorCanonicalStateSnapshot BuildCanonicalStateSnapshot(bool bDeepValidation) const;
     FDWCEditorBuildStatusSnapshot BuildBuildStatusSnapshot(bool bDeepValidation = false) const;
     bool                 CanExecuteBuildAction(EDWCEditorBuildAction Action) const;
     void                 ExecuteBuildAction(EDWCEditorBuildAction Action);

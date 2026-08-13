@@ -43,6 +43,7 @@
 #include "WetClothing/Modes/Transparency/Viewport/SWetClothingTransparencyPreviewViewport.h"
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboButton.h"
@@ -1295,17 +1296,17 @@ bool SWetClothingTransparencyBakePanel::RefreshModelState()
     else
     {
         TArray<FString> Errors;
+        const TSharedPtr<FDWCTransparencySourcePayload>* Existing =
+            AutoBakeResults.Find(Layer->LayerGuid);
         if (GetCurrentStage() == EDWCTransparencyEditorStage::FinalEditing &&
-            EnsureFinalEditingWorkingMap())
+            Existing != nullptr && Existing->IsValid())
         {
-            const TSharedPtr<FDWCTransparencySourcePayload>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
-            check(Existing != nullptr && Existing->IsValid());
             const FDWCTransparencySourcePayload& Result = **Existing;
             if (Result.bIsFinalBakedBaseline)
             {
                 StatusMessage = FString::Printf(
                     TEXT("Baked map loaded as an editable baseline. New brush edits: %d."),
-                    FMath::Max(Layer->EditableStrokes.Num() - Result.BaselineStrokeCount, 0));
+                    FMath::Max(Layer->GetEditableStrokes().Num() - Result.BaselineStrokeCount, 0));
                 PanelStatus = EDWCTransparencyPanelStatus::Ready;
             }
             else
@@ -1692,8 +1693,8 @@ SWetClothingTransparencyBakePanel::EvaluateCharacterTypeChangeImpact() const
     Impact.LayerCount = Layers.Num();
     for (const FWetClothingTransparencyLayerData& Layer : Layers)
     {
-        Impact.RevealStrokeCount += Layer.RevealColorPaintStrokes.Num();
-        Impact.AlphaStrokeCount += Layer.EditableStrokes.Num();
+        Impact.RevealStrokeCount += Layer.GetRevealColorPaintStrokes().Num();
+        Impact.AlphaStrokeCount += Layer.GetEditableStrokes().Num();
         if (Layer.AutoBakeMetadata.AutoBakeGuid.IsValid() ||
             !Layer.AutoBakeMetadata.BuildSignature.IsEmpty())
         {
@@ -1958,12 +1959,28 @@ void SWetClothingTransparencyBakePanel::RefreshBlueprintHierarchy(const bool bAl
 
     BlueprintHierarchyItems.Reset();
     BlueprintHierarchyError.Reset();
+    if (!bAllowAutoTarget)
+    {
+        BlueprintHierarchyLayerGuid.Invalidate();
+        BlueprintHierarchyClassPath.Reset();
+        BlueprintHierarchyError =
+            TEXT("Blueprint hierarchy is not active. Click Refresh Hierarchy to load it.");
+        if (BlueprintHierarchyListView.IsValid())
+        {
+            BlueprintHierarchyListView->RequestListRefresh();
+        }
+        return;
+    }
+
     BlueprintHierarchyLayerGuid = Layer->LayerGuid;
     BlueprintHierarchyClassPath = Layer->BlueprintSource.BlueprintClass.ToSoftObjectPath().ToString();
 
     FDWCTransparencyBlueprintHierarchy Hierarchy;
     FString HierarchyError;
     const TSubclassOf<AActor> BlueprintClass = Layer->BlueprintSource.BlueprintClass.LoadSynchronous();
+    FDWCEditorAuthoringPayloadDiagnostics::RecordExplicitLoad(
+        BlueprintClass.Get(),
+        TEXT("Transparency.RefreshBlueprintHierarchy"));
     if (!FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchy(
             BlueprintClass, Hierarchy, HierarchyError))
     {
@@ -2440,7 +2457,7 @@ bool SWetClothingTransparencyBakePanel::LoadBakedMapAsWorkingResult(
     Result->BaselineStrokeCount = FMath::Clamp(
         BakedMap.BakedStrokeCount,
         0,
-        Layer.EditableStrokes.Num());
+        Layer.GetEditableStrokes().Num());
     Result->BaselineBakeGuid = BakedMap.BakeGuid;
     OutResult = MoveTemp(Result);
     return true;
@@ -2654,7 +2671,7 @@ bool SWetClothingTransparencyBakePanel::SaveTransparencySetupAssets() const
 const UClass* SWetClothingTransparencyBakePanel::GetSelectedSourceClass() const
 {
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    return Layer != nullptr ? Layer->BlueprintSource.BlueprintClass.LoadSynchronous() : nullptr;
+    return Layer != nullptr ? Layer->BlueprintSource.BlueprintClass.Get() : nullptr;
 }
 
 void SWetClothingTransparencyBakePanel::HandleSourceClassChanged(const UClass* NewClass)
@@ -3878,7 +3895,7 @@ void SWetClothingTransparencyBakePanel::RefreshRevealColorStrokeList()
     if (Layer != nullptr)
     {
         const int32 SlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
-        for (const FDWCTransparencyRevealColorStroke& Stroke : Layer->RevealColorPaintStrokes)
+        for (const FDWCTransparencyRevealColorStroke& Stroke : Layer->GetRevealColorPaintStrokes())
         {
             if (Stroke.MaterialSlotIndex == SlotIndex)
             {
@@ -3902,19 +3919,20 @@ FReply SWetClothingTransparencyBakePanel::HandleUndoLastStrokeClicked()
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const int32 BaselineStrokeCount = GetCurrentBaselineStrokeCount();
-    if (Asset == nullptr || Layer == nullptr || Layer->EditableStrokes.Num() <= BaselineStrokeCount)
+    if (Asset == nullptr || Layer == nullptr || Layer->GetEditableStrokes().Num() <= BaselineStrokeCount)
     {
         return FReply::Handled();
     }
-    const FGuid StrokeGuid = Layer->EditableStrokes.Last().StrokeGuid;
-    const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = {Layer->EditableStrokes.Last()};
+    const FGuid StrokeGuid = Layer->GetEditableStrokes().Last().StrokeGuid;
+    const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = {Layer->GetEditableStrokes().Last()};
     if (!EditSelectedLayerFinal(
             LOCTEXT("RemoveLastTransparencyStroke", "Remove Last Transparency Stroke"),
             StrokeGuid,
             [BaselineStrokeCount](FWetClothingTransparencyLayerData& MutableLayer)
             {
-                if (MutableLayer.EditableStrokes.Num() <= BaselineStrokeCount) return false;
-                MutableLayer.EditableStrokes.Pop();
+                TArray<FDWCTransparencyBrushStroke>& Strokes = MutableLayer.GetMutableEditableStrokes();
+                if (Strokes.Num() <= BaselineStrokeCount) return false;
+                Strokes.Pop();
                 return true;
             })) return FReply::Handled();
     if (PreviewViewport.IsValid())
@@ -3930,23 +3948,25 @@ FReply SWetClothingTransparencyBakePanel::HandleClearStrokesClicked()
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const int32 BaselineStrokeCount = GetCurrentBaselineStrokeCount();
-    if (Asset == nullptr || Layer == nullptr || Layer->EditableStrokes.Num() <= BaselineStrokeCount)
+    if (Asset == nullptr || Layer == nullptr || Layer->GetEditableStrokes().Num() <= BaselineStrokeCount)
     {
         return FReply::Handled();
     }
     TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes;
+    const TArray<FDWCTransparencyBrushStroke>& ExistingStrokes = Layer->GetEditableStrokes();
     InvalidatedStrokes.Append(
-        Layer->EditableStrokes.GetData() + BaselineStrokeCount,
-        Layer->EditableStrokes.Num() - BaselineStrokeCount);
+        ExistingStrokes.GetData() + BaselineStrokeCount,
+        ExistingStrokes.Num() - BaselineStrokeCount);
     if (!EditSelectedLayerFinal(
             LOCTEXT("ClearTransparencyStrokes", "Clear Transparency Strokes"),
             FGuid(),
             [BaselineStrokeCount](FWetClothingTransparencyLayerData& MutableLayer)
             {
-                if (MutableLayer.EditableStrokes.Num() <= BaselineStrokeCount) return false;
-                MutableLayer.EditableStrokes.RemoveAt(
+                TArray<FDWCTransparencyBrushStroke>& Strokes = MutableLayer.GetMutableEditableStrokes();
+                if (Strokes.Num() <= BaselineStrokeCount) return false;
+                Strokes.RemoveAt(
                     BaselineStrokeCount,
-                    MutableLayer.EditableStrokes.Num() - BaselineStrokeCount);
+                    Strokes.Num() - BaselineStrokeCount);
                 return true;
             })) return FReply::Handled();
     if (PreviewViewport.IsValid())
@@ -3965,7 +3985,7 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteStrokeClicked(const FGuid 
     {
         return FReply::Handled();
     }
-    const FDWCTransparencyBrushStroke* Stroke = Layer->EditableStrokes.FindByPredicate(
+    const FDWCTransparencyBrushStroke* Stroke = Layer->GetEditableStrokes().FindByPredicate(
         [StrokeGuid](const FDWCTransparencyBrushStroke& Candidate)
         {
             return Candidate.StrokeGuid == StrokeGuid;
@@ -3980,7 +4000,7 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteStrokeClicked(const FGuid 
             StrokeGuid,
             [StrokeGuid](FWetClothingTransparencyLayerData& MutableLayer)
             {
-                return MutableLayer.EditableStrokes.RemoveAll(
+                return MutableLayer.GetMutableEditableStrokes().RemoveAll(
                     [StrokeGuid](const FDWCTransparencyBrushStroke& Stroke)
                     {
                         return Stroke.StrokeGuid == StrokeGuid;
@@ -4004,7 +4024,7 @@ void SWetClothingTransparencyBakePanel::HandleStrokeEnabledChanged(
     {
         return;
     }
-    if (FDWCTransparencyBrushStroke* Stroke = Layer->EditableStrokes.FindByPredicate(
+    if (const FDWCTransparencyBrushStroke* Stroke = Layer->GetEditableStrokes().FindByPredicate(
             [StrokeGuid](const FDWCTransparencyBrushStroke& Candidate) { return Candidate.StrokeGuid == StrokeGuid; }))
     {
         const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = {*Stroke};
@@ -4014,7 +4034,7 @@ void SWetClothingTransparencyBakePanel::HandleStrokeEnabledChanged(
                 StrokeGuid,
                 [StrokeGuid, bEnabled](FWetClothingTransparencyLayerData& MutableLayer)
                 {
-                    FDWCTransparencyBrushStroke* MutableStroke = MutableLayer.EditableStrokes.FindByPredicate(
+                    FDWCTransparencyBrushStroke* MutableStroke = MutableLayer.GetMutableEditableStrokes().FindByPredicate(
                         [StrokeGuid](const FDWCTransparencyBrushStroke& Candidate)
                         {
                             return Candidate.StrokeGuid == StrokeGuid;
@@ -4363,9 +4383,18 @@ bool SWetClothingTransparencyBakePanel::EditSelectedLayerFinal(
     Change.MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     Change.LayerGuid = LayerGuid;
     Change.ElementGuid = ElementGuid;
+    UWetClothingAsset* MutableAsset = WetClothingAsset.Get();
+    UDWCTransparencyLayerStrokeHistory* StrokeHistory = MutableAsset != nullptr
+        ? MutableAsset->EnsureTransparencyLayerStrokeHistory(LayerGuid)
+        : nullptr;
+    if (StrokeHistory == nullptr)
+    {
+        return false;
+    }
     return AuthoringDocument->Edit(
         Text,
         Change,
+        StrokeHistory,
         [LayerGuid, &Edit](UWetClothingAsset& Asset)
         {
             FWetClothingTransparencyLayerData* MutableLayer =
@@ -4652,6 +4681,10 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
         PanelStatus = EDWCTransparencyPanelStatus::Warning;
         return;
     }
+
+    FDWCEditorAuthoringOperationScope DiagnosticScope(
+        TEXT("Transparency.SelectTargetPart"),
+        Asset);
 
     if (SelectedMaterialSlotIndex != Item->MaterialSlotIndex)
     {
@@ -5997,7 +6030,7 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealColorEditingSe
                     .IsEnabled_Lambda([this]()
                     {
                         const FWetClothingTransparencyLayerData* SelectedLayer = GetSelectedLayer();
-                        return SelectedLayer != nullptr && !SelectedLayer->RevealColorPaintStrokes.IsEmpty();
+                        return SelectedLayer != nullptr && !SelectedLayer->GetRevealColorPaintStrokes().IsEmpty();
                     })
                     .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked)
                     [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]
@@ -6220,7 +6253,7 @@ FReply SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked()
     }
     const int32 SlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     TArray<FDWCTransparencyRevealColorStroke> InvalidatedStrokes;
-    for (const FDWCTransparencyRevealColorStroke& Stroke : Layer->RevealColorPaintStrokes)
+    for (const FDWCTransparencyRevealColorStroke& Stroke : Layer->GetRevealColorPaintStrokes())
     {
         if (Stroke.MaterialSlotIndex == SlotIndex)
         {
@@ -6232,7 +6265,7 @@ FReply SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked()
         FGuid(),
         [SlotIndex](FWetClothingTransparencyLayerData& MutableLayer)
         {
-            return MutableLayer.RevealColorPaintStrokes.RemoveAll(
+            return MutableLayer.GetMutableRevealColorPaintStrokes().RemoveAll(
                 [SlotIndex](const FDWCTransparencyRevealColorStroke& Stroke)
                 {
                     return Stroke.MaterialSlotIndex == SlotIndex;
@@ -6264,9 +6297,18 @@ bool SWetClothingTransparencyBakePanel::EditRevealColorStrokeHistory(
     Change.MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     Change.LayerGuid = LayerGuid;
     Change.ElementGuid = StrokeGuid;
+    UWetClothingAsset* MutableAsset = WetClothingAsset.Get();
+    UDWCTransparencyLayerStrokeHistory* StrokeHistory = MutableAsset != nullptr
+        ? MutableAsset->EnsureTransparencyLayerStrokeHistory(LayerGuid)
+        : nullptr;
+    if (StrokeHistory == nullptr)
+    {
+        return false;
+    }
     const FDWCEditorAuthoringResult Result = AuthoringDocument->Edit(
         TransactionText,
         Change,
+        StrokeHistory,
         [LayerGuid, &Edit](UWetClothingAsset& MutableAsset)
         {
             FWetClothingTransparencyLayerData* MutableLayer =
@@ -6295,11 +6337,12 @@ FReply SWetClothingTransparencyBakePanel::HandleUndoLastRevealColorStrokeClicked
     }
     const int32 SlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     FGuid LastStrokeGuid;
-    for (int32 Index = Layer->RevealColorPaintStrokes.Num() - 1; Index >= 0; --Index)
+    const TArray<FDWCTransparencyRevealColorStroke>& RevealStrokes = Layer->GetRevealColorPaintStrokes();
+    for (int32 Index = RevealStrokes.Num() - 1; Index >= 0; --Index)
     {
-        if (Layer->RevealColorPaintStrokes[Index].MaterialSlotIndex == SlotIndex)
+        if (RevealStrokes[Index].MaterialSlotIndex == SlotIndex)
         {
-            LastStrokeGuid = Layer->RevealColorPaintStrokes[Index].StrokeGuid;
+            LastStrokeGuid = RevealStrokes[Index].StrokeGuid;
             break;
         }
     }
@@ -6315,7 +6358,7 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteRevealColorStrokeClicked(c
     if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const FDWCTransparencyRevealColorStroke* Stroke = Layer != nullptr
-        ? Layer->RevealColorPaintStrokes.FindByPredicate(
+        ? Layer->GetRevealColorPaintStrokes().FindByPredicate(
             [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
             {
                 return Candidate.StrokeGuid == StrokeGuid;
@@ -6331,7 +6374,7 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteRevealColorStrokeClicked(c
         StrokeGuid,
         [StrokeGuid](FWetClothingTransparencyLayerData& MutableLayer)
         {
-            return MutableLayer.RevealColorPaintStrokes.RemoveAll(
+            return MutableLayer.GetMutableRevealColorPaintStrokes().RemoveAll(
                 [StrokeGuid](const FDWCTransparencyRevealColorStroke& Stroke)
                 {
                     return Stroke.StrokeGuid == StrokeGuid;
@@ -6350,7 +6393,7 @@ void SWetClothingTransparencyBakePanel::HandleRevealColorStrokeEnabledChanged(
     if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const FDWCTransparencyRevealColorStroke* ExistingStroke = Layer != nullptr
-        ? Layer->RevealColorPaintStrokes.FindByPredicate(
+        ? Layer->GetRevealColorPaintStrokes().FindByPredicate(
             [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
             {
                 return Candidate.StrokeGuid == StrokeGuid;
@@ -6368,7 +6411,7 @@ void SWetClothingTransparencyBakePanel::HandleRevealColorStrokeEnabledChanged(
         [StrokeGuid, bEnabled](FWetClothingTransparencyLayerData& MutableLayer)
         {
             FDWCTransparencyRevealColorStroke* Stroke =
-                MutableLayer.RevealColorPaintStrokes.FindByPredicate(
+                MutableLayer.GetMutableRevealColorPaintStrokes().FindByPredicate(
                     [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
                     {
                         return Candidate.StrokeGuid == StrokeGuid;
@@ -6392,7 +6435,7 @@ TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateRevealColorStro
     const FGuid StrokeGuid = Item.IsValid() ? *Item : FGuid();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const FDWCTransparencyRevealColorStroke* Stroke = Layer != nullptr
-        ? Layer->RevealColorPaintStrokes.FindByPredicate(
+        ? Layer->GetRevealColorPaintStrokes().FindByPredicate(
             [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
             {
                 return Candidate.StrokeGuid == StrokeGuid;
@@ -6909,7 +6952,7 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyStrokeLi
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const int32 BaselineStrokeCount = GetCurrentBaselineStrokeCount();
     const int32 NewStrokeCount = Layer != nullptr
-        ? FMath::Max(Layer->EditableStrokes.Num() - BaselineStrokeCount, 0)
+        ? FMath::Max(Layer->GetEditableStrokes().Num() - BaselineStrokeCount, 0)
         : 0;
     Box->AddSlot().AutoHeight().Padding(0,2,0,6)
     [SNew(SHorizontalBox)
@@ -6932,9 +6975,10 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyStrokeLi
     else
     {
         TMap<EDWCTransparencyBrushMode, int32> StrokeNumberByMode;
-        for (int32 StrokeIndex = BaselineStrokeCount; StrokeIndex < Layer->EditableStrokes.Num(); ++StrokeIndex)
+        const TArray<FDWCTransparencyBrushStroke>& EditableStrokes = Layer->GetEditableStrokes();
+        for (int32 StrokeIndex = BaselineStrokeCount; StrokeIndex < EditableStrokes.Num(); ++StrokeIndex)
         {
-            const FDWCTransparencyBrushStroke& Stroke = Layer->EditableStrokes[StrokeIndex];
+            const FDWCTransparencyBrushStroke& Stroke = EditableStrokes[StrokeIndex];
             const int32 StrokeNumber = ++StrokeNumberByMode.FindOrAdd(Stroke.BrushMode);
             const FText StrokeLabel = FText::FromString(FString::Printf(
                 TEXT("%s %d"),

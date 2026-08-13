@@ -57,7 +57,9 @@ void AddDiagnostic(
     const FString& Detail,
     const FText& RequiredAction,
     const EDWCEditorValidationRemediation Remediation,
-    const TOptional<EDWCEditorBuildAction> SuggestedAction = {})
+    const TOptional<EDWCEditorBuildAction> SuggestedAction = {},
+    const bool bFailed = false,
+    const int32 OwnedBakeOutput = 0)
 {
     FDWCEditorValidationDiagnostic& Diagnostic = Snapshot.Diagnostics.AddDefaulted_GetRef();
     Diagnostic.Code = Code;
@@ -70,13 +72,28 @@ void AddDiagnostic(
     Diagnostic.Presentation.Status = Status;
     Diagnostic.Presentation.Detail = FText::FromString(Detail);
     Diagnostic.Presentation.RequiredAction = RequiredAction;
-    Diagnostic.Presentation.ContextLabel = FText::Format(
-        NSLOCTEXT("DWCTransparencyLayerValidation", "SlotContext", "Material Slot {0}"),
-        FText::AsNumber(Node.Key.MaterialSlotIndex));
+    Diagnostic.Presentation.ContextLabel = Node.Key.MaterialSlotIndex != INDEX_NONE
+        ? FText::Format(
+            NSLOCTEXT("DWCTransparencyLayerValidation", "SlotContext", "Material Slot {0}"),
+            FText::AsNumber(Node.Key.MaterialSlotIndex))
+        : FText::GetEmpty();
+    Diagnostic.bFailed = bFailed;
+    Diagnostic.OwnedBakeOutput = OwnedBakeOutput;
     Node.DiagnosticIndices.Add(Snapshot.Diagnostics.Num() - 1);
     if (SuggestedAction.IsSet())
     {
-        RequireAction(Snapshot, SuggestedAction.GetValue(), Node.Key);
+        if (bFailed)
+        {
+            DWCEditorValidation::SetActionState(
+                Snapshot,
+                SuggestedAction.GetValue(),
+                EDWCEditorBuildActionState::Failed,
+                &Node.Key);
+        }
+        else
+        {
+            RequireAction(Snapshot, SuggestedAction.GetValue(), Node.Key);
+        }
     }
 }
 } // namespace
@@ -87,7 +104,60 @@ void FDWCTransparencyLayerValidationEvaluator::AppendToSnapshot(
     FWCAEditorValidationSnapshot& InOutSnapshot)
 {
     const FDWCTransparencyBuildTargetSnapshot Targets =
-        FDWCTransparencyBuildTargetResolver::Resolve(Asset, bDeepValidation);
+        FDWCTransparencyBuildTargetResolver::Resolve(
+            Asset,
+            bDeepValidation
+                ? EDWCEditorValidationAccess::ExactPayload
+                : EDWCEditorValidationAccess::MetadataOnly);
+    const FDWCEditorValidationTargetKey RootKey{
+        EDWCEditorValidationDomain::Transparency,
+        INDEX_NONE,
+        FGuid(),
+        TEXT("TransparencyMaps")};
+    FDWCEditorValidationNode& RootNode =
+        DWCEditorValidation::FindOrAddNode(InOutSnapshot, RootKey);
+    RootNode.Intent = Targets.HasEnabledLayers()
+        ? EDWCEditorValidationIntentState::Enabled
+        : EDWCEditorValidationIntentState::NotConfigured;
+    RootNode.Artifact = Targets.HasEnabledLayers()
+        ? (Targets.FullBakeState == EDWCEditorBuildActionState::UpToDate &&
+           Targets.AffectedStage4State == EDWCEditorBuildActionState::UpToDate
+            ? EDWCEditorValidationArtifactState::Current
+            : EDWCEditorValidationArtifactState::Stale)
+        : EDWCEditorValidationArtifactState::NotRequired;
+    RootNode.Persistence = Targets.bSavePending
+        ? EDWCEditorValidationPersistenceState::SavePending
+        : EDWCEditorValidationPersistenceState::Saved;
+
+    DWCEditorValidation::SetActionState(
+        InOutSnapshot,
+        EDWCEditorBuildAction::BakeTransparencyTextures,
+        Targets.FullBakeState,
+        &RootKey);
+    DWCEditorValidation::SetActionState(
+        InOutSnapshot,
+        EDWCEditorBuildAction::RebakeAffectedTransparencyMaps,
+        Targets.AffectedStage4State,
+        &RootKey);
+
+    if (Targets.RecordedStatus == EDWCBakeStatus::Failed)
+    {
+        RootNode.Operation = EDWCEditorValidationOperationState::Failed;
+        AddDiagnostic(
+            InOutSnapshot,
+            RootNode,
+            TEXT("TransparencyMaps.BuildFailed"),
+            EDWCEditorValidationSeverity::Error,
+            NSLOCTEXT("DWCTransparencyLayerValidation", "Failed", "Failed"),
+            Targets.FailureMessage.IsEmpty()
+                ? TEXT("The Transparency texture build failed.")
+                : Targets.FailureMessage,
+            NSLOCTEXT("DWCTransparencyLayerValidation", "RetryBake", "Fix any reported inputs, then retry Build for Runtime > Bake Transparency Textures."),
+            EDWCEditorValidationRemediation::BuildAction,
+            EDWCEditorBuildAction::BakeTransparencyTextures,
+            true,
+            DWCBakeOutput::TransparencyMaps);
+    }
     for (const FDWCTransparencyBuildTarget& Target : Targets.Targets)
     {
         FDWCEditorValidationNode& Node = InOutSnapshot.Nodes.AddDefaulted_GetRef();

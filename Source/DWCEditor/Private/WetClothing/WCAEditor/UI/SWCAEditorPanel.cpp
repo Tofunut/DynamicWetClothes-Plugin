@@ -278,6 +278,7 @@ SWCAEditorPanel::~SWCAEditorPanel()
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
         FWCAGeneratedDataInvalidator::InvalidateAsset(*Asset);
+        Asset->ReleaseLoadedOriginalUVTopologiesForEditor();
     }
 }
 
@@ -414,9 +415,6 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
         SetEditorMode(EWCAEditorMode::PartEdit);
     }
     RegisterActiveTimer(
-        0.5,
-        FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleStatusRefreshTimer));
-    RegisterActiveTimer(
         0.0,
         FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleTextureUploadTimer));
 
@@ -471,6 +469,30 @@ void SWCAEditorPanel::RegisterResourceParticipants()
         return Result;
     };
     Register(MoveTemp(CacheDescriptor));
+
+    const TWeakObjectPtr<UWetClothingAsset> WeakAsset = WetClothingAsset;
+    FDWCEditorReclaimParticipantDescriptor TopologyDescriptor;
+    TopologyDescriptor.Name = TEXT("WCA.OriginalUVTopologyBulk");
+    TopologyDescriptor.ReservationOwnerNamespace = TEXT("DWC.OriginalUVTopologyBulk");
+    TopologyDescriptor.Pool = EDWCEditorResourcePool::SharedCacheCPU;
+    TopologyDescriptor.Priority = EDWCEditorReclaimPriority::Background;
+    TopologyDescriptor.QueryReclaimableBytes = [WeakAsset]
+    {
+        const UWetClothingAsset* Asset = WeakAsset.Get();
+        return Asset != nullptr
+            ? Asset->GetReclaimableOriginalUVTopologyBytesForEditor()
+            : 0;
+    };
+    TopologyDescriptor.Reclaim = [WeakAsset](const FDWCEditorResourceReclaimRequest&)
+    {
+        FDWCEditorResourceReclaimResult Result;
+        if (UWetClothingAsset* Asset = WeakAsset.Get())
+        {
+            Result.ImmediateBytes = Asset->ReclaimOriginalUVTopologyBytesForEditor();
+        }
+        return Result;
+    };
+    Register(MoveTemp(TopologyDescriptor));
 
     const TWeakPtr<FDWCEditorSurfacePatchProjectionCacheService> WeakProjectionCache =
         SurfacePatchProjectionCache;
@@ -544,7 +566,6 @@ void SWCAEditorPanel::RegisterResourceParticipants()
         };
     Register(MoveTemp(WorkspaceGPUDescriptor));
 
-    const TWeakObjectPtr<UWetClothingAsset> WeakAsset = WetClothingAsset;
     FDWCEditorReclaimParticipantDescriptor MaterialCacheDescriptor;
     MaterialCacheDescriptor.Name = TEXT("WCA.TransparencyMaterialCache");
     MaterialCacheDescriptor.ReservationOwnerNamespace = TEXT("DWC.TransparencyMaterialColorCache");
@@ -694,9 +715,7 @@ void SWCAEditorPanel::RefreshFromAsset(const bool bRebuildActiveModePreview)
 
 void SWCAEditorPanel::RefreshStatusFromAsset()
 {
-    // DWCEditorUtils::SaveAsset has already refreshed the asset bake state before
-    // broadcasting save completion. Reuse that state instead of validating twice.
-    UpdateCachedStatus(false);
+    UpdateCachedStatus();
 }
 
 void SWCAEditorPanel::RequestRefreshFromAsset(const bool bRebuildActiveModePreview)
@@ -717,14 +736,28 @@ EActiveTimerReturnType SWCAEditorPanel::HandleDeferredRefresh(double CurrentTime
     return EActiveTimerReturnType::Stop;
 }
 
-EActiveTimerReturnType SWCAEditorPanel::HandleStatusRefreshTimer(double CurrentTime, float DeltaTime)
+void SWCAEditorPanel::RequestStatusRefresh()
 {
-    UpdateCachedStatus(false);
-    return EActiveTimerReturnType::Continue;
+    if (bStatusRefreshPending)
+    {
+        return;
+    }
+    bStatusRefreshPending = true;
+    RegisterActiveTimer(
+        0.0f,
+        FWidgetActiveTimerDelegate::CreateSP(
+            this,
+            &SWCAEditorPanel::HandleDeferredStatusRefresh));
+}
+
+EActiveTimerReturnType SWCAEditorPanel::HandleDeferredStatusRefresh(double, float)
+{
+    bStatusRefreshPending = false;
+    UpdateCachedStatus();
+    return EActiveTimerReturnType::Stop;
 }
 
 FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
-    const bool bRefreshAssetState,
     const bool bRunDeepValidation) const
 {
     FWCAEditorIssueStatus Result;
@@ -736,8 +769,9 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
 
     const FWCAEditorValidationSnapshot Snapshot = BuildWCAValidationSnapshot(
         *Asset,
-        bRunDeepValidation ? EWCAValidationMode::Deep : EWCAValidationMode::Fast,
-        bRefreshAssetState);
+        bRunDeepValidation
+            ? EWCAValidationMode::ExactPayload
+            : EWCAValidationMode::MetadataOnly);
     for (const FDWCEditorValidationDiagnostic& Diagnostic : Snapshot.Diagnostics)
     {
         AddDiagnosticToStatus(Result, Diagnostic);
@@ -745,12 +779,12 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
     return Result;
 }
 
-void SWCAEditorPanel::UpdateCachedStatus(const bool bRefreshAssetState)
+void SWCAEditorPanel::UpdateCachedStatus()
 {
     const int32 PreviousIssueCount = CachedIssueCount;
     const EWCAEditorStatusSeverity PreviousStatusSeverity = CachedStatusSeverity;
 
-    const FWCAEditorIssueStatus Status = CollectIssueStatus(bRefreshAssetState, false);
+    const FWCAEditorIssueStatus Status = CollectIssueStatus(false);
     CachedIssueCount = Status.IssueCount;
     CachedStatusSeverity = Status.Severity;
 
@@ -874,7 +908,8 @@ bool SWCAEditorPanel::RequestBakeAllTransparencyMaps(
 
     TArray<FGuid> LayerGuids;
     const FDWCTransparencyBuildTargetSnapshot Targets =
-        FDWCTransparencyBuildTargetResolver::Resolve(*Asset, true);
+        FDWCTransparencyBuildTargetResolver::Resolve(
+            *Asset, EDWCEditorValidationAccess::ExactPayload);
     Targets.CollectLayerGuids(
         EDWCTransparencyBuildRequirement::FullBake,
         LayerGuids);
@@ -906,7 +941,8 @@ bool SWCAEditorPanel::RequestRebakeAffectedTransparencyMaps(
         return false;
     }
     const FDWCTransparencyBuildTargetSnapshot Targets =
-        FDWCTransparencyBuildTargetResolver::Resolve(*Asset, true);
+        FDWCTransparencyBuildTargetResolver::Resolve(
+            *Asset, EDWCEditorValidationAccess::ExactPayload);
     TArray<int32> MaterialSlots;
     for (const FDWCTransparencyBuildTarget& Target : Targets.Targets)
     {
@@ -1211,6 +1247,11 @@ void SWCAEditorPanel::HandleAuthoringDocumentChanged(const FDWCEditorAuthoringCh
     Action.Index = BuildAuthoringIndex(WetClothingAsset.Get());
     Action.Impact = Change.Impact;
     SessionStore->Dispatch(Action);
+
+    if (Change.Phase != EDWCEditorAuthoringChangePhase::Interactive)
+    {
+        RequestStatusRefresh();
+    }
 }
 
 void SWCAEditorPanel::SuspendPreviewMode(

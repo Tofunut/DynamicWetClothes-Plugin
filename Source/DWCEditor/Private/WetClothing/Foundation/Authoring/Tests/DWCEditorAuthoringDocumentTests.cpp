@@ -5,7 +5,9 @@
 #include "Misc/AutomationTest.h"
 
 #include "DataAssets/WetClothingAsset.h"
+#include "Editor.h"
 #include "UObject/UnrealType.h"
+#include "UObject/UObjectGlobals.h"
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringDocument.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -25,6 +27,201 @@ bool FDWCEditorAuthoringDerivedBulkTransactionPolicyTest::RunTest(const FString&
             TEXT("Rebuildable runtime bulk data is excluded from editor undo snapshots"),
             BulkProperty->HasAnyPropertyFlags(CPF_NonTransactional));
     }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyStrokeHistoryCookBoundaryTest,
+    "DWC.Editor.Authoring.TransparencyStrokeHistoryCookBoundary",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyStrokeHistoryCookBoundaryTest::RunTest(const FString&)
+{
+    const FProperty* HistoryProperty = FindFProperty<FProperty>(
+        FWetClothingTransparencyLayerData::StaticStruct(),
+        GET_MEMBER_NAME_CHECKED(FWetClothingTransparencyLayerData, EditorStrokeHistory));
+    const FProperty* LegacyAlphaProperty = FindFProperty<FProperty>(
+        FWetClothingTransparencyLayerData::StaticStruct(),
+        GET_MEMBER_NAME_CHECKED(FWetClothingTransparencyLayerData, EditableStrokes));
+    const FProperty* LegacyRevealProperty = FindFProperty<FProperty>(
+        FWetClothingTransparencyLayerData::StaticStruct(),
+        GET_MEMBER_NAME_CHECKED(FWetClothingTransparencyLayerData, RevealColorPaintStrokes));
+
+    TestNotNull(TEXT("The canonical stroke history property exists in editor builds."), HistoryProperty);
+    TestNotNull(TEXT("The legacy alpha migration property exists in editor builds."), LegacyAlphaProperty);
+    TestNotNull(TEXT("The legacy reveal migration property exists in editor builds."), LegacyRevealProperty);
+    if (HistoryProperty != nullptr)
+    {
+        TestTrue(TEXT("Canonical stroke history is excluded from cooked data."),
+            HistoryProperty->HasAnyPropertyFlags(CPF_EditorOnly));
+    }
+    if (LegacyAlphaProperty != nullptr)
+    {
+        TestTrue(TEXT("Legacy alpha migration data is excluded from cooked data."),
+            LegacyAlphaProperty->HasAnyPropertyFlags(CPF_EditorOnly));
+    }
+    if (LegacyRevealProperty != nullptr)
+    {
+        TestTrue(TEXT("Legacy reveal migration data is excluded from cooked data."),
+            LegacyRevealProperty->HasAnyPropertyFlags(CPF_EditorOnly));
+    }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyStrokeHistoryMigrationTest,
+    "DWC.Editor.Authoring.TransparencyStrokeHistoryMigration",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyStrokeHistoryMigrationTest::RunTest(const FString&)
+{
+    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(
+        GetTransientPackage(), NAME_None, RF_Transient | RF_Transactional);
+    FWetClothingTransparencyLayerData& Layer =
+        Asset->Authored.TransparencyData.TransparencyLayers.AddDefaulted_GetRef();
+    Layer.LayerGuid = FGuid::NewGuid();
+
+    FDWCTransparencyBrushSample AlphaSample;
+    AlphaSample.PositionUV = FVector2D(0.125, 0.75);
+    AlphaSample.UVIslandID = 4;
+    AlphaSample.RadiusUV = 0.05f;
+    AlphaSample.Strength = 0.8f;
+    Layer.EditableStrokes.AddDefaulted_GetRef().Samples.Add(AlphaSample);
+
+    FDWCTransparencyBrushSample RevealSample = AlphaSample;
+    RevealSample.PositionUV = FVector2D(0.625, 0.25);
+    Layer.RevealColorPaintStrokes.AddDefaulted_GetRef().Samples.Add(RevealSample);
+
+    UDWCTransparencyLayerStrokeHistory* History =
+        Asset->EnsureTransparencyLayerStrokeHistory(Layer.LayerGuid);
+    TestNotNull(TEXT("Legacy stroke arrays migrate into a layer history object."), History);
+    if (History == nullptr)
+    {
+        return false;
+    }
+
+    TestTrue(TEXT("The migrated history is transactional."), History->HasAnyFlags(RF_Transactional));
+    TestTrue(TEXT("The migrated history is owned by its WCA."), History->GetOuter() == Asset);
+    TestTrue(TEXT("Legacy inline alpha storage is released."), Layer.EditableStrokes.IsEmpty());
+    TestTrue(TEXT("Legacy inline reveal storage is released."), Layer.RevealColorPaintStrokes.IsEmpty());
+    TestEqual(TEXT("Alpha stroke count is preserved."), Layer.GetEditableStrokes().Num(), 1);
+    TestEqual(TEXT("Reveal stroke count is preserved."), Layer.GetRevealColorPaintStrokes().Num(), 1);
+    TestTrue(TEXT("Migrated alpha samples use compact storage."),
+        Layer.GetEditableStrokes()[0].Samples.IsEmpty() &&
+        Layer.GetEditableStrokes()[0].CompactSamples.Num() == 1);
+    TestTrue(TEXT("Migrated reveal samples use compact storage."),
+        Layer.GetRevealColorPaintStrokes()[0].Samples.IsEmpty() &&
+        Layer.GetRevealColorPaintStrokes()[0].CompactSamples.Num() == 1);
+    TestFalse(TEXT("A second compaction pass is idempotent."), History->CompactLegacySamples());
+    TestEqual(TEXT("Repeated history resolution keeps the same object."),
+        Asset->EnsureTransparencyLayerStrokeHistory(Layer.LayerGuid), History);
+
+    UWetClothingAsset* Duplicate = DuplicateObject<UWetClothingAsset>(Asset, GetTransientPackage());
+    TestNotNull(TEXT("A WCA containing compact stroke history duplicates."), Duplicate);
+    if (Duplicate != nullptr)
+    {
+        const FWetClothingTransparencyLayerData& DuplicateLayer =
+            Duplicate->Authored.TransparencyData.TransparencyLayers[0];
+        TestNotNull(TEXT("The duplicated WCA retains its stroke history."),
+            DuplicateLayer.GetEditorStrokeHistory());
+        TestTrue(TEXT("Instanced stroke history is not shared by duplicated WCAs."),
+            DuplicateLayer.GetEditorStrokeHistory() != History);
+        TestEqual(TEXT("Duplicated alpha sample count is preserved."),
+            DuplicateLayer.GetEditableStrokes()[0].GetSampleCount(), 1);
+    }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyStrokeHistoryTransactionLifetimeTest,
+    "DWC.Editor.Authoring.TransparencyStrokeHistoryTransactionLifetime",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyStrokeHistoryTransactionLifetimeTest::RunTest(const FString&)
+{
+    TestNotNull(TEXT("The editor transaction system is available."), GEditor);
+    if (GEditor == nullptr)
+    {
+        return false;
+    }
+    GEditor->ResetTransaction(FText::FromString(TEXT("DWC stroke history lifetime test")));
+
+    UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(
+        GetTransientPackage(), NAME_None, RF_Transient | RF_Transactional);
+    FWetClothingTransparencyLayerData& Layer =
+        Asset->Authored.TransparencyData.TransparencyLayers.AddDefaulted_GetRef();
+    Layer.LayerGuid = FGuid::NewGuid();
+    const FGuid LayerGuid = Layer.LayerGuid;
+    UDWCTransparencyLayerStrokeHistory* History =
+        Asset->EnsureTransparencyLayerStrokeHistory(LayerGuid);
+    TestNotNull(TEXT("The transaction target history exists."), History);
+    if (History == nullptr)
+    {
+        return false;
+    }
+
+    TSharedRef<FDWCEditorAuthoringDocument> Document =
+        MakeShared<FDWCEditorAuthoringDocument>(Asset);
+    FDWCEditorAuthoringChange Change;
+    Change.Domain = EDWCEditorAuthoringDomain::Transparency;
+    Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
+                    EDWCEditorAuthoringImpact::ElementList |
+                    EDWCEditorAuthoringImpact::TransparencyFinalBake;
+    Change.LayerGuid = LayerGuid;
+
+    const FDWCEditorAuthoringResult Result = Document->Edit(
+        FText::FromString(TEXT("Add compact transparency stroke")),
+        Change,
+        History,
+        [LayerGuid](UWetClothingAsset& MutableAsset)
+        {
+            FWetClothingTransparencyLayerData* MutableLayer =
+                MutableAsset.Authored.TransparencyData.TransparencyLayers.FindByPredicate(
+                    [LayerGuid](const FWetClothingTransparencyLayerData& Candidate)
+                    {
+                        return Candidate.LayerGuid == LayerGuid;
+                    });
+            if (MutableLayer == nullptr)
+            {
+                return false;
+            }
+            FDWCTransparencyBrushStroke& Stroke =
+                MutableLayer->GetMutableEditableStrokes().AddDefaulted_GetRef();
+            Stroke.StrokeGuid = FGuid::NewGuid();
+            Stroke.AddSample(FDWCTransparencyBrushSample());
+            return true;
+        });
+
+    TestTrue(TEXT("A scoped history edit commits."), Result.bChanged);
+    const auto FindLayer = [Asset, LayerGuid]() -> const FWetClothingTransparencyLayerData*
+    {
+        return Asset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
+            [LayerGuid](const FWetClothingTransparencyLayerData& Candidate)
+            {
+                return Candidate.LayerGuid == LayerGuid;
+            });
+    };
+    const FWetClothingTransparencyLayerData* CurrentLayer = FindLayer();
+    TestTrue(TEXT("The committed stroke is visible."),
+        CurrentLayer != nullptr && CurrentLayer->GetEditableStrokes().Num() == 1);
+    TestTrue(TEXT("The history object participates in the transaction buffer."),
+        GEditor->IsObjectInTransactionBuffer(History));
+    TestTrue(TEXT("Undo succeeds for the scoped history edit."), GEditor->UndoTransaction());
+    CurrentLayer = FindLayer();
+    TestTrue(TEXT("Undo removes only the committed stroke payload."),
+        CurrentLayer != nullptr && CurrentLayer->GetEditableStrokes().IsEmpty());
+    TestTrue(TEXT("Redo succeeds for the scoped history edit."), GEditor->RedoTransaction());
+    CurrentLayer = FindLayer();
+    TestTrue(TEXT("Redo restores the compact stroke."),
+        CurrentLayer != nullptr && CurrentLayer->GetEditableStrokes().Num() == 1);
+    if (CurrentLayer != nullptr && !CurrentLayer->GetEditableStrokes().IsEmpty())
+    {
+        TestTrue(TEXT("Redo preserves compact sample storage."),
+            CurrentLayer->GetEditableStrokes()[0].Samples.IsEmpty() &&
+            CurrentLayer->GetEditableStrokes()[0].CompactSamples.Num() == 1);
+    }
+
+    GEditor->ResetTransaction(FText::FromString(TEXT("DWC stroke history lifetime test complete")));
     return true;
 }
 

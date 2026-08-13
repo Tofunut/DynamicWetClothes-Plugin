@@ -24,6 +24,7 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
+#include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
 #include "WetClothing/Modes/Part/Topology/DWCPartTopologyCache.h"
 #include "WetClothing/Modes/Part/Viewport/SDWCPartViewport.h"
@@ -2792,7 +2793,14 @@ FReply SWetClothingPartEditorPanel::HandleDataUVOperationClicked()
 
     if (BuildResult.IsFailed() || !BuildResult.bSucceeded)
     {
-        Asset->SetLastBakeFailure(BuildResult.Message);
+        Asset->SetBakeOutputStatus(
+            DWCBakeOutput::GeneratedDataUV,
+            EDWCBakeStatus::Failed,
+            BuildResult.Message);
+        Asset->SetBakeOutputStatus(
+            DWCBakeOutput::OriginalUVTopology,
+            EDWCBakeStatus::Failed,
+            BuildResult.Message);
 
         TSet<int32> NewlyFailedSlots;
         for (const int32 FailedMaterialSlotIndex : BuildResult.FailedMaterialSlotIndices)
@@ -2847,7 +2855,9 @@ FReply SWetClothingPartEditorPanel::HandleDataUVOperationClicked()
     if (FailedDataUVSlotIndices.IsEmpty())
     {
         LastDataUVUpdateError.Reset();
-        Asset->SetLastBakeFailure(FString());
+        Asset->ClearBakeOutputFailure(
+            DWCBakeOutput::GeneratedDataUV |
+            DWCBakeOutput::OriginalUVTopology);
     }
     else
     {
@@ -3059,6 +3069,10 @@ void SWetClothingPartEditorPanel::HandleMaterialSlotSelectionChanged(FMaterialSl
     {
         return;
     }
+
+    FDWCEditorAuthoringOperationScope DiagnosticScope(
+        TEXT("WetPart.SelectMaterialSlot"),
+        WetClothingAsset.Get());
 
     TArray<FMaterialSlotItemPtr> SelectedItems;
     SelectedDataUVOperationSlotIndices.Reset();

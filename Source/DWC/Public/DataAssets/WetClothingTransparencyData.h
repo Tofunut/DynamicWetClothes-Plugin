@@ -270,6 +270,29 @@ struct DWC_API FDWCTransparencyBrushSample
     float Strength = 1.0f;
 };
 
+/** Compact persisted form. Brush math decodes this to FDWCTransparencyBrushSample on demand. */
+USTRUCT()
+struct DWC_API FDWCTransparencyCompactBrushSample
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    FVector2f PositionUV = FVector2f::ZeroVector;
+
+    UPROPERTY()
+    int32 UVIslandID = INDEX_NONE;
+
+    UPROPERTY()
+    float RadiusUV = 0.01f;
+
+    UPROPERTY()
+    float Strength = 1.0f;
+
+    static FDWCTransparencyCompactBrushSample Encode(
+        const FDWCTransparencyBrushSample& Sample);
+    FDWCTransparencyBrushSample Decode() const;
+};
+
 USTRUCT(BlueprintType)
 struct DWC_API FDWCTransparencyBrushStroke
 {
@@ -304,6 +327,32 @@ struct DWC_API FDWCTransparencyBrushStroke
 
     UPROPERTY(EditAnywhere, Category = "Transparency Brush")
     TArray<FDWCTransparencyBrushSample> Samples;
+
+    UPROPERTY()
+    TArray<FDWCTransparencyCompactBrushSample> CompactSamples;
+
+    int32 GetSampleCount() const;
+    bool HasSamples() const;
+    uint64 GetSampleAllocatedSize() const;
+    void AddSample(const FDWCTransparencyBrushSample& Sample);
+    void DecodeSamples(TArray<FDWCTransparencyBrushSample>& OutSamples) const;
+    bool CompactLegacySamples();
+
+    template <typename VisitorType>
+    void ForEachSample(VisitorType&& Visitor) const
+    {
+        if (!CompactSamples.IsEmpty())
+        {
+            for (const FDWCTransparencyCompactBrushSample& Sample : CompactSamples)
+            {
+                Visitor(Sample.Decode());
+            }
+        }
+        for (const FDWCTransparencyBrushSample& Sample : Samples)
+        {
+            Visitor(Sample);
+        }
+    }
 };
 
 /** RGB paint stored for the Type 3 procedural inner-mesh workflow. */
@@ -338,6 +387,49 @@ struct DWC_API FDWCTransparencyRevealColorStroke
 
     UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
     TArray<FDWCTransparencyBrushSample> Samples;
+
+    UPROPERTY()
+    TArray<FDWCTransparencyCompactBrushSample> CompactSamples;
+
+    int32 GetSampleCount() const;
+    bool HasSamples() const;
+    uint64 GetSampleAllocatedSize() const;
+    void AddSample(const FDWCTransparencyBrushSample& Sample);
+    void DecodeSamples(TArray<FDWCTransparencyBrushSample>& OutSamples) const;
+    bool CompactLegacySamples();
+
+    template <typename VisitorType>
+    void ForEachSample(VisitorType&& Visitor) const
+    {
+        if (!CompactSamples.IsEmpty())
+        {
+            for (const FDWCTransparencyCompactBrushSample& Sample : CompactSamples)
+            {
+                Visitor(Sample.Decode());
+            }
+        }
+        for (const FDWCTransparencyBrushSample& Sample : Samples)
+        {
+            Visitor(Sample);
+        }
+    }
+};
+
+/** Editor-only, per-layer transaction boundary for high-volume authored strokes. */
+UCLASS()
+class DWC_API UDWCTransparencyLayerStrokeHistory : public UObject
+{
+    GENERATED_BODY()
+
+  public:
+    UPROPERTY()
+    TArray<FDWCTransparencyBrushStroke> AlphaStrokes;
+
+    UPROPERTY()
+    TArray<FDWCTransparencyRevealColorStroke> RevealColorStrokes;
+
+    bool CompactLegacySamples();
+    uint64 GetAllocatedSize() const;
 };
 
 USTRUCT(BlueprintType)
@@ -752,11 +844,19 @@ struct DWC_API FWetClothingTransparencyLayerData
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     FWetClothingTransparencyExternalMeshSource ExternalMeshSource;
 
-    UPROPERTY(EditAnywhere, Category = "Transparency Layer")
+#if WITH_EDITORONLY_DATA
+    /** Canonical editor history. A separate UObject keeps Undo snapshots scoped to this layer. */
+    UPROPERTY(Instanced)
+    TObjectPtr<UDWCTransparencyLayerStrokeHistory> EditorStrokeHistory;
+
+    /** Legacy inline storage retained for loading pre-compaction WCA assets. */
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Migrated to EditorStrokeHistory."))
     TArray<FDWCTransparencyBrushStroke> EditableStrokes;
 
-    UPROPERTY(EditAnywhere, Category = "Transparency Layer")
+    /** Legacy inline storage retained for loading pre-compaction WCA assets. */
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Migrated to EditorStrokeHistory."))
     TArray<FDWCTransparencyRevealColorStroke> RevealColorPaintStrokes;
+#endif
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency Layer")
     FWetClothingTransparencyAutoBakeMetadata AutoBakeMetadata;
@@ -787,6 +887,14 @@ struct DWC_API FWetClothingTransparencyLayerData
     {
         return SourceType != EDWCTransparencySourceType::ManualColorOrTexture;
     }
+
+#if WITH_EDITOR
+    const TArray<FDWCTransparencyBrushStroke>& GetEditableStrokes() const;
+    TArray<FDWCTransparencyBrushStroke>& GetMutableEditableStrokes();
+    const TArray<FDWCTransparencyRevealColorStroke>& GetRevealColorPaintStrokes() const;
+    TArray<FDWCTransparencyRevealColorStroke>& GetMutableRevealColorPaintStrokes();
+    UDWCTransparencyLayerStrokeHistory* GetEditorStrokeHistory() const;
+#endif
 
     bool RequiresRuntimeRevealNormal() const
     {
@@ -900,5 +1008,6 @@ class DWC_API FWetClothingTransparencyDataHelpers
         const USkeletalMesh* TargetMesh,
         const FWetClothingTransparencyLayerData& Layer,
         TArray<FString>& OutErrors,
-        int32 DWCDataUVChannelIndex);
+        int32 DWCDataUVChannelIndex,
+        bool bValidateRenderPayload = true);
 };

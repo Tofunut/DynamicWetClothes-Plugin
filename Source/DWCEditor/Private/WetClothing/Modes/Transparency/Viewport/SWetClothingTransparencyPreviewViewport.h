@@ -18,6 +18,7 @@
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyAlphaTileStore.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyRevealColorTileStore.h"
 #include "WetClothing/Modes/Transparency/Processing/DWCWrinkleSuppressionCoverageService.h"
+#include "WetClothing/Modes/Transparency/Editor/DWCTransparencyPlacementSession.h"
 
 class FAdvancedPreviewScene;
 class FDWCTransparencyAuthoringController;
@@ -52,6 +53,9 @@ DECLARE_DELEGATE_TwoParams(
     FDWCTransparencyExternalSourceTransformCommitted,
     const FGuid& /* SourceGuid */,
     const FTransform& /* BakeTransform */);
+DECLARE_DELEGATE_OneParam(
+    FDWCTransparencyPlacementSelectionChanged,
+    const FDWCTransparencyPlacementSelection& /* Selection */);
 
 class SWetClothingTransparencyPreviewViewport
     : public SEditorViewport
@@ -70,6 +74,7 @@ class SWetClothingTransparencyPreviewViewport
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewModeLifetime>, PreviewModeLifetime)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
+    SLATE_ARGUMENT(TSharedPtr<FDWCTransparencyPlacementSession>, PlacementSession)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
@@ -93,6 +98,20 @@ class SWetClothingTransparencyPreviewViewport
     /** Adds/removes only the Type 2 source components whose hierarchy check state changed. */
     void SyncType2SelectedSourceComponents();
     void SetExternalSourcePlacementSelection(const FGuid& SourceGuid);
+    void SetPlacementSelection(const FDWCTransparencyPlacementSelection& Selection);
+    void SetPlacementSelectionChangedDelegate(
+        FDWCTransparencyPlacementSelectionChanged InDelegate);
+    const FDWCTransparencyPlacementSelection& GetPlacementSelection() const;
+    FTransform GetSelectedPlacementTransform() const;
+    void SetSelectedPlacementTransform(const FTransform& Transform, bool bCommit);
+    void RefreshType3PlacementPresentation();
+    bool SelectType3PlacementAtRay(
+        const FVector& RayOrigin,
+        const FVector& RayDirection,
+        bool bCycleSelection);
+    void FocusSelectedPlacement(bool bInstant = false);
+    void FocusType3Assembly(bool bInstant = false);
+    void SetPlacementHelpVisible(bool bVisible);
     void SetExternalSourceTransformCommittedDelegate(
         FDWCTransparencyExternalSourceTransformCommitted InDelegate);
     void SetWetnessPreviewPercent(float InPercent);
@@ -164,19 +183,6 @@ class SWetClothingTransparencyPreviewViewport
     void BuildFullBlueprintPreview();
     void BuildType2BlueprintAssemblyPreview();
     void BuildFullExternalMeshPreview();
-
-  public:
-    // Called exclusively by the viewport client while Type 3 placement is active.
-    bool IsExternalSourcePlacementActive() const;
-    FVector GetExternalSourceWidgetLocation() const;
-    bool ApplyExternalSourceWidgetDelta(
-        EAxisList::Type CurrentAxis,
-        const FVector& Drag,
-        const FRotator& Rot,
-        const FVector& Scale);
-    void BeginExternalSourceTransformInteraction();
-    void FinishExternalSourceTransformInteraction();
-    bool NudgeExternalSourcePlacement(const FKey& Key, bool bLargeStep, bool bRotate);
 
   private:
     void ConfigurePreviewMeshComponent(USkeletalMeshComponent* MeshComponent);
@@ -276,13 +282,13 @@ class SWetClothingTransparencyPreviewViewport
     TArray<TObjectPtr<USkeletalMeshComponent>> PreviewMeshComponents;
     TMap<FName, TObjectPtr<USkeletalMeshComponent>> BlueprintSourcePreviewComponents;
     TMap<FGuid, TObjectPtr<USkeletalMeshComponent>> ExternalSourcePreviewComponents;
+    TSharedPtr<FDWCTransparencyPlacementSession> PlacementSession;
     TSharedPtr<const FDWCTransparencyBlueprintHierarchy> Type2BlueprintHierarchy;
     FGuid Type2BlueprintHierarchyLayerGuid;
     FSoftObjectPath Type2BlueprintClassPath;
     uint64 Type2BlueprintHierarchyRevision = 0;
-    FGuid SelectedExternalSourceGuid;
-    bool bExternalSourceTransformInteractionActive = false;
     FDWCTransparencyExternalSourceTransformCommitted ExternalSourceTransformCommitted;
+    FDWCTransparencyPlacementSelectionChanged PlacementSelectionChanged;
     TUniquePtr<FDWCEditorPreviewSession> PreviewSession;
     TSharedPtr<FDWCEditorPreviewModeLifetime> PreviewModeLifetime;
     TUniquePtr<FDWCEditorPreviewOrchestrator> PreviewOrchestrator;
@@ -346,6 +352,7 @@ class SWetClothingTransparencyPreviewViewport
     bool bSurfacePaintingEnabled = false;
     bool bShowSavedWrinkle = true;
     bool bPreviewSuspended = false;
+    bool bPlacementHelpVisible = false;
     FGuid SelectedLayerGuid;
     int32 SelectedMaterialSlotIndex = INDEX_NONE;
     int32 SelectedUVChannelIndex = 0;

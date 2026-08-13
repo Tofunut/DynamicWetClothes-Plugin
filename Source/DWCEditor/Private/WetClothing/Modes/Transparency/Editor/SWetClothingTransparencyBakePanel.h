@@ -9,6 +9,7 @@
 #include "WetClothing/Foundation/Preview/Slots/DWCEditorPreviewSlotState.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionState.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobTypes.h"
+#include "WetClothing/Modes/Transparency/Editor/DWCTransparencyPlacementSession.h"
 
 class IDetailsView;
 class FAssetThumbnail;
@@ -134,8 +135,19 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     FReply HandleAddExternalSourceClicked();
     FReply HandleRemoveExternalSourceClicked(int32 PriorityIndex);
     FReply HandleMoveExternalSourceClicked(int32 PriorityIndex, int32 Direction);
-    FReply HandleResetExternalSourceTransformClicked(int32 PriorityIndex);
-    FReply HandleSelectExternalSourceClicked(int32 PriorityIndex);
+    void HandleExternalSourceListSelectionChanged(
+        TSharedPtr<int32> Item,
+        ESelectInfo::Type SelectInfo);
+    void HandlePlacementSelectionChanged(
+        const FDWCTransparencyPlacementSelection& Selection);
+    FReply HandleToggleExternalSourceVisibilityClicked(FGuid SourceGuid);
+    FReply HandleToggleExternalSourceSoloClicked(FGuid SourceGuid);
+    FReply HandleToggleExternalSourceLockClicked(FGuid SourceGuid);
+    TSharedRef<SWidget> BuildExternalSourceTransformSection();
+    FReply HandleAlignSelectedPlacementToTargetClicked();
+    FReply HandleResetSelectedPlacementClicked();
+    FReply HandleFocusSelectedPlacementClicked();
+    FReply HandleFocusAllPlacementsClicked();
     void HandleExternalSourceUVChannelChanged(
         TSharedPtr<int32> Item,
         ESelectInfo::Type SelectInfo,
@@ -440,6 +452,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<FDWCTransparencyAuthoringController> AuthoringController;
     TSharedPtr<FDWCTransparencyBlueprintHierarchySession> BlueprintHierarchySession;
     TSharedPtr<FDWCEditorSessionStore> SessionStore;
+    TSharedPtr<FDWCTransparencyPlacementSession> PlacementSession;
     FDWCEditorWorkerJobSchedulerPtr WorkerJobScheduler;
     TSharedPtr<FDWCEditorBakeCoordinator> BakeCoordinator;
     TSharedPtr<FDWCWrinkleSuppressionCoverageService> WrinkleSuppressionCoverageService;
@@ -487,7 +500,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<class SListView<TSharedPtr<int32>>> ExternalSourcePriorityListView;
     TArray<TSharedPtr<EDWCTransparencyBlueprintSourceRole>> BlueprintSourceRoleItems;
     TSoftObjectPtr<USkeletalMesh> PendingExternalSourceMesh;
-    FGuid SelectedExternalSourceGuid;
     // Inner source slots remain unrestricted. Target slots are limited to Wettable slots.
     TArray<FMaterialSlotItemPtr> MaterialSlotItems;
     TArray<FMaterialSlotItemPtr> TargetMaterialSlotItems;

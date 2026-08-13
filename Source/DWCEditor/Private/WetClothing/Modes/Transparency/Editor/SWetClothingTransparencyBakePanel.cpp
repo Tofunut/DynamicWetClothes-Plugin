@@ -15,6 +15,7 @@
 #include "PropertyCustomizationHelpers.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "ScopedTransaction.h"
+#include "SAdvancedTransformInputBox.h"
 #include "Styling/AppStyle.h"
 #include "Styling/StyleColors.h"
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
@@ -692,6 +693,7 @@ void SWetClothingTransparencyBakePanel::Construct(const FArguments& InArgs)
     {
         SessionStore = MakeShared<FDWCEditorSessionStore>();
     }
+    PlacementSession = MakeShared<FDWCTransparencyPlacementSession>();
     InitializeCharacterTypeSessionState();
     AuthoringController = MakeShared<FDWCTransparencyAuthoringController>(
         WetClothingAsset.Get(), AuthoringDocument, SessionStore);
@@ -2156,6 +2158,22 @@ void SWetClothingTransparencyBakePanel::RefreshExternalSourcePriorityItems()
     if (ExternalSourcePriorityListView.IsValid())
     {
         ExternalSourcePriorityListView->RequestListRefresh();
+        const FDWCTransparencyPlacementSelection& Selection = PlacementSession->GetSelection();
+        const TSharedPtr<int32>* SelectedItem = ExternalSourcePriorityItems.FindByPredicate(
+            [Layer, &Selection](const TSharedPtr<int32>& Item)
+            {
+                return Selection.IsSource() && Item.IsValid() && Layer != nullptr &&
+                    Layer->ExternalMeshSource.SourcePriority.IsValidIndex(*Item) &&
+                    Layer->ExternalMeshSource.SourcePriority[*Item].SourceGuid == Selection.SourceGuid;
+            });
+        if (SelectedItem != nullptr)
+        {
+            ExternalSourcePriorityListView->SetSelection(*SelectedItem, ESelectInfo::Direct);
+        }
+        else
+        {
+            ExternalSourcePriorityListView->ClearSelection();
+        }
     }
 }
 
@@ -2876,7 +2894,8 @@ FReply SWetClothingTransparencyBakePanel::HandleAddExternalSourceClicked()
     {
         return FReply::Handled();
     }
-    SelectedExternalSourceGuid = NewSourceGuid;
+    PlacementSession->SetSourceTransform(NewSourceGuid, FTransform::Identity);
+    PlacementSession->SetSelection(FDWCTransparencyPlacementSelection::Source(NewSourceGuid));
     PendingExternalSourceMesh.Reset();
     AutoBakeResults.Remove(GetSelectedLayerGuid());
     RefreshExternalSourcePriorityItems();
@@ -2893,13 +2912,18 @@ FReply SWetClothingTransparencyBakePanel::HandleAddExternalSourceClicked()
         {
             PreviewViewport->InvalidateFullSourceLayout();
         }
-        PreviewViewport->SetExternalSourcePlacementSelection(SelectedExternalSourceGuid);
+        PreviewViewport->SetPlacementSelection(PlacementSession->GetSelection());
     }
     return FReply::Handled();
 }
 
 FReply SWetClothingTransparencyBakePanel::HandleRemoveExternalSourceClicked(const int32 PriorityIndex)
 {
+    const FWetClothingTransparencyLayerData* ExistingLayer = GetSelectedLayer();
+    const FGuid RemovedGuid = ExistingLayer != nullptr &&
+            ExistingLayer->ExternalMeshSource.SourcePriority.IsValidIndex(PriorityIndex)
+        ? ExistingLayer->ExternalMeshSource.SourcePriority[PriorityIndex].SourceGuid
+        : FGuid();
     EditSelectedLayer(
         LOCTEXT("RemoveTransparencyExternalMesh", "Remove Transparency External Mesh Source"),
         [PriorityIndex](FWetClothingTransparencyLayerData& Layer)
@@ -2912,21 +2936,15 @@ FReply SWetClothingTransparencyBakePanel::HandleRemoveExternalSourceClicked(cons
             }
         },
         true);
-    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if (Layer == nullptr ||
-        !Layer->ExternalMeshSource.SourcePriority.ContainsByPredicate(
-            [this](const FWetClothingTransparencyExternalMeshEntry& Entry)
-            {
-                return Entry.SourceGuid == SelectedExternalSourceGuid;
-            }))
+    if (RemovedGuid.IsValid())
     {
-        SelectedExternalSourceGuid.Invalidate();
+        PlacementSession->RemoveSource(RemovedGuid);
     }
     RefreshExternalSourcePriorityItems();
     if (PreviewViewport.IsValid())
     {
         PreviewViewport->InvalidateFullSourceLayout();
-        PreviewViewport->SetExternalSourcePlacementSelection(SelectedExternalSourceGuid);
+        PreviewViewport->SetPlacementSelection(PlacementSession->GetSelection());
     }
     return FReply::Handled();
 }
@@ -2954,41 +2972,74 @@ FReply SWetClothingTransparencyBakePanel::HandleMoveExternalSourceClicked(
     return FReply::Handled();
 }
 
-FReply SWetClothingTransparencyBakePanel::HandleResetExternalSourceTransformClicked(
-    const int32 PriorityIndex)
+void SWetClothingTransparencyBakePanel::HandleExternalSourceListSelectionChanged(
+    const TSharedPtr<int32> Item,
+    const ESelectInfo::Type)
 {
-    EditSelectedLayer(
-        LOCTEXT("ResetTransparencyExternalMeshTransform", "Reset Transparency External Mesh Transform"),
-        [PriorityIndex](FWetClothingTransparencyLayerData& Layer)
-        {
-            if (Layer.ExternalMeshSource.SourcePriority.IsValidIndex(PriorityIndex))
-            {
-                Layer.ExternalMeshSource.SourcePriority[PriorityIndex].BakeTransform = FTransform::Identity;
-                Layer.MarkAutoBakeStale();
-                Layer.MarkFinalBakeStale();
-            }
-        },
-        false);
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    if (!Item.IsValid() || Layer == nullptr ||
+        !Layer->ExternalMeshSource.SourcePriority.IsValidIndex(*Item))
+    {
+        return;
+    }
+    const FGuid SourceGuid = Layer->ExternalMeshSource.SourcePriority[*Item].SourceGuid;
+    PlacementSession->SetSelection(FDWCTransparencyPlacementSelection::Source(SourceGuid));
     if (PreviewViewport.IsValid())
     {
-        PreviewViewport->RefreshPreview();
-        PreviewViewport->SetExternalSourcePlacementSelection(SelectedExternalSourceGuid);
+        PreviewViewport->SetPreviewMode(EWetClothingTransparencyPreviewMode::FullBlueprint);
+        PreviewViewport->SetPlacementSelection(PlacementSession->GetSelection());
+    }
+}
+
+void SWetClothingTransparencyBakePanel::HandlePlacementSelectionChanged(
+    const FDWCTransparencyPlacementSelection& Selection)
+{
+    PlacementSession->SetSelection(Selection);
+    RefreshExternalSourcePriorityItems();
+}
+
+FReply SWetClothingTransparencyBakePanel::HandleToggleExternalSourceVisibilityClicked(
+    const FGuid SourceGuid)
+{
+    if (SourceGuid.IsValid())
+    {
+        PlacementSession->SetSourceHidden(
+            SourceGuid,
+            !PlacementSession->IsSourceHidden(SourceGuid));
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->RefreshType3PlacementPresentation();
+        }
     }
     return FReply::Handled();
 }
 
-FReply SWetClothingTransparencyBakePanel::HandleSelectExternalSourceClicked(const int32 PriorityIndex)
+FReply SWetClothingTransparencyBakePanel::HandleToggleExternalSourceSoloClicked(
+    const FGuid SourceGuid)
 {
-    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if (Layer == nullptr || !Layer->ExternalMeshSource.SourcePriority.IsValidIndex(PriorityIndex))
+    if (SourceGuid.IsValid())
     {
-        return FReply::Handled();
+        PlacementSession->ToggleSourceSolo(SourceGuid);
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->RefreshType3PlacementPresentation();
+        }
     }
-    SelectedExternalSourceGuid = Layer->ExternalMeshSource.SourcePriority[PriorityIndex].SourceGuid;
-    if (PreviewViewport.IsValid())
+    return FReply::Handled();
+}
+
+FReply SWetClothingTransparencyBakePanel::HandleToggleExternalSourceLockClicked(
+    const FGuid SourceGuid)
+{
+    if (SourceGuid.IsValid())
     {
-        PreviewViewport->SetPreviewMode(EWetClothingTransparencyPreviewMode::FullBlueprint);
-        PreviewViewport->SetExternalSourcePlacementSelection(SelectedExternalSourceGuid);
+        PlacementSession->SetSourceLocked(
+            SourceGuid,
+            !PlacementSession->IsSourceLocked(SourceGuid));
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->RefreshType3PlacementPresentation();
+        }
     }
     return FReply::Handled();
 }
@@ -3051,29 +3102,50 @@ void SWetClothingTransparencyBakePanel::HandleExternalSourceTransformCommitted(
         return;
     }
 
-    EditSelectedLayer(
+    const FGuid LayerGuid = ExistingLayer->LayerGuid;
+    const int32 MaterialSlotIndex = ExistingLayer->TargetSurface.OuterMaterialSlotIndex;
+    FDWCEditorAuthoringChange Change;
+    Change.Domain = EDWCEditorAuthoringDomain::Transparency;
+    Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
+        EDWCEditorAuthoringImpact::ElementList |
+        EDWCEditorAuthoringImpact::TransparencyAutoBake;
+    Change.MaterialSlotIndex = MaterialSlotIndex;
+    Change.LayerGuid = LayerGuid;
+    const FDWCEditorAuthoringResult Result = AuthoringDocument->Edit(
         LOCTEXT("PlaceTransparencyExternalMesh", "Place Transparency External Mesh Source"),
-        [SourceGuid, Transform](FWetClothingTransparencyLayerData& Layer)
+        Change,
+        [LayerGuid, SourceGuid, Transform](UWetClothingAsset& Asset)
         {
+            FWetClothingTransparencyLayerData* Layer =
+                Asset.Authored.TransparencyData.TransparencyLayers.FindByPredicate(
+                [LayerGuid](const FWetClothingTransparencyLayerData& Candidate)
+                {
+                    return Candidate.LayerGuid == LayerGuid;
+                });
+            if (Layer == nullptr)
+            {
+                return false;
+            }
             FWetClothingTransparencyExternalMeshEntry* Entry =
-                Layer.ExternalMeshSource.SourcePriority.FindByPredicate(
+                Layer->ExternalMeshSource.SourcePriority.FindByPredicate(
                     [SourceGuid](const FWetClothingTransparencyExternalMeshEntry& Candidate)
                     {
                         return Candidate.SourceGuid == SourceGuid;
                     });
             if (Entry == nullptr || Entry->BakeTransform.Equals(Transform))
             {
-                return;
+                return false;
             }
             Entry->BakeTransform = Transform;
-            Layer.MarkAutoBakeStale();
-            Layer.MarkFinalBakeStale();
-        },
-        false);
-    if (PreviewViewport.IsValid())
+            Layer->MarkAutoBakeStale();
+            Layer->MarkFinalBakeStale();
+            return true;
+        });
+    if (Result.bChanged)
     {
-        PreviewViewport->RefreshPreview();
-        PreviewViewport->SetExternalSourcePlacementSelection(SourceGuid);
+        PlacementSession->SetSourceTransform(SourceGuid, Transform);
+        AutoBakeResults.Remove(LayerGuid);
+        RequestRefresh(EDWCTransparencyPanelRefreshFlags::Model);
     }
     RefreshExternalSourcePriorityItems();
 }
@@ -4394,6 +4466,25 @@ FString SWetClothingTransparencyBakePanel::GetGenerateDisabledReason() const
         if (!Readiness.bReady)
         {
             return Readiness.DisabledReason;
+        }
+    }
+    if (Layer->SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh)
+    {
+        for (const FWetClothingTransparencyExternalMeshEntry& Source :
+             Layer->ExternalMeshSource.SourcePriority)
+        {
+            if (Source.BakeTransform.ContainsNaN())
+            {
+                return FString::Printf(
+                    TEXT("External source '%s' has an invalid placement transform."),
+                    Source.SkeletalMesh != nullptr ? *Source.SkeletalMesh->GetName() : TEXT("Missing"));
+            }
+            if (!Source.BakeTransform.GetScale3D().Equals(FVector::OneVector, KINDA_SMALL_NUMBER))
+            {
+                return FString::Printf(
+                    TEXT("External source '%s' has a non-unit scale. Type 3 placement supports translation and rotation only."),
+                    Source.SkeletalMesh != nullptr ? *Source.SkeletalMesh->GetName() : TEXT("Missing"));
+            }
         }
     }
     TArray<FString> Errors;
@@ -5989,9 +6080,11 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildExternalMeshSourceSe
         + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)
           [BuildEmptyAssetRow(LOCTEXT(
               "ExternalSourceMeshTransformHint",
-              "Each listed mesh is a separate reference-pose source. Select Place, use the viewport translate/rotate gizmo or arrow-key nudges, then order the rows by raycast priority."))]
+              "Select the target or a source in the viewport. Space switches Move/Rotate, F focuses the selection, Home frames all, and Alt-click cycles overlapping meshes."))]
         + SVerticalBox::Slot().AutoHeight()
-          [BuildExternalMeshSourcePrioritySection()];
+          [BuildExternalMeshSourcePrioritySection()]
+        + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 0.0f)
+          [BuildExternalSourceTransformSection()];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildExternalMeshSourcePrioritySection()
@@ -6018,7 +6111,10 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildExternalMeshSourcePr
             })
             [SAssignNew(ExternalSourcePriorityListView, SListView<TSharedPtr<int32>>)
                 .ListItemsSource(&ExternalSourcePriorityItems)
-                .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateExternalSourcePriorityRow)]];
+                .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateExternalSourcePriorityRow)
+                .OnSelectionChanged(
+                    this,
+                    &SWetClothingTransparencyBakePanel::HandleExternalSourceListSelectionChanged)]];
 }
 
 TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateExternalSourcePriorityRow(
@@ -6054,23 +6150,44 @@ TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateExternalSourceP
                .Text(Source != nullptr && Source->SkeletalMesh != nullptr
                    ? FText::FromString(Source->SkeletalMesh->GetName())
                    : LOCTEXT("MissingExternalSourceMesh", "Missing Skeletal Mesh"))
-               .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
-           + SVerticalBox::Slot().AutoHeight()
-           [SNew(STextBlock)
-               .Text(Source != nullptr
-                   ? FText::FromString(Source->BakeTransform.ToHumanReadableString())
-                   : FText::GetEmpty())
-               .ColorAndOpacity(FStyleColors::Foreground)
-               .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
-          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
-          [SNew(SButton)
-             .Text_Lambda([this, Source]()
+               .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]]
+          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+          [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+             .ToolTipText(LOCTEXT("ToggleExternalSourceVisibility", "Show or hide this source in the editor preview."))
+             .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleToggleExternalSourceVisibilityClicked,
+                 Source != nullptr ? Source->SourceGuid : FGuid())
+             [SNew(SImage).Image_Lambda([this, Source]()
              {
-                 return Source != nullptr && Source->SourceGuid == SelectedExternalSourceGuid
-                     ? LOCTEXT("ExternalSourcePlaced", "Placing")
-                     : LOCTEXT("ExternalSourcePlace", "Place");
-             })
-             .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleSelectExternalSourceClicked, PriorityIndex)]
+                 return FAppStyle::GetBrush(Source != nullptr &&
+                         PlacementSession->IsSourceHidden(Source->SourceGuid)
+                     ? TEXT("Icons.Hidden")
+                     : TEXT("Icons.Visible"));
+             })]]
+          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+          [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+             .ToolTipText(LOCTEXT("ToggleExternalSourceSolo", "Show only this source with the target mesh."))
+             .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleToggleExternalSourceSoloClicked,
+                 Source != nullptr ? Source->SourceGuid : FGuid())
+             [SNew(STextBlock)
+                .Text(LOCTEXT("ExternalSourceSolo", "S"))
+                .ColorAndOpacity_Lambda([this, Source]()
+                {
+                    return Source != nullptr && PlacementSession->IsSourceSolo(Source->SourceGuid)
+                        ? FStyleColors::AccentBlue
+                        : FStyleColors::Foreground;
+                })]]
+          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+          [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+             .ToolTipText(LOCTEXT("ToggleExternalSourceLock", "Lock or unlock this source placement."))
+             .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleToggleExternalSourceLockClicked,
+                 Source != nullptr ? Source->SourceGuid : FGuid())
+             [SNew(SImage).Image_Lambda([this, Source]()
+             {
+                 return FAppStyle::GetBrush(Source != nullptr &&
+                         PlacementSession->IsSourceLocked(Source->SourceGuid)
+                     ? TEXT("Icons.Lock")
+                     : TEXT("Icons.Unlock"));
+             })]]
           + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
           [SNew(SBox).WidthOverride(58.0f)
            [SNew(SComboBox<TSharedPtr<int32>>)
@@ -6109,11 +6226,6 @@ TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateExternalSourceP
             })]]]
           + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
           [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
-             .ToolTipText(LOCTEXT("ResetExternalSourceTransformTooltip", "Reset this source placement to the target mesh origin."))
-             .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleResetExternalSourceTransformClicked, PriorityIndex)
-             [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Undo")))]]
-          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-          [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
              .IsEnabled_Lambda([PriorityIndex]() { return PriorityIndex > 0; })
              .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleMoveExternalSourceClicked, PriorityIndex, -1)
              [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.ArrowUp")))]]
@@ -6126,6 +6238,260 @@ TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateExternalSourceP
           [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
              .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleRemoveExternalSourceClicked, PriorityIndex)
              [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]];
+}
+
+FReply SWetClothingTransparencyBakePanel::HandleAlignSelectedPlacementToTargetClicked()
+{
+    if (PreviewViewport.IsValid() && PlacementSession->GetSelection().IsSource())
+    {
+        FTransform Transform = PreviewViewport->GetSelectedPlacementTransform();
+        Transform.SetTranslation(FVector::ZeroVector);
+        PreviewViewport->SetSelectedPlacementTransform(Transform, true);
+    }
+    return FReply::Handled();
+}
+
+FReply SWetClothingTransparencyBakePanel::HandleResetSelectedPlacementClicked()
+{
+    if (PreviewViewport.IsValid() &&
+        PlacementSession->GetSelection().Type != EDWCTransparencyPlacementSelectionType::None)
+    {
+        PreviewViewport->SetSelectedPlacementTransform(FTransform::Identity, true);
+    }
+    return FReply::Handled();
+}
+
+FReply SWetClothingTransparencyBakePanel::HandleFocusSelectedPlacementClicked()
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->FocusSelectedPlacement(false);
+    }
+    return FReply::Handled();
+}
+
+FReply SWetClothingTransparencyBakePanel::HandleFocusAllPlacementsClicked()
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->FocusType3Assembly(false);
+    }
+    return FReply::Handled();
+}
+
+TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildExternalSourceTransformSection()
+{
+    using FPlacementTransformInput = SAdvancedTransformInputBox<FTransform>;
+
+    const auto GetTransform = [this]() -> TOptional<FTransform>
+    {
+        return PreviewViewport.IsValid() &&
+                PlacementSession->GetSelection().Type !=
+                    EDWCTransparencyPlacementSelectionType::None
+            ? TOptional<FTransform>(PreviewViewport->GetSelectedPlacementTransform())
+            : TOptional<FTransform>();
+    };
+    const auto IsTransformEditable = [this]()
+    {
+        return PreviewViewport.IsValid() &&
+            PlacementSession->GetSelection().Type !=
+                EDWCTransparencyPlacementSelectionType::None &&
+            !PlacementSession->IsSelectionLocked();
+    };
+    const auto DiffersFromDefault = [this](const ESlateTransformComponent::Type Component)
+    {
+        if (!PreviewViewport.IsValid() ||
+            PlacementSession->GetSelection().Type ==
+                EDWCTransparencyPlacementSelectionType::None)
+        {
+            return false;
+        }
+        const FTransform Transform = PreviewViewport->GetSelectedPlacementTransform();
+        switch (Component)
+        {
+        case ESlateTransformComponent::Location:
+            return !Transform.GetTranslation().IsNearlyZero();
+        case ESlateTransformComponent::Rotation:
+            return !Transform.GetRotation().Equals(FQuat::Identity);
+        case ESlateTransformComponent::Scale:
+            return false;
+        case ESlateTransformComponent::Max:
+        default:
+            return !Transform.GetTranslation().IsNearlyZero() ||
+                !Transform.GetRotation().Equals(FQuat::Identity);
+        }
+    };
+    const auto ResetComponent = [this](const ESlateTransformComponent::Type Component)
+    {
+        if (!PreviewViewport.IsValid())
+        {
+            return;
+        }
+        FTransform Transform = PreviewViewport->GetSelectedPlacementTransform();
+        if (Component == ESlateTransformComponent::Location ||
+            Component == ESlateTransformComponent::Max)
+        {
+            Transform.SetTranslation(FVector::ZeroVector);
+        }
+        if (Component == ESlateTransformComponent::Rotation ||
+            Component == ESlateTransformComponent::Max)
+        {
+            Transform.SetRotation(FQuat::Identity);
+        }
+        Transform.SetScale3D(FVector::OneVector);
+        PreviewViewport->SetSelectedPlacementTransform(Transform, true);
+    };
+
+    const TSharedRef<SWidget> EditableTransform =
+        SNew(FPlacementTransformInput)
+        .ConstructLocation(true)
+        .ConstructRotation(true)
+        .ConstructScale(false)
+        .ShowInlineLabels(true)
+        .AllowSpin(true)
+        .AllowEditRotationRepresentation(false)
+        .DisplayScaleLock(false)
+        .DisplayRelativeWorld(false)
+        .Transform_Lambda(GetTransform)
+        .IsEnabled_Lambda(IsTransformEditable)
+        .OnTransformChanged_Lambda([this](const FTransform Transform)
+        {
+            if (PreviewViewport.IsValid())
+            {
+                PreviewViewport->SetSelectedPlacementTransform(Transform, false);
+            }
+        })
+        .OnNumericValueChanged_Lambda(
+            [this](
+                const ESlateTransformComponent::Type Component,
+                const ESlateRotationRepresentation::Type Representation,
+                const ESlateTransformSubComponent::Type SubComponent,
+                const double Value)
+            {
+                if (!PreviewViewport.IsValid())
+                {
+                    return;
+                }
+                FTransform Transform = PreviewViewport->GetSelectedPlacementTransform();
+                FPlacementTransformInput::ApplyNumericValueChange(
+                    Transform,
+                    Value,
+                    Component,
+                    Representation,
+                    SubComponent);
+                PreviewViewport->SetSelectedPlacementTransform(Transform, false);
+            })
+        .OnTransformCommitted_Lambda(
+            [this](const FTransform Transform, ETextCommit::Type)
+            {
+                if (PreviewViewport.IsValid())
+                {
+                    PreviewViewport->SetSelectedPlacementTransform(Transform, true);
+                }
+            })
+        .OnNumericValueCommitted_Lambda(
+            [this](
+                const ESlateTransformComponent::Type Component,
+                const ESlateRotationRepresentation::Type Representation,
+                const ESlateTransformSubComponent::Type SubComponent,
+                const double Value,
+                ETextCommit::Type)
+            {
+                if (!PreviewViewport.IsValid())
+                {
+                    return;
+                }
+                FTransform Transform = PreviewViewport->GetSelectedPlacementTransform();
+                FPlacementTransformInput::ApplyNumericValueChange(
+                    Transform,
+                    Value,
+                    Component,
+                    Representation,
+                    SubComponent);
+                PreviewViewport->SetSelectedPlacementTransform(Transform, true);
+            })
+        .OnEndSliderMovement_Lambda(
+            [this](ESlateTransformComponent::Type,
+                ESlateRotationRepresentation::Type,
+                ESlateTransformSubComponent::Type,
+                double)
+            {
+                if (PreviewViewport.IsValid())
+                {
+                    PreviewViewport->SetSelectedPlacementTransform(
+                        PreviewViewport->GetSelectedPlacementTransform(),
+                        true);
+                }
+            })
+        .OnResetToDefault_Lambda(ResetComponent)
+        .DiffersFromDefault_Lambda(DiffersFromDefault);
+
+    const TSharedRef<SWidget> ReadOnlyScale =
+        SNew(FPlacementTransformInput)
+        .ConstructLocation(false)
+        .ConstructRotation(false)
+        .ConstructScale(true)
+        .ShowInlineLabels(true)
+        .AllowSpin(false)
+        .DisplayScaleLock(true)
+        .Transform(FTransform::Identity)
+        .IsEnabled(false);
+
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,5)
+          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("ExternalPlacementTransform", "Transform"))]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+          [SNew(SHorizontalBox)
+           + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+             [SNew(STextBlock).Text_Lambda([this]()
+             {
+                 const FDWCTransparencyPlacementSelection& Selection = PlacementSession->GetSelection();
+                 if (Selection.Type == EDWCTransparencyPlacementSelectionType::Target)
+                 {
+                     return LOCTEXT("SelectedPlacementTarget", "Selected: Target Mesh (preview assembly)");
+                 }
+                 const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+                 const FWetClothingTransparencyExternalMeshEntry* Source = Layer != nullptr && Selection.IsSource()
+                     ? Layer->ExternalMeshSource.SourcePriority.FindByPredicate(
+                         [&Selection](const FWetClothingTransparencyExternalMeshEntry& Entry)
+                         {
+                             return Entry.SourceGuid == Selection.SourceGuid;
+                         })
+                     : nullptr;
+                 return Source != nullptr && Source->SkeletalMesh != nullptr
+                     ? FText::Format(LOCTEXT("SelectedPlacementSource", "Selected: {0}"),
+                         FText::FromString(Source->SkeletalMesh->GetName()))
+                     : LOCTEXT("SelectedPlacementNone", "Select the target or a source mesh in the viewport.");
+             })]
+           + SHorizontalBox::Slot().AutoWidth()
+             [SNew(SButton)
+                .Text(LOCTEXT("SelectPlacementTarget", "Select Target"))
+                .OnClicked_Lambda([this]()
+                {
+                    if (PreviewViewport.IsValid())
+                    {
+                        PreviewViewport->SetPlacementSelection(
+                            FDWCTransparencyPlacementSelection::Target());
+                    }
+                    return FReply::Handled();
+                })]]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,2)[EditableTransform]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[ReadOnlyScale]
+        + SVerticalBox::Slot().AutoHeight()
+          [SNew(SHorizontalBox)
+           + SHorizontalBox::Slot().AutoWidth().Padding(0,0,4,0)
+             [SNew(SButton).Text(LOCTEXT("PlacementAlignTarget", "Align to Target Origin"))
+                .IsEnabled_Lambda([this]() { return PlacementSession->GetSelection().IsSource(); })
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleAlignSelectedPlacementToTargetClicked)]
+           + SHorizontalBox::Slot().AutoWidth().Padding(0,0,4,0)
+             [SNew(SButton).Text(LOCTEXT("PlacementReset", "Reset"))
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleResetSelectedPlacementClicked)]
+           + SHorizontalBox::Slot().AutoWidth().Padding(0,0,4,0)
+             [SNew(SButton).Text(LOCTEXT("PlacementFocus", "Focus"))
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleFocusSelectedPlacementClicked)]
+           + SHorizontalBox::Slot().AutoWidth()
+             [SNew(SButton).Text(LOCTEXT("PlacementFocusAll", "Focus All"))
+                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleFocusAllPlacementsClicked)]];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildManualSourceSection()
@@ -7546,7 +7912,8 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyPreviewS
             .TextureWorkspace(TextureWorkspace)
             .PreviewCommitCoordinator(PreviewCommitCoordinator)
             .PreviewModeLifetime(PreviewModeLifetime)
-            .RenderUploadQueue(RenderUploadQueue)]];
+            .RenderUploadQueue(RenderUploadQueue)
+            .PlacementSession(PlacementSession)]];
     if (AuthoringController.IsValid())
     {
         AuthoringController->AttachViewport(PreviewViewport);
@@ -7556,7 +7923,11 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyPreviewS
         FDWCTransparencyExternalSourceTransformCommitted::CreateSP(
             this,
             &SWetClothingTransparencyBakePanel::HandleExternalSourceTransformCommitted));
-    PreviewViewport->SetExternalSourcePlacementSelection(SelectedExternalSourceGuid);
+    PreviewViewport->SetPlacementSelectionChangedDelegate(
+        FDWCTransparencyPlacementSelectionChanged::CreateSP(
+            this,
+            &SWetClothingTransparencyBakePanel::HandlePlacementSelectionChanged));
+    PreviewViewport->SetPlacementSelection(PlacementSession->GetSelection());
     return Content;
 }
 
@@ -7611,6 +7982,9 @@ void SWetClothingTransparencyBakePanel::RefreshViewportContext()
     const EDWCTransparencySourceType SourceType = Layer != nullptr
         ? Layer->SourceType
         : EDWCTransparencySourceType::SameMeshMaterialSlots;
+    PreviewViewport->SetPlacementHelpVisible(
+        CurrentStage == EDWCTransparencyEditorStage::MapGeneration &&
+        SourceType == EDWCTransparencySourceType::ExternalSkeletalMesh);
     const EWetClothingTransparencyPreviewMode RequestedPreviewMode =
         PreviewViewport->GetPreviewMode();
     DWCTransparencyWorkflow::FDWCTransparencyPreviewContext PreviewContext =

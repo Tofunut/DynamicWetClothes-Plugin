@@ -1770,6 +1770,75 @@ void FDWCGPUBackend::ClearPendingWetnessMaps()
         });
 }
 
+void FDWCGPUBackend::ClearWetnessMaps()
+{
+    if (!bInitialized)
+    {
+        return;
+    }
+
+    PendingContacts.Reset();
+    PendingSurfaceStamps.Reset();
+    PendingWetAllAmount = 0.0f;
+
+    TArray<FTextureRenderTargetResource*> ResourcesToClear;
+    for (FMaterialSlotRuntime& Slot : MaterialSlots)
+    {
+        auto AddResource = [&ResourcesToClear](UTextureRenderTarget2D* RenderTarget)
+        {
+            if (RenderTarget == nullptr)
+            {
+                return;
+            }
+
+            if (FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource())
+            {
+                ResourcesToClear.Add(Resource);
+            }
+        };
+
+        for (const TStrongObjectPtr<UTextureRenderTarget2D>& WetnessMap : Slot.WetnessMaps)
+        {
+            AddResource(WetnessMap.Get());
+        }
+        for (const TStrongObjectPtr<UTextureRenderTarget2D>& PendingWetnessMap : Slot.PendingWetnessMaps)
+        {
+            AddResource(PendingWetnessMap.Get());
+        }
+
+        AddResource(Slot.SurfaceDroplet1RT.Get());
+        AddResource(Slot.SurfaceDroplet2RT.Get());
+    }
+
+    if (ResourcesToClear.IsEmpty())
+    {
+        return;
+    }
+
+    ENQUEUE_RENDER_COMMAND(DWCClearWetnessMaps)(
+        [ResourcesToClear = MoveTemp(ResourcesToClear)](FRHICommandListImmediate& RHICmdList) mutable
+        {
+            FRDGBuilder GraphBuilder(RHICmdList);
+            for (FTextureRenderTargetResource* Resource : ResourcesToClear)
+            {
+                if (Resource == nullptr || Resource->GetRenderTargetTexture() == nullptr)
+                {
+                    continue;
+                }
+
+                TRefCountPtr<IPooledRenderTarget> External = CreateRenderTarget(
+                    Resource->GetRenderTargetTexture(),
+                    TEXT("DWC.ClearWetnessMaps"));
+                FRDGTextureRef Texture = GraphBuilder.RegisterExternalTexture(External);
+                AddClearUAVPass(
+                    GraphBuilder,
+                    GraphBuilder.CreateUAV(Texture),
+                    FLinearColor::Black);
+            }
+            GraphBuilder.Execute();
+        });
+}
+
 void FDWCGPUBackend::Update(const float DeltaSeconds)
 {
     if (!bInitialized)
@@ -2571,6 +2640,7 @@ void FDWCGPUBackend::DispatchSimulation(
                         SlotDispatch.SurfaceWaterResolution,
                         SlotDispatch.SurfaceWaterResolution);
                     DryParameters->DeltaSeconds = DeltaSeconds;
+                    DryParameters->DryRateScale = DryRateScaleValue;
                     DryParameters->Surface = SurfaceUAV;
                     DryParameters->TexelLookup = SurfaceLookupSRV;
                     DryParameters->Profiles = ProfileSRV;

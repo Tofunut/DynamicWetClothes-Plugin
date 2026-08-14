@@ -297,6 +297,7 @@ class FDWCSurfaceWetnessDryInPlaceCS final : public FGlobalShader
     BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
     SHADER_PARAMETER(FIntPoint, TextureSize)
     SHADER_PARAMETER(float, DeltaSeconds)
+    SHADER_PARAMETER(float, DryRateScale)
     SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, Surface)
     SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
     SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)

@@ -799,6 +799,27 @@ bool UDynamicWetClothesComponent::ClearGPUPendingWetnessMaps()
     return bClearedAny;
 }
 
+bool UDynamicWetClothesComponent::ClearGPUWetnessMaps()
+{
+    PendingWetContacts.Reset();
+    bPendingWetContactsApplyMaterial = false;
+
+    bool bClearedAny = false;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() || !Receiver->GPUBackend.IsValid())
+        {
+            continue;
+        }
+
+        Receiver->GPUBackend->ClearWetnessMaps();
+        bClearedAny = true;
+    }
+
+    bWetRenderDirty |= bClearedAny;
+    return bClearedAny;
+}
+
 bool UDynamicWetClothesComponent::GetWetnessWorldBounds(FBox& OutBounds) const
 {
     OutBounds = FBox(ForceInit);

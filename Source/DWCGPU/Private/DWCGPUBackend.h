@@ -19,6 +19,7 @@ class FDWCGPUBackend final : public IDWCGPUBackend
     virtual bool                EnqueueSurfaceStamps(const TArray<FDWCSurfaceStampRequest>& Stamps) override;
     virtual bool                ApplyWetAll(float Amount) override;
     virtual void                ClearPendingWetnessMaps() override;
+    virtual void                ClearWetnessMaps() override;
     virtual void                Update(float DeltaSeconds) override;
     virtual FDWCGPUBackendStats GetStats() const override;
     virtual void                Shutdown() override;

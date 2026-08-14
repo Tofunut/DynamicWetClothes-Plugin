@@ -62,6 +62,7 @@ class DWC_API IDWCGPUBackend
     virtual bool                EnqueueSurfaceStamps(const TArray<FDWCSurfaceStampRequest>& Stamps) = 0;
     virtual bool                ApplyWetAll(float Amount) = 0;
     virtual void                ClearPendingWetnessMaps() = 0;
+    virtual void                ClearWetnessMaps() = 0;
     virtual void                Update(float DeltaSeconds) = 0;
     virtual FDWCGPUBackendStats GetStats() const = 0;
 

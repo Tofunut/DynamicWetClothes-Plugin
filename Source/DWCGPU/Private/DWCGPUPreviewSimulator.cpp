@@ -16,12 +16,13 @@
 namespace DWCGPUPreviewPrivate
 {
     // The preview starts dry and writes water only after an explicit Add Water request.
-    // Use a visible contact amount so diffusion and drying can be inspected in the editor.
+    // Keep the applied water visible so diffusion and wetness can be inspected in the editor.
     constexpr float PreviewScenarioContactAmount = 1.0f;
 
-    // Keep authored per-second rates aligned with runtime. The preview domain is
-    // synthetic, but speed controls should not change meaning in the WP editor.
+    // Keep authored spread rates aligned with runtime. Preview water is persistent;
+    // drying is disabled so the editor can inspect the applied wetness state.
     constexpr float PreviewRateScale = 1.0f;
+    constexpr float PreviewDryRateScale = 0.0f;
 
     struct alignas(16) FUint4
     {
@@ -442,9 +443,10 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float /*Scena
             auto                                          AddSurfaceDry = [&](FRDGTextureRef SurfaceTexture, const TCHAR* Name)
             {
                 FDWCSurfaceWetnessDryInPlaceCS::FParameters* P =
-                    GraphBuilder.AllocParameters<FDWCSurfaceWetnessDryInPlaceCS::FParameters>();
+                GraphBuilder.AllocParameters<FDWCSurfaceWetnessDryInPlaceCS::FParameters>();
                 P->TextureSize = FIntPoint(RTResolution, RTResolution);
                 P->DeltaSeconds = SafeDelta;
+                P->DryRateScale = PreviewDryRateScale;
                 P->Surface = GraphBuilder.CreateUAV(SurfaceTexture);
                 P->TexelLookup = LookupSRV;
                 P->Profiles = ProfileSRV;
@@ -537,7 +539,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float /*Scena
                 P->TextureSize = FIntPoint(RTResolution, RTResolution);
                 P->DeltaSeconds = SafeDelta;
                 P->MaxWetness = RTMaxWetness;
-                P->DryRateScale = 1.0f;
+                P->DryRateScale = PreviewDryRateScale;
                 P->CapillaryImmediateAbsorptionFraction = RTImmediateAbsorption;
                 P->SourceWetnessTexture = AppliedWetness;
                 P->PendingWetnessTexture = AppliedPending;
@@ -563,7 +565,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float /*Scena
                 P->TextureSize = FIntPoint(RTResolution, RTResolution);
                 P->DeltaSeconds = SafeDelta;
                 P->MaxWetness = RTMaxWetness;
-                P->DryRateScale = 1.0f;
+                P->DryRateScale = PreviewDryRateScale;
                 P->CapillaryImmediateAbsorptionFraction = RTImmediateAbsorption;
                 P->SourceWetnessTexture = AppliedWetness;
                 P->PendingWetnessTexture = AppliedPending;

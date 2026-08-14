@@ -123,6 +123,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void SetDropletRenderingEnabled(bool bEnabled);
     UFUNCTION(BlueprintCallable, Category = "Wetness|GPU")
     bool ClearGPUPendingWetnessMaps();
+    /** Immediately clears the current, next, pending, and droplet GPU maps. */
+    UFUNCTION(BlueprintCallable, Category = "Wetness|GPU")
+    bool ClearGPUWetnessMaps();
     bool GetWetnessWorldBounds(FBox& OutBounds) const;
     UFUNCTION(BlueprintPure, Category = "Wetness|GPU")
     int32 GetDWCReceiverGPUId(FName ReceiverId = NAME_None) const;

@@ -75,6 +75,8 @@ public:
     int32 Num() const { return Leases.Num(); }
     uint64 GetReservedBytes() const;
     uint64 GetReservedBytes(EDWCEditorResourcePool Pool) const;
+    /** Removes and returns the reservation for one pool without releasing it. */
+    FDWCEditorMemoryLease TakeLease(EDWCEditorResourcePool Pool);
     void Reset() { Leases.Reset(); }
 
 private:

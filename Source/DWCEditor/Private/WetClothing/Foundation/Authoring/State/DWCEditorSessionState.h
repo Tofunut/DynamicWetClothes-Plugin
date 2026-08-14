@@ -148,7 +148,8 @@ enum class EDWCEditorSessionEffect : uint32
     RebuildHitTopology = 1 << 7,
     RefreshUVView = 1 << 8,
     RefreshDetails = 1 << 9,
-    RefreshStatus = 1 << 10
+    RefreshStatus = 1 << 10,
+    RefreshPartSlotPresentation = 1 << 11
 };
 ENUM_CLASS_FLAGS(EDWCEditorSessionEffect);
 
@@ -232,8 +233,11 @@ struct FDWCEditorSessionState
     EWCAEditorMode ActiveMode = EWCAEditorMode::PartEdit;
     uint64 SessionRevision = 0;
     uint64 AuthoringRevision = 0;
+    uint64 PartAuthoringRevision = 0;
     uint64 WrinkleAuthoringRevision = 0;
     uint64 TransparencyAuthoringRevision = 0;
+    int32 LastPartImpactMaterialSlotIndex = INDEX_NONE;
+    int32 LastPartImpactWetPartID = INDEX_NONE;
     FDWCEditorAuthoringIndex AuthoringIndex;
     FDWCEditorWrinkleSessionState Wrinkle;
     FDWCEditorTransparencySessionState Transparency;
@@ -245,6 +249,8 @@ inline uint64 GetDWCEditorDomainRevision(
 {
     switch (Domain)
     {
+    case EDWCEditorAuthoringDomain::Part:
+        return State.PartAuthoringRevision;
     case EDWCEditorAuthoringDomain::Wrinkle:
         return State.WrinkleAuthoringRevision;
     case EDWCEditorAuthoringDomain::Transparency:

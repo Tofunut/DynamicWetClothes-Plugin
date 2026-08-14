@@ -5,6 +5,7 @@
 #include "Misc/AutomationTest.h"
 
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetClothingAssetSetupData.h"
 #include "Editor.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
@@ -285,6 +286,20 @@ bool FDWCEditorAuthoringDocumentCommandTest::RunTest(const FString& Parameters)
         });
     TestFalse(TEXT("A command without a domain is rejected"), InvalidResult.bChanged);
     TestEqual(TEXT("A rejected command does not advance revision"), Document->GetRevision(), uint64(1));
+
+    FDWCEditorAuthoringChange InvalidCrossOutputChange = Change;
+    InvalidCrossOutputChange.InvalidatedBakeOutputMask = DWCBakeOutput::GPUMaps;
+    const FDWCEditorAuthoringResult InvalidCrossOutputResult = Document->Edit(
+        FText::FromString(TEXT("Invalid cross-output command")),
+        InvalidCrossOutputChange,
+        [](UWetClothingAsset&)
+        {
+            return true;
+        });
+    TestFalse(TEXT("A non-Part command cannot use the cross-output mask"),
+        InvalidCrossOutputResult.bChanged);
+    TestEqual(TEXT("A rejected cross-output command does not advance revision"),
+        Document->GetRevision(), uint64(1));
     return true;
 }
 

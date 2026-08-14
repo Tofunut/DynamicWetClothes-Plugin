@@ -9,6 +9,7 @@
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionIf.h"
+#include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
@@ -308,6 +309,12 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
              HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverBaselineMap()));
     TestTrue(TEXT("Hover baseline use is exposed as a scalar parameter"),
              HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseHoverBaselineMap()));
+    TestTrue(TEXT("Hover island identity is exposed as a texture parameter"),
+             HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverIslandIDMap()));
+    TestTrue(TEXT("Hover island identity use is exposed as a scalar parameter"),
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseHoverIslandIDMap()));
+    TestTrue(TEXT("The active hover island is exposed as a scalar parameter"),
+             HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverIslandID()));
     TestTrue(TEXT("Hover edge feather is exposed as a texture parameter"),
              HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap()));
     TestTrue(TEXT("Hover edge feather use is exposed as a scalar parameter"),
@@ -327,70 +334,88 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
     TestTrue(TEXT("Reveal Surface enable is exposed as a scalar parameter"),
              HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseRevealSurfaceMap()));
 
-    const UMaterialExpressionCustom* HoverBlend = nullptr;
+    const UMaterialExpressionCustom* PreviewState = nullptr;
     for (UMaterialExpression* Expression : Material->GetExpressions())
     {
         const UMaterialExpressionCustom* Candidate = Cast<UMaterialExpressionCustom>(Expression);
         if (Candidate != nullptr && Candidate->Description.Contains(TEXT("Transparency Live Preview")))
         {
-            HoverBlend = Candidate;
+            PreviewState = Candidate;
             break;
         }
     }
-    TestNotNull(TEXT("The graph owns the Transparency custom blend"), HoverBlend);
-    if (HoverBlend != nullptr)
+    TestNotNull(TEXT("The graph owns the Transparency preview state expression"), PreviewState);
+    if (PreviewState != nullptr)
     {
         TestTrue(TEXT("Disabled hover has an explicit fast path"),
-                 HoverBlend->Code.Contains(TEXT("HoverState1.x > 0.0")));
+                 PreviewState->Code.Contains(TEXT("HoverState1.x > 0.0")));
         TestTrue(TEXT("Reveal and alpha hover use separate targets"),
-                 HoverBlend->Code.Contains(TEXT("HoverTarget < 1.5")));
+                 PreviewState->Code.Contains(TEXT("HoverTarget < 1.5")));
         TestTrue(TEXT("Smooth hover samples only inside the active branch"),
-                 HoverBlend->Code.Contains(TEXT("SelectedHoverOperation == 3")));
+                 PreviewState->Code.Contains(TEXT("SelectedHoverOperation == 3")));
         TestTrue(TEXT("Hover is clipped to the active UV island"),
-                 HoverBlend->Code.Contains(TEXT("HoverIslandEligibility")));
+                 PreviewState->Code.Contains(TEXT("HoverIslandEligibility")));
+        TestTrue(TEXT("Hover island identity is sampled directly in the material"),
+                 PreviewState->Code.Contains(TEXT("HoverIslandIDMapTex.Load")));
+        TestTrue(TEXT("Hover island selection is parameter-driven"),
+                 PreviewState->Code.Contains(TEXT("SampledHoverIslandID - HoverIslandID")));
         TestTrue(TEXT("Auto-alpha hover updates its grayscale visualization"),
-                 HoverBlend->Code.Contains(TEXT("TransparencySample.rgb = TransparencySample.aaa")));
+                 PreviewState->Code.Contains(TEXT("TransparencySample.rgb = TransparencySample.aaa")));
         TestTrue(TEXT("Wrinkle coverage is sampled directly by the preview material"),
-                 HoverBlend->Code.Contains(TEXT("WrinkleCoverageMapTex")));
+                 PreviewState->Code.Contains(TEXT("WrinkleCoverageMapTex")));
         TestTrue(TEXT("Wrinkle threshold and softness are evaluated by the preview material"),
-                 HoverBlend->Code.Contains(TEXT("smoothstep(SafeThreshold, TransitionEnd, Coverage)")));
+                 PreviewState->Code.Contains(TEXT("smoothstep(SafeThreshold, TransitionEnd, Coverage)")));
         TestTrue(TEXT("Wrinkle suppression is applied to final alpha in the preview material"),
-                 HoverBlend->Code.Contains(TEXT("(1.0 - SuppressionWeight)")));
+                 PreviewState->Code.Contains(TEXT("(1.0 - SuppressionWeight)")));
         TestTrue(TEXT("Reveal Surface visibility follows final transparency alpha"),
-                 HoverBlend->Code.Contains(TEXT("FinalRevealVisibility = FinalAlpha")));
+                 PreviewState->Code.Contains(TEXT("FinalRevealVisibility = FinalAlpha")));
+        bool bConsumesBaseColor = false;
+        for (const FCustomInput& Input : PreviewState->Inputs)
+        {
+            bConsumesBaseColor |= Input.InputName == TEXT("BaseColor");
+        }
+        TestFalse(TEXT("Preview state never consumes source Base Color"), bConsumesBaseColor);
     }
 
-    const UMaterialExpressionCustom* RevealSurfaceComposite = nullptr;
+    const UMaterialExpressionCustom* RevealSurfaceNormal = nullptr;
     for (UMaterialExpression* Expression : Material->GetExpressions())
     {
         const UMaterialExpressionCustom* Candidate = Cast<UMaterialExpressionCustom>(Expression);
-        if (Candidate != nullptr && Candidate->Description.Contains(TEXT("Reveal Surface Composite")))
+        if (Candidate != nullptr && Candidate->Description.Contains(TEXT("Reveal Surface Preview Normal")))
         {
-            RevealSurfaceComposite = Candidate;
+            RevealSurfaceNormal = Candidate;
             break;
         }
     }
-    TestNotNull(TEXT("The graph owns the shared Reveal Surface composite"), RevealSurfaceComposite);
-    if (RevealSurfaceComposite != nullptr)
+    TestNotNull(TEXT("The graph owns the isolated Reveal Surface normal expression"), RevealSurfaceNormal);
+    if (RevealSurfaceNormal != nullptr)
     {
         TestTrue(TEXT("Reveal Surface decodes its packed normal channels"),
-                 RevealSurfaceComposite->Code.Contains(TEXT("float2 RevealXY")));
+                 RevealSurfaceNormal->Code.Contains(TEXT("float2 RevealXY")));
         TestTrue(TEXT("Editor Reveal Surface consumes packed source coverage"),
-                 RevealSurfaceComposite->Code.Contains(TEXT("RevealSample.a")));
-        TestTrue(TEXT("Reveal Surface exposes the composed normal output"),
-                 RevealSurfaceComposite->Code.Contains(TEXT("Normal = normalize")));
+                 RevealSurfaceNormal->Code.Contains(TEXT("RevealSample.a")));
+        TestTrue(TEXT("Reveal Surface returns the composed normal"),
+                 RevealSurfaceNormal->Code.Contains(TEXT("return normalize")));
         TestFalse(TEXT("Reveal Surface does not apply runtime metallic darkening"),
-                  RevealSurfaceComposite->Code.Contains(TEXT("MetallicDarkening")));
-        TestTrue(TEXT("Reveal Surface preserves the Stage 3 corrected Base Color"),
-                 RevealSurfaceComposite->Code.Contains(TEXT("return BaseColor")));
+                  RevealSurfaceNormal->Code.Contains(TEXT("MetallicDarkening")));
+        bool bConsumesBaseColor = false;
+        for (const FCustomInput& Input : RevealSurfaceNormal->Inputs)
+        {
+            bConsumesBaseColor |= Input.InputName == TEXT("BaseColor");
+        }
+        TestFalse(TEXT("Reveal Normal never consumes source Base Color"), bConsumesBaseColor);
     }
+
+    const UMaterialExpressionLinearInterpolate* ColorCompose = Cast<UMaterialExpressionLinearInterpolate>(
+        UMaterialEditingLibrary::GetMaterialPropertyInputNode(Material, MP_BaseColor));
+    TestNotNull(TEXT("Base Color is composed through an isolated Lerp"), ColorCompose);
 
     TestEqual(TEXT("The material hover target enum has a stable disabled value"),
               static_cast<uint8>(EDWCTransparencyMaterialHoverTarget::None), static_cast<uint8>(0));
     TestEqual(TEXT("The material hover operation enum has a stable smooth value"),
               static_cast<uint8>(EDWCTransparencyMaterialHoverOperation::Smooth), static_cast<uint8>(3));
-    TestTrue(TEXT("The feature schema invalidates graphs built before Reveal Normal preview controls"),
-             FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 9);
+    TestTrue(TEXT("The feature schema invalidates graphs built before separated Reveal preview paths"),
+             FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 10);
     return true;
 }
 

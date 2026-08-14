@@ -2,10 +2,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WetClothing/Foundation/Async/DWCEditorAsyncOperationTypes.h"
+#include "WetClothing/Foundation/Operations/DWCEditorOperationPhaseTypes.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
 
 class UWetClothingAsset;
 class FDWCEditorCancellationToken;
+class FDWCEditorCacheStore;
+class FDWCEditorResourceGovernor;
+class FDWCTransparencyStage2PhaseOperation;
 struct FDWCTransparencyBlueprintHierarchy;
 struct FWetClothingTransparencyLayerData;
 struct FWetClothingTransparencyTargetSurface;
@@ -34,6 +39,19 @@ struct FDWCTransparencyGenerationProgress
 using FDWCTransparencyGenerationProgressCallback =
     TFunction<void(const FDWCTransparencyGenerationProgress&)>;
 
+struct FDWCTransparencyStage2ExecutionOptions
+{
+    const FDWCEditorCancellationToken* CancellationToken = nullptr;
+    const FDWCTransparencyBlueprintHierarchy* BlueprintHierarchy = nullptr;
+    const FDWCTransparencyGenerationProgressCallback* ProgressCallback = nullptr;
+    TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
+    TSharedPtr<FDWCEditorCacheStore> CacheStore;
+    FDWCEditorAsyncOperationIdentity ResourceOwner;
+    /** A surrounding worker/build operation already owns the live buffers. */
+    bool bResourcesOwnedByCaller = false;
+    FDWCEditorOperationPhaseGraphSnapshot* OutPhaseGraphSnapshot = nullptr;
+};
+
 /** Game-thread capture for same-mesh projection. Worker code only reads copied geometry and texture pixels. */
 class FDWCTransparencyAutoMapSnapshot
 {
@@ -49,8 +67,6 @@ class FDWCTransparencyAutoMapSnapshot
     FDWCTransparencyAutoMapSnapshot& operator=(const FDWCTransparencyAutoMapSnapshot&) = delete;
 
     bool IsValid() const;
-    int32 GetMaterialSlotIndex() const;
-    FGuid GetLayerGuid() const;
     uint64 GetEstimatedBytes() const;
 
   private:
@@ -79,23 +95,6 @@ class FDWCTransparencyAutoMapGenerator
         FDWCTransparencySourcePayload& OutResult,
         FString& OutErrorMessage);
 
-    static bool BuildSameMeshSnapshot(
-        UWetClothingAsset& WetClothingAsset,
-        const FWetClothingTransparencyLayerData& Layer,
-        FDWCTransparencyAutoMapSnapshot& OutSnapshot,
-        FString& OutErrorMessage);
-
-    /** Dispatches Type 1/2/3 ray-projected sources into the common snapshot contract. */
-    static bool BuildProjectionSnapshot(
-        UWetClothingAsset& WetClothingAsset,
-        const FWetClothingTransparencyLayerData& Layer,
-        FDWCTransparencyAutoMapSnapshot& OutSnapshot,
-        FString& OutErrorMessage);
-
-    static FDWCTransparencyAutoMapComputedResult ComputeSameMeshSnapshot(
-        FDWCTransparencyAutoMapSnapshot& Snapshot,
-        const FDWCEditorCancellationToken* CancellationToken = nullptr);
-
     static bool BuildTargetSurfaceBuffers(
         const UWetClothingAsset& WetClothingAsset,
         const FWetClothingTransparencyTargetSurface& TargetSurface,
@@ -105,7 +104,8 @@ class FDWCTransparencyAutoMapGenerator
         TArray<uint16>& OutIslandIDBuffer,
         int32* OutOuterSampleCount,
         int32* OutOverlappedPixelCount,
-        FString& OutErrorMessage);
+        FString& OutErrorMessage,
+        const TSharedPtr<FDWCEditorCacheStore>& CacheStore = nullptr);
 
     static bool GenerateSameMesh(
         UWetClothingAsset& WetClothingAsset,
@@ -113,16 +113,15 @@ class FDWCTransparencyAutoMapGenerator
         FDWCTransparencySourcePayload& OutResult,
         FString& OutSummary,
         TArray<FString>& OutWarnings,
-        const FDWCEditorCancellationToken* CancellationToken = nullptr,
-        const FDWCTransparencyBlueprintHierarchy* BlueprintHierarchy = nullptr,
-        const FDWCTransparencyGenerationProgressCallback* ProgressCallback = nullptr);
+        const FDWCTransparencyStage2ExecutionOptions& Options = {});
 
     static bool GenerateBaseRevealColorMap(
         const UWetClothingAsset& WetClothingAsset,
         const FWetClothingTransparencyLayerData& Layer,
         FDWCTransparencySourcePayload& OutResult,
         FString& OutSummary,
-        TArray<FString>& OutWarnings);
+        TArray<FString>& OutWarnings,
+        const TSharedPtr<FDWCEditorCacheStore>& CacheStore = nullptr);
 
     /** Replays authored reveal-color strokes into a separate color layer. The
      *  auto-bake result remains an immutable base for preview workers. */
@@ -137,16 +136,18 @@ class FDWCTransparencyAutoMapGenerator
     static bool BuildProjectionSnapshotInternal(
         UWetClothingAsset& WetClothingAsset,
         const FWetClothingTransparencyLayerData& Layer,
-        bool bResolveMaterialSurfaces,
         FDWCTransparencyAutoMapSnapshot& OutSnapshot,
         FString& OutErrorMessage,
         const FDWCTransparencyBlueprintHierarchy* BlueprintHierarchy = nullptr,
         const FDWCEditorCancellationToken* CancellationToken = nullptr,
-        const FDWCTransparencyGenerationProgressCallback* ProgressCallback = nullptr);
+        const FDWCTransparencyGenerationProgressCallback* ProgressCallback = nullptr,
+        FDWCTransparencyStage2PhaseOperation* PhaseOperation = nullptr,
+        const TSharedPtr<FDWCEditorCacheStore>& CacheStore = nullptr);
 
     static FDWCTransparencyAutoMapComputedResult ComputeStreamingProjection(
         UWetClothingAsset& WetClothingAsset,
         FDWCTransparencyAutoMapSnapshot& Snapshot,
         const FDWCEditorCancellationToken* CancellationToken = nullptr,
-        const FDWCTransparencyGenerationProgressCallback* ProgressCallback = nullptr);
+        const FDWCTransparencyGenerationProgressCallback* ProgressCallback = nullptr,
+        FDWCTransparencyStage2PhaseOperation* PhaseOperation = nullptr);
 };

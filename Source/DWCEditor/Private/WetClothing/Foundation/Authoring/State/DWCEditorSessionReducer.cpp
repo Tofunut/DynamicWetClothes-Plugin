@@ -124,6 +124,10 @@ namespace
         {
             Effects |= EDWCEditorSessionEffect::RefreshDetails;
         }
+        if (EnumHasAnyFlags(Impact, EDWCEditorAuthoringImpact::PartSlotPresentation))
+        {
+            Effects |= EDWCEditorSessionEffect::RefreshPartSlotPresentation;
+        }
         return Effects;
     }
 }
@@ -152,6 +156,11 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     State.AuthoringRevision = Action.AuthoringRevision;
     switch (Action.Domain)
     {
+    case EDWCEditorAuthoringDomain::Part:
+        State.PartAuthoringRevision = Action.AuthoringRevision;
+        State.LastPartImpactMaterialSlotIndex = Action.MaterialSlotIndex;
+        State.LastPartImpactWetPartID = Action.WetPartID;
+        break;
     case EDWCEditorAuthoringDomain::Wrinkle:
         State.WrinkleAuthoringRevision = Action.AuthoringRevision;
         break;
@@ -159,8 +168,11 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
         State.TransparencyAuthoringRevision = Action.AuthoringRevision;
         break;
     default:
+        State.PartAuthoringRevision = Action.AuthoringRevision;
         State.WrinkleAuthoringRevision = Action.AuthoringRevision;
         State.TransparencyAuthoringRevision = Action.AuthoringRevision;
+        State.LastPartImpactMaterialSlotIndex = Action.MaterialSlotIndex;
+        State.LastPartImpactWetPartID = Action.WetPartID;
         break;
     }
     State.AuthoringIndex = Action.Index;

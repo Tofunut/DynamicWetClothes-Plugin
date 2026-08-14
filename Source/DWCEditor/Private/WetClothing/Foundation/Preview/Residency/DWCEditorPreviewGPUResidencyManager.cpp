@@ -24,7 +24,7 @@ namespace
         static const EDWCEditorTexturePurpose TransparencyPurposes[] = {
             EDWCEditorTexturePurpose::TransparencyVisualization,
             EDWCEditorTexturePurpose::TransparencyHoverBaseline,
-            EDWCEditorTexturePurpose::TransparencyHoverIslandMask};
+            EDWCEditorTexturePurpose::TransparencyHoverEdgeFeather};
 
         switch (Domain)
         {
@@ -199,7 +199,7 @@ EDWCEditorPreviewGPUDomain FDWCEditorPreviewGPUResidencyManager::GetDomainForPur
         return EDWCEditorPreviewGPUDomain::Wrinkle;
     case EDWCEditorTexturePurpose::TransparencyVisualization:
     case EDWCEditorTexturePurpose::TransparencyHoverBaseline:
-    case EDWCEditorTexturePurpose::TransparencyHoverIslandMask:
+    case EDWCEditorTexturePurpose::TransparencyHoverEdgeFeather:
         return EDWCEditorPreviewGPUDomain::Transparency;
     default:
         return EDWCEditorPreviewGPUDomain::None;

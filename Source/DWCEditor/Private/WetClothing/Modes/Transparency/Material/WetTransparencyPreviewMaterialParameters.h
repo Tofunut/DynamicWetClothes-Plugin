@@ -144,6 +144,24 @@ namespace DWCTransparencyPreviewMaterialParameters
         return Name;
     }
 
+    inline const FName& HoverIslandIDMap()
+    {
+        static const FName Name(TEXT("DWC_TransparencyHoverIslandIDMap"));
+        return Name;
+    }
+
+    inline const FName& UseHoverIslandIDMap()
+    {
+        static const FName Name(TEXT("DWC_UseTransparencyHoverIslandIDMap"));
+        return Name;
+    }
+
+    inline const FName& HoverIslandID()
+    {
+        static const FName Name(TEXT("DWC_TransparencyHoverIslandID"));
+        return Name;
+    }
+
     inline const FName& HoverEdgeFeatherMap()
     {
         static const FName Name(TEXT("DWC_TransparencyHoverEdgeFeatherMap"));
@@ -154,6 +172,13 @@ namespace DWCTransparencyPreviewMaterialParameters
     {
         static const FName Name(TEXT("DWC_UseTransparencyHoverEdgeFeatherMap"));
         return Name;
+    }
+
+    inline float EncodeHoverIslandID(const int32 IslandID)
+    {
+        return IslandID >= 0 && IslandID < MAX_uint16
+            ? static_cast<float>(IslandID) / static_cast<float>(MAX_uint16)
+            : -1.0f;
     }
 } // namespace DWCTransparencyPreviewMaterialParameters
 

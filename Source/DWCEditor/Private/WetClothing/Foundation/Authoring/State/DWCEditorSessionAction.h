@@ -16,6 +16,8 @@ struct FDWCReconcileAuthoringAction
     EDWCEditorAuthoringDomain Domain = EDWCEditorAuthoringDomain::None;
     FDWCEditorAuthoringIndex Index;
     EDWCEditorAuthoringImpact Impact = EDWCEditorAuthoringImpact::None;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    int32 WetPartID = INDEX_NONE;
 };
 
 struct FDWCSetWrinkleBrushAction

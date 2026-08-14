@@ -75,6 +75,7 @@ class FDWCEditorPreviewSession final
     void PreparePreviewMaterials(TConstArrayView<int32> MaterialSlotIndices);
     /** Polls shader compilation and promotes completed slots without blocking. */
     void TickPendingMaterialCompilations();
+    bool HasPendingMaterialCompilations() const { return PendingMaterialBuildCount > 0; }
     FDWCEditorPreviewSessionMaterialResult GetOrCreatePreviewMaterial(int32 MaterialSlotIndex);
     void ForEachActiveBuiltMID(TFunctionRef<void(int32, UMaterialInstanceDynamic&)> Visitor) const;
 
@@ -108,6 +109,8 @@ class FDWCEditorPreviewSession final
     void HandleObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
     bool IsSourceOrBaseMaterial(const UObject* Object, UMaterialInterface* SourceMaterial) const;
     uint64 CalculateSessionContainerBytes() const;
+    void SetMaterialBuildPending(FDWCEditorPreviewSessionSlot& Slot, bool bPending);
+    void RebuildPendingMaterialBuildCount();
 
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TWeakObjectPtr<UWorld> PreviewWorld;
@@ -129,6 +132,7 @@ class FDWCEditorPreviewSession final
     EDWCEditorPreviewSuspendReason LastSuspendReason = EDWCEditorPreviewSuspendReason::ModeSwitch;
     uint64 LifecycleGeneration = 1;
     bool bRenderResourcesDirty = false;
+    int32 PendingMaterialBuildCount = 0;
     uint64 SlotRefreshCount = 0;
     uint64 SlotStateChangeCount = 0;
     uint64 MaterialRequestCount = 0;

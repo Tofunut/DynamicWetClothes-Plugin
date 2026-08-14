@@ -209,6 +209,9 @@ class FDWCEditorCacheStore final
         const UObject* Owner,
         FName Namespace,
         int32 MaterialSlotIndex = INDEX_NONE);
+    void InvalidateResourceIdentity(
+        const void* ResourceIdentity,
+        FName Namespace = NAME_None);
     void InvalidateNamespace(FName Namespace);
     void Reset();
     void TrimToBudget();

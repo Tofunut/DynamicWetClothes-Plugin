@@ -25,7 +25,7 @@ struct FDWCTransparencyBlueprintHierarchySnapshot
     FGuid LayerGuid;
     FSoftObjectPath BlueprintClassPath;
     TObjectPtr<UClass> LoadedClass = nullptr;
-    FDWCTransparencyBlueprintHierarchy Hierarchy;
+    FDWCTransparencyBlueprintHierarchyMetadata Hierarchy;
     FString Error;
     uint64 Revision = 0;
 
@@ -57,9 +57,9 @@ struct FDWCTransparencyType2BindingReconcileResult
 };
 
 /**
- * Panel-session owner for the Type 2 Blueprint hierarchy. Asset loading is
- * explicit and generation-scoped; ordinary Slate/model refreshes only consume
- * the latest immutable snapshot.
+ * Panel-session owner for the Type 2 Blueprint hierarchy. A class load reads
+ * default component metadata without spawning an actor or snapshotting
+ * materials. Full projection objects are created only by an explicit Generate.
  */
 class FDWCTransparencyBlueprintHierarchySession final : public FGCObject,
     public TSharedFromThis<FDWCTransparencyBlueprintHierarchySession>

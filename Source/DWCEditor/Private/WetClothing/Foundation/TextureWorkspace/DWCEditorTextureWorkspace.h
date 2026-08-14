@@ -140,6 +140,8 @@ class FDWCEditorTextureWorkspace final : public FGCObject
     void Invalidate(const FDWCEditorTextureKey& Key);
     void InvalidateOwner(const UObject* Owner);
     void Reset();
+    /** Final editor shutdown boundary. Normal mode changes must remain non-blocking. */
+    void Shutdown();
     void TrimToBudget();
     uint64 GetReclaimableCPUBytes() const;
     uint64 GetReclaimableCPUBytesForPurposes(
@@ -206,6 +208,7 @@ class FDWCEditorTextureWorkspace final : public FGCObject
     void RetireEntry(const FDWCEditorTextureKey& Key);
     void RetireEntry(const FDWCEditorTextureHandle& Entry);
     bool BeginGPUResourceRetire(const FDWCEditorTextureHandle& Entry);
+    bool TryIssueGPUResourceRelease(const FDWCEditorTextureHandle& Entry);
     void ReleaseEntryCPUStorage(const FDWCEditorTextureHandle& Entry);
     void RemoveCompletedRetiredEntries();
     void ReleaseTextureLease(const FDWCEditorTextureHandle& Entry, uint64 LeaseId);
@@ -248,4 +251,5 @@ class FDWCEditorTextureWorkspace final : public FGCObject
     uint64 RegionCommitDescriptorMismatchCount = 0;
     uint64 RegionCommitEntryMissingCount = 0;
     uint64 RegionCommitWorkspaceRejectedCount = 0;
+    bool bShuttingDown = false;
 };

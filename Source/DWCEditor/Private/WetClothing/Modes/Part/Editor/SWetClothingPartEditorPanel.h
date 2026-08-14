@@ -10,6 +10,8 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Modes/Part/Partition/WetPartAutoPartitionTypes.h"
+#include "WetClothing/Modes/Part/Presentation/DWCPartPresentationModel.h"
+#include "WetClothing/Foundation/Authoring/State/DWCEditorSessionState.h"
 #include "WetClothing/Modes/Part/Viewport/SDWCPartViewport.h"
 #include "WetClothing/WCAEditor/UI/UVView/SWCAUVView.h"
 #include "Widgets/Input/SComboBox.h"
@@ -20,6 +22,10 @@
 class FAssetThumbnail;
 class FAssetThumbnailPool;
 class FDWCEditorCacheStore;
+class FDWCEditorPreviewResourceContext;
+class FDWCEditorAuthoringDocument;
+class FDWCEditorSessionStore;
+class FDWCPartAuthoringController;
 class FDWCEditorRenderUploadQueue;
 class FDWCEditorResourceGovernor;
 class FDWCEditorTextureWorkspace;
@@ -32,6 +38,7 @@ class UTexture;
 class UTexture2D;
 struct FSlateBrush;
 struct FDWCDataUVBuildResult;
+class FDWCDataUVBuildSelection;
 enum class EDWCEditorPreviewSuspendReason : uint8;
 
 class SWetClothingPartEditorPanel : public SCompoundWidget
@@ -39,9 +46,10 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
   public:
     SLATE_BEGIN_ARGS(SWetClothingPartEditorPanel) {}
     SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorAuthoringDocument>, AuthoringDocument)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorSessionStore>, SessionStore)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorCacheStore>, CacheStore)
-    SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
-    SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewResourceContext>, PreviewResources)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorResourceGovernor>, ResourceGovernor)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorWorkerJobScheduler>, WorkerJobScheduler)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
@@ -62,7 +70,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     using FUVIslandItemPtr = TSharedPtr<FWetClothingAssetUVIsland>;
     using FUVSelectionToolItemPtr = TSharedPtr<FWCAUVSelectionToolItem>;
     using FAutoPartitionColorModeItemPtr = TSharedPtr<EWetPartAutoPartitionColorMode>;
-    using FWetPartEntryPtr = TSharedPtr<FWetClothingWetPartEntry>;
+    using FWetPartEntryPtr = FDWCPartPresentationItemPtr;
 
     void RefreshMaterialSlotItems();
     void RefreshMaterialTextures(bool bRefreshUVView = true);
@@ -72,31 +80,21 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void RefreshUVView();
     void RefreshPreviewIslandHighlight();
     void RefreshWetPartList(bool bRefreshUVView = true);
+    bool RebuildWetPartPresentationSnapshot();
     void RefreshPreviewWetPartOverlay();
     void RefreshIslandSelectionViews();
     void RefreshWetPartAssignmentViews();
-    void RefreshWetPartWidgets();
+    void RebuildAllMaterialSlotPresentation();
+    bool RebuildMaterialSlotPresentation(int32 MaterialSlotIndex);
+    const FDWCPartSlotPresentationItem* FindMaterialSlotPresentation(int32 MaterialSlotIndex) const;
 
-    void                            EnsureDefaultWetPartForSelectedScope();
     int32                           GetOriginalUVChannelIndex() const;
     bool                            HasValidOriginalUVChannel() const;
-    int32                           FindNextWetPartForSelectedScope() const;
-    FWetClothingWetPartEntry*       FindMutableWetPartEntry(int32 WetPartID) const;
     const FWetClothingWetPartEntry* FindWetPartEntry(int32 WetPartID) const;
-    const FWetClothingWetPartEntry* FindWetPartEntryForUVIsland(int32 UVIslandID) const;
-    const FWetClothingWetPartEntry* FindEffectiveWetPartEntryForUVIsland(int32 UVIslandID) const;
     FWetPartEntryPtr                FindWetPartItemByID(int32 WetPartID) const;
     FMaterialSlotItemPtr            FindMaterialSlotItem(int32 MaterialSlotIndex) const;
     TSet<int32>                     GetUVIslandIDsForWetPart(int32 WetPartID) const;
     int32                           GetEffectiveWetPartForUVIsland(int32 UVIslandID) const;
-    FLinearColor                    GetDefaultWetPartColor(int32 WetPartID) const;
-    FString                         GetDefaultWetPartName(int32 WetPartID) const;
-    FString                         GetWetPartDisplayName(const FWetClothingWetPartEntry& Entry) const;
-    FString                         GetAssignedProfileLabel(const FWetClothingWetPartEntry& Entry) const;
-    TMap<int32, int32>              BuildUVIslandWetPartIDMap() const;
-    TMap<int32, FLinearColor>       BuildUVIslandColorMap() const;
-    TMap<int32, FLinearColor>       BuildPreviewUVIslandColorMap() const;
-    TSet<int32>                     BuildHiddenUVIslandIDSet() const;
 
     void ApplyIslandSelection(const TArray<int32>& HitUVIslandIDs, bool bAppendSelection);
     void SetSelectedUVIslandIDs(const TSet<int32>& InSelectedUVIslandIDs, int32 InPrimarySelectedUVIslandID, bool bSyncListSelection = true);
@@ -108,7 +106,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void                      HandleMaterialSlotSelectionChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type);
     void                      HandleMaterialSlotDoubleClicked(FMaterialSlotItemPtr Item);
     FReply                    HandleWettableMaterialSlotClicked(int32 MaterialSlotIndex);
-    void                      MarkSelectedMaterialSlotWettable(bool bInvalidateBake = true);
     TSharedRef<SWidget>       GenerateTextureComboItem(FTextureItemPtr Item);
     void                      HandleTextureSelectionChanged(FTextureItemPtr Item, ESelectInfo::Type SelectInfo);
     TSharedRef<SWidget>       BuildTextureComboContent(FTextureItemPtr Item, float ThumbnailSize, bool bCompactLayout);
@@ -156,8 +153,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FSlateColor           GetMaterialSlotRowBackgroundColor(int32 MaterialSlotIndex) const;
     FSlateColor           GetMaterialSlotRowAccentColor(int32 MaterialSlotIndex) const;
     bool                  IsMaterialSlotIncludedInDataUVLayout(int32 MaterialSlotIndex) const;
-    bool                  DoesMaterialSlotHaveDataUVWarnings(int32 MaterialSlotIndex) const;
-    bool                  HasCompleteDataUVDiagnosticRecords(int32 MaterialSlotIndex) const;
     bool                  IsMaterialSlotPartMapComplete(int32 MaterialSlotIndex) const;
     bool                  DoesMaterialSlotNeedPartMapAttention(int32 MaterialSlotIndex) const;
     FText                 GetMaterialSlotPartMapWarningText(int32 MaterialSlotIndex) const;
@@ -170,8 +165,12 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void                  HandleDataUVOperationCheckStateChanged(ECheckBoxState NewState, int32 MaterialSlotIndex);
     void                  HandleAllDataUVOperationCheckStateChanged(ECheckBoxState NewState);
     void                  SyncDataUVOperationSelection();
-    FDWCDataUVBuildResult GenerateDataUVForTargetSlots(
-        const TSet<int32>& TargetMaterialSlotIndices,
+    bool CaptureDataUVBuildSelection(
+        const TSet<int32>&        RequestedMaterialSlotIndices,
+        FDWCDataUVBuildSelection& OutSelection,
+        FString*                  OutErrorMessage = nullptr) const;
+    FDWCDataUVBuildResult GenerateDataUVForSelection(
+        const FDWCDataUVBuildSelection& Selection,
         const TSet<int32>* ConfirmedVisibleExclusionMaterialSlotIndices = nullptr,
         const TSet<int32>* SkippedMaterialSlotIndices = nullptr);
     void                                RestorePersistedDataUVFailureState();
@@ -270,9 +269,23 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     UTexture*                           ResolveTextureAddressTexture() const;
     void                                SaveSelectedTexture();
     void                                SaveTextureSelection(int32 MaterialSlotIndex, UTexture* Texture);
+    void                                HandleSessionStateChanged(
+        const FDWCEditorSessionState& State,
+        EDWCEditorSessionEffect Effects,
+        uint64 Revision);
+    EActiveTimerReturnType              FlushPendingAuthoringRefresh(double CurrentTime, float DeltaTime);
 
   private:
     TWeakObjectPtr<UWetClothingAsset>                 WetClothingAsset;
+    TSharedPtr<FDWCEditorAuthoringDocument>            AuthoringDocument;
+    TSharedPtr<FDWCEditorSessionStore>                 SessionStore;
+    TSharedPtr<FDWCPartAuthoringController>            AuthoringController;
+    EDWCEditorSessionEffect                            PendingAuthoringEffects = EDWCEditorSessionEffect::None;
+    TSet<int32>                                        PendingPartRefreshMaterialSlotIndices;
+    uint64                                             LastHandledPartAuthoringRevision = 0;
+    bool                                               bPendingGlobalPartRefresh = false;
+    bool                                               bPartRefreshDeferredWhileInactive = false;
+    bool                                               bAuthoringRefreshScheduled = false;
     TSharedPtr<FDWCEditorCacheStore>                   CacheStore;
     TSharedPtr<FDWCEditorTextureWorkspace>             TextureWorkspace;
     TSharedPtr<FDWCEditorRenderUploadQueue>            RenderUploadQueue;
@@ -285,6 +298,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSharedPtr<SDWCPartViewport>                      PreviewViewport;
     TSharedPtr<SDWCPartViewport>                      SurfaceWaterTilingPreviewViewport;
     TArray<FMaterialSlotItemPtr>                      MaterialSlotItems;
+    TMap<int32, FMaterialSlotItemPtr>                 MaterialSlotItemByIndex;
     TSharedPtr<FAssetThumbnailPool>                   MaterialThumbnailPool;
     TArray<TSharedPtr<FAssetThumbnail>>               MaterialSlotThumbnails;
     TSharedPtr<class SListView<FMaterialSlotItemPtr>> MaterialSlotListView;
@@ -312,6 +326,8 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FAutoPartitionColorModeItemPtr                    SelectedAutoPartitionColorModeItem;
     EWetPartAutoPartitionColorMode                    AutoPartitionColorMode = EWetPartAutoPartitionColorMode::DominantColor;
     FString                                           UVStatusMessage;
+    FDWCPartSlotPresentationSnapshot                  MaterialSlotPresentationSnapshot;
+    FDWCPartPresentationSnapshot                      WetPartPresentationSnapshot;
     TArray<FWetPartEntryPtr>                          CurrentWetPartItems;
     TSharedPtr<class SListView<FWetPartEntryPtr>>     WetPartListView;
     TSharedPtr<class SComboBox<FWetPartEntryPtr>>     AssignWetPartComboBox;

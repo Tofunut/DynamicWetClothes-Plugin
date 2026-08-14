@@ -1426,6 +1426,52 @@ bool FDWCEditorTextureWorkspaceGovernorResidencyLifetimeTest::RunTest(const FStr
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorTextureWorkspaceRenderUploadOwnershipTest,
+    "DWC.Editor.Foundation.TextureWorkspace.RenderUploadOwnership",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorTextureWorkspaceRenderUploadOwnershipTest::RunTest(const FString&)
+{
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>();
+    FDWCEditorTextureWorkspace Workspace(
+        UploadQueue,
+        1024ull * 1024ull,
+        1024ull * 1024ull);
+
+    UTexture2D* Owner = NewObject<UTexture2D>(GetTransientPackage());
+    const FDWCEditorTextureDescriptor Descriptor = MakeBGRA8Descriptor(FIntPoint(4, 4));
+    FDWCEditorTextureHandle Handle = Workspace.PublishBGRA8(
+        MakeTextureKey(Owner, EDWCEditorTexturePurpose::WrinkleHover, 41),
+        Descriptor,
+        MakeFlatNormalPixels(Descriptor));
+    TestTrue(TEXT("The render ownership fixture publishes a GPU resource"),
+        Handle.IsValid() && Handle->IsGPUResident());
+
+    FDWCEditorTextureLease Lease = Workspace.AcquireLease(Handle);
+    Handle->BeginRenderUpload();
+    Workspace.Discard(Lease);
+    Lease.Reset();
+    Workspace.ProcessRetiredGPUResources();
+    TestTrue(TEXT("Retirement waits while a render upload owns the entry"),
+        Workspace.HasRetiringGPUResources());
+    TestTrue(TEXT("The in-flight upload remains accounted on the entry"),
+        Handle->HasInFlightRenderUploads());
+
+    Handle->EndRenderUpload();
+    Workspace.ProcessRetiredGPUResources();
+    FlushRenderingCommands();
+    Workspace.ProcessRetiredGPUResources();
+    TestFalse(TEXT("Retirement completes after render ownership is released"),
+        Workspace.HasRetiringGPUResources());
+
+    Handle.Reset();
+    UploadQueue->Shutdown();
+    Workspace.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorVisibilityMaintenanceWakeupTest,
     "DWC.Editor.Lifecycle.Visibility.MaintenanceWakeup",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

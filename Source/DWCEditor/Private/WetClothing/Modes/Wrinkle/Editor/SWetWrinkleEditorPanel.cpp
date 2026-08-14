@@ -13,6 +13,7 @@
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringDocument.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionStore.h"
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
+#include "WetClothing/Foundation/Preview/DWCEditorPreviewResourceContext.h"
 #include "WetClothing/WCAEditor/UI/WCAReportDialogs.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorRenderUploadQueue.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
@@ -128,24 +129,14 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
     BakeCoordinator = InArgs._BakeCoordinator;
     SpatialQueryService = InArgs._SpatialQueryService;
     SurfacePatchProjectionCache = InArgs._SurfacePatchProjectionCache;
-    TextureWorkspace = InArgs._TextureWorkspace;
-    PreviewCommitCoordinator = InArgs._PreviewCommitCoordinator;
+    const TSharedPtr<FDWCEditorPreviewResourceContext> PreviewResources =
+        InArgs._PreviewResources;
+    checkf(PreviewResources.IsValid(), TEXT("Wrinkle editor requires WCA-owned preview resources."));
+    TextureWorkspace = PreviewResources->GetTextureWorkspace();
+    PreviewCommitCoordinator = PreviewResources->GetCommitCoordinator();
+    AssetResidency = PreviewResources->GetAssetResidency();
     PreviewModeLifetime = InArgs._PreviewModeLifetime;
-    RenderUploadQueue = InArgs._RenderUploadQueue;
-    if (!RenderUploadQueue.IsValid())
-    {
-        RenderUploadQueue = MakeShared<FDWCEditorRenderUploadQueue>();
-    }
-    if (!TextureWorkspace.IsValid())
-    {
-        TextureWorkspace = MakeShared<FDWCEditorTextureWorkspace>(RenderUploadQueue.ToSharedRef());
-    }
-    if (!PreviewCommitCoordinator.IsValid())
-    {
-        PreviewCommitCoordinator = MakeShared<FDWCEditorPreviewCommitCoordinator>(
-            TextureWorkspace.ToSharedRef(),
-            WorkerJobScheduler.IsValid() ? WorkerJobScheduler->GetSessionEpoch() : FGuid());
-    }
+    RenderUploadQueue = PreviewResources->GetUploadQueue();
     SessionStore->OnChanged().AddSP(this, &SWetWrinkleEditorPanel::HandleSessionStateChanged);
     DetailsView = InArgs._DetailsView;
     MaterialThumbnailPool = MakeShared<FAssetThumbnailPool>(32);
@@ -1428,6 +1419,8 @@ SWetWrinkleEditorPanel::~SWetWrinkleEditorPanel()
     }
     TransientEditedProceduralRidgeStroke.Reset();
     bRidgePropertyEditActive = false;
+    SelectedWrinkleTextureResidencyLease.Reset();
+    AssetResidency.Reset();
     if (GEditor != nullptr)
     {
         GEditor->UnregisterForUndo(this);
@@ -1631,7 +1624,9 @@ void SWetWrinkleEditorPanel::HandleSessionStateChanged(
 {
     TGuardValue<bool> Guard(bApplyingSessionState, true);
     const FDWCEditorWrinkleSessionState& WrinkleState = State.Wrinkle;
+    UTexture2D* SelectedNormalTexture = WrinkleState.Brush.WrinkleNormalTexture.Get();
     BrushSettings = WrinkleState.Brush;
+    SetSelectedWrinkleNormalTexture(SelectedNormalTexture);
     SizeCm = WrinkleState.BrushSizeCm;
     SizeUV = WrinkleState.BrushSizeUV;
     bShowBakedTransparency = WrinkleState.bShowBakedTransparency;
@@ -2940,9 +2935,28 @@ FString SWetWrinkleEditorPanel::GetWrinkleNormalTextureObjectPath() const
     return BrushSettings.WrinkleNormalTexture != nullptr ? BrushSettings.WrinkleNormalTexture->GetPathName() : FString();
 }
 
+void SWetWrinkleEditorPanel::SetSelectedWrinkleNormalTexture(UTexture2D* Texture)
+{
+    if (BrushSettings.WrinkleNormalTexture == Texture &&
+        (Texture == nullptr || SelectedWrinkleTextureResidencyLease.IsValid()))
+    {
+        return;
+    }
+
+    SelectedWrinkleTextureResidencyLease.Reset();
+    BrushSettings.WrinkleNormalTexture = Texture;
+    if (Texture != nullptr && AssetResidency.IsValid())
+    {
+        SelectedWrinkleTextureResidencyLease = AssetResidency->Acquire(
+            Texture,
+            EDWCEditorAssetResidencyDomain::Wrinkle,
+            TEXT("Selected wrinkle normal"));
+    }
+}
+
 void SWetWrinkleEditorPanel::HandleWrinkleNormalTextureChanged(const FAssetData& AssetData)
 {
-    BrushSettings.WrinkleNormalTexture = Cast<UTexture2D>(AssetData.GetAsset());
+    SetSelectedWrinkleNormalTexture(Cast<UTexture2D>(AssetData.GetAsset()));
     RefreshWrinkleNormalThumbnail();
     PushBrushPreviewSettingsToViewport();
     WrinklePalettePanel->RequestRefresh();
@@ -3150,7 +3164,7 @@ void SWetWrinkleEditorPanel::HandleCorrectedWrinkleTextureCreated(
         }
     }
 
-    BrushSettings.WrinkleNormalTexture = CorrectedTexture;
+    SetSelectedWrinkleNormalTexture(CorrectedTexture);
     UpsertWrinkleTexturePaletteItem(FAssetData(CorrectedTexture));
     RefreshWrinkleTexturePaletteView();
     RefreshWrinkleNormalThumbnail();

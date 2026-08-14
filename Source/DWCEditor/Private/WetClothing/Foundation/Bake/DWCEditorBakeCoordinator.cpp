@@ -753,7 +753,8 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
                     *Layer,
                     *SourcePayload,
                     GenerateSummary,
-                    GenerateWarnings))
+                    GenerateWarnings,
+                    CacheStore))
             {
                 Batch->Failures.Add(FString::Printf(
                     TEXT("Slot %d: %s"),
@@ -836,13 +837,19 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
                 TSharedPtr<FTransparencyAutoBakeWorkerResult, ESPMode::ThreadSafe> PreparedResult =
                     MakeShared<FTransparencyAutoBakeWorkerResult, ESPMode::ThreadSafe>();
                 FString GenerateSummary;
+                FDWCTransparencyStage2ExecutionOptions GenerationOptions;
+                GenerationOptions.CancellationToken = &Token.Get();
+                GenerationOptions.CacheStore = Self->CacheStore;
+                // The scheduler admission lease already covers this prepare
+                // job's snapshot, working set, and output payload.
+                GenerationOptions.bResourcesOwnedByCaller = true;
                 if (!FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
                         *CurrentAsset,
                         *CurrentLayer,
                         PreparedResult->Computed.SourcePayload,
                         GenerateSummary,
                         PreparedResult->Computed.Warnings,
-                        &Token.Get()))
+                        GenerationOptions))
                 {
                     PrepareError = MoveTemp(GenerateSummary);
                     return false;

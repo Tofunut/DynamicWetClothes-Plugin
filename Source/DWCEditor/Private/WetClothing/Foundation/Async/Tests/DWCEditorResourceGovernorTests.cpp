@@ -325,6 +325,13 @@ bool FDWCEditorResourceGovernorLeaseBundleTest::RunTest(const FString&)
     TestTrue(TEXT("A cross-pool bundle is admitted as one operation"), Bundle.IsValid());
     TestEqual(TEXT("The bundle owns one merged lease per pool"), Bundle.Num(), 2);
     TestEqual(TEXT("The bundle reports its complete ownership"), Bundle.GetReservedBytes(), 70ull);
+    FDWCEditorMemoryLease WorkerLease =
+        Bundle.TakeLease(EDWCEditorResourcePool::WorkerPrivateCPU);
+    TestTrue(TEXT("A pool lease can transfer out of the bundle"), WorkerLease.IsValid());
+    TestEqual(TEXT("Transferred ownership leaves the other pool in the bundle"), Bundle.Num(), 1);
+    TestEqual(TEXT("The remaining bundle reports only its retained pool"),
+        Bundle.GetReservedBytes(), 30ull);
+    WorkerLease.Reset();
     Bundle.Reset();
 
     FDWCEditorMemoryLease Blocker = Governor.TryAcquire(

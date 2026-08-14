@@ -8,11 +8,10 @@ class UMaterial;
 class UMaterialExpressionScalarParameter;
 class UMaterialExpressionTextureObjectParameter;
 
-/** Inputs for the editor-only packed Reveal Surface authoring preview. */
+/** Inputs for the editor-only packed Reveal Normal preview. */
 struct FDWCRevealSurfaceMaterialGraphRequest
 {
     UMaterial* Material = nullptr;
-    FDWCMaterialGraphPin BaseColor;
     FDWCMaterialGraphPin BaseNormal;
     FDWCMaterialGraphPin DataUV;
     FDWCMaterialGraphPin Visibility;
@@ -30,7 +29,6 @@ struct FDWCRevealSurfaceMaterialGraphResult
 {
     bool bSucceeded = false;
     FString FailureReason;
-    FDWCMaterialGraphPin BaseColor;
     FDWCMaterialGraphPin Normal;
     UMaterialExpressionTextureObjectParameter* SurfaceTextureParameter = nullptr;
     UMaterialExpressionScalarParameter* UseSurfaceParameter = nullptr;
@@ -38,7 +36,7 @@ struct FDWCRevealSurfaceMaterialGraphResult
     UMaterialExpressionScalarParameter* ShowParameter = nullptr;
 };
 
-/** Builds the editor-only packed Reveal Surface authoring composite. */
+/** Builds the editor-only packed Reveal Normal preview expression. */
 class FDWCRevealSurfaceMaterialGraph
 {
   public:

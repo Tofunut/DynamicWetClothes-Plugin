@@ -6,6 +6,7 @@
 #include "RenderingThread.h"
 #include "Engine/Texture2D.h"
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
+#include "WetClothing/Foundation/Preview/DWCEditorPreviewResourceContext.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorRenderUploadQueue.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
 
@@ -154,6 +155,37 @@ bool FDWCEditorPreviewCommitLifetimeTest::RunTest(const FString&)
     TestEqual(TEXT("Shutdown rejections are counted"), Diagnostics.ShutdownRejectedCount, 1ull);
 
     Lease.Reset();
+    Workspace->Reset();
+    FlushRenderingCommands();
+    Workspace->ProcessRetiredGPUResources();
+    UploadQueue->Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorPreviewResourceContextIdentityTest,
+    "DWC.Editor.Foundation.PreviewCommit.SessionResourceIdentity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorPreviewResourceContextIdentityTest::RunTest(const FString&)
+{
+    const TSharedRef<FDWCEditorRenderUploadQueue> UploadQueue =
+        MakeShared<FDWCEditorRenderUploadQueue>();
+    const TSharedRef<FDWCEditorTextureWorkspace> Workspace =
+        MakeShared<FDWCEditorTextureWorkspace>(UploadQueue);
+    const TSharedRef<FDWCEditorPreviewCommitCoordinator> Coordinator =
+        MakeShared<FDWCEditorPreviewCommitCoordinator>(Workspace, FGuid::NewGuid());
+    const TSharedRef<FDWCEditorPreviewResourceContext> Context =
+        MakeShared<FDWCEditorPreviewResourceContext>(UploadQueue, Workspace, Coordinator);
+
+    TestTrue(TEXT("The session context preserves the root upload queue identity."),
+        &Context->GetUploadQueue().Get() == &UploadQueue.Get());
+    TestTrue(TEXT("The session context preserves the root workspace identity."),
+        &Context->GetTextureWorkspace().Get() == &Workspace.Get());
+    TestTrue(TEXT("The session context preserves the root commit coordinator identity."),
+        &Context->GetCommitCoordinator().Get() == &Coordinator.Get());
+
+    Coordinator->Shutdown();
     Workspace->Reset();
     FlushRenderingCommands();
     Workspace->ProcessRetiredGPUResources();

@@ -109,11 +109,11 @@ bool FDWCTransparencyWorkflowStageResolutionTest::RunTest(const FString& Paramet
 #endif
     const DWCTransparencyWorkflow::FDWCTransparencyLayerWorkflowState IncompleteDiagnosticSource =
         DWCTransparencyWorkflow::ResolveLayerWorkflowState(true, &Layer, false);
-    TestTrue(TEXT("Missing diagnostic artifacts require a Stage 2 rebuild instead of default diagnostics."),
+    TestFalse(TEXT("Optional diagnostic artifacts do not invalidate the canonical Stage 2 source."),
         IncompleteDiagnosticSource.bRequiresSourceRegeneration);
-    TestEqual(TEXT("An incomplete diagnostic source returns to Stage 2."),
+    TestEqual(TEXT("A source missing only optional diagnostics remains available in Stage 3."),
         IncompleteDiagnosticSource.DefaultStage,
-        EDWCTransparencyEditorStage::MapGeneration);
+        EDWCTransparencyEditorStage::RevealEditing);
 
 #if WITH_EDITORONLY_DATA
     AddCurrentArtifact(Layer, EDWCTransparencyTempArtifactKind::HitDistance,
@@ -724,14 +724,14 @@ bool FDWCTransparencyBlueprintHierarchyReadinessTest::RunTest(const FString&)
     Snapshot.State = EDWCTransparencyBlueprintHierarchyState::Ready;
     const FName TargetComponentName(TEXT("TargetMesh"));
     const FName SourceComponentName(TEXT("InnerMesh"));
-    FDWCTransparencyBlueprintMeshComponent& Target =
+    FDWCTransparencyBlueprintMeshComponentMetadata& Target =
         Snapshot.Hierarchy.MeshComponents.AddDefaulted_GetRef();
     Target.ComponentName = TargetComponentName;
-    Target.SkeletalMesh = TargetMesh;
-    FDWCTransparencyBlueprintMeshComponent& Source =
+    Target.SkeletalMeshPath = FSoftObjectPath(TargetMesh);
+    FDWCTransparencyBlueprintMeshComponentMetadata& Source =
         Snapshot.Hierarchy.MeshComponents.AddDefaulted_GetRef();
     Source.ComponentName = SourceComponentName;
-    Source.SkeletalMesh = SourceMesh;
+    Source.SkeletalMeshPath = FSoftObjectPath(SourceMesh);
 
     Readiness = FDWCTransparencyBlueprintHierarchySession::EvaluateReadiness(
         TargetMesh, TargetMesh, Layer, Snapshot);
@@ -785,9 +785,9 @@ bool FDWCTransparencyBlueprintHierarchyReadinessTest::RunTest(const FString&)
     FDWCTransparencyBlueprintHierarchySnapshot MissingTargetSnapshot = Snapshot;
     MissingTargetSnapshot.LayerGuid = Layer.LayerGuid;
     MissingTargetSnapshot.Hierarchy.MeshComponents.RemoveAll(
-        [TargetMesh](const FDWCTransparencyBlueprintMeshComponent& Component)
+        [TargetMesh](const FDWCTransparencyBlueprintMeshComponentMetadata& Component)
         {
-            return Component.SkeletalMesh == TargetMesh;
+            return Component.SkeletalMeshPath == FSoftObjectPath(TargetMesh);
         });
     Readiness = FDWCTransparencyBlueprintHierarchySession::EvaluateReadiness(
         TargetMesh, TargetMesh, Layer, MissingTargetSnapshot);

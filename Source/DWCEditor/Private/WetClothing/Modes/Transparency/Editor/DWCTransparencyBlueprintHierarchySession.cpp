@@ -11,12 +11,12 @@
 
 namespace
 {
-    const FDWCTransparencyBlueprintMeshComponent* FindHierarchyComponent(
-        const FDWCTransparencyBlueprintHierarchy& Hierarchy,
+    const FDWCTransparencyBlueprintMeshComponentMetadata* FindHierarchyComponent(
+        const FDWCTransparencyBlueprintHierarchyMetadata& Hierarchy,
         const FName ComponentName)
     {
         return Hierarchy.MeshComponents.FindByPredicate(
-            [ComponentName](const FDWCTransparencyBlueprintMeshComponent& Candidate)
+            [ComponentName](const FDWCTransparencyBlueprintMeshComponentMetadata& Candidate)
             {
                 return Candidate.ComponentName == ComponentName;
             });
@@ -24,21 +24,21 @@ namespace
 
     bool DoesExpectedMeshMatch(
         const FWetClothingTransparencyBlueprintComponentBinding& Binding,
-        const FDWCTransparencyBlueprintMeshComponent& Component)
+        const FDWCTransparencyBlueprintMeshComponentMetadata& Component)
     {
         const FSoftObjectPath ExpectedPath = Binding.ExpectedSkeletalMesh.ToSoftObjectPath();
-        return ExpectedPath.IsNull() ||
-            (Component.SkeletalMesh != nullptr &&
-                FSoftObjectPath(Component.SkeletalMesh) == ExpectedPath);
+        return ExpectedPath.IsNull() || Component.SkeletalMeshPath == ExpectedPath;
     }
 
     bool IsTargetMesh(
-        const FDWCTransparencyBlueprintMeshComponent& Component,
+        const FDWCTransparencyBlueprintMeshComponentMetadata& Component,
         const USkeletalMesh* RuntimeMesh,
         const USkeletalMesh* SourceMesh)
     {
-        return Component.SkeletalMesh != nullptr &&
-            (Component.SkeletalMesh == RuntimeMesh || Component.SkeletalMesh == SourceMesh);
+        const FSoftObjectPath RuntimePath(RuntimeMesh);
+        const FSoftObjectPath SourcePath(SourceMesh);
+        return !Component.SkeletalMeshPath.IsNull() &&
+            (Component.SkeletalMeshPath == RuntimePath || Component.SkeletalMeshPath == SourcePath);
     }
 }
 
@@ -147,9 +147,9 @@ void FDWCTransparencyBlueprintHierarchySession::CompleteRequest(const uint64 Cap
     }
     Snapshot.LoadedClass = LoadedClass;
 
-    FDWCTransparencyBlueprintHierarchy Hierarchy;
+    FDWCTransparencyBlueprintHierarchyMetadata Hierarchy;
     FString Error;
-    if (!FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchy(
+    if (!FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchyMetadata(
             LoadedClass,
             Hierarchy,
             Error))
@@ -228,7 +228,7 @@ FDWCTransparencyType2Readiness FDWCTransparencyBlueprintHierarchySession::Evalua
 
     const FWetClothingTransparencyBlueprintSource& Config = Layer.BlueprintSource;
     int32 TargetCandidateCount = 0;
-    for (const FDWCTransparencyBlueprintMeshComponent& Component :
+    for (const FDWCTransparencyBlueprintMeshComponentMetadata& Component :
          HierarchySnapshot.Hierarchy.MeshComponents)
     {
         TargetCandidateCount += IsTargetMesh(Component, RuntimeMesh, SourceMesh) ? 1 : 0;
@@ -246,7 +246,7 @@ FDWCTransparencyType2Readiness FDWCTransparencyBlueprintHierarchySession::Evalua
         return Result;
     }
 
-    const FDWCTransparencyBlueprintMeshComponent* Target = FindHierarchyComponent(
+    const FDWCTransparencyBlueprintMeshComponentMetadata* Target = FindHierarchyComponent(
         HierarchySnapshot.Hierarchy,
         Config.TargetComponent.ComponentName);
     if (Target == nullptr)
@@ -299,7 +299,7 @@ FDWCTransparencyType2Readiness FDWCTransparencyBlueprintHierarchySession::Evalua
         }
         SeenComponents.Add(Source.ComponentName);
 
-        const FDWCTransparencyBlueprintMeshComponent* Component = FindHierarchyComponent(
+        const FDWCTransparencyBlueprintMeshComponentMetadata* Component = FindHierarchyComponent(
             HierarchySnapshot.Hierarchy,
             Source.ComponentName);
         if (Component == nullptr)
@@ -345,8 +345,8 @@ FDWCTransparencyBlueprintHierarchySession::ReconcileBindings(
         return Result;
     }
 
-    const FDWCTransparencyBlueprintHierarchy& Hierarchy = HierarchySnapshot.Hierarchy;
-    const FDWCTransparencyBlueprintMeshComponent* CurrentTarget =
+    const FDWCTransparencyBlueprintHierarchyMetadata& Hierarchy = HierarchySnapshot.Hierarchy;
+    const FDWCTransparencyBlueprintMeshComponentMetadata* CurrentTarget =
         FindHierarchyComponent(Hierarchy, InOutSource.TargetComponent.ComponentName);
     const bool bCurrentTargetValid = CurrentTarget != nullptr &&
         DoesExpectedMeshMatch(InOutSource.TargetComponent, *CurrentTarget) &&
@@ -354,8 +354,8 @@ FDWCTransparencyBlueprintHierarchySession::ReconcileBindings(
 
     if (!bCurrentTargetValid)
     {
-        TArray<const FDWCTransparencyBlueprintMeshComponent*> Candidates;
-        for (const FDWCTransparencyBlueprintMeshComponent& Component : Hierarchy.MeshComponents)
+        TArray<const FDWCTransparencyBlueprintMeshComponentMetadata*> Candidates;
+        for (const FDWCTransparencyBlueprintMeshComponentMetadata& Component : Hierarchy.MeshComponents)
         {
             if (IsTargetMesh(Component, RuntimeMesh, SourceMesh))
             {
@@ -365,9 +365,10 @@ FDWCTransparencyBlueprintHierarchySession::ReconcileBindings(
 
         if (Candidates.Num() == 1)
         {
-            const FDWCTransparencyBlueprintMeshComponent& Candidate = *Candidates[0];
+            const FDWCTransparencyBlueprintMeshComponentMetadata& Candidate = *Candidates[0];
             InOutSource.TargetComponent.ComponentName = Candidate.ComponentName;
-            InOutSource.TargetComponent.ExpectedSkeletalMesh = Candidate.SkeletalMesh;
+            InOutSource.TargetComponent.ExpectedSkeletalMesh =
+                TSoftObjectPtr<USkeletalMesh>(Candidate.SkeletalMeshPath);
             Result.bChanged = true;
             CurrentTarget = &Candidate;
         }
@@ -382,7 +383,8 @@ FDWCTransparencyBlueprintHierarchySession::ReconcileBindings(
     }
     else if (InOutSource.TargetComponent.ExpectedSkeletalMesh.IsNull())
     {
-        InOutSource.TargetComponent.ExpectedSkeletalMesh = CurrentTarget->SkeletalMesh;
+        InOutSource.TargetComponent.ExpectedSkeletalMesh =
+            TSoftObjectPtr<USkeletalMesh>(CurrentTarget->SkeletalMeshPath);
         Result.bChanged = true;
     }
 
@@ -400,10 +402,11 @@ FDWCTransparencyBlueprintHierarchySession::ReconcileBindings(
         {
             continue;
         }
-        if (const FDWCTransparencyBlueprintMeshComponent* Component =
+        if (const FDWCTransparencyBlueprintMeshComponentMetadata* Component =
                 FindHierarchyComponent(Hierarchy, Source.ComponentName))
         {
-            Source.ExpectedSkeletalMesh = Component->SkeletalMesh;
+            Source.ExpectedSkeletalMesh =
+                TSoftObjectPtr<USkeletalMesh>(Component->SkeletalMeshPath);
             Result.bChanged = true;
         }
     }
@@ -416,12 +419,4 @@ FDWCTransparencyBlueprintHierarchySession::ReconcileBindings(
 void FDWCTransparencyBlueprintHierarchySession::AddReferencedObjects(FReferenceCollector& Collector)
 {
     Collector.AddReferencedObject(Snapshot.LoadedClass);
-    for (FDWCTransparencyBlueprintMeshComponent& Component : Snapshot.Hierarchy.MeshComponents)
-    {
-        Collector.AddReferencedObject(Component.SkeletalMesh);
-        for (TObjectPtr<UMaterialInterface>& Material : Component.Materials)
-        {
-            Collector.AddReferencedObject(Material);
-        }
-    }
 }

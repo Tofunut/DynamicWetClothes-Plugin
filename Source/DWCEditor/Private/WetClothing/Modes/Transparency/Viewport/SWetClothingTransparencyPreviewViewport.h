@@ -39,7 +39,7 @@ class UTexture2D;
 class USkeletalMeshComponent;
 class UWetClothingAsset;
 struct FDWCTransparencySourcePayload;
-struct FDWCTransparencyBlueprintHierarchy;
+struct FDWCTransparencyBlueprintHierarchyMetadata;
 struct FDWCTransparencyBlueprintHierarchySnapshot;
 struct FDWCTransparencyAlphaComposeTileSnapshot;
 struct FDWCTransparencyRevealColorComposeTileSnapshot;
@@ -97,7 +97,6 @@ class SWetClothingTransparencyPreviewViewport
         const FDWCTransparencyBlueprintHierarchySnapshot& Snapshot);
     /** Adds/removes only the Type 2 source components whose hierarchy check state changed. */
     void SyncType2SelectedSourceComponents();
-    void SetExternalSourcePlacementSelection(const FGuid& SourceGuid);
     void SetPlacementSelection(const FDWCTransparencyPlacementSelection& Selection);
     void SetPlacementSelectionChangedDelegate(
         FDWCTransparencyPlacementSelectionChanged InDelegate);
@@ -160,9 +159,7 @@ class SWetClothingTransparencyPreviewViewport
         EDWCTransparencyUVAddressMode InAddressMode,
         EDWCTransparencyPaintTarget InPaintTarget,
         bool bInSurfacePaintingEnabled);
-    void ProcessInteractivePaintWork();
-    void FlushPendingPreviewTextureUpdates();
-    void TickPreviewMaterialCompilations();
+    void ProcessPendingViewportWork();
 
     virtual bool HitTestSurface(const FRay& WorldRay, double& OutHitDepth) const override;
     virtual bool CanBeginSurfaceInteraction(const FRay& WorldRay, double& OutHitDepth) override;
@@ -202,6 +199,9 @@ class SWetClothingTransparencyPreviewViewport
     FDWCEditorPreviewLayer BuildTransparencyPreviewLayer();
     bool RebuildTransparencyPreviewTexture();
     void RetryPreviewTextureRebuildIfNeeded();
+    void ProcessInteractivePaintWork();
+    void FlushPendingPreviewTextureUpdates();
+    void TickPreviewMaterialCompilations();
     UTexture2D* GetTransparencyPreviewTexture() const;
     UTexture2D* GetWrinkleCoverageTexture() const;
     bool CanUseMaterialDrivenPreviewPresentation() const;
@@ -218,10 +218,12 @@ class SWetClothingTransparencyPreviewViewport
     void UpdateMaterialHoverLayer();
     void ClearMaterialHoverLayer();
     bool EnsureHoverBaselineTexture();
-    bool EnsureHoverIslandMaskTexture(int32 UVIslandID);
+    bool EnsureHoverIslandIDTexture();
+    bool EnsureHoverEdgeFeatherTexture();
     void ReleaseHoverAuxiliaryResources();
     UTexture2D* GetHoverBaselineTexture() const;
-    UTexture2D* GetHoverIslandMaskTexture() const;
+    UTexture2D* GetHoverIslandIDTexture() const;
+    UTexture2D* GetHoverEdgeFeatherTexture() const;
     void QueueRevealColorIncrementalSample(
         const FDWCTransparencyRevealColorStroke& Stroke,
         const FDWCTransparencyBrushSample& Sample);
@@ -283,7 +285,7 @@ class SWetClothingTransparencyPreviewViewport
     TMap<FName, TObjectPtr<USkeletalMeshComponent>> BlueprintSourcePreviewComponents;
     TMap<FGuid, TObjectPtr<USkeletalMeshComponent>> ExternalSourcePreviewComponents;
     TSharedPtr<FDWCTransparencyPlacementSession> PlacementSession;
-    TSharedPtr<const FDWCTransparencyBlueprintHierarchy> Type2BlueprintHierarchy;
+    TSharedPtr<const FDWCTransparencyBlueprintHierarchyMetadata> Type2BlueprintHierarchy;
     FGuid Type2BlueprintHierarchyLayerGuid;
     FSoftObjectPath Type2BlueprintClassPath;
     uint64 Type2BlueprintHierarchyRevision = 0;
@@ -294,7 +296,8 @@ class SWetClothingTransparencyPreviewViewport
     TUniquePtr<FDWCEditorPreviewOrchestrator> PreviewOrchestrator;
     FDWCEditorTextureLease TransparencyPreviewHandle;
     FDWCEditorTextureLease HoverBaselinePreviewHandle;
-    FDWCEditorTextureLease HoverIslandMaskPreviewHandle;
+    FDWCEditorTextureLease HoverEdgeFeatherPreviewHandle;
+    TObjectPtr<UTexture2D> HoverIslandIDTexture = nullptr;
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
     TSharedPtr<const FDWCTransparencySourcePayload> AutoBakePreviewResult;
     FDWCWrinkleSuppressionDependencySnapshot WrinkleSuppressionDependency;
@@ -329,7 +332,6 @@ class SWetClothingTransparencyPreviewViewport
     FDWCTransparencyPaintSettings PaintSettings;
     FDWCTransparencySurfaceHit CurrentSurfaceHit;
     int32 HoverLayerMaterialSlotIndex = INDEX_NONE;
-    int32 HoverIslandMaskID = INDEX_NONE;
     EWetClothingTransparencyPreviewMode PreviewMode = EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
     float WetnessPreviewPercent = 100.0f;
@@ -363,7 +365,8 @@ class SWetClothingTransparencyPreviewViewport
     uint64 PreviewTextureRebuildCount = 0;
     uint64 HoverParameterUpdateCount = 0;
     uint64 HoverBaselineBuildCount = 0;
-    uint64 HoverIslandMaskBuildCount = 0;
+    uint64 HoverIslandIDResolveCount = 0;
+    uint64 HoverEdgeFeatherBuildCount = 0;
     uint64 OuterEdgeFeatherRebuildCount = 0;
     uint64 InteractivePaintAuthoritativeReplayCount = 0;
     uint64 AlphaIncrementalCommitCount = 0;
@@ -374,6 +377,12 @@ class SWetClothingTransparencyPreviewViewport
     uint64 RevealColorIncrementalCommittedTileCount = 0;
     uint64 RevealColorIncrementalCommittedBytes = 0;
     uint64 RevealColorIncrementalFallbackCount = 0;
+    uint64 PendingWorkTickCount = 0;
+    uint64 IdleWorkTickSkipCount = 0;
+    uint64 MaterialCompilationPollCount = 0;
+    uint64 InteractivePaintWorkCount = 0;
+    uint64 PreviewRecoveryWorkCount = 0;
+    uint64 UploadFlushWorkCount = 0;
     // A visualization job owns an immutable content snapshot. This revision
     // prevents an older asynchronous result from replacing newer brush edits.
     uint64 PreviewContentRevision = 0;

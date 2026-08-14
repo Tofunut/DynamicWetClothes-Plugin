@@ -9,6 +9,7 @@
 #include "WetClothing/Foundation/Preview/Slots/DWCEditorPreviewSlotState.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionState.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobTypes.h"
+#include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyWorkingPayloadCache.h"
 #include "WetClothing/Modes/Transparency/Editor/DWCTransparencyPlacementSession.h"
 
 class IDetailsView;
@@ -23,8 +24,10 @@ class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorRenderUploadQueue;
 class FDWCEditorPreviewCommitCoordinator;
+class FDWCEditorPreviewResourceContext;
 class FDWCEditorPreviewModeLifetime;
 class FDWCEditorResourceGovernor;
+class FDWCEditorCacheStore;
 class FDWCEditorTextureWorkspace;
 class FDWCEditorWorkerJobScheduler;
 using FDWCEditorWorkerJobSchedulerPtr = TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>;
@@ -35,7 +38,7 @@ class UObject;
 enum class EDWCEditorPreviewSuspendReason : uint8;
 struct FDWCTransparencySourcePayload;
 struct FAssetData;
-struct FDWCTransparencyBlueprintMeshComponent;
+struct FDWCTransparencyBlueprintMeshComponentMetadata;
 namespace DWCTransparencyWorkflow
 {
 struct FDWCTransparencyTypeChangeImpact;
@@ -56,7 +59,8 @@ enum class EDWCTransparencyPanelRefreshFlags : uint8
     Model = 1 << 0,
     StageContent = 1 << 1,
     Viewport = 1 << 2,
-    Details = 1 << 3
+    Details = 1 << 3,
+    SourceModel = 1 << 4
 };
 ENUM_CLASS_FLAGS(EDWCTransparencyPanelRefreshFlags);
 
@@ -100,11 +104,10 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorBakeCoordinator>, BakeCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCWrinkleSuppressionCoverageService>, WrinkleSuppressionCoverageService)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSpatialQueryService>, SpatialQueryService)
-    SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
-    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewResourceContext>, PreviewResources)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewModeLifetime>, PreviewModeLifetime)
-    SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorResourceGovernor>, ResourceGovernor)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorCacheStore>, CacheStore)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
     SLATE_END_ARGS()
 
@@ -183,6 +186,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
         int32 MaterialSlotIndex,
         EDWCTransparencyEditorStage Stage);
     bool RefreshModelState();
+    void RefreshSourceModelState();
     void RefreshStageContent();
     void RefreshMapGenerationSettings();
     void RefreshRevealEditingContent();
@@ -198,9 +202,11 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void RefreshBlueprintSourcePriorityItems();
     void RefreshExternalSourcePriorityItems();
     bool IsBlueprintHierarchyCurrent() const;
-    bool IsBlueprintTargetCandidate(const FDWCTransparencyBlueprintMeshComponent& Component) const;
+    bool IsBlueprintTargetCandidate(
+        const FDWCTransparencyBlueprintMeshComponentMetadata& Component) const;
     bool HasBlueprintTargetCandidate() const;
-    int32 GetBlueprintHierarchyDepth(const FDWCTransparencyBlueprintMeshComponent& Component) const;
+    int32 GetBlueprintHierarchyDepth(
+        const FDWCTransparencyBlueprintMeshComponentMetadata& Component) const;
     FReply HandleRefreshBlueprintHierarchyClicked();
     void HandleBlueprintTargetComponentChanged(ECheckBoxState NewState, FName ComponentName);
     void HandleBlueprintSourceComponentChanged(ECheckBoxState NewState, FName ComponentName);
@@ -224,7 +230,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
         const TSharedPtr<FDWCTransparencySourcePayload>& Payload,
         FString& OutError) const;
     bool RestoreCanonicalWorkingMap(FString& OutError);
-    bool HasRestorableCanonicalSource() const;
     bool LoadBakedMapAsWorkingResult(
         const FWetClothingBakedTransparencyMap& BakedMap,
         const FWetClothingTransparencyLayerData& Layer,
@@ -325,12 +330,14 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     int32 GetTransparencyDataUVChannel() const;
     bool HasUsableTransparencyDataUV() const;
     TSharedPtr<int32> FindUVChannelItem(int32 UVChannelIndex) const;
-    bool EditSelectedLayer(const FText& TransactionText, TFunctionRef<void(FWetClothingTransparencyLayerData&)> Edit, bool bRebuildLayout);
+    bool EditSelectedLayer(
+        const FText& TransactionText,
+        TFunctionRef<bool(FWetClothingTransparencyLayerData&)> Edit,
+        EDWCTransparencyPanelRefreshFlags RefreshFlags);
     bool EditSelectedLayerFinal(
         const FText& TransactionText,
         const FGuid& ElementGuid,
         TFunctionRef<bool(FWetClothingTransparencyLayerData&)> Edit);
-    void EditGlobalSettings(const FText& TransactionText, TFunctionRef<void(FWetClothingTransparencyData&)> Edit);
     void EditFinalBakeSettings(
         const FText& TransactionText,
         TFunctionRef<bool(FWetClothingTransparencyData&)> Edit,
@@ -348,7 +355,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedRef<ITableRow> GenerateLayerRow(FLayerItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     TSharedRef<ITableRow> GenerateInnerSourceRow(TSharedPtr<int32> Item, const TSharedRef<STableViewBase>& OwnerTable);
     TSharedRef<ITableRow> GenerateBlueprintHierarchyRow(
-        TSharedPtr<FDWCTransparencyBlueprintMeshComponent> Item,
+        TSharedPtr<FDWCTransparencyBlueprintMeshComponentMetadata> Item,
         const TSharedRef<STableViewBase>& OwnerTable);
     TSharedRef<ITableRow> GenerateBlueprintSourcePriorityRow(
         TSharedPtr<int32> Item,
@@ -462,6 +469,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<FDWCEditorPreviewModeLifetime> PreviewModeLifetime;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
+    TSharedPtr<FDWCEditorCacheStore> CacheStore;
     TSharedPtr<IDetailsView> DetailsView;
     TSharedPtr<class SBox> ControlPanelContainer;
     TSharedPtr<class SWidgetSwitcher> StageContentSwitcher;
@@ -491,9 +499,10 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<class SListView<FLayerItemPtr>> LayerListView;
     TArray<TSharedPtr<int32>> InnerSourceSlotItems;
     TSharedPtr<class SListView<TSharedPtr<int32>>> InnerSourceListView;
-    TArray<TSharedPtr<FDWCTransparencyBlueprintMeshComponent>> BlueprintHierarchyItems;
+    TArray<TSharedPtr<FDWCTransparencyBlueprintMeshComponentMetadata>> BlueprintHierarchyItems;
     uint64 BlueprintHierarchyItemsRevision = MAX_uint64;
-    TSharedPtr<class SListView<TSharedPtr<FDWCTransparencyBlueprintMeshComponent>>> BlueprintHierarchyListView;
+    TSharedPtr<class SListView<TSharedPtr<FDWCTransparencyBlueprintMeshComponentMetadata>>>
+        BlueprintHierarchyListView;
     TArray<TSharedPtr<int32>> BlueprintSourcePriorityItems;
     TSharedPtr<class SListView<TSharedPtr<int32>>> BlueprintSourcePriorityListView;
     TArray<TSharedPtr<int32>> ExternalSourcePriorityItems;
@@ -534,7 +543,8 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     bool bPreviewSuspended = false;
     EDWCTransparencyPanelRefreshFlags PendingRefreshFlags = EDWCTransparencyPanelRefreshFlags::None;
     TMap<FGuid, EDWCTransparencyEditorStage> StageByLayer;
-    TMap<FGuid, TSharedPtr<FDWCTransparencySourcePayload>> AutoBakeResults;
+    FDWCTransparencyWorkingPayloadCache AutoBakeResults;
+    mutable uint64 BakedBaselineRestoreSerial = 0;
     FDWCEditorWorkerJobTicket PendingRevealCommitTicket;
     uint64 RevealCommitEpoch = 1;
     bool bRevealCommitInFlight = false;

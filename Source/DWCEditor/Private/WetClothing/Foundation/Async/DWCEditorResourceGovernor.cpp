@@ -640,6 +640,21 @@ uint64 FDWCEditorMemoryLeaseSet::GetReservedBytes(const EDWCEditorResourcePool P
     return TotalBytes;
 }
 
+FDWCEditorMemoryLease FDWCEditorMemoryLeaseSet::TakeLease(
+    const EDWCEditorResourcePool Pool)
+{
+    for (int32 Index = 0; Index < Leases.Num(); ++Index)
+    {
+        if (Leases[Index].GetPool() == Pool)
+        {
+            FDWCEditorMemoryLease Result = MoveTemp(Leases[Index]);
+            Leases.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+            return Result;
+        }
+    }
+    return {};
+}
+
 FDWCEditorMemoryLease FDWCEditorResourceGovernor::TryAcquire(
     const FDWCEditorResourceReservationRequest& Request,
     FString* OutError)

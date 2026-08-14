@@ -39,6 +39,29 @@ struct FDWCTransparencyProjectionSource
     FName MaterialSlotName;
 };
 
+/**
+ * Lightweight Blueprint component description used by Type 2 UI and preview.
+ * It deliberately stores soft asset identities only; effective materials and
+ * render resources belong to the explicit projection build snapshot.
+ */
+struct FDWCTransparencyBlueprintMeshComponentMetadata
+{
+    FName ComponentName;
+    FName ParentComponentName;
+    FString DisplayPath;
+    int32 HierarchyDepth = 0;
+    FSoftObjectPath SkeletalMeshPath;
+    TArray<FSoftObjectPath> MaterialPaths;
+    FTransform BakeTransform = FTransform::Identity;
+};
+
+/** Immutable metadata-only hierarchy consumed by ordinary editor refreshes. */
+struct FDWCTransparencyBlueprintHierarchyMetadata
+{
+    TArray<FDWCTransparencyBlueprintMeshComponentMetadata> MeshComponents;
+    FString BuildSignature;
+};
+
 /** Immutable, game-thread snapshot of Blueprint Skeletal Mesh Components. */
 struct FDWCTransparencyBlueprintMeshComponent
 {
@@ -74,6 +97,11 @@ struct FDWCTransparencyProjectionSourceSet
 class FDWCTransparencyProjectionSourceProvider
 {
   public:
+    static bool BuildBlueprintHierarchyMetadata(
+        const TSubclassOf<AActor> BlueprintClass,
+        FDWCTransparencyBlueprintHierarchyMetadata& OutHierarchy,
+        FString& OutError);
+
     static bool BuildBlueprintHierarchy(
         const TSubclassOf<AActor> BlueprintClass,
         FDWCTransparencyBlueprintHierarchy& OutHierarchy,

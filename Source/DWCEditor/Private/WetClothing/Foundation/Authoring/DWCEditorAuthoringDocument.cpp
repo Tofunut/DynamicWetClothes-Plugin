@@ -3,6 +3,7 @@
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringDocument.h"
 
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetClothingAssetSetupData.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "ScopedTransaction.h"
 #include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
@@ -273,6 +274,11 @@ FDWCEditorAuthoringResult FDWCEditorAuthoringDocument::CommitInteractiveEdit(
     {
         Change.ElementGuid = InteractiveChange.ElementGuid;
     }
+    if (Change.WetPartID == INDEX_NONE)
+    {
+        Change.WetPartID = InteractiveChange.WetPartID;
+    }
+    Change.InvalidatedBakeOutputMask |= InteractiveChange.InvalidatedBakeOutputMask;
 
     ApplyCommittedImpact(*MutableAsset, Change);
     ResetInteractiveState();
@@ -353,6 +359,15 @@ bool FDWCEditorAuthoringDocument::ValidateMutationChange(
     {
         return Fail(TEXT("An authoring mutation must declare AssetDirty impact."));
     }
+    if ((Change.InvalidatedBakeOutputMask & ~DWCBakeOutput::All) != 0)
+    {
+        return Fail(TEXT("An authoring mutation declared an unknown bake output."));
+    }
+    if (Change.Domain != EDWCEditorAuthoringDomain::Part &&
+        Change.InvalidatedBakeOutputMask != 0)
+    {
+        return Fail(TEXT("Only Part authoring mutations may use the cross-output invalidation mask."));
+    }
 
     const bool bTouchesWrinkleBake =
         EnumHasAnyFlags(Change.Impact, EDWCEditorAuthoringImpact::WrinkleBake);
@@ -376,6 +391,28 @@ void FDWCEditorAuthoringDocument::ApplyCommittedImpact(
     UWetClothingAsset&               MutableAsset,
     const FDWCEditorAuthoringChange& Change) const
 {
+    const int32 RuntimeOutputMask =
+        Change.InvalidatedBakeOutputMask &
+        (DWCBakeOutput::CPURuntimeData | DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps);
+    if (DWCBakeOutput::Has(Change.InvalidatedBakeOutputMask, DWCBakeOutput::GeneratedDataUV))
+    {
+        MutableAsset.MarkGeneratedDataUVOutOfDate();
+    }
+    else if (RuntimeOutputMask != 0)
+    {
+        MutableAsset.MarkRuntimeBakeOutputsDirty(RuntimeOutputMask);
+    }
+
+    const int32 VisualOutputMask =
+        Change.InvalidatedBakeOutputMask &
+        (DWCBakeOutput::WrinkleMaps | DWCBakeOutput::TransparencyMaps | DWCBakeOutput::RenderProfileData);
+    if (VisualOutputMask != 0)
+    {
+        // Part semantics feed all visual outputs. Keep their state transition
+        // atomic so Validation cannot observe a mixture of old and new Part data.
+        MutableAsset.MarkVisualBakeOutOfDate();
+    }
+
     if (EnumHasAnyFlags(Change.Impact, EDWCEditorAuthoringImpact::WrinkleBake))
     {
         MutableAsset.MarkWrinkleBakeOutOfDate();
@@ -413,6 +450,10 @@ void FDWCEditorAuthoringDocument::ApplyCommittedImpact(
 
     if (EnumHasAnyFlags(Change.Impact, EDWCEditorAuthoringImpact::AssetDirty))
     {
+        if (Change.InvalidatedBakeOutputMask != 0)
+        {
+            MutableAsset.RefreshBakeState(false);
+        }
         MutableAsset.MarkPackageDirty();
     }
 }

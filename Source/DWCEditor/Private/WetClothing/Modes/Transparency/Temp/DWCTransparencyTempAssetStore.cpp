@@ -10,6 +10,7 @@
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyStageArtifactContract.h"
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeUtilities.h"
+#include "WetClothing/Modes/Transparency/Temp/DWCTransparencyTempAssetLifetimePolicy.h"
 
 namespace
 {
@@ -56,13 +57,13 @@ namespace
         const UWetClothingAsset& Asset,
         const FWetClothingTransparencyLayerData& Layer,
         const EDWCTransparencyTempArtifactKind Kind,
-        const FGuid& CommitGeneration)
+        const int32 GenerationSlot)
     {
         return FString::Printf(
-            TEXT("T_%s_L%s_G%s_%s"),
+            TEXT("T_%s_L%s_%s_%s"),
             *FDWCRevealBakeUtilities::SanitizeAssetToken(Asset.GetName()),
             *Layer.LayerGuid.ToString(EGuidFormats::Digits).Left(8),
-            *CommitGeneration.ToString(EGuidFormats::Digits).Left(8),
+            *FDWCTransparencyTempAssetLifetimePolicy::GetGenerationSlotToken(GenerationSlot),
             *FDWCTransparencyStageArtifactContract::GetAssetToken(Kind));
     }
 
@@ -75,24 +76,16 @@ namespace
         const FGuid& CommitGeneration)
     {
 #if WITH_EDITORONLY_DATA
-        FDWCTransparencyTempArtifactReference* Reference =
-            Layer.EditorStageCache.Artifacts.FindByPredicate(
-                [Kind](const FDWCTransparencyTempArtifactReference& Candidate)
-                {
-                    return Candidate.Kind == Kind;
-                });
-        if (Reference == nullptr)
-        {
-            Reference = &Layer.EditorStageCache.Artifacts.AddDefaulted_GetRef();
-            Reference->Kind = Kind;
-        }
-        Reference->Texture = Texture;
-        Reference->BuildSignature = Signature;
-        Reference->ContractVersion = FDWCTransparencyStageArtifactContract::ContractVersion;
-        Reference->CommitGeneration = CommitGeneration;
-        Reference->TextureSourceId = Texture != nullptr ? Texture->Source.GetId() : FGuid();
-        Reference->Resolution = Resolution;
-        Reference->bObsolete = false;
+        FDWCTransparencyTempArtifactReference Reference;
+        Reference.Kind = Kind;
+        Reference.Texture = Texture;
+        Reference.BuildSignature = Signature;
+        Reference.ContractVersion = FDWCTransparencyStageArtifactContract::ContractVersion;
+        Reference.CommitGeneration = CommitGeneration;
+        Reference.TextureSourceId = Texture != nullptr ? Texture->Source.GetId() : FGuid();
+        Reference.Resolution = Resolution;
+        Reference.bObsolete = false;
+        FDWCTransparencyTempAssetLifetimePolicy::PublishCurrentReference(Layer, Reference);
 #endif
     }
 }
@@ -299,6 +292,8 @@ bool FDWCTransparencyTempAssetStore::CommitSourceMaterialSurface(
     Reference->PlacementSignature = Identity.PlacementSignature;
     Reference->MaterialBakeSignature = Identity.Digest;
     Reference->bObsolete = false;
+    FDWCTransparencyTempAssetLifetimePolicy::PruneObsoleteMaterialSurfaceReferences(
+        Asset.Authored.TransparencyData);
     Asset.MarkPackageDirty();
 #endif
     OutBaseColorTexture = BaseColorTexture;
@@ -329,14 +324,18 @@ bool FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
         return false;
     }
 
-    // Each Stage 2 commit writes a new immutable artifact set. References are
-    // published only after every texture has been created and configured.
+    // Each Stage 2 commit writes the inactive stable artifact slot. References
+    // are published only after every texture has been created and configured.
     const FGuid CommitGeneration = FGuid::NewGuid();
+    const int32 GenerationSlot =
+        FDWCTransparencyTempAssetLifetimePolicy::SelectNextGenerationSlot(
+            Layer,
+            EDWCTransparencyTempArtifactKind::BaseRevealColor);
     TArray<FDWCEditorArtifactTextureRequest> Requests;
     TArray<EDWCTransparencyTempArtifactKind> ArtifactKinds;
     Requests.Reserve(7);
     ArtifactKinds.Reserve(7);
-    const auto AddRequest = [&Asset, &Layer, &Result, &CommitGeneration, &Requests, &ArtifactKinds](
+    const auto AddRequest = [&Asset, &Layer, &Result, GenerationSlot, &Requests, &ArtifactKinds](
         const EDWCTransparencyTempArtifactKind Kind,
         const ETextureSourceFormat Format,
         const void* Data,
@@ -346,7 +345,7 @@ bool FDWCTransparencyTempAssetStore::CommitSourceArtifacts(
     {
         Requests.Add(MakeTempTextureRequest(
             Asset,
-            BuildAssetName(Asset, Layer, Kind, CommitGeneration),
+            BuildAssetName(Asset, Layer, Kind, GenerationSlot),
             Result.Resolution,
             Format,
             Data,
@@ -481,10 +480,12 @@ bool FDWCTransparencyTempAssetStore::CommitRevealArtifact(
     const FGuid CommitGeneration = FGuid::NewGuid();
     const EDWCTransparencyTempArtifactKind Kind =
         EDWCTransparencyTempArtifactKind::CorrectedRevealColor;
+    const int32 GenerationSlot =
+        FDWCTransparencyTempAssetLifetimePolicy::SelectNextGenerationSlot(Layer, Kind);
     TArray<FDWCEditorArtifactTextureRequest> Requests;
     Requests.Add(MakeTempTextureRequest(
         Asset,
-        BuildAssetName(Asset, Layer, Kind, CommitGeneration),
+        BuildAssetName(Asset, Layer, Kind, GenerationSlot),
         Resolution,
         TSF_BGRA8,
         CorrectedRevealPixels.GetData(),

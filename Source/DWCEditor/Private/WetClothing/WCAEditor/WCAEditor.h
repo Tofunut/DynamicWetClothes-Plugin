@@ -55,7 +55,8 @@ class FWCAEditor : public FAssetEditorToolkit
     void                 RefreshValidationDialogContent(const TSharedRef<SWindow>& DialogWindow);
     FReply               HandleValidationRefreshClicked(TWeakPtr<SWindow> DialogWindow);
     FReply               HandleValidationResolveClicked(TWeakPtr<SWindow> DialogWindow);
-    void                 ExecuteValidationResolveExclusive(TWeakPtr<SWindow> DialogWindow);
+    void                 ExecuteValidationResolveExclusive();
+    void                 HandleValidationWindowClosed(const TSharedRef<SWindow>& Window);
     TSharedRef<SWidget>  BuildRuntimeBuildMenu();
     FWCAEditorCanonicalStateSnapshot BuildCanonicalStateSnapshot(bool bDeepValidation) const;
     FDWCEditorBuildStatusSnapshot BuildBuildStatusSnapshot(bool bDeepValidation = false) const;
@@ -105,6 +106,7 @@ class FWCAEditor : public FAssetEditorToolkit
     TSharedPtr<IDetailsView>                 DetailsView;
     TSharedPtr<SWCAEditorPanel> EditorPanel;
     TWeakPtr<SDockTab>                       MainDockTab;
+    TWeakPtr<SWindow>                        ValidationDialogWindow;
     TSharedPtr<FDWCEditorSlateHostVisibilityAdapter> HostVisibilityAdapter;
     TSharedPtr<FWorkspaceItem>               WorkspaceMenuCategory;
     FDelegateHandle                          ObjectPropertyChangedHandle;
@@ -112,4 +114,7 @@ class FWCAEditor : public FAssetEditorToolkit
     TSharedPtr<FExtender>                    ToolbarExtender;
     EWCAEditorMode                           CurrentMode = EWCAEditorMode::PartEdit;
     ECloseConfirmationState                  CloseConfirmationState = ECloseConfirmationState::Idle;
+    bool                                     bValidationResolveInProgress = false;
+    bool                                     bValidationResolveFailed = false;
+    FText                                    ValidationResolveStatus;
 };

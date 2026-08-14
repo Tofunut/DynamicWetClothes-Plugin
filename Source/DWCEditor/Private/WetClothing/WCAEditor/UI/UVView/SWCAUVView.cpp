@@ -226,10 +226,9 @@ void SWCAUVView::SetIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>&
         }
     }
 
-    // FWCAUVIslandViewCache returns the same shared island objects until the mesh /
-    // asset topology revision changes. If those identities and the texture-address
-    // source are unchanged, the copied triangles and canonical edge cache are still
-    // valid. Avoid rebuilding them on every tab/slot/UI refresh.
+    // The brokered topology lease returns stable shared island objects until its
+    // cache entry is invalidated. If those identities and the texture-address source
+    // are unchanged, the copied triangles and canonical edge cache remain valid.
     const UTexture* CachedAddressTexture = IslandGeometryAddressTexture.Get();
     if (bSameIslandSources &&
         CachedAddressTexture == CurrentAddressTexture &&

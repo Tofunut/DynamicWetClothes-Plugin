@@ -29,6 +29,7 @@ namespace
     {
         FDWCTransparencySourcePayload Result;
         Result.Resolution = Resolution;
+        Result.MaterialSlotIndex = 0;
         const int32 PixelCount = Resolution.X * Resolution.Y;
         Result.AutoAlphaBuffer.SetNumUninitialized(PixelCount);
         Result.InnerColorBuffer.SetNumUninitialized(PixelCount);
@@ -420,6 +421,15 @@ bool FDWCTransparencyMaterialHoverZeroUploadTest::RunTest(const FString&)
     FDWCEditorTextureWorkspace Workspace(UploadQueue);
     Workspace.ResetDiagnosticCounters();
     UploadQueue->ResetDiagnosticCounters();
+    UTexture2D* IslandIDMap = NewObject<UTexture2D>(GetTransientPackage());
+    TestNotNull(TEXT("The material-driven hover fixture owns one persistent island-ID map"), IslandIDMap);
+    TestEqual(
+        TEXT("Island zero preserves its exact normalized material identity"),
+        DWCTransparencyPreviewMaterialParameters::EncodeHoverIslandID(0),
+        0.0f);
+    TestTrue(
+        TEXT("The largest encodable island keeps a distinct normalized material identity"),
+        DWCTransparencyPreviewMaterialParameters::EncodeHoverIslandID(MAX_uint16 - 1) < 1.0f);
 
     FDWCEditorPreviewLayerStack Stack;
     Stack.MaterialSlotIndex = 4;
@@ -435,6 +445,15 @@ bool FDWCTransparencyMaterialHoverZeroUploadTest::RunTest(const FString&)
         Hover.AddVector(
             DWCTransparencyPreviewMaterialParameters::HoverState1(),
             FLinearColor(1.0f, 0.8f, 0.4f, 0.0f));
+        Hover.AddTexture(
+            DWCTransparencyPreviewMaterialParameters::HoverIslandIDMap(),
+            IslandIDMap);
+        Hover.AddScalar(
+            DWCTransparencyPreviewMaterialParameters::UseHoverIslandIDMap(),
+            1.0f);
+        Hover.AddScalar(
+            DWCTransparencyPreviewMaterialParameters::HoverIslandID(),
+            DWCTransparencyPreviewMaterialParameters::EncodeHoverIslandID(Index));
         Stack.AddOrReplace(MoveTemp(Hover));
         FDWCEditorPreviewParameterSet Parameters;
         Stack.BuildParameterSet(Parameters);
@@ -481,7 +500,7 @@ bool FDWCTransparencyMaterialHoverAuxiliaryResourceReuseTest::RunTest(const FStr
 
     FDWCEditorTextureKey Key;
     Key.Owner = FObjectKey(Owner);
-    Key.Purpose = EDWCEditorTexturePurpose::TransparencyHoverIslandMask;
+    Key.Purpose = EDWCEditorTexturePurpose::TransparencyHoverEdgeFeather;
     Key.MaterialSlotIndex = 4;
     Key.LayerGuid = FGuid::NewGuid();
 

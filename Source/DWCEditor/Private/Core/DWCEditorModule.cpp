@@ -12,7 +12,7 @@
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
 #include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
-#include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
+#include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "WetnessProfile/Editor/WetnessProfileDetailsCustomization.h"
 #include "UObject/UnrealType.h"
@@ -107,11 +107,11 @@ class FDWCEditorModule : public IModuleInterface
         {
             // Covers direct editor changes and most reimport paths so a cached UV view
             // can never survive a mesh topology change outside the WCA editor.
-            FWCAUVIslandViewCache::InvalidateMesh(ChangedMesh);
+            FWCAGeneratedDataInvalidator::InvalidateMesh(ChangedMesh);
         }
         else if (UWetClothingAsset* ChangedAsset = Cast<UWetClothingAsset>(ObjectBeingModified))
         {
-            FWCAUVIslandViewCache::InvalidateAsset(ChangedAsset);
+            FWCAGeneratedDataInvalidator::NotifyAssetChanged(*ChangedAsset);
         }
 
         UWetnessProfile* WetnessProfile = Cast<UWetnessProfile>(ObjectBeingModified);

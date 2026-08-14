@@ -77,7 +77,7 @@ namespace
         return Parameter;
     }
 
-    UMaterialExpressionCustom* CreateRevealSurfaceCompositeExpression(
+    UMaterialExpressionCustom* CreateRevealSurfaceNormalExpression(
         UMaterial* Material,
         const int32 NodeX,
         const int32 NodeY,
@@ -92,7 +92,6 @@ namespace
         }
 
         static const FName InputNames[] = {
-            TEXT("BaseColor"),
             TEXT("BaseNormal"),
             TEXT("SelectedUV"),
             TEXT("Visibility"),
@@ -107,10 +106,6 @@ namespace
             FCustomInput& Input = Composite->Inputs.AddDefaulted_GetRef();
             Input.InputName = InputName;
         }
-
-        FCustomOutput& NormalOutput = Composite->AdditionalOutputs.AddDefaulted_GetRef();
-        NormalOutput.OutputName = TEXT("Normal");
-        NormalOutput.OutputType = CMOT_Float3;
 
         Composite->OutputType = CMOT_Float3;
         Composite->Description = Description;
@@ -134,15 +129,10 @@ float RevealZ = sqrt(saturate(1.0 - dot(RevealXY, RevealXY)));
 float3 BaseTS = normalize(BaseNormal);
 float3 RevealTS = float3(RevealXY, RevealZ);
 int SelectedVisualizationMode = (int)floor(VisualizationMode + 0.5);
-Normal = BaseTS;
 
-if (SelectedVisualizationMode == 11)
+if (SelectedVisualizationMode == 11 || SelectedVisualizationMode == 12)
 {
-    return float3(RevealSample.rg, 1.0);
-}
-if (SelectedVisualizationMode == 12)
-{
-    return RevealSample.aaa;
+    return BaseTS;
 }
 if (SelectedVisualizationMode == 10)
 {
@@ -151,26 +141,22 @@ if (SelectedVisualizationMode == 10)
 
 // Same angle-corrected tangent-space composition convention used by the
 // wrinkle preview: reveal surface first, then outer wrinkle detail.
-Normal = normalize(float3(
+return normalize(float3(
     BaseTS.xy + RevealTS.xy * RevealWeight,
     BaseTS.z * lerp(1.0, RevealTS.z, RevealWeight)));
-
-return SelectedVisualizationMode == 10
-    ? float3(0.5, 0.5, 0.5)
-    : BaseColor;
 )");
         Composite->RebuildOutputs();
         return Composite;
     }
 
-    FDWCRevealSurfaceMaterialGraphResult BuildRevealNormalComposite(
+    FDWCRevealSurfaceMaterialGraphResult BuildRevealNormalExpression(
         const FDWCRevealSurfaceMaterialGraphRequest& Request)
     {
         FDWCRevealSurfaceMaterialGraphResult Result;
         constexpr const TCHAR* ContractLabel = TEXT("editor Reveal Surface authoring");
-        if (Request.Material == nullptr || !Request.BaseColor.IsValid() ||
-            !Request.BaseNormal.IsValid() || !Request.DataUV.IsValid() ||
-            !Request.Visibility.IsValid() || !Request.VisualizationMode.IsValid() ||
+        if (Request.Material == nullptr || !Request.BaseNormal.IsValid() ||
+            !Request.DataUV.IsValid() || !Request.Visibility.IsValid() ||
+            !Request.VisualizationMode.IsValid() ||
             Request.SurfaceTextureParameterName.IsNone() ||
             Request.UseSurfaceParameterName.IsNone() || Request.StrengthParameterName.IsNone() ||
             Request.ShowParameterName.IsNone())
@@ -204,8 +190,8 @@ return SelectedVisualizationMode == 10
             1.0f,
             Request.NodePosX + 180,
             Request.NodePosY + 200);
-        const FString DefaultDescription = TEXT("DWC Editor Reveal Surface Authoring Composite");
-        UMaterialExpressionCustom* Composite = CreateRevealSurfaceCompositeExpression(
+        const FString DefaultDescription = TEXT("DWC Editor Reveal Surface Preview Normal");
+        UMaterialExpressionCustom* Composite = CreateRevealSurfaceNormalExpression(
             Request.Material,
             Request.NodePosX + 380,
             Request.NodePosY,
@@ -221,8 +207,6 @@ return SelectedVisualizationMode == 10
         }
 
         bool bConnected = true;
-        bConnected &= ConnectRevealSurfaceInput(
-            Request.BaseColor, Composite, TEXT("BaseColor"), Result.FailureReason);
         bConnected &= ConnectRevealSurfaceInput(
             Request.BaseNormal, Composite, TEXT("BaseNormal"), Result.FailureReason);
         bConnected &= ConnectRevealSurfaceInput(
@@ -259,8 +243,7 @@ return SelectedVisualizationMode == 10
             return Result;
         }
 
-        Result.BaseColor = { Composite, TEXT("return") };
-        Result.Normal = { Composite, TEXT("Normal") };
+        Result.Normal = { Composite, FString() };
         Result.bSucceeded = true;
         return Result;
     }
@@ -269,5 +252,5 @@ return SelectedVisualizationMode == 10
 FDWCRevealSurfaceMaterialGraphResult FDWCRevealSurfaceMaterialGraph::BuildAuthoringPreview(
     const FDWCRevealSurfaceMaterialGraphRequest& Request)
 {
-    return BuildRevealNormalComposite(Request);
+    return BuildRevealNormalExpression(Request);
 }

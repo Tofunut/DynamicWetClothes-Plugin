@@ -457,7 +457,7 @@ void FDWCEditorRenderUploadQueue::CancelPreviewMode(
         case EDWCEditorPreviewMode::Transparency:
             return Key.Purpose == EDWCEditorTexturePurpose::TransparencyVisualization ||
                 Key.Purpose == EDWCEditorTexturePurpose::TransparencyHoverBaseline ||
-                Key.Purpose == EDWCEditorTexturePurpose::TransparencyHoverIslandMask;
+                Key.Purpose == EDWCEditorTexturePurpose::TransparencyHoverEdgeFeather;
         default:
             return false;
         }
@@ -551,6 +551,11 @@ bool FDWCEditorRenderUploadQueue::HasPendingWork() const
         }
     }
     return false;
+}
+
+uint64 FDWCEditorRenderUploadQueue::GetInFlightRenderUploadCount() const
+{
+    return StagingState->InFlightSubmissionCount.Load();
 }
 
 void FDWCEditorRenderUploadQueue::SetWorkAvailableCallback(FWorkAvailableCallback Callback)
@@ -1107,6 +1112,9 @@ bool FDWCEditorRenderUploadQueue::SubmitRegion(
         Region.Height());
     TSharedPtr<TArray<uint8>, ESPMode::ThreadSafe> KeepAlive = Staging;
     const TSharedRef<FStagingState, ESPMode::ThreadSafe> KeepStagingState = StagingState;
+    const FDWCEditorTextureHandle KeepEntryAlive = Entry;
+    Entry->BeginRenderUpload();
+    KeepStagingState->InFlightSubmissionCount.AddExchange(1);
     const double SubmitStartSeconds = FPlatformTime::Seconds();
     Texture->UpdateTextureRegions(
         0,
@@ -1115,7 +1123,7 @@ bool FDWCEditorRenderUploadQueue::SubmitRegion(
         Pitch,
         BytesPerPixel,
         Staging->GetData(),
-        [KeepAlive = MoveTemp(KeepAlive), KeepStagingState, UploadBytes, Telemetry,
+        [KeepAlive = MoveTemp(KeepAlive), KeepEntryAlive, KeepStagingState, UploadBytes, Telemetry,
          StagingLease = MoveTemp(StagingLease)](
             uint8*,
             const FUpdateTextureRegion2D* Regions)
@@ -1125,6 +1133,8 @@ bool FDWCEditorRenderUploadQueue::SubmitRegion(
             {
                 StagingLease->Reset();
             }
+            KeepEntryAlive->EndRenderUpload();
+            KeepStagingState->InFlightSubmissionCount.SubExchange(1);
             KeepStagingState->InFlightBytes.SubExchange(UploadBytes);
             if (Telemetry.IsValid())
             {
@@ -1178,6 +1188,10 @@ bool FDWCEditorRenderUploadQueue::SubmitPreparedRegion(
     {
         Telemetry->RecordPreparedRegionScheduled(UploadBytes);
     }
+    const FDWCEditorTextureHandle KeepEntryAlive = Entry;
+    const TSharedRef<FStagingState, ESPMode::ThreadSafe> KeepStagingState = StagingState;
+    Entry->BeginRenderUpload();
+    KeepStagingState->InFlightSubmissionCount.AddExchange(1);
     const double SubmitStartSeconds = FPlatformTime::Seconds();
     Texture->UpdateTextureRegions(
         0,
@@ -1186,9 +1200,13 @@ bool FDWCEditorRenderUploadQueue::SubmitPreparedRegion(
         Pitch,
         sizeof(FColor),
         const_cast<uint8*>(Source),
-        [KeepAlive = Payload, Telemetry](uint8*, const FUpdateTextureRegion2D* Regions)
+        [KeepAlive = Payload, KeepEntryAlive, KeepStagingState, Telemetry](
+            uint8*,
+            const FUpdateTextureRegion2D* Regions)
         {
             (void)KeepAlive;
+            KeepEntryAlive->EndRenderUpload();
+            KeepStagingState->InFlightSubmissionCount.SubExchange(1);
             if (Telemetry.IsValid())
             {
                 Telemetry->RecordRenderCallback();
@@ -1262,6 +1280,11 @@ void FDWCEditorRenderUploadQueue::AppendDiagnosticMemoryBucket(
         static_cast<const void*>(this));
     Bucket.GlobalCategory = EDWCEditorMemoryCategory::UploadStagingCPU;
     Bucket.bIncludeInGlobalSnapshot = true;
+
+    FDWCEditorPreviewMemoryBucket& RenderOwned = OutBuckets.AddDefaulted_GetRef();
+    RenderOwned.Name = TEXT("Render upload submissions (render-thread owned)");
+    RenderOwned.EntryCount = static_cast<int32>(GetInFlightRenderUploadCount());
+    RenderOwned.ActiveLeaseCount = RenderOwned.EntryCount;
 }
 
 void FDWCEditorRenderUploadQueue::AppendDiagnosticOperationCounters(
@@ -1271,6 +1294,10 @@ void FDWCEditorRenderUploadQueue::AppendDiagnosticOperationCounters(
     Uploads.Name = TEXT("Render texture region uploads");
     Uploads.Count = SubmittedUploadCount;
     Uploads.Bytes = SubmittedUploadBytes;
+
+    FDWCEditorPreviewOperationCounter& InFlight = OutCounters.AddDefaulted_GetRef();
+    InFlight.Name = TEXT("Render-thread owned texture uploads");
+    InFlight.Count = GetInFlightRenderUploadCount();
 
     FDWCEditorPreviewOperationCounter& Coalesced = OutCounters.AddDefaulted_GetRef();
     Coalesced.Name = TEXT("Coalesced texture upload requests");

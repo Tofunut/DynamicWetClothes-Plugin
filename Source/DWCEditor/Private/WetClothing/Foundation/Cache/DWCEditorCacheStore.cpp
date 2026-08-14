@@ -200,6 +200,32 @@ void FDWCEditorCacheStore::InvalidateNamespace(const FName Namespace)
     }
 }
 
+void FDWCEditorCacheStore::InvalidateResourceIdentity(
+    const void* ResourceIdentity,
+    const FName Namespace)
+{
+    check(IsInGameThread());
+    if (ResourceIdentity == nullptr)
+    {
+        return;
+    }
+
+    TArray<FDWCEditorCacheKey> KeysToRemove;
+    for (const TPair<FDWCEditorCacheKey, TSharedPtr<FDWCEditorCacheEntry>>& Pair : Entries)
+    {
+        if (Pair.Key.ResourceIdentity == ResourceIdentity &&
+            (Namespace.IsNone() || Pair.Key.Namespace == Namespace))
+        {
+            KeysToRemove.Add(Pair.Key);
+        }
+    }
+    for (const FDWCEditorCacheKey& Key : KeysToRemove)
+    {
+        RemoveEntry(Key, false);
+    }
+    CleanupRetiredEntries();
+}
+
 void FDWCEditorCacheStore::Reset()
 {
     check(IsInGameThread());

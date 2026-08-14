@@ -128,6 +128,10 @@ void FDWCEditorPreviewSession::Shutdown()
         ObjectPropertyChangedHandle.Reset();
     }
 
+    // Apply pending resource parameters while every MID is still rooted by
+    // the cache, then sever session references before releasing the cache.
+    FlushRenderResourceBindings();
+    ClearBuiltMaterials();
     MaterialCache.Reset();
     MaterialCache.ResetDiagnosticCounters();
     ResourceBindingMIDs.Reset();
@@ -148,6 +152,7 @@ void FDWCEditorPreviewSession::Shutdown()
     LastSuspendReason = EDWCEditorPreviewSuspendReason::EditorClosing;
     ++LifecycleGeneration;
     bRenderResourcesDirty = false;
+    PendingMaterialBuildCount = 0;
     SlotRefreshCount = 0;
     SlotStateChangeCount = 0;
     MaterialRequestCount = 0;
@@ -192,9 +197,9 @@ void FDWCEditorPreviewSession::Suspend(const EDWCEditorPreviewSuspendReason Reas
 
     // Preview graph/MID objects are editor-session resources. Keeping the
     // slot collection lets the mode resume lazily without rebuilding topology.
+    FlushRenderResourceBindings();
     ClearBuiltMaterials();
     MaterialCache.Reset();
-    FlushRenderResourceBindings();
     LastSuspendReason = Reason;
     bSuspended = true;
     ++LifecycleGeneration;
@@ -277,6 +282,7 @@ bool FDWCEditorPreviewSession::RefreshSlotStates()
 
     SlotCollection = MoveTemp(NewCollection);
     RuntimeSlots = MoveTemp(NewRuntimeSlots);
+    RebuildPendingMaterialBuildCount();
     CachedDataUVChannelIndex = NewDataUVChannelIndex;
     RebuildActivePreviewMaterialSlots();
     ResourceBindingMIDs.SetNumZeroed(SlotCollection.Slots.Num());
@@ -546,7 +552,7 @@ FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePrev
     SessionResult.bPending = MaterialResult.bPending;
     if (MaterialResult.State == EDWCEditorPreviewMaterialState::Compiling)
     {
-        Slot->bMaterialBuildPending = true;
+        SetMaterialBuildPending(*Slot, true);
         Slot->bMaterialBuildFailed = false;
         Slot->MaterialBuildError.Reset();
         SessionResult.Message = MaterialResult.Message;
@@ -554,7 +560,7 @@ FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePrev
     }
     if (!MaterialResult.bSucceeded || MaterialResult.PreviewMID == nullptr)
     {
-        Slot->bMaterialBuildPending = false;
+        SetMaterialBuildPending(*Slot, false);
         Slot->bMaterialBuildFailed = true;
         Slot->MaterialBuildError = MaterialResult.Message;
         UE_LOG(
@@ -570,7 +576,7 @@ FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePrev
 
     Slot->PreviewMID = MaterialResult.PreviewMID;
     Slot->LastMaterialUseSerial = ++MaterialUseSerial;
-    Slot->bMaterialBuildPending = false;
+    SetMaterialBuildPending(*Slot, false);
     Slot->bMaterialBuildFailed = false;
     Slot->MaterialBuildError.Reset();
     ApplyCommonParameters(*MaterialResult.PreviewMID);
@@ -643,7 +649,7 @@ void FDWCEditorPreviewSession::NotifySourceMaterialChanged(UMaterialInterface* S
                 RevisedSources.Add(SourceKey);
             }
             Slot.PreviewMID.Reset();
-            Slot.bMaterialBuildPending = false;
+            SetMaterialBuildPending(Slot, false);
             Slot.bMaterialBuildFailed = false;
             Slot.MaterialBuildError.Reset();
             if (ResourceBindingMIDs.IsValidIndex(Slot.Eligibility.MaterialSlotIndex))
@@ -671,8 +677,8 @@ void FDWCEditorPreviewSession::NotifyWCADataChanged()
 void FDWCEditorPreviewSession::InvalidateMaterialGraphs()
 {
     ++GraphInvalidationCount;
-    MaterialCache.Reset();
     ClearBuiltMaterials();
+    MaterialCache.Reset();
     SlotsChangedDelegate.Broadcast();
 }
 
@@ -1095,6 +1101,7 @@ void FDWCEditorPreviewSession::ClearBuiltMaterials()
         Slot.MaterialBuildError.Reset();
         Slot.AppliedLayerParameters = FDWCEditorPreviewParameterSet();
     }
+    PendingMaterialBuildCount = 0;
     for (TObjectPtr<UMaterialInstanceDynamic>& MID : ResourceBindingMIDs)
     {
         MID = nullptr;
@@ -1140,7 +1147,7 @@ void FDWCEditorPreviewSession::TrimIdlePreviewMaterials(const bool bReleaseAllId
         const int32 MaterialSlotIndex = Slot->Eligibility.MaterialSlotIndex;
         Slot->PreviewMID.Reset();
         Slot->AppliedLayerParameters = FDWCEditorPreviewParameterSet();
-        Slot->bMaterialBuildPending = false;
+        SetMaterialBuildPending(*Slot, false);
         Slot->bMaterialBuildFailed = false;
         Slot->MaterialBuildError.Reset();
         if (ResourceBindingMIDs.IsValidIndex(MaterialSlotIndex))
@@ -1152,6 +1159,30 @@ void FDWCEditorPreviewSession::TrimIdlePreviewMaterials(const bool bReleaseAllId
     }
     MaterialCache.PruneUnusedHierarchies();
     bRenderResourcesDirty = true;
+}
+
+void FDWCEditorPreviewSession::SetMaterialBuildPending(
+    FDWCEditorPreviewSessionSlot& Slot,
+    const bool bPending)
+{
+    if (Slot.bMaterialBuildPending == bPending)
+    {
+        return;
+    }
+
+    Slot.bMaterialBuildPending = bPending;
+    PendingMaterialBuildCount = FMath::Max(
+        PendingMaterialBuildCount + (bPending ? 1 : -1),
+        0);
+}
+
+void FDWCEditorPreviewSession::RebuildPendingMaterialBuildCount()
+{
+    PendingMaterialBuildCount = 0;
+    for (const FDWCEditorPreviewSessionSlot& Slot : RuntimeSlots)
+    {
+        PendingMaterialBuildCount += Slot.bMaterialBuildPending ? 1 : 0;
+    }
 }
 
 void FDWCEditorPreviewSession::RebuildActivePreviewMaterialSlots()

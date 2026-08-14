@@ -95,6 +95,49 @@ bool FDWCEditorCacheStoreScopedInvalidationTest::RunTest(const FString& Paramete
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorCacheStoreResourceIdentityInvalidationTest,
+    "DWC.Editor.Foundation.Cache.ResourceIdentityInvalidation",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorCacheStoreResourceIdentityInvalidationTest::RunTest(const FString& Parameters)
+{
+    FDWCEditorCacheStore Store(1024 * 1024);
+    UTexture2D* Owner = NewObject<UTexture2D>();
+    UTexture2D* FirstResource = NewObject<UTexture2D>();
+    UTexture2D* SecondResource = NewObject<UTexture2D>();
+
+    FDWCEditorCacheKey FirstKey;
+    FirstKey.Namespace = TEXT("UVTopology");
+    FirstKey.Owner = FObjectKey(Owner);
+    FirstKey.ResourceIdentity = FirstResource;
+    FirstKey.MaterialSlotIndex = 1;
+
+    FDWCEditorCacheKey SecondKey = FirstKey;
+    SecondKey.ResourceIdentity = SecondResource;
+    SecondKey.MaterialSlotIndex = 2;
+
+    Store.Put(FirstKey, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(64));
+    Store.Put(SecondKey, MakeShared<FTestCacheValue, ESPMode::ThreadSafe>(64));
+    FDWCEditorCacheLease FirstLease = Store.FindLease<FTestCacheValue>(FirstKey);
+
+    Store.InvalidateResourceIdentity(FirstResource, FirstKey.Namespace);
+
+    TestFalse(TEXT("The matching resource entry is removed from the cache index."),
+        Store.Contains<FTestCacheValue>(FirstKey));
+    TestTrue(TEXT("A different resource remains cached."),
+        Store.Contains<FTestCacheValue>(SecondKey));
+    TestTrue(TEXT("An active lease keeps an invalidated resource payload alive."),
+        FirstLease.IsValid());
+    TestEqual(TEXT("The leased resource is tracked as retired."),
+        Store.GetRetiredEntryCount(), 1);
+
+    FirstLease.Reset();
+    TestEqual(TEXT("Releasing the lease clears retired resource accounting."),
+        Store.GetRetiredEntryCount(), 0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCEditorCacheStorePinnedEntryEvictionTest,
     "DWC.Editor.Foundation.Cache.PinnedEntryEviction",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -18,16 +18,19 @@
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleHitData.h"
 #include "WetClothing/Foundation/Preview/Slots/DWCEditorPreviewSlotState.h"
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringTypes.h"
+#include "WetClothing/Foundation/Assets/DWCEditorAssetResidency.h"
 
 class FAssetThumbnail;
 class FAssetThumbnailPool;
 class FDWCEditorAuthoringDocument;
+class FDWCEditorAssetResidencyRegistry;
 class FDWCEditorBakeCoordinator;
 class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorSurfacePatchProjectionCacheService;
 class FDWCEditorRenderUploadQueue;
 class FDWCEditorPreviewCommitCoordinator;
+class FDWCEditorPreviewResourceContext;
 class FDWCEditorPreviewModeLifetime;
 class FDWCEditorTextureWorkspace;
 class FDWCEditorWorkerJobScheduler;
@@ -61,10 +64,8 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorBakeCoordinator>, BakeCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSpatialQueryService>, SpatialQueryService)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService>, SurfacePatchProjectionCache)
-    SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
-    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewResourceContext>, PreviewResources)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewModeLifetime>, PreviewModeLifetime)
-    SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
     SLATE_END_ARGS()
 
@@ -184,6 +185,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void ApplyMaterialSlotSelection(int32 MaterialSlotIndex, bool bShowFailureDialog);
 
     FString GetWrinkleNormalTextureObjectPath() const;
+    void SetSelectedWrinkleNormalTexture(UTexture2D* Texture);
     void HandleWrinkleNormalTextureChanged(const FAssetData& AssetData);
     TSharedRef<SWidget> BuildWrinkleTexturePalette();
     TSharedRef<ITableRow> GenerateWrinkleTexturePaletteTileRow(
@@ -308,6 +310,8 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
     TSharedPtr<FDWCEditorPreviewModeLifetime> PreviewModeLifetime;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
+    TSharedPtr<FDWCEditorAssetResidencyRegistry> AssetResidency;
+    FDWCEditorAssetResidencyLease SelectedWrinkleTextureResidencyLease;
     TSharedPtr<IDetailsView> DetailsView;
     TSharedPtr<SWetWrinkleViewport> PreviewViewport;
     TSharedPtr<FWetWrinkleAuthoringController> AuthoringController;

@@ -66,6 +66,7 @@ struct FDWCEditorArtifactStoreDiagnostics
     int32 TrackedArtifactCount = 0;
     int32 DirtyArtifactCount = 0;
     uint64 TrackedSourceBytes = 0;
+    uint64 ExpiredTrackingPruneCount = 0;
     uint64 CommitCount = 0;
     uint64 FailedCommitCount = 0;
     uint64 PeakCommitReservationBytes = 0;
@@ -100,6 +101,9 @@ public:
 private:
     explicit FDWCEditorArtifactStore(
         TSharedRef<FDWCEditorResourceGovernor> InResourceGovernor);
+
+    void PruneExpiredTracking();
+    void RefreshTrackingDiagnostics();
 
     struct FTrackedArtifact
     {

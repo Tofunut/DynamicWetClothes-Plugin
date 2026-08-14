@@ -14,8 +14,10 @@ namespace
     {
         FDWCTransparencySourcePayload Result;
         Result.Resolution = Resolution;
+        Result.MaterialSlotIndex = 3;
         const int32 PixelCount = Resolution.X * Resolution.Y;
         Result.AutoAlphaBuffer.SetNumUninitialized(PixelCount);
+        Result.OuterCoverageBuffer.Init(255, PixelCount);
         Result.OuterIslandIDBuffer.Init(
             FDWCTransparencySourcePayload::EncodeOuterIslandID(7),
             PixelCount);

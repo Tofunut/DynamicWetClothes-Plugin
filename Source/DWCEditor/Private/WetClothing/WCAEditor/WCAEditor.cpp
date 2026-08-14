@@ -150,9 +150,32 @@ namespace
     {
         FDWCDataUVBuildOptions RetryOptions =
             Options != nullptr ? *Options : FDWCDataUVBuildOptions();
-        const FDWCDataUVBuildOptions* OptionsToUse = Options;
 
         FDWCDataUVBuildResult Result;
+        const USkeletalMesh* SelectionMesh = Asset.GetSourceSkeletalMesh() != nullptr
+            ? Asset.GetSourceSkeletalMesh()
+            : Asset.GetRuntimeSkeletalMesh();
+        TArray<int32> IncludedSlots = IncludedMaterialSlotIndices.Array();
+        const TArray<int32> NoExistingLayoutSlots;
+        FString SelectionError;
+        TOptional<FDWCDataUVBuildSelection> BuildSelection =
+            FDWCDataUVBuildSelection::Create(
+                IncludedSlots,
+                NoExistingLayoutSlots,
+                SelectionMesh != nullptr ? SelectionMesh->GetMaterials().Num() : 0,
+                &SelectionError);
+        if (!BuildSelection.IsSet())
+        {
+            Result.BuildState = EDWCDataUVBuildState::Failed;
+            Result.ResultSeverity = EDWCDataUVResultSeverity::Failed;
+            Result.Message = SelectionError.IsEmpty()
+                ? TEXT("The DWC UV build selection could not be captured.")
+                : MoveTemp(SelectionError);
+            return Result;
+        }
+        RetryOptions.BuildSelection = MoveTemp(BuildSelection.GetValue());
+        const FDWCDataUVBuildOptions* OptionsToUse = &RetryOptions;
+
         TSet<int32> AcceptedMaterialSlotIndices =
             RetryOptions.ConfirmedVisibleExclusionMaterialSlotIndices;
         TSet<int32> SkippedMaterialSlotIndices =
@@ -1354,6 +1377,9 @@ namespace
         const FWCAValidationReport& Report,
         const FDWCEditorBuildPlan& AutomaticPlan,
         const FString& Examples,
+        const bool bResolveInProgress,
+        const bool bResolveFailed,
+        const FText& ResolveStatus,
         const FOnClicked& OnResolveClicked,
         const FOnClicked& OnRefreshClicked)
     {
@@ -1388,7 +1414,7 @@ namespace
 
         const bool bHasIssues = AttentionSectionCount > 0;
         const bool bHasErrors = ErrorCount > 0;
-        const bool bCanResolveAutomatically =
+        const bool bHasAutomaticResolvePlan =
             AutomaticPlan.IsExecutable() && !AutomaticPlan.Steps.IsEmpty() && OnResolveClicked.IsBound();
         const FSlateBrush* HeaderIconBrush = bHasErrors
             ? FDWCEditorStyle::GetBrush(TEXT("DWCEditor.Status.Error"))
@@ -1464,7 +1490,7 @@ namespace
         ];
 
         TSharedRef<SHorizontalBox> ButtonRow = SNew(SHorizontalBox);
-        if (bCanResolveAutomatically)
+        if (bHasAutomaticResolvePlan)
         {
             ButtonRow->AddSlot()
             .AutoWidth()
@@ -1472,6 +1498,7 @@ namespace
             .Padding(0.0f, 0.0f, 8.0f, 0.0f)
             [
                 SNew(SButton)
+                .IsEnabled(!bResolveInProgress)
                 .ContentPadding(FMargin(10.0f, 5.0f))
                 .ToolTipText(!AutomaticPlan.ManualDiagnosticCodes.IsEmpty()
                     ? LOCTEXT("ValidationResolveAutomaticWithManualTooltip", "Resolve automatic issues. Manual Fix items will remain in the report.")
@@ -1503,6 +1530,7 @@ namespace
         .VAlign(VAlign_Center)
         [
             SNew(SButton)
+            .IsEnabled(!bResolveInProgress)
             .ContentPadding(FMargin(10.0f, 5.0f))
             .ToolTipText(LOCTEXT("ValidationDialogRefreshTooltip", "Run validation again and refresh this window."))
             .OnClicked(OnRefreshClicked)
@@ -1570,6 +1598,20 @@ namespace
                             .AutoWrapText(true)
                             .Font(MakeValidationFont())
                             .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 7.0f, 0.0f, 0.0f)
+                        [
+                            SNew(STextBlock)
+                            .Visibility(ResolveStatus.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+                            .Text(ResolveStatus)
+                            .AutoWrapText(true)
+                            .Font(MakeValidationFont())
+                            .ColorAndOpacity(FSlateColor(
+                                bResolveInProgress
+                                    ? FStyleColors::AccentYellow
+                                    : (bResolveFailed ? FStyleColors::Error : FStyleColors::Success)))
                         ]
                     ]
                 ]
@@ -2856,6 +2898,11 @@ const FName FWCAEditor::MainTabId(TEXT("WCAEditor_Main"));
 
 FWCAEditor::~FWCAEditor()
 {
+    if (const TSharedPtr<SWindow> DialogWindow = ValidationDialogWindow.Pin())
+    {
+        DialogWindow->RequestDestroyWindow();
+    }
+    ValidationDialogWindow.Reset();
     if (HostVisibilityAdapter.IsValid())
     {
         HostVisibilityAdapter->Shutdown();
@@ -3697,6 +3744,12 @@ void FWCAEditor::HandleValidationClicked()
         return;
     }
 
+    if (const TSharedPtr<SWindow> ExistingWindow = ValidationDialogWindow.Pin())
+    {
+        ExistingWindow->BringToFront(true);
+        return;
+    }
+
     TSharedRef<SWindow> DialogWindow = SNew(SWindow)
         .Title(LOCTEXT("ValidationResultsWindowTitle", "Validation Results"))
         .ClientSize(FVector2D(700.0f, 620.0f))
@@ -3704,8 +3757,21 @@ void FWCAEditor::HandleValidationClicked()
         .SupportsMaximize(true)
         .SupportsMinimize(false);
 
+    ValidationDialogWindow = DialogWindow;
+    DialogWindow->SetOnWindowClosed(FOnWindowClosed::CreateSP(
+        this,
+        &FWCAEditor::HandleValidationWindowClosed));
     RefreshValidationDialogContent(DialogWindow);
-    FSlateApplication::Get().AddModalWindow(DialogWindow, FSlateApplication::Get().GetActiveTopLevelWindow());
+    if (EditorPanel.IsValid())
+    {
+        if (const TSharedPtr<SWindow> ParentWindow =
+                FSlateApplication::Get().FindWidgetWindow(EditorPanel.ToSharedRef()))
+        {
+            FSlateApplication::Get().AddWindowAsNativeChild(DialogWindow, ParentWindow.ToSharedRef());
+            return;
+        }
+    }
+    FSlateApplication::Get().AddWindow(DialogWindow);
 }
 
 void FWCAEditor::RefreshValidationDialogContent(const TSharedRef<SWindow>& DialogWindow)
@@ -3758,9 +3824,23 @@ void FWCAEditor::RefreshValidationDialogContent(const TSharedRef<SWindow>& Dialo
         ValidationReport,
         AutomaticPlan,
         Examples,
+        bValidationResolveInProgress,
+        bValidationResolveFailed,
+        ValidationResolveStatus,
         FOnClicked::CreateSP(this, &FWCAEditor::HandleValidationResolveClicked, WeakDialogWindow),
         FOnClicked::CreateSP(this, &FWCAEditor::HandleValidationRefreshClicked, WeakDialogWindow)));
 #endif
+}
+
+void FWCAEditor::HandleValidationWindowClosed(const TSharedRef<SWindow>& Window)
+{
+    if (ValidationDialogWindow.Pin() == Window)
+    {
+        ValidationDialogWindow.Reset();
+    }
+    bValidationResolveInProgress = false;
+    bValidationResolveFailed = false;
+    ValidationResolveStatus = FText::GetEmpty();
 }
 
 FReply FWCAEditor::HandleValidationRefreshClicked(TWeakPtr<SWindow> DialogWindow)
@@ -3782,26 +3862,41 @@ FReply FWCAEditor::HandleValidationResolveClicked(TWeakPtr<SWindow> DialogWindow
     FString RequestError;
     if (!EditorPanel->RequestExclusiveBuild(
             TEXT("Resolve Validation Issues"),
-            [WeakEditor, DialogWindow]()
+            [WeakEditor]()
             {
                 if (const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin())
                 {
-                    Editor->ExecuteValidationResolveExclusive(DialogWindow);
+                    Editor->ExecuteValidationResolveExclusive();
                 }
             },
             &RequestError))
     {
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            FText::FromString(RequestError.IsEmpty()
-                ? TEXT("Validation issues cannot be resolved while another Build is active.")
-                : RequestError));
+        bValidationResolveInProgress = false;
+        bValidationResolveFailed = true;
+        ValidationResolveStatus = FText::FromString(RequestError.IsEmpty()
+            ? TEXT("Validation issues cannot be resolved while another Build is active.")
+            : RequestError);
+        if (const TSharedPtr<SWindow> PinnedDialog = DialogWindow.Pin())
+        {
+            RefreshValidationDialogContent(PinnedDialog.ToSharedRef());
+        }
+    }
+    else
+    {
+        bValidationResolveInProgress = true;
+        bValidationResolveFailed = false;
+        ValidationResolveStatus = LOCTEXT(
+            "ValidationResolveInProgress",
+            "Resolving validation issues. Build and save are in progress...");
+        if (const TSharedPtr<SWindow> PinnedDialog = DialogWindow.Pin())
+        {
+            RefreshValidationDialogContent(PinnedDialog.ToSharedRef());
+        }
     }
     return FReply::Handled();
 }
 
-void FWCAEditor::ExecuteValidationResolveExclusive(TWeakPtr<SWindow> DialogWindow)
+void FWCAEditor::ExecuteValidationResolveExclusive()
 {
     FString Failure;
     FString SuccessSummary;
@@ -3811,27 +3906,31 @@ void FWCAEditor::ExecuteValidationResolveExclusive(TWeakPtr<SWindow> DialogWindo
             TEXT("Resolve Validation Issues"),
             EDWCEditorBuildPlanPolicy::ValidationSuggested))
     {
-        const FText FailureMessage = Failure.IsEmpty()
+        bValidationResolveInProgress = false;
+        bValidationResolveFailed = true;
+        ValidationResolveStatus = Failure.IsEmpty()
             ? LOCTEXT("ValidationResolveFailedFallback", "Validation issues could not be resolved.")
             : FText::FromString(Failure);
-        FMessageDialog::Open(EAppMsgCategory::Error, EAppMsgType::Ok, FailureMessage);
         RefreshAssetStateAndEditor();
+        if (const TSharedPtr<SWindow> DialogWindow = ValidationDialogWindow.Pin())
+        {
+            RefreshValidationDialogContent(DialogWindow.ToSharedRef());
+        }
         return;
     }
 
-    if (TSharedPtr<SWindow> PinnedDialog = DialogWindow.Pin())
-    {
-        PinnedDialog->RequestDestroyWindow();
-    }
-
-    const FString SuccessMessage = SuccessSummary.IsEmpty()
-        ? FString(TEXT("Validation issues were resolved and saved."))
-        : FString::Printf(TEXT("Validation issues were resolved and saved.\n\n%s"), *SuccessSummary);
-    FMessageDialog::Open(
-        EAppMsgCategory::Success,
-        EAppMsgType::Ok,
-        FText::FromString(SuccessMessage));
+    bValidationResolveInProgress = false;
+    bValidationResolveFailed = false;
+    ValidationResolveStatus = SuccessSummary.IsEmpty()
+        ? LOCTEXT("ValidationResolveSucceeded", "Validation issues were resolved and saved.")
+        : FText::Format(
+            LOCTEXT("ValidationResolveSucceededWithSummary", "Validation issues were resolved and saved.\n{0}"),
+            FText::FromString(SuccessSummary));
     RefreshAssetStateAndEditor();
+    if (const TSharedPtr<SWindow> DialogWindow = ValidationDialogWindow.Pin())
+    {
+        RefreshValidationDialogContent(DialogWindow.ToSharedRef());
+    }
 }
 
 TSharedRef<SWidget> FWCAEditor::BuildRuntimeBuildMenu()

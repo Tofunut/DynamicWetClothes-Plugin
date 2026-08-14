@@ -70,6 +70,7 @@ bool FDWCEditorArtifactStore::CommitTextureBatch(
     FString& OutError)
 {
     check(IsInGameThread());
+    PruneExpiredTracking();
     OutReceipts.Reset();
     OutError.Reset();
     if (Requests.IsEmpty())
@@ -285,14 +286,7 @@ bool FDWCEditorArtifactStore::CommitTextureBatch(
     }
 
     ++Diagnostics.CommitCount;
-    Diagnostics.TrackedArtifactCount = Artifacts.Num();
-    Diagnostics.DirtyArtifactCount = 0;
-    Diagnostics.TrackedSourceBytes = 0;
-    for (const TPair<FString, FTrackedArtifact>& Pair : Artifacts)
-    {
-        Diagnostics.DirtyArtifactCount += Pair.Value.bDirty ? 1 : 0;
-        Diagnostics.TrackedSourceBytes += Pair.Value.SourceBytes;
-    }
+    RefreshTrackingDiagnostics();
     return true;
 }
 
@@ -335,10 +329,39 @@ void FDWCEditorArtifactStore::NotifyPackagesSaved(
             Pair.Value.bDirty = false;
         }
     }
+    PruneExpiredTracking();
 }
 
 FDWCEditorArtifactStoreDiagnostics FDWCEditorArtifactStore::GetDiagnostics() const
 {
     check(IsInGameThread());
     return Diagnostics;
+}
+
+void FDWCEditorArtifactStore::PruneExpiredTracking()
+{
+    check(IsInGameThread());
+    int32 Removed = 0;
+    for (auto It = Artifacts.CreateIterator(); It; ++It)
+    {
+        if (!It.Value().Texture.IsValid())
+        {
+            It.RemoveCurrent();
+            ++Removed;
+        }
+    }
+    Diagnostics.ExpiredTrackingPruneCount += static_cast<uint64>(Removed);
+    RefreshTrackingDiagnostics();
+}
+
+void FDWCEditorArtifactStore::RefreshTrackingDiagnostics()
+{
+    Diagnostics.TrackedArtifactCount = Artifacts.Num();
+    Diagnostics.DirtyArtifactCount = 0;
+    Diagnostics.TrackedSourceBytes = 0;
+    for (const TPair<FString, FTrackedArtifact>& Pair : Artifacts)
+    {
+        Diagnostics.DirtyArtifactCount += Pair.Value.bDirty ? 1 : 0;
+        Diagnostics.TrackedSourceBytes += Pair.Value.SourceBytes;
+    }
 }

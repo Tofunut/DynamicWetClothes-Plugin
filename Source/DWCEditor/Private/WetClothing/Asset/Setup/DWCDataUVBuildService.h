@@ -25,8 +25,55 @@ struct FDWCDataUVLODWarning
     FString TechnicalDetails;
 };
 
+/**
+ * Immutable material-slot selection captured before a Data UV build starts.
+ * Requested slots describe the caller's intent, while build slots also contain
+ * existing layout slots that must participate in a complete reconstruction.
+ */
+class FDWCDataUVBuildSelection
+{
+  public:
+    FDWCDataUVBuildSelection() = default;
+
+    static TOptional<FDWCDataUVBuildSelection> Create(
+        TConstArrayView<int32> RequestedMaterialSlotIndices,
+        TConstArrayView<int32> ExistingLayoutMaterialSlotIndices,
+        int32                  MaterialSlotCount,
+        FString*               OutErrorMessage = nullptr);
+
+    const TArray<int32>& GetRequestedMaterialSlotIndices() const
+    {
+        return RequestedMaterialSlotIndices;
+    }
+
+    const TArray<int32>& GetBuildMaterialSlotIndices() const
+    {
+        return BuildMaterialSlotIndices;
+    }
+
+    const TArray<int32>& GetExistingLayoutMaterialSlotIndices() const
+    {
+        return ExistingLayoutMaterialSlotIndices;
+    }
+
+    bool IsRequestedMaterialSlot(int32 MaterialSlotIndex) const;
+    bool IsBuildMaterialSlot(int32 MaterialSlotIndex) const;
+    bool IsExistingLayoutMaterialSlot(int32 MaterialSlotIndex) const;
+    bool IsEmpty() const { return BuildMaterialSlotIndices.IsEmpty(); }
+    uint32 GetSemanticHash() const { return SemanticHash; }
+
+  private:
+    TArray<int32> RequestedMaterialSlotIndices;
+    TArray<int32> ExistingLayoutMaterialSlotIndices;
+    TArray<int32> BuildMaterialSlotIndices;
+    uint32        SemanticHash = 0;
+};
+
 struct FDWCDataUVBuildOptions
 {
+    /** Required immutable material-slot selection for this operation and every retry. */
+    TOptional<FDWCDataUVBuildSelection> BuildSelection;
+
     /** When non-empty, build only these LODs instead of resolving the full active range. */
     TArray<int32> TargetLODIndices;
 

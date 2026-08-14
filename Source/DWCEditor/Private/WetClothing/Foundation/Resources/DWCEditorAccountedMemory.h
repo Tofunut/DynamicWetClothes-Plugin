@@ -32,6 +32,16 @@ public:
     /** Adopts an already-built allocation without disturbing the old lease on failure. */
     bool TryAdoptActualBytes(uint64 NewActualBytes, FString* OutError = nullptr);
 
+    /**
+     * Transfers an existing reservation together with its live allocation.
+     * This is the phase-boundary handoff used when a transient producer turns
+     * its output into a retained workspace payload without reserving twice.
+     */
+    bool AdoptExistingLease(
+        FDWCEditorMemoryLease&& InLease,
+        uint64 InActualBytes,
+        FString* OutError = nullptr);
+
     /** Releases both the tracked allocation and its reservation. */
     void Reset();
 

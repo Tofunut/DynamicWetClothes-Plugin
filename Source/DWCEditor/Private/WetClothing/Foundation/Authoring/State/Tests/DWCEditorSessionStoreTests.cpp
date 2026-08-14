@@ -232,6 +232,36 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
     TestFalse(
         TEXT("An incremental wrinkle append does not request a full preview rebuild"),
         EnumHasAnyFlags(IncrementalEffects, EDWCEditorSessionEffect::RebuildPreviewContent));
+
+    const uint64 PreviousWrinkleRevision = State.WrinkleAuthoringRevision;
+    const uint64 PreviousTransparencyRevision = State.TransparencyAuthoringRevision;
+    FDWCReconcileAuthoringAction PartReconcile;
+    PartReconcile.AuthoringRevision = 12;
+    PartReconcile.Domain = EDWCEditorAuthoringDomain::Part;
+    PartReconcile.MaterialSlotIndex = 4;
+    PartReconcile.WetPartID = 9;
+    PartReconcile.Impact = EDWCEditorAuthoringImpact::ElementList |
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::Details |
+        EDWCEditorAuthoringImpact::PartSlotPresentation;
+    const EDWCEditorSessionEffect PartEffects =
+        FDWCEditorSessionReducer::Reduce(State, PartReconcile);
+    TestEqual(TEXT("Part reconciliation updates only the Part revision"),
+        State.PartAuthoringRevision, uint64(12));
+    TestEqual(TEXT("Part reconciliation preserves the wrinkle revision"),
+        State.WrinkleAuthoringRevision, PreviousWrinkleRevision);
+    TestEqual(TEXT("Part reconciliation preserves the transparency revision"),
+        State.TransparencyAuthoringRevision, PreviousTransparencyRevision);
+    TestEqual(TEXT("Part reconciliation preserves the impacted material slot"),
+        State.LastPartImpactMaterialSlotIndex, 4);
+    TestEqual(TEXT("Part reconciliation preserves the impacted wet part"),
+        State.LastPartImpactWetPartID, 9);
+    TestTrue(TEXT("Part reconciliation refreshes the Part list"),
+        EnumHasAnyFlags(PartEffects, EDWCEditorSessionEffect::RefreshElementList));
+    TestTrue(TEXT("Part reconciliation refreshes the Part preview"),
+        EnumHasAnyFlags(PartEffects, EDWCEditorSessionEffect::RebuildPreviewContent));
+    TestTrue(TEXT("Part reconciliation refreshes the impacted slot presentation"),
+        EnumHasAnyFlags(PartEffects, EDWCEditorSessionEffect::RefreshPartSlotPresentation));
     return true;
 }
 

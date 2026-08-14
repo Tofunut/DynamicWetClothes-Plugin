@@ -185,6 +185,64 @@ bool FDWCTransparencySharedEdgeCoverageTest::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyBoundedMaskRasterParityTest,
+    "DWC.Editor.Transparency.RevealBake.BoundedMaskRasterParity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyBoundedMaskRasterParityTest::RunTest(const FString&)
+{
+    FDWCRevealBakeSurface Surface;
+    Surface.Triangles.Add(MakeTriangle(
+        FVector2D(0.0, 0.0), FVector2D(1.0, 0.0), FVector2D(1.0, 1.0),
+        7, 0, 1, 2));
+    Surface.Triangles.Add(MakeTriangle(
+        FVector2D(0.0, 0.0), FVector2D(1.0, 1.0), FVector2D(0.0, 1.0),
+        8, 0, 2, 3));
+    Surface.Triangles[0].UVIslandID = 4;
+    Surface.Triangles[1].UVIslandID = 4;
+
+    FDWCRevealBakeTexelSamplingSettings Settings;
+    Settings.Resolution = FIntPoint(8, 8);
+    Settings.MaterialSlotIndex = 0;
+    TArray<FDWCRevealBakeTexelSample> RichSamples;
+    FString Error;
+    int32 RichOverlapCount = 0;
+    TestTrue(TEXT("The reference rich-sample raster succeeds."),
+        FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
+            Surface, Settings, RichSamples, &Error, &RichOverlapCount));
+
+    TSet<int32> EligibleTriangleIDs = { 7, 8 };
+    TArray<uint8> Coverage;
+    TArray<int32> UVIslandIDs;
+    int32 CoveredPixelCount = 0;
+    int32 MaskOverlapCount = 0;
+    TestTrue(TEXT("The bounded mask raster succeeds."),
+        FDWCRevealBakeTexelSampler::BuildOuterTexelMaskBuffers(
+            Surface,
+            Settings,
+            EligibleTriangleIDs,
+            Coverage,
+            UVIslandIDs,
+            CoveredPixelCount,
+            &Error,
+            &MaskOverlapCount));
+
+    TestEqual(TEXT("Both raster paths cover the same number of texels."),
+        CoveredPixelCount, RichSamples.Num());
+    TestEqual(TEXT("Both raster paths report the same overlap count."),
+        MaskOverlapCount, RichOverlapCount);
+    for (const FDWCRevealBakeTexelSample& Sample : RichSamples)
+    {
+        const int32 PixelIndex = Sample.Pixel.Y * Settings.Resolution.X + Sample.Pixel.X;
+        TestEqual(TEXT("Bounded raster preserves fractional coverage."),
+            Coverage[PixelIndex], Sample.Coverage);
+        TestEqual(TEXT("Bounded raster preserves UV-island identity."),
+            UVIslandIDs[PixelIndex], Sample.UVIslandID);
+    }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyUVOverlapCoverageTest,
     "DWC.Transparency.RevealBake.UVOverlapCoverage",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

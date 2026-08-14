@@ -444,6 +444,147 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
     return true;
 }
 
+bool FDWCRevealBakeTexelSampler::BuildOuterTexelMaskBuffers(
+    const FDWCRevealBakeSurface& OuterSurface,
+    const FDWCRevealBakeTexelSamplingSettings& Settings,
+    const TSet<int32>& EligibleTriangleIDs,
+    TArray<uint8>& OutCoverage,
+    TArray<int32>& OutUVIslandIDs,
+    int32& OutCoveredPixelCount,
+    FString* OutErrorMessage,
+    int32* OutOverlappedPixelCount)
+{
+    OutCoverage.Reset();
+    OutUVIslandIDs.Reset();
+    OutCoveredPixelCount = 0;
+    if (OutOverlappedPixelCount != nullptr)
+    {
+        *OutOverlappedPixelCount = 0;
+    }
+    if (Settings.Resolution.X <= 0 || Settings.Resolution.Y <= 0)
+    {
+        SetError(OutErrorMessage, TEXT("Texel mask resolution must be positive."));
+        return false;
+    }
+    if (OuterSurface.Triangles.IsEmpty() || EligibleTriangleIDs.IsEmpty())
+    {
+        SetError(OutErrorMessage, TEXT("Texel mask requires eligible outer-surface triangles."));
+        return false;
+    }
+
+    const int64 PixelCount64 =
+        static_cast<int64>(Settings.Resolution.X) * Settings.Resolution.Y;
+    if (PixelCount64 <= 0 || PixelCount64 > MAX_int32)
+    {
+        SetError(OutErrorMessage, TEXT("Texel mask resolution exceeds the supported pixel count."));
+        return false;
+    }
+    const int32 PixelCount = static_cast<int32>(PixelCount64);
+    // While rasterizing, this stores the surface-array triangle index. The
+    // final pass replaces it with the stable UV-island identity.
+    OutUVIslandIDs.Init(INDEX_NONE, PixelCount);
+    OutCoverage.Init(0, PixelCount);
+    constexpr uint8 CoverageMaskBits = 0x0f;
+    constexpr uint8 OverlapReportedBit = 0x80;
+    TArray<uint8> RasterFlags;
+    RasterFlags.Init(0, PixelCount);
+
+    for (int32 SurfaceTriangleIndex = 0;
+         SurfaceTriangleIndex < OuterSurface.Triangles.Num();
+         ++SurfaceTriangleIndex)
+    {
+        const FDWCRevealBakeSurfaceTriangle& Triangle =
+            OuterSurface.Triangles[SurfaceTriangleIndex];
+        if ((Settings.MaterialSlotIndex != INDEX_NONE &&
+             Triangle.MaterialSlotIndex != Settings.MaterialSlotIndex) ||
+            !EligibleTriangleIDs.Contains(Triangle.TriangleIndex))
+        {
+            continue;
+        }
+
+        const FIntRect PixelBounds =
+            MakePixelBoundsFromUVTriangle(Triangle, Settings.Resolution);
+        for (int32 Y = PixelBounds.Min.Y; Y < PixelBounds.Max.Y; ++Y)
+        {
+            for (int32 X = PixelBounds.Min.X; X < PixelBounds.Max.X; ++X)
+            {
+                const uint8 TriangleCoverageMask =
+                    ComputeSubpixelMask(X, Y, Settings.Resolution, Triangle);
+                if (TriangleCoverageMask == 0)
+                {
+                    continue;
+                }
+
+                const int32 PixelKey = MakePixelKey(X, Y, Settings.Resolution.X);
+                const int32 ExistingSurfaceTriangleIndex = OutUVIslandIDs[PixelKey];
+                if (ExistingSurfaceTriangleIndex != INDEX_NONE)
+                {
+                    const FDWCRevealBakeSurfaceTriangle& ExistingTriangle =
+                        OuterSurface.Triangles[ExistingSurfaceTriangleIndex];
+                    bool bSharesVertex = false;
+                    for (int32 ExistingCorner = 0;
+                         ExistingCorner < 3 && !bSharesVertex;
+                         ++ExistingCorner)
+                    {
+                        for (int32 NewCorner = 0; NewCorner < 3; ++NewCorner)
+                        {
+                            bSharesVertex |=
+                                ExistingTriangle.VertexIndices[ExistingCorner] ==
+                                Triangle.VertexIndices[NewCorner];
+                        }
+                    }
+                    if (!bSharesVertex)
+                    {
+                        if (OutOverlappedPixelCount != nullptr &&
+                            (RasterFlags[PixelKey] & OverlapReportedBit) == 0)
+                        {
+                            RasterFlags[PixelKey] |= OverlapReportedBit;
+                            ++(*OutOverlappedPixelCount);
+                        }
+                        continue;
+                    }
+                    RasterFlags[PixelKey] |= TriangleCoverageMask;
+                    continue;
+                }
+
+                OutUVIslandIDs[PixelKey] = SurfaceTriangleIndex;
+                RasterFlags[PixelKey] |= TriangleCoverageMask;
+            }
+        }
+    }
+
+    constexpr uint8 SubsampleCountByMask[] =
+    {
+        0, 1, 1, 2, 1, 2, 2, 3,
+        1, 2, 2, 3, 2, 3, 3, 4
+    };
+    constexpr uint8 CoverageBySubsampleCount[] = { 0, 64, 128, 191, 255 };
+    for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
+    {
+        const int32 SurfaceTriangleIndex = OutUVIslandIDs[PixelIndex];
+        if (SurfaceTriangleIndex == INDEX_NONE)
+        {
+            continue;
+        }
+        const uint8 CoverageMask = RasterFlags[PixelIndex] & CoverageMaskBits;
+        OutCoverage[PixelIndex] =
+            CoverageBySubsampleCount[SubsampleCountByMask[CoverageMask]];
+        OutUVIslandIDs[PixelIndex] =
+            OuterSurface.Triangles[SurfaceTriangleIndex].UVIslandID;
+        ++OutCoveredPixelCount;
+    }
+    if (OutCoveredPixelCount == 0)
+    {
+        OutCoverage.Reset();
+        OutUVIslandIDs.Reset();
+        SetError(OutErrorMessage, TEXT("No eligible outer texels were generated."));
+        return false;
+    }
+
+    SetError(OutErrorMessage, TEXT(""));
+    return true;
+}
+
 bool FDWCRevealBakeTexelSampler::ComputeBarycentricInUV(
     const FVector2D&                     UV,
     const FDWCRevealBakeSurfaceTriangle& Triangle,

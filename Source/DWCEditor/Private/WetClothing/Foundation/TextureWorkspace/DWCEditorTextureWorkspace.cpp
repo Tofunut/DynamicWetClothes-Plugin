@@ -100,14 +100,38 @@ FDWCEditorTextureWorkspace::FDWCEditorTextureWorkspace(
 FDWCEditorTextureWorkspace::~FDWCEditorTextureWorkspace()
 {
     check(IsInGameThread());
+    Shutdown();
+}
+
+void FDWCEditorTextureWorkspace::Shutdown()
+{
+    check(IsInGameThread());
+    if (bShuttingDown)
+    {
+        return;
+    }
+    bShuttingDown = true;
     LeaseState->bAcceptReleases = false;
     LeaseState->ReleaseCallback = nullptr;
     Reset();
+
+    // Render callbacks own their entry until UpdateTextureRegions has consumed
+    // the payload. Drain those callbacks before issuing ReleaseResource, then
+    // drain the release fences. This is the only blocking workspace boundary.
     if (!RetiredEntries.IsEmpty())
     {
         FlushRenderingCommands();
         ProcessRetiredGPUResources();
     }
+    if (!RetiredEntries.IsEmpty())
+    {
+        FlushRenderingCommands();
+        ProcessRetiredGPUResources();
+    }
+    ensureMsgf(
+        RetiredEntries.IsEmpty(),
+        TEXT("DWC texture workspace shutdown left %d retired entries."),
+        RetiredEntries.Num());
 }
 
 FDWCEditorTextureHandle FDWCEditorTextureWorkspace::Acquire(
@@ -1631,11 +1655,25 @@ bool FDWCEditorTextureWorkspace::BeginGPUResourceRetire(const FDWCEditorTextureH
 
     UploadQueue->Cancel(Entry->Key);
     Entry->GPUState = EDWCEditorTextureGPUState::Retiring;
+    ++GPUResourceRetireCount;
+    TryIssueGPUResourceRelease(Entry);
+    NotifyMaintenanceRequired();
+    return true;
+}
+
+bool FDWCEditorTextureWorkspace::TryIssueGPUResourceRelease(
+    const FDWCEditorTextureHandle& Entry)
+{
+    check(IsInGameThread());
+    if (!Entry.IsValid() || !Entry->IsGPURetiring() || Entry->GPUReleaseFence.IsValid() ||
+        Entry->HasInFlightRenderUploads() || Entry->Texture == nullptr)
+    {
+        return false;
+    }
+
     Entry->GPUReleaseFence = MakeUnique<FRenderCommandFence>();
     Entry->Texture->ReleaseResource();
     Entry->GPUReleaseFence->BeginFence();
-    ++GPUResourceRetireCount;
-    NotifyMaintenanceRequired();
     return true;
 }
 
@@ -1666,8 +1704,15 @@ void FDWCEditorTextureWorkspace::ProcessRetiredGPUResources()
     check(IsInGameThread());
     const auto ProcessEntry = [this](const FDWCEditorTextureHandle& Entry)
     {
-        if (!Entry.IsValid() || !Entry->IsGPURetiring() || !Entry->GPUReleaseFence.IsValid() ||
-            !Entry->GPUReleaseFence->IsFenceComplete())
+        if (!Entry.IsValid() || !Entry->IsGPURetiring())
+        {
+            return;
+        }
+        if (!Entry->GPUReleaseFence.IsValid())
+        {
+            TryIssueGPUResourceRelease(Entry);
+        }
+        if (!Entry->GPUReleaseFence.IsValid() || !Entry->GPUReleaseFence->IsFenceComplete())
         {
             return;
         }

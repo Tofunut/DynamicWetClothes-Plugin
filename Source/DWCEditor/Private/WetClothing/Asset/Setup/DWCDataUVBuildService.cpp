@@ -22,7 +22,6 @@
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
-#include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
 #include "Utility/DWCLog.h"
 
 namespace DWCDataUVBuildServicePrivate
@@ -902,6 +901,112 @@ namespace DWCDataUVBuildServicePrivate
     }
 } // namespace DWCDataUVBuildServicePrivate
 
+TOptional<FDWCDataUVBuildSelection> FDWCDataUVBuildSelection::Create(
+    const TConstArrayView<int32> RequestedSlots,
+    const TConstArrayView<int32> ExistingLayoutSlots,
+    const int32                  MaterialSlotCount,
+    FString*                     OutErrorMessage)
+{
+    if (MaterialSlotCount <= 0)
+    {
+        if (OutErrorMessage != nullptr)
+        {
+            *OutErrorMessage = TEXT("The Source Mesh has no material slots.");
+        }
+        return {};
+    }
+
+    auto Normalize = [MaterialSlotCount](
+                         const TConstArrayView<int32> Source,
+                         TArray<int32>&               Out,
+                         FString*                     Error) -> bool
+    {
+        TSet<int32> UniqueSlots;
+        for (const int32 MaterialSlotIndex : Source)
+        {
+            if (MaterialSlotIndex < 0 || MaterialSlotIndex >= MaterialSlotCount)
+            {
+                if (Error != nullptr)
+                {
+                    *Error = FString::Printf(
+                        TEXT("Material Slot %d is outside the Source Mesh material range [0, %d)."),
+                        MaterialSlotIndex,
+                        MaterialSlotCount);
+                }
+                return false;
+            }
+            UniqueSlots.Add(MaterialSlotIndex);
+        }
+        Out = UniqueSlots.Array();
+        Out.Sort();
+        return true;
+    };
+
+    FDWCDataUVBuildSelection Selection;
+    if (!Normalize(RequestedSlots, Selection.RequestedMaterialSlotIndices, OutErrorMessage) ||
+        !Normalize(ExistingLayoutSlots, Selection.ExistingLayoutMaterialSlotIndices, OutErrorMessage))
+    {
+        return {};
+    }
+    if (Selection.RequestedMaterialSlotIndices.IsEmpty())
+    {
+        if (OutErrorMessage != nullptr)
+        {
+            *OutErrorMessage = TEXT("At least one material slot is required for a DWC UV build.");
+        }
+        return {};
+    }
+
+    TSet<int32> BuildSlotsSet;
+    for (const int32 ExistingSlot : Selection.ExistingLayoutMaterialSlotIndices)
+    {
+        BuildSlotsSet.Add(ExistingSlot);
+    }
+    for (const int32 RequestedSlot : Selection.RequestedMaterialSlotIndices)
+    {
+        BuildSlotsSet.Add(RequestedSlot);
+    }
+    Selection.BuildMaterialSlotIndices = BuildSlotsSet.Array();
+    Selection.BuildMaterialSlotIndices.Sort();
+
+    uint32 Hash = GetTypeHash(MaterialSlotCount);
+    for (const int32 MaterialSlotIndex : Selection.RequestedMaterialSlotIndices)
+    {
+        Hash = HashCombine(Hash, GetTypeHash(MaterialSlotIndex));
+    }
+    Hash = HashCombine(Hash, 0x9e3779b9u);
+    for (const int32 MaterialSlotIndex : Selection.ExistingLayoutMaterialSlotIndices)
+    {
+        Hash = HashCombine(Hash, GetTypeHash(MaterialSlotIndex));
+    }
+    Hash = HashCombine(Hash, 0x85ebca6bu);
+    for (const int32 MaterialSlotIndex : Selection.BuildMaterialSlotIndices)
+    {
+        Hash = HashCombine(Hash, GetTypeHash(MaterialSlotIndex));
+    }
+    Selection.SemanticHash = Hash;
+    if (OutErrorMessage != nullptr)
+    {
+        OutErrorMessage->Reset();
+    }
+    return Selection;
+}
+
+bool FDWCDataUVBuildSelection::IsRequestedMaterialSlot(const int32 MaterialSlotIndex) const
+{
+    return RequestedMaterialSlotIndices.Contains(MaterialSlotIndex);
+}
+
+bool FDWCDataUVBuildSelection::IsBuildMaterialSlot(const int32 MaterialSlotIndex) const
+{
+    return BuildMaterialSlotIndices.Contains(MaterialSlotIndex);
+}
+
+bool FDWCDataUVBuildSelection::IsExistingLayoutMaterialSlot(const int32 MaterialSlotIndex) const
+{
+    return ExistingLayoutMaterialSlotIndices.Contains(MaterialSlotIndex);
+}
+
 FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     UWetClothingAsset&            Asset,
     const bool                    bForceNewAsset,
@@ -931,36 +1036,69 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         Result.SkippedMaterialSlotIndices = *SkippedMaterialSlotIndices;
     }
 
-    TSet<int32> AuthoredWettableMaterialSlotIndices;
-    TSet<int32> WettableMaterialSlotIndices;
-    for (const FWetClothingAuthoredMaterialSlot& Slot : Asset.Authored.PartData.EditableWetPartData.MaterialSlots)
+    if (Options == nullptr || !Options->BuildSelection.IsSet())
     {
-        if (Slot.bIsWettableSlot && Slot.MaterialSlotIndex != INDEX_NONE)
-        {
-            AuthoredWettableMaterialSlotIndices.Add(Slot.MaterialSlotIndex);
-            if (SkippedMaterialSlotIndices == nullptr ||
-                !SkippedMaterialSlotIndices->Contains(Slot.MaterialSlotIndex))
-            {
-                WettableMaterialSlotIndices.Add(Slot.MaterialSlotIndex);
-            }
-        }
-    }
-    if (WettableMaterialSlotIndices.IsEmpty())
-    {
-        if (!AuthoredWettableMaterialSlotIndices.IsEmpty() &&
-            SkippedMaterialSlotIndices != nullptr &&
-            !SkippedMaterialSlotIndices->IsEmpty())
-        {
-            Result.MarkCancelled(TEXT("No DWC UV changes were made because all affected material slots were skipped."));
-            return Result;
-        }
-
-        SetFailure(Result, TEXT("Select at least one Wettable material slot in Part Edit before generating DWC UV Channel."));
+        SetFailure(Result, TEXT("The DWC UV build did not provide an immutable material-slot selection."));
         return Result;
     }
 
-    TArray<int32> SortedWettableMaterialSlotIndices = WettableMaterialSlotIndices.Array();
-    SortedWettableMaterialSlotIndices.Sort();
+    const FDWCDataUVBuildSelection& BuildSelection = Options->BuildSelection.GetValue();
+    auto ValidateDecisionSlots = [&BuildSelection](
+                                     const TSet<int32>* DecisionSlots,
+                                     const TCHAR*      DecisionLabel,
+                                     FString&          OutError) -> bool
+    {
+        if (DecisionSlots == nullptr)
+        {
+            return true;
+        }
+        for (const int32 MaterialSlotIndex : *DecisionSlots)
+        {
+            if (!BuildSelection.IsBuildMaterialSlot(MaterialSlotIndex))
+            {
+                OutError = FString::Printf(
+                    TEXT("%s contains Material Slot %d, which is outside the captured DWC UV build selection."),
+                    DecisionLabel,
+                    MaterialSlotIndex);
+                return false;
+            }
+        }
+        return true;
+    };
+    FString DecisionValidationError;
+    if (!ValidateDecisionSlots(
+            ConfirmedVisibleExclusionMaterialSlotIndices,
+            TEXT("The accepted warning set"),
+            DecisionValidationError) ||
+        !ValidateDecisionSlots(
+            SkippedMaterialSlotIndices,
+            TEXT("The skipped warning set"),
+            DecisionValidationError))
+    {
+        SetFailure(Result, DecisionValidationError);
+        return Result;
+    }
+
+    TSet<int32>                     BuildMaterialSlotIndices;
+    for (const int32 MaterialSlotIndex : BuildSelection.GetBuildMaterialSlotIndices())
+    {
+        BuildMaterialSlotIndices.Add(MaterialSlotIndex);
+    }
+    if (SkippedMaterialSlotIndices != nullptr)
+    {
+        for (const int32 SkippedMaterialSlotIndex : *SkippedMaterialSlotIndices)
+        {
+            BuildMaterialSlotIndices.Remove(SkippedMaterialSlotIndex);
+        }
+    }
+    if (BuildMaterialSlotIndices.IsEmpty())
+    {
+        Result.MarkCancelled(TEXT("No DWC UV changes were made because all affected material slots were skipped."));
+        return Result;
+    }
+
+    TArray<int32> SortedBuildMaterialSlotIndices = BuildMaterialSlotIndices.Array();
+    SortedBuildMaterialSlotIndices.Sort();
 
     USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
     if (SourceMesh == nullptr)
@@ -1032,7 +1170,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         SourceSafetyPreflight = RunSourceMeshSafetyPreflight(
             Asset,
             SourceMesh,
-            SortedWettableMaterialSlotIndices,
+            SortedBuildMaterialSlotIndices,
             bEffectiveForceNewAsset,
             bAllowOverwriteExistingDataUVChannel,
             bUsePreferredDataUVChannel,
@@ -1058,7 +1196,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
             Result.bSucceeded = false;
             Result.bRequiresUserConfirmation = true;
             Result.DataUVChannelIndex = SourceSafetyPreflight.DataUVChannelIndex;
-            Result.WettableMaterialSlotCount = SortedWettableMaterialSlotIndices.Num();
+            Result.WettableMaterialSlotCount = SortedBuildMaterialSlotIndices.Num();
             Result.TargetLODIndices = SourceSafetyPreflight.TargetLODIndices;
             Result.ResultSeverity = SourceSafetyPreflight.ResultSeverity;
             Result.SlotWarnings = SourceSafetyPreflight.SlotWarnings;
@@ -1174,7 +1312,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         PayloadLODIndices.Sort();
     }
     Result.TargetLODIndices = PayloadLODIndices;
-    Result.WettableMaterialSlotCount = SortedWettableMaterialSlotIndices.Num();
+    Result.WettableMaterialSlotCount = SortedBuildMaterialSlotIndices.Num();
 
     FDWCPreparedMeshEditTransaction MeshEditTransaction(PreparedMesh);
     FString                         TransactionError;
@@ -1413,7 +1551,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     }
 
     TArray<FSlotPreflightResult> SlotPreflightResults;
-    SlotPreflightResults.SetNum(SortedWettableMaterialSlotIndices.Num());
+    SlotPreflightResults.SetNum(SortedBuildMaterialSlotIndices.Num());
     const bool bCanReuseSourceAnalysisPlans =
         bUseSourceMeshForSafetyPreflight &&
         bRebuildPreparedLODsFromSource &&
@@ -1425,10 +1563,10 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         // Source preflight is the authoritative analysis for a pristine rebuild.
         // Reusing its GenerationPlan keeps the user's confirmed exclusion and the
         // committed metadata tied to the exact same Source-Mesh analysis.
-        for (int32 SlotArrayIndex = 0; SlotArrayIndex < SortedWettableMaterialSlotIndices.Num(); ++SlotArrayIndex)
+        for (int32 SlotArrayIndex = 0; SlotArrayIndex < SortedBuildMaterialSlotIndices.Num(); ++SlotArrayIndex)
         {
             FSlotPreflightResult& SlotResult = SlotPreflightResults[SlotArrayIndex];
-            SlotResult.MaterialSlotIndex = SortedWettableMaterialSlotIndices[SlotArrayIndex];
+            SlotResult.MaterialSlotIndex = SortedBuildMaterialSlotIndices[SlotArrayIndex];
             SlotResult.CandidateDataUVChannelIndex = DataUVChannelIndex;
             SlotResult.Outcomes.Reserve(PayloadLODIndices.Num());
 
@@ -1550,12 +1688,12 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     else
     {
         RunBoundedMaterialSlotTasks(
-            SortedWettableMaterialSlotIndices.Num(),
+            SortedBuildMaterialSlotIndices.Num(),
             ResolveMaxParallelMaterialSlots(Options),
             [&](const int32 SlotArrayIndex)
             {
                 FSlotPreflightResult& SlotResult = SlotPreflightResults[SlotArrayIndex];
-                SlotResult.MaterialSlotIndex = SortedWettableMaterialSlotIndices[SlotArrayIndex];
+                SlotResult.MaterialSlotIndex = SortedBuildMaterialSlotIndices[SlotArrayIndex];
                 SlotResult.CandidateDataUVChannelIndex = DataUVChannelIndex;
                 SlotResult.Outcomes.Reserve(PayloadLODIndices.Num());
 
@@ -1748,7 +1886,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         Result.bRequiresUserConfirmation = true;
         Result.PreparedMesh = PreparedMesh;
         Result.DataUVChannelIndex = DataUVChannelIndex;
-        Result.WettableMaterialSlotCount = SortedWettableMaterialSlotIndices.Num();
+        Result.WettableMaterialSlotCount = SortedBuildMaterialSlotIndices.Num();
         Result.TargetLODIndices = PayloadLODIndices;
         Result.ResultSeverity = EDWCDataUVResultSeverity::ReadyWithWarnings;
 
@@ -1817,7 +1955,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
                                            : FString::Join(SlotFailureMessages, TEXT("\n"));
         SetFailure(Result, FString::Printf(
                                TEXT("DWC UV generation failed for all %d material slot(s) in the build.\n%s"),
-                               SortedWettableMaterialSlotIndices.Num(),
+                               SortedBuildMaterialSlotIndices.Num(),
                                *FailureDetails));
 #if WITH_EDITORONLY_DATA
         PersistLastSlotLODResults(Asset, Result, bMergeWithExistingLayout);
@@ -1951,7 +2089,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
                 &SuccessfulMaterialSlotIndices))
         {
             Result.GeneratedMaterialSlotIndices.Reset();
-            Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
+            Result.FailedMaterialSlotIndices = BuildMaterialSlotIndices;
             Result.FailureLODIndex = CanonicalDataUVLODIndex;
             SetFailure(Result, FString::Printf(
                                    TEXT("LOD0 Original UV topology failed for the successfully generated slots: %s"),
@@ -1995,7 +2133,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         if (LODResults == nullptr || LODResults->IsEmpty())
         {
             Result.GeneratedMaterialSlotIndices.Reset();
-            Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
+            Result.FailedMaterialSlotIndices = BuildMaterialSlotIndices;
             Result.FailureLODIndex = LODIndex;
             SetFailure(Result, FString::Printf(
                                    TEXT("LOD%d did not retain a complete result for every successful material slot."),
@@ -2043,7 +2181,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         {
             DataUVMetadata.RemoveAt(DataUVMetadata.Num() - 1);
             Result.GeneratedMaterialSlotIndices.Reset();
-            Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
+            Result.FailedMaterialSlotIndices = BuildMaterialSlotIndices;
             Result.FailureLODIndex = LODIndex;
 
             const bool bMissingGeneratedChannel =
@@ -2176,7 +2314,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     if (DataUVMetadata.IsEmpty())
     {
         Result.GeneratedMaterialSlotIndices.Reset();
-        Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
+        Result.FailedMaterialSlotIndices = BuildMaterialSlotIndices;
         SetFailure(Result, TEXT("The DWC Prepared Skeletal Mesh produced no DWC UV Channel payloads."));
         return Result;
     }
@@ -2217,7 +2355,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     if (!bCommitSucceeded)
     {
         Result.GeneratedMaterialSlotIndices.Reset();
-        Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
+        Result.FailedMaterialSlotIndices = BuildMaterialSlotIndices;
         SetFailure(Result, CommitError.IsEmpty() ? TEXT("Failed to commit the DWC UV Channel layout.") : CommitError);
         return Result;
     }
@@ -2228,7 +2366,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     Result.bRequiresUserConfirmation = false;
     Result.PreparedMesh = PreparedMesh;
     Result.DataUVChannelIndex = DataUVChannelIndex;
-    Result.WettableMaterialSlotCount = SortedWettableMaterialSlotIndices.Num();
+    Result.WettableMaterialSlotCount = SortedBuildMaterialSlotIndices.Num();
     Result.TargetLODIndices = PayloadLODIndices;
     Result.GeneratedLODIndices = MoveTemp(GeneratedLODIndices);
     Result.GeneratedLODIndices.Sort();
@@ -2278,7 +2416,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         Operation,
         DataUVChannelIndex,
         SuccessfulMaterialSlotIndices.Num(),
-        SortedWettableMaterialSlotIndices.Num(),
+        SortedBuildMaterialSlotIndices.Num(),
         Result.GeneratedLODIndices.Num(),
         Result.TargetLODIndices.Num(),
         *GeneratedLODText,
@@ -2520,7 +2658,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::RelocateChannel(
 
     MeshEditTransaction.Commit();
     FWCAGeneratedDataInvalidator::InvalidateAsset(Asset);
-    FWCAUVIslandViewCache::InvalidateMesh(PreparedMesh);
+    FWCAGeneratedDataInvalidator::InvalidateMesh(PreparedMesh);
 
     Result.BuildState = EDWCDataUVBuildState::Ready;
     Result.bSucceeded = true;

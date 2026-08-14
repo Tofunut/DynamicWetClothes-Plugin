@@ -218,7 +218,7 @@ void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetRemoved(const FAssetData& 
     if (BrushSettings.WrinkleNormalTexture != nullptr &&
         FSoftObjectPath(BrushSettings.WrinkleNormalTexture.Get()) == RemovedPath)
     {
-        BrushSettings.WrinkleNormalTexture = nullptr;
+        SetSelectedWrinkleNormalTexture(nullptr);
         PushBrushPreviewSettingsToViewport();
     }
     RemoveWrinkleTexturePaletteItem(RemovedPath);
@@ -313,7 +313,7 @@ FReply SWetWrinkleEditorPanel::HandleWrinkleTexturePaletteClicked(TSharedPtr<FWe
         Item->Texture = Texture;
     }
 
-    BrushSettings.WrinkleNormalTexture = Texture;
+    SetSelectedWrinkleNormalTexture(Texture);
     RefreshWrinkleNormalThumbnail();
     PushBrushPreviewSettingsToViewport();
     WrinklePalettePanel->RequestRefresh();

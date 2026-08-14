@@ -44,6 +44,7 @@ class FDWCEditorRenderUploadQueue final
     void CancelPreviewMode(const UObject* Owner, EDWCEditorPreviewMode Mode);
     void Flush();
     bool HasPendingWork() const;
+    uint64 GetInFlightRenderUploadCount() const;
     void SetWorkAvailableCallback(FWorkAvailableCallback Callback);
     EDWCEditorTextureUploadStatus TrySubmitInteractive(
         const FDWCEditorTextureUploadTicket& Ticket,
@@ -70,6 +71,7 @@ class FDWCEditorRenderUploadQueue final
     struct FStagingState
     {
         TAtomic<uint64> InFlightBytes{0};
+        TAtomic<uint64> InFlightSubmissionCount{0};
     };
 
     struct FPreparedUploadPayload

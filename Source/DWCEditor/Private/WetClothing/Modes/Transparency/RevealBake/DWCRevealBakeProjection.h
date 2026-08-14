@@ -70,6 +70,21 @@ class FDWCRevealBakeTexelSampler
         FString*                                   OutErrorMessage = nullptr,
         int32*                                     OutOverlappedPixelCount = nullptr);
 
+    /**
+     * Rasterizes only the persistent paint-domain mask required when restoring
+     * a baked Stage 4 baseline. Unlike BuildOuterTexelSamples, this does not
+     * retain position, normal, or barycentric data for every covered texel.
+     */
+    static bool BuildOuterTexelMaskBuffers(
+        const FDWCRevealBakeSurface&               OuterSurface,
+        const FDWCRevealBakeTexelSamplingSettings& Settings,
+        const TSet<int32>&                         EligibleTriangleIDs,
+        TArray<uint8>&                             OutCoverage,
+        TArray<int32>&                             OutUVIslandIDs,
+        int32&                                     OutCoveredPixelCount,
+        FString*                                   OutErrorMessage = nullptr,
+        int32*                                     OutOverlappedPixelCount = nullptr);
+
   private:
     static constexpr double BarycentricTolerance = -1.0e-6;
     static constexpr double RayIntersectionEpsilon = 1.0e-8;

@@ -8,6 +8,7 @@
 #include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
+#include "WetClothing/Modes/Part/Topology/DWCPartTopologyCache.h"
 #include "SEditorViewport.h"
 #include "UObject/GCObject.h"
 
@@ -125,7 +126,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void                ApplySurfaceWaterPreviewTextureParameters();
     void                ApplySurfaceWaterPreviewRenderOverrides();
     void                RequestViewportRedraw();
-    const class FDWCPartTopologyCacheValue* GetCurrentTopology() const;
+    const FDWCPartTopologyCacheValue* GetCurrentTopology() const;
     void                CacheOriginalMaterials();
     void                RestoreOriginalMaterials();
     UMaterialInterface* ResolveWetPartOverlayMaterial();

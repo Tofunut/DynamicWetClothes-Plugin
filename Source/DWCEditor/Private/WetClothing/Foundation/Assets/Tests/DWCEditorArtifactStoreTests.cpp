@@ -133,6 +133,9 @@ bool FDWCEditorArtifactStoreCommitTest::RunTest(const FString&)
     TestTrue(TEXT("The committed package participates in the save lifecycle."),
         DirtyPackages.Contains(Texture->GetOutermost()));
     Store->NotifyPackagesSaved(DirtyPackages);
+    const FDWCEditorArtifactStoreDiagnostics SavedDiagnostics = Store->GetDiagnostics();
+    TestEqual(TEXT("Save acknowledgement updates dirty tracking diagnostics immediately."),
+        SavedDiagnostics.DirtyArtifactCount, 0);
     DirtyPackages.Reset();
     Store->CollectDirtyPackages(*Owner, DirtyPackages);
     TestTrue(TEXT("A successful save acknowledgement clears store dirtiness."),

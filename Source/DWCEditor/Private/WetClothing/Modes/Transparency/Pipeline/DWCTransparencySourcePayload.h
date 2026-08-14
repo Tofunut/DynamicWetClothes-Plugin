@@ -99,6 +99,8 @@ struct FDWCTransparencySourcePayload
     /** Resolver identity captured with Resolution at the request boundary. */
     FString OutputResolutionIdentity;
     FString BuildSignature;
+    /** Material-surface identity captured by the same canonical signature pass. */
+    FString MaterialBakeSignature;
     int32 OuterSampleCount = 0;
     int32 ValidHitCount = 0;
     int32 NoHitCount = 0;
@@ -131,6 +133,7 @@ struct FDWCTransparencySourcePayload
     {
         return static_cast<uint64>(sizeof(FDWCTransparencySourcePayload)) +
             static_cast<uint64>(BuildSignature.GetAllocatedSize()) +
+            static_cast<uint64>(MaterialBakeSignature.GetAllocatedSize()) +
             static_cast<uint64>(OutputResolutionIdentity.GetAllocatedSize()) +
             static_cast<uint64>(InnerColorBuffer.GetAllocatedSize()) +
             RevealSurfaceAuthoring.GetAllocatedBytes() +

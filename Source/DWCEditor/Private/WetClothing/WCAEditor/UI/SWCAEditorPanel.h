@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WetClothing/Foundation/Assets/DWCEditorAssetResidency.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionTypes.h"
 #include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorHostLifecycle.h"
 #include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorPreviewModeLifetime.h"
@@ -14,10 +15,12 @@ class IDetailsView;
 class FDWCEditorAuthoringDocument;
 class FDWCEditorBakeCoordinator;
 class FDWCEditorBuildOperationManager;
+class FDWCEditorExclusiveBuildCoordinator;
 class FDWCEditorCacheStore;
 class FDWCWrinkleSuppressionCoverageService;
 class FDWCEditorRenderUploadQueue;
 class FDWCEditorPreviewCommitCoordinator;
+class FDWCEditorPreviewResourceContext;
 class FDWCEditorPreviewGPUResidencyManager;
 class FDWCEditorResourceGovernor;
 class FDWCEditorSessionStore;
@@ -32,6 +35,7 @@ class SWetWrinkleEditorPanel;
 class UWetClothingAsset;
 class FActiveTimerHandle;
 struct FDWCEditorAuthoringChange;
+struct FWCAGeneratedDataInvalidation;
 struct FDWCEditorBakeBatchResult;
 struct FDWCEditorWorkerJobDescriptor;
 enum class EDWCEditorPreviewSuspendReason : uint8;
@@ -43,6 +47,13 @@ enum class EWCAEditorStatusSeverity : uint8
     Info,
     Warning,
     Error
+};
+
+enum class EWCAEditorPreviewResourceShutdownState : uint8
+{
+    Running,
+    Quiescing,
+    Closed
 };
 
 /** Lightweight validation summary used by toolbar refresh and resolve/close flows. */
@@ -123,10 +134,10 @@ private:
     EActiveTimerReturnType HandleDeferredStatusRefresh(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleTextureUploadTimer(double CurrentTime, float DeltaTime);
     void EnsureTextureUploadTimer();
-    EActiveTimerReturnType HandleExclusiveBuildTimer(double CurrentTime, float DeltaTime);
     void RequestStatusRefresh();
     void UpdateCachedStatus();
     void HandleAuthoringDocumentChanged(const FDWCEditorAuthoringChange& Change);
+    void HandleGeneratedDataInvalidated(const FWCAGeneratedDataInvalidation& Invalidation);
     void SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker Blocker, bool bEnabled);
     void ApplyHostLifecycleTransition(const FDWCEditorHostLifecycleTransition& Transition);
     bool CanRunInteractivePreview() const;
@@ -146,13 +157,15 @@ private:
     void HandleEndPIE(bool bIsSimulating);
     void RegisterResourceParticipants();
     void UnregisterResourceParticipants();
+    void BeginPreviewResourceShutdown();
+    void CompletePreviewResourceShutdown();
     void HandleExclusiveBuildBarrierChanged(bool bActive);
-    void FinishExclusiveBuild();
 
 private:
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TSharedPtr<FDWCEditorAuthoringDocument> AuthoringDocument;
     TSharedPtr<FDWCEditorCacheStore> CacheStore;
+    FDelegateHandle GeneratedDataInvalidationHandle;
     TSharedPtr<FDWCWrinkleSuppressionCoverageService> WrinkleSuppressionCoverageService;
     TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
     TSharedPtr<FDWCEditorSurfacePatchProjectionCacheService> SurfacePatchProjectionCache;
@@ -160,6 +173,9 @@ private:
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
     TSharedPtr<FDWCEditorPreviewGPUResidencyManager> PreviewGPUResidencyManager;
     TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
+    TSharedPtr<FDWCEditorPreviewResourceContext> PreviewResources;
+    TSharedPtr<FDWCEditorAssetResidencyRegistry> AssetResidency;
+    FDWCEditorAssetResidencyLease EditorAssetResidencyLease;
     TSharedPtr<FDWCEditorSessionStore> SessionStore;
     TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
     TSharedPtr<FDWCEditorResourceBroker> ResourceBroker;
@@ -168,10 +184,7 @@ private:
     TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> WorkerJobScheduler;
     TSharedPtr<FDWCEditorBuildOperationManager> BuildOperationManager;
     TSharedPtr<FDWCEditorBakeCoordinator> BakeCoordinator;
-    TUniquePtr<FDWCEditorExclusiveBuildLease> ExclusiveBuildLease;
-    TFunction<void()> PendingExclusiveBuildWork;
-    double ExclusiveBuildDrainStartedSeconds = 0.0;
-    bool bExclusiveBuildWorkExecuting = false;
+    TSharedPtr<FDWCEditorExclusiveBuildCoordinator> ExclusiveBuildCoordinator;
     FDWCEditorHostLifecycleReducer HostLifecycle { EDWCEditorHostLifecycleBlocker::HostUnavailable };
     TSharedPtr<FDWCEditorPreviewModeLifetime> PartPreviewLifetime;
     TSharedPtr<FDWCEditorPreviewModeLifetime> WrinklePreviewLifetime;
@@ -193,4 +206,6 @@ private:
     FDelegateHandle PreBeginPIEHandle;
     FDelegateHandle EndPIEHandle;
     TWeakPtr<FActiveTimerHandle> TextureUploadTimerHandle;
+    EWCAEditorPreviewResourceShutdownState PreviewResourceShutdownState =
+        EWCAEditorPreviewResourceShutdownState::Running;
 };

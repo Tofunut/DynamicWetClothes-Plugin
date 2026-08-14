@@ -4,7 +4,10 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/SCS_Node.h"
+#include "Engine/SimpleConstructionScript.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Materials/Material.h"
@@ -13,10 +16,58 @@
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "PreviewScene.h"
+#include "WetClothing/Modes/Transparency/Diagnostics/DWCTransparencyBaselineDiagnostics.h"
 
 namespace
 {
+    FName ResolveTemplateComponentName(const UActorComponent& Component)
+    {
+        FString ComponentName = Component.GetName();
+        ComponentName.RemoveFromEnd(UActorComponent::ComponentTemplateNameSuffix);
+        return FName(*ComponentName);
+    }
+
+    const USceneComponent* ResolveTemplateParent(
+        const TSubclassOf<AActor> BlueprintClass,
+        const USceneComponent& Component)
+    {
+        if (const USceneComponent* AttachParent = Component.GetAttachParent())
+        {
+            return AttachParent;
+        }
+
+        UBlueprintGeneratedClass* ActualClass = Cast<UBlueprintGeneratedClass>(BlueprintClass.Get());
+        if (ActualClass == nullptr)
+        {
+            return nullptr;
+        }
+
+        const USceneComponent* ResolvedParent = nullptr;
+        UBlueprintGeneratedClass::ForEachGeneratedClassInHierarchy(
+            ActualClass,
+            [&Component, ActualClass, &ResolvedParent](const UBlueprintGeneratedClass* CurrentClass)
+            {
+                USimpleConstructionScript* ConstructionScript =
+                    CurrentClass != nullptr ? CurrentClass->SimpleConstructionScript.Get() : nullptr;
+                if (ConstructionScript == nullptr)
+                {
+                    return true;
+                }
+                for (USCS_Node* Node : ConstructionScript->GetAllNodes())
+                {
+                    if (Node != nullptr && Node->GetActualComponentTemplate(ActualClass) == &Component)
+                    {
+                        ResolvedParent = Node->GetParentComponentTemplate(ActualClass);
+                        return false;
+                    }
+                }
+                return true;
+            });
+        return ResolvedParent;
+    }
+
     bool RequiresDurableMaterialSnapshot(const UMaterialInterface& Material)
     {
         return Material.IsA<UMaterialInstanceDynamic>() ||
@@ -104,6 +155,76 @@ namespace
                     LightingGuid.IsValid()
                         ? *LightingGuid.ToString(EGuidFormats::Digits)
                         : TEXT("None"));
+            }
+            const FTransform& Transform = Component.BakeTransform;
+            Signature += FString::Printf(
+                TEXT(":Transform{T=%.9g,%.9g,%.9g;R=%.9g,%.9g,%.9g,%.9g;S=%.9g,%.9g,%.9g}"),
+                Transform.GetTranslation().X,
+                Transform.GetTranslation().Y,
+                Transform.GetTranslation().Z,
+                Transform.GetRotation().X,
+                Transform.GetRotation().Y,
+                Transform.GetRotation().Z,
+                Transform.GetRotation().W,
+                Transform.GetScale3D().X,
+                Transform.GetScale3D().Y,
+                Transform.GetScale3D().Z);
+        }
+        return Signature;
+    }
+
+    FTransform ResolveTemplateActorTransform(
+        const TSubclassOf<AActor> BlueprintClass,
+        const USceneComponent& Component)
+    {
+        FTransform ActorTransform = Component.GetRelativeTransform();
+        const USceneComponent* Parent = ResolveTemplateParent(BlueprintClass, Component);
+        int32 ParentDepth = 0;
+        while (Parent != nullptr && ParentDepth++ < 64)
+        {
+            ActorTransform *= Parent->GetRelativeTransform();
+            Parent = ResolveTemplateParent(BlueprintClass, *Parent);
+        }
+        return ActorTransform;
+    }
+
+    FString MakeTemplateDisplayPath(
+        const TSubclassOf<AActor> BlueprintClass,
+        const USceneComponent& Component,
+        int32& OutHierarchyDepth)
+    {
+        TArray<FString> Names;
+        Names.Add(ResolveTemplateComponentName(Component).ToString());
+        OutHierarchyDepth = 0;
+        for (const USceneComponent* Parent = ResolveTemplateParent(BlueprintClass, Component);
+             Parent != nullptr && OutHierarchyDepth < 64;
+             Parent = ResolveTemplateParent(BlueprintClass, *Parent))
+        {
+            Names.Insert(ResolveTemplateComponentName(*Parent).ToString(), 0);
+            ++OutHierarchyDepth;
+        }
+        return FString::Join(Names, TEXT(" / "));
+    }
+
+    FString MakeBlueprintMetadataSignature(
+        const TSubclassOf<AActor> BlueprintClass,
+        const TArray<FDWCTransparencyBlueprintMeshComponentMetadata>& Components)
+    {
+        FString Signature = FString::Printf(
+            TEXT("DWCTransparencyBlueprintMetadata_v1|Class=%s"),
+            *GetPathNameSafe(BlueprintClass.Get()));
+        for (const FDWCTransparencyBlueprintMeshComponentMetadata& Component : Components)
+        {
+            Signature += FString::Printf(
+                TEXT("|%s:Parent=%s:Mesh=%s:Path=%s:Depth=%d"),
+                *Component.ComponentName.ToString(),
+                *Component.ParentComponentName.ToString(),
+                *Component.SkeletalMeshPath.ToString(),
+                *Component.DisplayPath,
+                Component.HierarchyDepth);
+            for (const FSoftObjectPath& MaterialPath : Component.MaterialPaths)
+            {
+                Signature += FString::Printf(TEXT(":Material=%s"), *MaterialPath.ToString());
             }
             const FTransform& Transform = Component.BakeTransform;
             Signature += FString::Printf(
@@ -285,12 +406,108 @@ bool FDWCTransparencyBlueprintMaterialSnapshotLifetimeTest::RunTest(const FStrin
 }
 #endif
 
+bool FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchyMetadata(
+    const TSubclassOf<AActor> BlueprintClass,
+    FDWCTransparencyBlueprintHierarchyMetadata& OutHierarchy,
+    FString& OutError)
+{
+    check(IsInGameThread());
+    const double BuildStartSeconds = FPlatformTime::Seconds();
+    bool bBuildSucceeded = false;
+    ON_SCOPE_EXIT
+    {
+        FDWCTransparencyBaselineDiagnostics::RecordBlueprintHierarchyBuild(
+            bBuildSucceeded,
+            0,
+            (FPlatformTime::Seconds() - BuildStartSeconds) * 1000.0);
+    };
+
+    OutHierarchy = FDWCTransparencyBlueprintHierarchyMetadata();
+    OutError.Reset();
+    if (BlueprintClass == nullptr ||
+        BlueprintClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
+    {
+        OutError = TEXT("Assign a usable Blueprint class before reading its Skeletal Mesh hierarchy.");
+        return false;
+    }
+
+    TArray<const USkeletalMeshComponent*> MeshComponents;
+    AActor::GetActorClassDefaultComponents(BlueprintClass, MeshComponents);
+    OutHierarchy.MeshComponents.Reserve(MeshComponents.Num());
+    TSet<FName> AddedComponentNames;
+    for (const USkeletalMeshComponent* MeshComponent : MeshComponents)
+    {
+        if (MeshComponent == nullptr || MeshComponent->GetSkeletalMeshAsset() == nullptr)
+        {
+            continue;
+        }
+
+        const FName ComponentName = ResolveTemplateComponentName(*MeshComponent);
+        if (AddedComponentNames.Contains(ComponentName))
+        {
+            continue;
+        }
+        AddedComponentNames.Add(ComponentName);
+
+        FDWCTransparencyBlueprintMeshComponentMetadata& Component =
+            OutHierarchy.MeshComponents.AddDefaulted_GetRef();
+        Component.ComponentName = ComponentName;
+        const USceneComponent* Parent = ResolveTemplateParent(BlueprintClass, *MeshComponent);
+        Component.ParentComponentName = Parent != nullptr
+            ? ResolveTemplateComponentName(*Parent)
+            : NAME_None;
+        Component.DisplayPath = MakeTemplateDisplayPath(
+            BlueprintClass,
+            *MeshComponent,
+            Component.HierarchyDepth);
+        Component.SkeletalMeshPath = FSoftObjectPath(MeshComponent->GetSkeletalMeshAsset());
+        Component.BakeTransform = ResolveTemplateActorTransform(BlueprintClass, *MeshComponent);
+
+        const int32 MaterialCount = MeshComponent->GetNumMaterials();
+        Component.MaterialPaths.Reserve(MaterialCount);
+        for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+        {
+            Component.MaterialPaths.Add(FSoftObjectPath(MeshComponent->GetMaterial(MaterialIndex)));
+        }
+    }
+
+    OutHierarchy.MeshComponents.Sort(
+        [](const FDWCTransparencyBlueprintMeshComponentMetadata& Left,
+            const FDWCTransparencyBlueprintMeshComponentMetadata& Right)
+        {
+            return Left.ComponentName.LexicalLess(Right.ComponentName);
+        });
+    if (OutHierarchy.MeshComponents.IsEmpty())
+    {
+        OutError = FString::Printf(
+            TEXT("Blueprint '%s' contains no default Skeletal Mesh Components."),
+            *GetNameSafe(BlueprintClass.Get()));
+        return false;
+    }
+
+    OutHierarchy.BuildSignature = MakeBlueprintMetadataSignature(
+        BlueprintClass,
+        OutHierarchy.MeshComponents);
+    bBuildSucceeded = true;
+    return true;
+}
+
 bool FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchy(
     const TSubclassOf<AActor> BlueprintClass,
     FDWCTransparencyBlueprintHierarchy& OutHierarchy,
     FString& OutError)
 {
     check(IsInGameThread());
+    const double BuildStartSeconds = FPlatformTime::Seconds();
+    int32 MaterialSnapshotCount = 0;
+    bool bBuildSucceeded = false;
+    ON_SCOPE_EXIT
+    {
+        FDWCTransparencyBaselineDiagnostics::RecordBlueprintHierarchyBuild(
+            bBuildSucceeded,
+            MaterialSnapshotCount,
+            (FPlatformTime::Seconds() - BuildStartSeconds) * 1000.0);
+    };
     OutHierarchy = FDWCTransparencyBlueprintHierarchy();
     OutHierarchy.ObjectLease = MakeShared<FDWCTransparencyProjectionObjectLease>();
     OutError.Reset();
@@ -376,6 +593,7 @@ bool FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchy(
             }
             Component.Materials.Add(DurableMaterial);
             OutHierarchy.ObjectLease->Retain(DurableMaterial);
+            MaterialSnapshotCount += DurableMaterial != nullptr ? 1 : 0;
         }
     }
     OutHierarchy.MeshComponents.Sort(
@@ -393,6 +611,7 @@ bool FDWCTransparencyProjectionSourceProvider::BuildBlueprintHierarchy(
     }
     OutHierarchy.BuildSignature = MakeBlueprintHierarchySignature(
         BlueprintClass, OutHierarchy.MeshComponents);
+    bBuildSucceeded = true;
     return true;
 }
 

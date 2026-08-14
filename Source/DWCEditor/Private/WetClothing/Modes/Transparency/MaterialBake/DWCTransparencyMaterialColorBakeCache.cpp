@@ -12,6 +12,7 @@
 #include "UObject/StrongObjectPtr.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySignatureService.h"
 #include "WetClothing/Modes/Transparency/Temp/DWCTransparencyTempAssetStore.h"
+#include "WetClothing/Modes/Transparency/Diagnostics/DWCTransparencyBaselineDiagnostics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDWCTransparencyMaterialBake, Log, All);
 
@@ -767,6 +768,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
 
     if (FCacheEntry* Existing = GMaterialColorCache.Find(Key))
     {
+        FDWCTransparencyBaselineDiagnostics::RecordResidentMaterialSurfaceHit();
         Existing->LastUsedSerial = ++GUseSerial;
         UE_LOG(
             LogDWCTransparencyMaterialBake, VeryVerbose,
@@ -828,6 +830,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
                     PersistentReference.bHasBakedMetallicProperty, OutError))
             {
                 Result->bLoadedFromPersistentCache = true;
+                FDWCTransparencyBaselineDiagnostics::RecordPersistentMaterialSurfaceHit();
                 UE_LOG(
                     LogDWCTransparencyMaterialBake, Verbose,
                     TEXT("Loaded persistent source material surface for '%s' slot %d UV%d (sourceBake=%d, color=%dx%d, normal=%dx%d, metallic=%dx%d)."),
@@ -842,6 +845,7 @@ FDWCTransparencyMaterialColorBakeCache::ResolveOrBake(
 
     if (!Result->HasCompleteSurfacePayload())
     {
+        FDWCTransparencyBaselineDiagnostics::RecordMaterialSurfaceBake();
         const double BakeStartSeconds = FPlatformTime::Seconds();
         FBakedMaterialSurfacePayload Payload;
         if (!BakeMaterialSurface(

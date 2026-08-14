@@ -6,6 +6,7 @@
 #include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
@@ -163,12 +164,19 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         return false;
     }
 
-    UMaterialExpressionCustom* Blend = Cast<UMaterialExpressionCustom>(
+    UMaterialExpressionCustom* State = Cast<UMaterialExpressionCustom>(
         UMaterialEditingLibrary::CreateMaterialExpression(
             Material,
             UMaterialExpressionCustom::StaticClass(),
             -100,
             2900));
+    UMaterialExpressionLinearInterpolate* ColorCompose =
+        Cast<UMaterialExpressionLinearInterpolate>(
+            UMaterialEditingLibrary::CreateMaterialExpression(
+                Material,
+                UMaterialExpressionLinearInterpolate::StaticClass(),
+                250,
+                2900));
     UMaterialExpressionTextureObjectParameter* TransparencyMap = CreateColorTextureParameter(
         Material, DWCTransparencyPreviewMaterialParameters::TransparencyMap(), 2900);
     UMaterialExpressionScalarParameter* UseTransparencyMap = CreateScalarParameter(
@@ -219,12 +227,18 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         Material, DWCTransparencyPreviewMaterialParameters::HoverBaselineMap(), 4500);
     UMaterialExpressionScalarParameter* UseHoverBaselineMap = CreateScalarParameter(
         Material, DWCTransparencyPreviewMaterialParameters::UseHoverBaselineMap(), 0.0f, 4600);
+    UMaterialExpressionTextureObjectParameter* HoverIslandIDMap = CreateMaskTextureParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::HoverIslandIDMap(), 4700);
+    UMaterialExpressionScalarParameter* UseHoverIslandIDMap = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::UseHoverIslandIDMap(), 0.0f, 4800);
+    UMaterialExpressionScalarParameter* HoverIslandID = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::HoverIslandID(), -1.0f, 4900);
     UMaterialExpressionTextureObjectParameter* HoverEdgeFeatherMap = CreateMaskTextureParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap(), 4700);
+        Material, DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap(), 5000);
     UMaterialExpressionScalarParameter* UseHoverEdgeFeatherMap = CreateScalarParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap(), 0.0f, 4800);
+        Material, DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap(), 0.0f, 5100);
     UMaterialExpressionScalarParameter* PreviewWetness = FindPreviewWetnessParameter(Material);
-    if (Blend == nullptr || TransparencyMap == nullptr || UseTransparencyMap == nullptr ||
+    if (State == nullptr || ColorCompose == nullptr || TransparencyMap == nullptr || UseTransparencyMap == nullptr ||
         TransparencyStrength == nullptr || ShowInnerColor == nullptr || WrinkleCoverageMap == nullptr ||
         UseWrinkleCoverageMap == nullptr || WrinkleSuppressionStrength == nullptr ||
         WrinkleMaskThreshold == nullptr || WrinkleMaskSoftness == nullptr || VisualizationMode == nullptr ||
@@ -232,6 +246,7 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         HoverTarget == nullptr || HoverWrap == nullptr || HoverTexelSize == nullptr ||
         HoverVisualizationMode == nullptr ||
         HoverBaselineMap == nullptr || UseHoverBaselineMap == nullptr ||
+        HoverIslandIDMap == nullptr || UseHoverIslandIDMap == nullptr || HoverIslandID == nullptr ||
         HoverEdgeFeatherMap == nullptr || UseHoverEdgeFeatherMap == nullptr ||
         PreviewWetness == nullptr)
     {
@@ -239,12 +254,14 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         return false;
     }
 
-    FCustomOutput& FinalRevealVisibility = Blend->AdditionalOutputs.AddDefaulted_GetRef();
+    FCustomOutput& BlendWeight = State->AdditionalOutputs.AddDefaulted_GetRef();
+    BlendWeight.OutputName = TEXT("BaseColorBlendWeight");
+    BlendWeight.OutputType = CMOT_Float1;
+    FCustomOutput& FinalRevealVisibility = State->AdditionalOutputs.AddDefaulted_GetRef();
     FinalRevealVisibility.OutputName = TEXT("FinalRevealVisibility");
     FinalRevealVisibility.OutputType = CMOT_Float1;
 
     static const FName InputNames[] = {
-        TEXT("BaseColor"),
         TEXT("TransparencyMapTex"),
         TEXT("SelectedUV"),
         TEXT("UseTransparencyMap"),
@@ -268,15 +285,18 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         TEXT("HoverVisualizationMode"),
         TEXT("HoverBaselineMapTex"),
         TEXT("UseHoverBaselineMap"),
+        TEXT("HoverIslandIDMapTex"),
+        TEXT("UseHoverIslandIDMap"),
+        TEXT("HoverIslandID"),
         TEXT("HoverEdgeFeatherMapTex"),
         TEXT("UseHoverEdgeFeatherMap"),
     };
     for (const FName InputName : InputNames)
     {
-        FCustomInput& Input = Blend->Inputs.AddDefaulted_GetRef();
+        FCustomInput& Input = State->Inputs.AddDefaulted_GetRef();
         Input.InputName = InputName;
     }
-    Blend->Code = TEXT(R"(
+    State->Code = TEXT(R"(
 float4 TransparencySample = Texture2DSampleLevel(TransparencyMapTex, TransparencyMapTexSampler, SelectedUV, 0);
 
 // Hover is a presentation-only layer. Disabled hover returns the committed
@@ -298,6 +318,17 @@ if (HoverState1.x > 0.0 && HoverTarget > 0.5)
         float HoverRadialWeight = ClampedHoverFalloff <= 0.00001 || HoverDistance <= HoverInnerRadius
             ? 1.0
             : 1.0 - smoothstep(HoverInnerRadius, 1.0, HoverDistance);
+        float2 SafeTexelSize = max(HoverTexelSize.xy, float2(0.000001, 0.000001));
+        float2 HoverTextureSize = max(round(1.0 / SafeTexelSize), float2(1.0, 1.0));
+        float2 HoverAddressedUV = HoverWrap > 0.5 ? frac(SelectedUV) : saturate(SelectedUV);
+        int2 HoverPixelCoord = clamp(
+            (int2)floor(HoverAddressedUV * HoverTextureSize),
+            int2(0, 0),
+            (int2)HoverTextureSize - int2(1, 1));
+        float SampledHoverIslandID = HoverIslandIDMapTex.Load(int3(HoverPixelCoord, 0)).r;
+        float HoverIslandEligibility = UseHoverIslandIDMap > 0.5
+            ? 1.0 - step(0.5 / 65535.0, abs(SampledHoverIslandID - HoverIslandID))
+            : 1.0;
         float HoverIslandFeather = UseHoverEdgeFeatherMap > 0.5
             ? Texture2DSampleLevel(
                 HoverEdgeFeatherMapTex,
@@ -305,11 +336,10 @@ if (HoverState1.x > 0.0 && HoverTarget > 0.5)
                 SelectedUV,
                 0).r
             : 1.0;
-        float HoverIslandEligibility = step(0.5 / 255.0, HoverIslandFeather);
+        HoverIslandEligibility *= step(0.5 / 255.0, HoverIslandFeather);
         float HoverWeight = saturate(HoverRadialWeight * max(HoverState1.y, 0.0)) * HoverIslandEligibility;
         int SelectedHoverOperation = (int)floor(HoverOperation + 0.5);
 
-        float2 SafeTexelSize = max(HoverTexelSize.xy, float2(0.000001, 0.000001));
         float4 SmoothSample = 0.0;
         float SmoothAlphaWeight = 0.0;
         if (SelectedHoverOperation == 3)
@@ -327,7 +357,16 @@ if (HoverState1.x > 0.0 && HoverTarget > 0.5)
                         TransparencyMapTexSampler,
                         SampleUV,
                         0);
-                    float NeighborEligibility = UseHoverEdgeFeatherMap > 0.5
+                    float2 NeighborAddressedUV = HoverWrap > 0.5 ? frac(SampleUV) : saturate(SampleUV);
+                    int2 NeighborPixelCoord = clamp(
+                        (int2)floor(NeighborAddressedUV * HoverTextureSize),
+                        int2(0, 0),
+                        (int2)HoverTextureSize - int2(1, 1));
+                    float NeighborIslandID = HoverIslandIDMapTex.Load(int3(NeighborPixelCoord, 0)).r;
+                    float NeighborEligibility = UseHoverIslandIDMap > 0.5
+                        ? 1.0 - step(0.5 / 65535.0, abs(NeighborIslandID - HoverIslandID))
+                        : 1.0;
+                    NeighborEligibility *= UseHoverEdgeFeatherMap > 0.5
                         ? step(
                             0.5 / 255.0,
                             Texture2DSampleLevel(
@@ -440,49 +479,53 @@ else if (SelectedVisualizationMode >= 4)
 }
 
 float InnerColorBlendWeight = saturate(ShowInnerColor);
-float BlendWeight = max(MapBlendWeight, InnerColorBlendWeight) *
+BaseColorBlendWeight = max(MapBlendWeight, InnerColorBlendWeight) *
     saturate(UseTransparencyMap) * saturate(PreviewWetness);
 FinalRevealVisibility = FinalAlpha * saturate(UseTransparencyMap) * saturate(PreviewWetness);
-return lerp(BaseColor, DisplayColor, BlendWeight);
+return DisplayColor;
 )");
-    Blend->OutputType = CMOT_Float3;
-    Blend->Description = TEXT("DWC Transparency Live Preview BaseColor Blend");
-    Blend->RebuildOutputs();
+    State->OutputType = CMOT_Float3;
+    State->Description = TEXT("DWC Transparency Live Preview State");
+    State->RebuildOutputs();
 
     FDWCMaterialGraphPin DataUVPin;
     DataUVPin.Expression = SurfaceGraph.DWCDataUVExpression;
-    bool bConnected = Connect(SurfaceGraph.Outputs.BaseColor, Blend, TEXT("BaseColor"), OutErrorMessage);
-    bConnected &= Connect({ TransparencyMap, FString() }, Blend, TEXT("TransparencyMapTex"), OutErrorMessage);
-    bConnected &= Connect(DataUVPin, Blend, TEXT("SelectedUV"), OutErrorMessage);
-    bConnected &= Connect({ UseTransparencyMap, FString() }, Blend, TEXT("UseTransparencyMap"), OutErrorMessage);
-    bConnected &= Connect({ PreviewWetness, FString() }, Blend, TEXT("PreviewWetness"), OutErrorMessage);
-    bConnected &= Connect({ TransparencyStrength, FString() }, Blend, TEXT("TransparencyStrength"), OutErrorMessage);
-    bConnected &= Connect({ ShowInnerColor, FString() }, Blend, TEXT("ShowInnerColor"), OutErrorMessage);
-    bConnected &= Connect({ WrinkleCoverageMap, FString() }, Blend, TEXT("WrinkleCoverageMapTex"), OutErrorMessage);
-    bConnected &= Connect({ UseWrinkleCoverageMap, FString() }, Blend, TEXT("UseWrinkleCoverageMap"), OutErrorMessage);
-    bConnected &= Connect({ WrinkleSuppressionStrength, FString() }, Blend, TEXT("WrinkleSuppressionStrength"), OutErrorMessage);
-    bConnected &= Connect({ WrinkleMaskThreshold, FString() }, Blend, TEXT("WrinkleMaskThreshold"), OutErrorMessage);
-    bConnected &= Connect({ WrinkleMaskSoftness, FString() }, Blend, TEXT("WrinkleMaskSoftness"), OutErrorMessage);
-    bConnected &= Connect({ VisualizationMode, FString() }, Blend, TEXT("VisualizationMode"), OutErrorMessage);
-    bConnected &= Connect({ HoverState0, FString() }, Blend, TEXT("HoverState0"), OutErrorMessage);
-    bConnected &= Connect({ HoverState1, FString() }, Blend, TEXT("HoverState1"), OutErrorMessage);
-    bConnected &= Connect({ HoverState0, TEXT("A") }, Blend, TEXT("HoverFalloff"), OutErrorMessage);
-    bConnected &= Connect({ HoverState1, TEXT("A") }, Blend, TEXT("HoverOperation"), OutErrorMessage);
-    bConnected &= Connect({ HoverColor, FString() }, Blend, TEXT("HoverColor"), OutErrorMessage);
-    bConnected &= Connect({ HoverTarget, FString() }, Blend, TEXT("HoverTarget"), OutErrorMessage);
-    bConnected &= Connect({ HoverWrap, FString() }, Blend, TEXT("HoverWrap"), OutErrorMessage);
-    bConnected &= Connect({ HoverTexelSize, FString() }, Blend, TEXT("HoverTexelSize"), OutErrorMessage);
-    bConnected &= Connect({ HoverVisualizationMode, FString() }, Blend, TEXT("HoverVisualizationMode"), OutErrorMessage);
-    bConnected &= Connect({ HoverBaselineMap, FString() }, Blend, TEXT("HoverBaselineMapTex"), OutErrorMessage);
-    bConnected &= Connect({ UseHoverBaselineMap, FString() }, Blend, TEXT("UseHoverBaselineMap"), OutErrorMessage);
-    bConnected &= Connect({ HoverEdgeFeatherMap, FString() }, Blend, TEXT("HoverEdgeFeatherMapTex"), OutErrorMessage);
-    bConnected &= Connect({ UseHoverEdgeFeatherMap, FString() }, Blend, TEXT("UseHoverEdgeFeatherMap"), OutErrorMessage);
+    bool bConnected = Connect({ TransparencyMap, FString() }, State, TEXT("TransparencyMapTex"), OutErrorMessage);
+    bConnected &= Connect(DataUVPin, State, TEXT("SelectedUV"), OutErrorMessage);
+    bConnected &= Connect({ UseTransparencyMap, FString() }, State, TEXT("UseTransparencyMap"), OutErrorMessage);
+    bConnected &= Connect({ PreviewWetness, FString() }, State, TEXT("PreviewWetness"), OutErrorMessage);
+    bConnected &= Connect({ TransparencyStrength, FString() }, State, TEXT("TransparencyStrength"), OutErrorMessage);
+    bConnected &= Connect({ ShowInnerColor, FString() }, State, TEXT("ShowInnerColor"), OutErrorMessage);
+    bConnected &= Connect({ WrinkleCoverageMap, FString() }, State, TEXT("WrinkleCoverageMapTex"), OutErrorMessage);
+    bConnected &= Connect({ UseWrinkleCoverageMap, FString() }, State, TEXT("UseWrinkleCoverageMap"), OutErrorMessage);
+    bConnected &= Connect({ WrinkleSuppressionStrength, FString() }, State, TEXT("WrinkleSuppressionStrength"), OutErrorMessage);
+    bConnected &= Connect({ WrinkleMaskThreshold, FString() }, State, TEXT("WrinkleMaskThreshold"), OutErrorMessage);
+    bConnected &= Connect({ WrinkleMaskSoftness, FString() }, State, TEXT("WrinkleMaskSoftness"), OutErrorMessage);
+    bConnected &= Connect({ VisualizationMode, FString() }, State, TEXT("VisualizationMode"), OutErrorMessage);
+    bConnected &= Connect({ HoverState0, FString() }, State, TEXT("HoverState0"), OutErrorMessage);
+    bConnected &= Connect({ HoverState1, FString() }, State, TEXT("HoverState1"), OutErrorMessage);
+    bConnected &= Connect({ HoverState0, TEXT("A") }, State, TEXT("HoverFalloff"), OutErrorMessage);
+    bConnected &= Connect({ HoverState1, TEXT("A") }, State, TEXT("HoverOperation"), OutErrorMessage);
+    bConnected &= Connect({ HoverColor, FString() }, State, TEXT("HoverColor"), OutErrorMessage);
+    bConnected &= Connect({ HoverTarget, FString() }, State, TEXT("HoverTarget"), OutErrorMessage);
+    bConnected &= Connect({ HoverWrap, FString() }, State, TEXT("HoverWrap"), OutErrorMessage);
+    bConnected &= Connect({ HoverTexelSize, FString() }, State, TEXT("HoverTexelSize"), OutErrorMessage);
+    bConnected &= Connect({ HoverVisualizationMode, FString() }, State, TEXT("HoverVisualizationMode"), OutErrorMessage);
+    bConnected &= Connect({ HoverBaselineMap, FString() }, State, TEXT("HoverBaselineMapTex"), OutErrorMessage);
+    bConnected &= Connect({ UseHoverBaselineMap, FString() }, State, TEXT("UseHoverBaselineMap"), OutErrorMessage);
+    bConnected &= Connect({ HoverIslandIDMap, FString() }, State, TEXT("HoverIslandIDMapTex"), OutErrorMessage);
+    bConnected &= Connect({ UseHoverIslandIDMap, FString() }, State, TEXT("UseHoverIslandIDMap"), OutErrorMessage);
+    bConnected &= Connect({ HoverIslandID, FString() }, State, TEXT("HoverIslandID"), OutErrorMessage);
+    bConnected &= Connect({ HoverEdgeFeatherMap, FString() }, State, TEXT("HoverEdgeFeatherMapTex"), OutErrorMessage);
+    bConnected &= Connect({ UseHoverEdgeFeatherMap, FString() }, State, TEXT("UseHoverEdgeFeatherMap"), OutErrorMessage);
+    bConnected &= Connect(SurfaceGraph.Outputs.BaseColor, ColorCompose, TEXT("A"), OutErrorMessage);
+    bConnected &= Connect({ State, FString() }, ColorCompose, TEXT("B"), OutErrorMessage);
+    bConnected &= Connect({ State, TEXT("BaseColorBlendWeight") }, ColorCompose, TEXT("Alpha"), OutErrorMessage);
     FDWCRevealSurfaceMaterialGraphRequest RevealSurfaceRequest;
     RevealSurfaceRequest.Material = Material;
-    RevealSurfaceRequest.BaseColor = { Blend, TEXT("return") };
     RevealSurfaceRequest.BaseNormal = SurfaceGraph.Outputs.Normal;
     RevealSurfaceRequest.DataUV = DataUVPin;
-    RevealSurfaceRequest.Visibility = { Blend, TEXT("FinalRevealVisibility") };
+    RevealSurfaceRequest.Visibility = { State, TEXT("FinalRevealVisibility") };
     RevealSurfaceRequest.VisualizationMode = { VisualizationMode, FString() };
     RevealSurfaceRequest.SurfaceTextureParameterName =
         DWCTransparencyPreviewMaterialParameters::RevealSurfaceMap();
@@ -494,13 +537,13 @@ return lerp(BaseColor, DisplayColor, BlendWeight);
         DWCTransparencyPreviewMaterialParameters::ShowRevealNormal();
     RevealSurfaceRequest.NodePosX = 520;
     RevealSurfaceRequest.NodePosY = 2950;
-    RevealSurfaceRequest.Description = TEXT("DWC Transparency Preview Reveal Surface Composite");
+    RevealSurfaceRequest.Description = TEXT("DWC Transparency Preview Reveal Surface Normal");
     const FDWCRevealSurfaceMaterialGraphResult RevealSurfaceResult =
         FDWCRevealSurfaceMaterialGraph::BuildAuthoringPreview(RevealSurfaceRequest);
     if (!bConnected || !RevealSurfaceResult.bSucceeded ||
         !UMaterialEditingLibrary::ConnectMaterialProperty(
-            RevealSurfaceResult.BaseColor.Expression,
-            RevealSurfaceResult.BaseColor.OutputName,
+            ColorCompose,
+            FString(),
             MP_BaseColor) ||
         !UMaterialEditingLibrary::ConnectMaterialProperty(
             RevealSurfaceResult.Normal.Expression,
@@ -557,6 +600,9 @@ void FWetTransparencyPreviewGraphExtension::InitializeMID(
         0.0f);
     PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::HoverBaselineMap(), nullptr);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseHoverBaselineMap(), 0.0f);
+    PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::HoverIslandIDMap(), nullptr);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseHoverIslandIDMap(), 0.0f);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::HoverIslandID(), -1.0f);
     PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap(), nullptr);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap(), 0.0f);
 }

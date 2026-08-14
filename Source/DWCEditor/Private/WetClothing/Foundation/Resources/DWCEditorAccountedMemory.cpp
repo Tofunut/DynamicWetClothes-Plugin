@@ -62,6 +62,45 @@ bool FDWCEditorAccountedMemory::TryAdoptActualBytes(
     return true;
 }
 
+bool FDWCEditorAccountedMemory::AdoptExistingLease(
+    FDWCEditorMemoryLease&& InLease,
+    const uint64 InActualBytes,
+    FString* OutError)
+{
+    if (ActualBytes != 0 || MemoryLease.IsValid())
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = TEXT("An accounted allocation cannot replace an existing reservation.");
+        }
+        return false;
+    }
+    if (InActualBytes == 0)
+    {
+        InLease.Reset();
+        return true;
+    }
+    if (!InLease.IsValid() || InLease.GetPool() != Pool ||
+        InLease.GetReservedBytes() < InActualBytes)
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = TEXT("The transferred reservation does not cover the accounted allocation.");
+        }
+        return false;
+    }
+
+    MemoryLease = MoveTemp(InLease);
+    if (MemoryLease.GetReservedBytes() != InActualBytes &&
+        !MemoryLease.TryResize(InActualBytes, OutError))
+    {
+        MemoryLease.Reset();
+        return false;
+    }
+    ActualBytes = InActualBytes;
+    return true;
+}
+
 void FDWCEditorAccountedMemory::Reset()
 {
     MemoryLease.Reset();

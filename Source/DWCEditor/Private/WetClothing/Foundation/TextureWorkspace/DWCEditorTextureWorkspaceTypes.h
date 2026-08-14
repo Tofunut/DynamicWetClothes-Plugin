@@ -20,7 +20,7 @@ enum class EDWCEditorTexturePurpose : uint8
     WrinkleHover,
     TransparencyVisualization,
     TransparencyHoverBaseline,
-    TransparencyHoverIslandMask,
+    TransparencyHoverEdgeFeather,
     WetPartColor,
     WetPartSelection,
     WetPartSurfaceData,
@@ -229,6 +229,16 @@ class FDWCEditorTextureWorkspaceEntry final
     bool IsGPUResident() const { return GPUState == EDWCEditorTextureGPUState::Resident && Texture != nullptr; }
     bool IsGPURetiring() const { return GPUState == EDWCEditorTextureGPUState::Retiring; }
     bool CanAcceptUploads() const { return IsGPUResident(); }
+    uint32 GetInFlightRenderUploadCount() const { return InFlightRenderUploadCount.Load(); }
+    bool HasInFlightRenderUploads() const { return GetInFlightRenderUploadCount() > 0; }
+
+    /** Render callbacks may only touch this thread-safe lifetime counter. */
+    void BeginRenderUpload() { InFlightRenderUploadCount.AddExchange(1); }
+    void EndRenderUpload()
+    {
+        const uint32 PreviousCount = InFlightRenderUploadCount.SubExchange(1);
+        ensureMsgf(PreviousCount > 0, TEXT("Unbalanced DWC render upload lifetime."));
+    }
 
     TArray<FColor>& GetMutableBGRA8Pixels() { return BGRA8Pixels; }
     const TArray<FColor>& GetBGRA8Pixels() const { return BGRA8Pixels; }
@@ -299,6 +309,7 @@ class FDWCEditorTextureWorkspaceEntry final
     uint64 ResourceGeneration = 0;
     uint64 LastUsedSerial = 0;
     uint32 ActiveLeaseCount = 0;
+    TAtomic<uint32> InFlightRenderUploadCount{0};
     EDWCEditorTextureGPUState GPUState = EDWCEditorTextureGPUState::CPUOnly;
     TUniquePtr<FRenderCommandFence> GPUReleaseFence;
     FDWCEditorMemoryLease CPUResourceLease;

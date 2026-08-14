@@ -1,7 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WCAEditor.h"
 
-#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Core/DWCEditorStyle.h"
 #include "Core/DWCEditorUtils.h"
 #include "DataAssets/WetClothingAsset.h"
@@ -13,7 +12,6 @@
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildActionRegistry.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildPlanResolver.h"
-#include "WetClothing/Foundation/Build/DWCEditorBuildActionEvaluator.h"
 #include "WetClothing/Foundation/Build/DWCTransparencyBuildTargetResolver.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationReportAdapter.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationSectionRegistry.h"
@@ -22,7 +20,6 @@
 #include "WetClothing/Foundation/Diagnostics/DWCEditorAuthoringPayloadDiagnostics.h"
 #include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorSlateHostVisibilityAdapter.h"
 #include "WetClothing/WCAEditor/Build/WCAEditorCanonicalStateProvider.h"
-#include "WetClothing/WCAEditor/Build/WCAEditorBuildStatusProvider.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencyAffectedStage4Rebake.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
@@ -40,7 +37,6 @@
 #include "Misc/ScopedSlowTask.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
-#include "Materials/MaterialInstanceConstant.h"
 #include "PropertyEditorModule.h"
 #include "PropertyEditorDelegates.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
@@ -49,11 +45,9 @@
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateTypes.h"
 #include "Styling/StyleColors.h"
-#include "Styling/ToolBarStyle.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/StrongObjectPtr.h"
-#include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -252,27 +246,6 @@ namespace
         }
 
         return Result;
-    }
-
-    const FCheckBoxStyle& GetWetClothingModeToggleStyle()
-    {
-        static const FSlateRoundedBoxBrush UncheckedBrush(FStyleColors::Header, 4.0f);
-        static const FSlateRoundedBoxBrush UncheckedHoveredBrush(FStyleColors::Hover, 4.0f);
-        static const FSlateRoundedBoxBrush UncheckedPressedBrush(FStyleColors::Recessed, 4.0f);
-        static const FSlateRoundedBoxBrush CheckedBrush(FStyleColors::Primary, 4.0f);
-        static const FSlateRoundedBoxBrush CheckedHoveredBrush(FStyleColors::PrimaryHover, 4.0f);
-
-        static const FCheckBoxStyle Style =
-            FCheckBoxStyle(FAppStyle::Get().GetWidgetStyle<FToolBarStyle>(TEXT("AssetEditorToolbar")).ToggleButton)
-                .SetUncheckedImage(UncheckedBrush)
-                .SetUncheckedHoveredImage(UncheckedHoveredBrush)
-                .SetUncheckedPressedImage(UncheckedPressedBrush)
-                .SetCheckedImage(CheckedBrush)
-                .SetCheckedHoveredImage(CheckedHoveredBrush)
-                .SetCheckedPressedImage(CheckedBrush)
-                .SetPadding(FMargin(0.0f));
-
-        return Style;
     }
 
     FText BuildAssetSetupSkeletalMeshUVChannelSummary(
@@ -2903,12 +2876,9 @@ FWCAEditor::~FWCAEditor()
         DialogWindow->RequestDestroyWindow();
     }
     ValidationDialogWindow.Reset();
-    if (HostVisibilityAdapter.IsValid())
-    {
-        HostVisibilityAdapter->Shutdown();
-        HostVisibilityAdapter.Reset();
-    }
+    ShutdownEditorPanel();
     MainDockTab.Reset();
+    EditorPanel.Reset();
 
     if (ObjectPropertyChangedHandle.IsValid())
     {
@@ -2917,6 +2887,19 @@ FWCAEditor::~FWCAEditor()
     if (AssetSavedHandle.IsValid())
     {
         DWCEditorUtils::OnAssetSaveAttemptFinished().Remove(AssetSavedHandle);
+    }
+}
+
+void FWCAEditor::ShutdownEditorPanel()
+{
+    if (HostVisibilityAdapter.IsValid())
+    {
+        HostVisibilityAdapter->Shutdown();
+        HostVisibilityAdapter.Reset();
+    }
+    if (EditorPanel.IsValid())
+    {
+        EditorPanel->Shutdown();
     }
 }
 
@@ -3011,6 +2994,7 @@ bool FWCAEditor::OnRequestClose(EAssetEditorCloseReason InCloseReason)
 {
     if (CloseConfirmationState == ECloseConfirmationState::Confirmed)
     {
+        ShutdownEditorPanel();
         return true;
     }
 
@@ -3067,16 +3051,24 @@ bool FWCAEditor::OnRequestClose(EAssetEditorCloseReason InCloseReason)
             {
                 // The DWC close dialog already received an explicit discard confirmation.
                 CloseConfirmationState = ECloseConfirmationState::Confirmed;
+                ShutdownEditorPanel();
                 return true;
             }
 
             // ResolveIssuesAndSave completed successfully, so no additional close prompt is needed.
             CloseConfirmationState = ECloseConfirmationState::Confirmed;
+            ShutdownEditorPanel();
             return true;
         }
     }
 
-    return FAssetEditorToolkit::OnRequestClose(InCloseReason);
+    const bool bCanClose = FAssetEditorToolkit::OnRequestClose(InCloseReason);
+    if (bCanClose)
+    {
+        CloseConfirmationState = ECloseConfirmationState::Confirmed;
+        ShutdownEditorPanel();
+    }
+    return bCanClose;
 }
 
 
@@ -3089,14 +3081,6 @@ void FWCAEditor::SaveAsset_Execute()
     }
 
     FAssetEditorToolkit::SaveAsset_Execute();
-}
-
-void FWCAEditor::HandleFinishedChangingProperties(const FPropertyChangedEvent& PropertyChangedEvent)
-{
-    if (EditorPanel.IsValid())
-    {
-        EditorPanel->RequestRefreshFromAsset();
-    }
 }
 
 void FWCAEditor::HandleObjectPropertyChanged(UObject* ObjectBeingModified, FPropertyChangedEvent& PropertyChangedEvent)
@@ -3161,11 +3145,8 @@ TSharedRef<SDockTab> FWCAEditor::SpawnMainTab(const FSpawnTabArgs& Args)
 {
     check(Args.GetTabId().TabType == MainTabId);
 
-    if (HostVisibilityAdapter.IsValid())
-    {
-        HostVisibilityAdapter->Shutdown();
-        HostVisibilityAdapter.Reset();
-    }
+    ShutdownEditorPanel();
+    EditorPanel.Reset();
 
     TSharedRef<SDockTab> NewMainTab = SNew(SDockTab)
         .Label(LOCTEXT("MainTabLabel", "Wet Clothing Asset Editor"))
@@ -3933,695 +3914,6 @@ void FWCAEditor::ExecuteValidationResolveExclusive()
     }
 }
 
-TSharedRef<SWidget> FWCAEditor::BuildRuntimeBuildMenu()
-{
-    FWCARuntimeBuildMenuArgs Args;
-    const FWCAEditorCanonicalStateSnapshot CanonicalState =
-        BuildCanonicalStateSnapshot(false);
-    Args.Snapshot = CanonicalState.BuildStatus;
-    Args.RequiredPlan = FDWCEditorBuildPlanResolver::ResolveRequired(Args.Snapshot);
-    switch (CurrentMode)
-    {
-    case EWCAEditorMode::WrinkleEdit:
-        Args.SurfaceMode = EDWCEditorBuildSurfaceMode::Wrinkle;
-        break;
-    case EWCAEditorMode::TransparencyBake:
-        Args.SurfaceMode = EDWCEditorBuildSurfaceMode::Transparency;
-        break;
-    case EWCAEditorMode::PartEdit:
-    default:
-        Args.SurfaceMode = EDWCEditorBuildSurfaceMode::WetPart;
-        break;
-    }
-    const TWeakPtr<FWCAEditor> WeakEditor = SharedThis(this);
-    Args.OnExecuteAction = [WeakEditor](const EDWCEditorBuildAction Action)
-    {
-        if (const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin())
-        {
-            Editor->ExecuteBuildAction(Action);
-        }
-    };
-    Args.OnBuildAllRequired = FSimpleDelegate::CreateLambda([WeakEditor]()
-    {
-        if (const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin())
-        {
-            Editor->HandleBuildAllRequiredClicked();
-        }
-    });
-    return FWCAEditorWidgets::BuildRuntimeBuildMenu(Args);
-}
-
-FDWCEditorBuildStatusSnapshot FWCAEditor::BuildBuildStatusSnapshot(const bool bDeepValidation) const
-{
-    return BuildCanonicalStateSnapshot(bDeepValidation).BuildStatus;
-}
-
-FWCAEditorCanonicalStateSnapshot FWCAEditor::BuildCanonicalStateSnapshot(
-    const bool bDeepValidation) const
-{
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
-    {
-        FWCAEditorCanonicalStateSnapshot Empty;
-        Empty.BuildStatus = FDWCEditorBuildActionEvaluator::Evaluate(FDWCEditorBuildEvaluationInput());
-        return Empty;
-    }
-
-    EDWCEditorBuildSurfaceMode SurfaceMode = EDWCEditorBuildSurfaceMode::WetPart;
-    switch (CurrentMode)
-    {
-    case EWCAEditorMode::WrinkleEdit:
-        SurfaceMode = EDWCEditorBuildSurfaceMode::Wrinkle;
-        break;
-    case EWCAEditorMode::TransparencyBake:
-        SurfaceMode = EDWCEditorBuildSurfaceMode::Transparency;
-        break;
-    case EWCAEditorMode::PartEdit:
-    default:
-        break;
-    }
-    return FWCAEditorCanonicalStateProvider::Build(
-        *Asset,
-        EditorPanel.Get(),
-        SurfaceMode,
-        bDeepValidation);
-}
-
-bool FWCAEditor::CanExecuteBuildAction(const EDWCEditorBuildAction Action) const
-{
-    FString BarrierReason;
-    if (!EditorPanel.IsValid() || !EditorPanel->CanStartBuildAction(&BarrierReason))
-    {
-        return false;
-    }
-    const FDWCEditorBuildStatusSnapshot Snapshot = BuildBuildStatusSnapshot(false);
-    const FDWCEditorBuildActionStatus* Status = Snapshot.Find(Action);
-    return Status != nullptr && Status->IsExecutable();
-}
-
-void FWCAEditor::ExecuteBuildAction(const EDWCEditorBuildAction Action)
-{
-    if (!CanExecuteBuildAction(Action) || !EditorPanel.IsValid())
-    {
-        return;
-    }
-
-    const FDWCEditorBuildActionDescriptor* Descriptor = FDWCEditorBuildActionRegistry::Find(Action);
-    const FString ActionName = Descriptor != nullptr
-        ? Descriptor->DisplayName.ToString()
-        : TEXT("Build Action");
-    const TWeakPtr<FWCAEditor> WeakEditor = SharedThis(this);
-    FString RequestError;
-    if (!EditorPanel->RequestExclusiveBuild(
-            ActionName,
-            [WeakEditor, Action, ActionName]()
-            {
-                const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin();
-                if (!Editor.IsValid())
-                {
-                    return;
-                }
-                FString Failure;
-                FString Summary;
-                if (!Editor->ResolveIssuesAndSave(
-                        Failure,
-                        &Summary,
-                        *ActionName,
-                        EDWCEditorBuildPlanPolicy::ExplicitActions,
-                        Action))
-                {
-                    FMessageDialog::Open(
-                        EAppMsgCategory::Error,
-                        EAppMsgType::Ok,
-                        FText::FromString(Failure.IsEmpty()
-                            ? FString::Printf(TEXT("%s failed."), *ActionName)
-                            : Failure));
-                }
-                else
-                {
-                    FMessageDialog::Open(
-                        EAppMsgCategory::Success,
-                        EAppMsgType::Ok,
-                        FText::FromString(Summary.IsEmpty() ? ActionName : Summary));
-                }
-                Editor->RefreshAssetStateAndEditor();
-            },
-            &RequestError))
-    {
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            FText::FromString(RequestError.IsEmpty()
-                ? FString::Printf(TEXT("%s cannot start while another Build is active."), *ActionName)
-                : RequestError));
-    }
-}
-
-FReply FWCAEditor::HandleBuildCPURuntimeDataClicked()
-{
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !CanExecuteBuildAction(EDWCEditorBuildAction::BuildCPURuntimeData))
-    {
-        return FReply::Handled();
-    }
-
-    Asset->Modify();
-    Asset->RefreshBakeState(false);
-    const bool bNeedsBuild = IsValidationActionRequiredStatus(Asset->GetBakeState().CPURuntimeData);
-
-    FScopedSlowTask SlowTask(
-        bNeedsBuild ? 2.0f : 1.0f,
-        FText::FromString(FString::Printf(TEXT("Building CPU Runtime Data for %s..."), *GetNameSafe(Asset))));
-    SlowTask.MakeDialog(false);
-
-    if (bNeedsBuild)
-    {
-        SlowTask.EnterProgressFrame(
-            1.0f,
-            LOCTEXT("BuildCPURuntimeDataProgress", "Building CPU Runtime Data..."));
-        FString Failure;
-        if (!Asset->RebuildPrecomputedSimulationData(&Failure))
-        {
-            Asset->SetCPURuntimeDataStatus(EDWCBakeStatus::Failed, Failure);
-            RefreshAssetStateAndEditor();
-            FMessageDialog::Open(
-                EAppMsgCategory::Error,
-                EAppMsgType::Ok,
-                FText::FromString(Failure.IsEmpty() ? TEXT("CPU Runtime Data build failed.") : Failure));
-            return FReply::Handled();
-        }
-        Asset->SetCPURuntimeDataStatus(EDWCBakeStatus::Valid);
-    }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BuildCPURuntimeDataSaveProgress", "Saving CPU Runtime Data..."));
-    if (!DWCEditorUtils::SaveAsset(Asset, false))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            LOCTEXT("BuildCPURuntimeDataSaveFailed", "CPU Runtime Data was built, but the Wet Clothing Asset could not be saved."));
-        return FReply::Handled();
-    }
-
-    RefreshAssetStateAndEditor();
-    FMessageDialog::Open(
-        EAppMsgCategory::Success,
-        EAppMsgType::Ok,
-        LOCTEXT("BuildCPURuntimeDataSucceeded", "CPU Runtime Data was built and saved."));
-    return FReply::Handled();
-}
-
-FReply FWCAEditor::HandleBuildAllRequiredClicked()
-{
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !EditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    const TWeakPtr<FWCAEditor> WeakEditor = SharedThis(this);
-    FString RequestError;
-    if (!EditorPanel->RequestExclusiveBuild(
-            TEXT("Build All Required"),
-            [WeakEditor]()
-            {
-                if (const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin())
-                {
-                    Editor->ExecuteBuildAllRequiredExclusive();
-                }
-            },
-            &RequestError))
-    {
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            FText::FromString(RequestError.IsEmpty()
-                ? TEXT("Build All Required cannot start while another Build is active.")
-                : RequestError));
-    }
-    return FReply::Handled();
-}
-
-void FWCAEditor::ExecuteBuildAllRequiredExclusive()
-{
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !EditorPanel.IsValid())
-    {
-        return;
-    }
-
-    FString Failure;
-    FString SuccessSummary;
-    if (!ResolveIssuesAndSave(
-            Failure,
-            &SuccessSummary,
-            TEXT("Build All Required"),
-            EDWCEditorBuildPlanPolicy::AllRequired))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(
-            EAppMsgCategory::Error,
-            EAppMsgType::Ok,
-            FText::FromString(Failure.IsEmpty() ? TEXT("Required runtime outputs could not be completed.") : Failure));
-        return;
-    }
-
-    RefreshAssetStateAndEditor();
-    const FString SuccessMessage = SuccessSummary.IsEmpty()
-        ? FString(TEXT("All required runtime outputs are up to date."))
-        : FString::Printf(TEXT("All required runtime outputs were completed.\n\n%s"), *SuccessSummary);
-    FMessageDialog::Open(EAppMsgCategory::Success, EAppMsgType::Ok, FText::FromString(SuccessMessage));
-}
-
-FReply FWCAEditor::HandleBakeRenderProfileDataClicked()
-{
-    if (!CanExecuteBuildAction(EDWCEditorBuildAction::BakeRenderProfileData))
-    {
-        return FReply::Handled();
-    }
-    if (!EditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    FScopedSlowTask SlowTask(
-        2.0f,
-        LOCTEXT("BakeRenderProfileDataProgress", "Baking the Render Profile Lookup Texture..."));
-    SlowTask.MakeDialog(false);
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeRenderProfileDataBuildProgress", "Baking Wet Part Data textures..."));
-
-    FString Summary;
-    bool    bHadWarnings = false;
-    if (!EditorPanel->BakeWetVisualAssets(Summary, &bHadWarnings))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
-        return FReply::Handled();
-    }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeRenderProfileDataSaveProgress", "Saving render profile assets..."));
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !DWCEditorUtils::SaveAsset(Asset))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            LOCTEXT("BakeRenderProfileDataSaveFailed", "The Render Profile Lookup Texture was baked, but the generated textures or Wet Clothing Asset could not be saved."));
-        return FReply::Handled();
-    }
-    RefreshAssetStateAndEditor();
-
-    const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
-    FMessageDialog::Open(MessageCategory, EAppMsgType::Ok, FText::FromString(Summary));
-    return FReply::Handled();
-}
-
-FReply FWCAEditor::HandleBuildGPURuntimeDataClicked()
-{
-    if (!CanExecuteBuildAction(EDWCEditorBuildAction::BuildGPURuntimeData))
-    {
-        return FReply::Handled();
-    }
-
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
-    {
-        return FReply::Handled();
-    }
-
-    Asset->Modify();
-    Asset->RefreshBakeState(false);
-    const bool bNeedsRuntimeBuild = IsValidationActionRequiredStatus(Asset->GetBakeState().GPURuntimeData);
-    const bool bNeedsLookupBuildBeforeRuntime = IsValidationActionRequiredStatus(Asset->GetBakeState().GPUMaps);
-
-    FScopedSlowTask SlowTask(
-        3.0f,
-        FText::FromString(FString::Printf(TEXT("Building GPU Runtime Data for %s..."), *GetNameSafe(Asset))));
-    SlowTask.MakeDialog(false);
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        bNeedsRuntimeBuild
-            ? LOCTEXT("BuildGPURuntimePayloadProgress", "Building the GPU Runtime Data payload...")
-            : LOCTEXT("BuildGPURuntimePayloadCurrent", "GPU Runtime Data payload is up to date..."));
-    if (bNeedsRuntimeBuild)
-    {
-        FString RuntimeFailure;
-        if (!EnsureGPURuntimeDataReadyForMapBake(Asset, RuntimeFailure))
-        {
-            Asset->SetGPURuntimeDataStatus(EDWCBakeStatus::Failed, RuntimeFailure);
-            RefreshAssetStateAndEditor();
-            FMessageDialog::Open(
-                EAppMsgCategory::Error,
-                EAppMsgType::Ok,
-                FText::FromString(RuntimeFailure.IsEmpty() ? TEXT("GPU Runtime Data build failed.") : RuntimeFailure));
-            return FReply::Handled();
-        }
-    }
-
-    Asset->RefreshBakeState(false);
-    const bool bNeedsLookupBuild =
-        bNeedsLookupBuildBeforeRuntime || IsValidationActionRequiredStatus(Asset->GetBakeState().GPUMaps);
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        bNeedsLookupBuild
-            ? LOCTEXT("BuildGPURuntimeLookupProgress", "Building the GPU simulation lookup data...")
-            : LOCTEXT("BuildGPURuntimeLookupCurrent", "GPU simulation lookup data is up to date..."));
-    if (bNeedsLookupBuild)
-    {
-        FString LookupFailure;
-        if (!Asset->BakeGPUWetnessMaps(&LookupFailure))
-        {
-            RefreshAssetStateAndEditor();
-            FMessageDialog::Open(
-                EAppMsgCategory::Error,
-                EAppMsgType::Ok,
-                FText::FromString(LookupFailure.IsEmpty()
-                    ? TEXT("GPU Runtime Data simulation lookup build failed.")
-                    : FString::Printf(TEXT("GPU Runtime Data: %s"), *LookupFailure)));
-            return FReply::Handled();
-        }
-    }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BuildGPURuntimeDataSaveProgress", "Saving GPU Runtime Data..."));
-    if (!DWCEditorUtils::SaveAsset(Asset, false))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            LOCTEXT("BuildGPURuntimeDataSaveFailed", "GPU Runtime Data was built, but the Wet Clothing Asset could not be saved."));
-        return FReply::Handled();
-    }
-
-    RefreshAssetStateAndEditor();
-    FMessageDialog::Open(
-        EAppMsgCategory::Success,
-        EAppMsgType::Ok,
-        LOCTEXT("BuildGPURuntimeDataSucceeded", "GPU Runtime Data was built and saved."));
-    return FReply::Handled();
-}
-
-FReply FWCAEditor::HandleBakeWrinkleNormalMapClicked()
-{
-    if (!CanExecuteBuildAction(EDWCEditorBuildAction::BakeWrinkleTextures))
-    {
-        return FReply::Handled();
-    }
-    if (!EditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    TWeakPtr<FWCAEditor> WeakEditor = SharedThis(this);
-    FString RequestError;
-    if (!EditorPanel->RequestBakeAllWrinkleMaps(
-            [WeakEditor](const FDWCEditorBakeBatchResult& Result)
-            {
-                const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin();
-                if (!Editor.IsValid())
-                {
-                    return;
-                }
-                Editor->RefreshAssetStateAndEditor();
-                WCAReportDialogs::OpenBakeResultDialog(
-                    Result,
-                    LOCTEXT("WrinkleBakeResultTitle", "Wrinkle Textures Baked"));
-            },
-            &RequestError))
-    {
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            FText::FromString(RequestError));
-    }
-    return FReply::Handled();
-}
-
-FReply FWCAEditor::HandleBakeTransparencyMapsClicked()
-{
-    if (!CanExecuteBuildAction(EDWCEditorBuildAction::BakeTransparencyTextures))
-    {
-        return FReply::Handled();
-    }
-
-    if (!EditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-    TWeakPtr<FWCAEditor> WeakEditor = SharedThis(this);
-    FString RequestError;
-    if (!EditorPanel->RequestBakeAllTransparencyMaps(
-            [WeakEditor](const FDWCEditorBakeBatchResult& Result)
-            {
-                const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin();
-                if (!Editor.IsValid())
-                {
-                    return;
-                }
-                Editor->RefreshAssetStateAndEditor();
-                FMessageDialog::Open(
-                    Result.bSucceeded ? EAppMsgCategory::Success : EAppMsgCategory::Warning,
-                    EAppMsgType::Ok,
-                    FText::FromString(Result.Summary));
-            },
-            &RequestError))
-    {
-        FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::Ok, FText::FromString(RequestError));
-    }
-    return FReply::Handled();
-}
-
-FReply FWCAEditor::HandleRebakeAffectedTransparencyMapsClicked()
-{
-    if (!CanExecuteBuildAction(EDWCEditorBuildAction::RebakeAffectedTransparencyMaps) || !EditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-    TWeakPtr<FWCAEditor> WeakEditor = SharedThis(this);
-    FString RequestError;
-    if (!EditorPanel->RequestRebakeAffectedTransparencyMaps(
-            [WeakEditor](const FDWCEditorBakeBatchResult& Result)
-            {
-                const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin();
-                if (!Editor.IsValid())
-                {
-                    return;
-                }
-                Editor->RefreshAssetStateAndEditor();
-                FMessageDialog::Open(
-                    Result.bSucceeded ? EAppMsgCategory::Success : EAppMsgCategory::Warning,
-                    EAppMsgType::Ok,
-                    FText::FromString(Result.Summary));
-            },
-            &RequestError))
-    {
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            FText::FromString(RequestError));
-    }
-    return FReply::Handled();
-}
-
-FReply FWCAEditor::HandleGenerateMaterialsClicked()
-{
-    if (!CanExecuteBuildAction(EDWCEditorBuildAction::GenerateMaterials))
-    {
-        return FReply::Handled();
-    }
-    return GenerateWetMaterials();
-}
-
-FReply FWCAEditor::GenerateWetMaterials()
-{
-
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
-    {
-        return FReply::Handled();
-    }
-
-    USkeletalMesh* RuntimeMesh = Asset->GetRuntimeSkeletalMesh();
-    if (RuntimeMesh == nullptr)
-    {
-        FMessageDialog::Open(
-            EAppMsgCategory::Error,
-            EAppMsgType::Ok,
-            LOCTEXT("GenerateMaterialsNoMesh", "Assign a runtime skeletal mesh before generating wet materials."));
-        return FReply::Handled();
-    }
-
-    if (!Asset->HasValidDataUVForLOD(Asset->GetSimulationLODIndex()))
-    {
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            LOCTEXT("GenerateMaterialsNoDataUV", "Generate DWC UV Channel before generating wet materials."));
-        return FReply::Handled();
-    }
-
-    TArray<int32> WettableSlots;
-    for (const FWetClothingAuthoredMaterialSlot& SlotState : Asset->Authored.PartData.EditableWetPartData.MaterialSlots)
-    {
-        if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
-        {
-            WettableSlots.AddUnique(SlotState.MaterialSlotIndex);
-        }
-    }
-    WettableSlots.Sort();
-    if (WettableSlots.IsEmpty())
-    {
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            LOCTEXT("GenerateMaterialsNoWettableSlots", "Mark at least one material slot as wettable before generating wet materials."));
-        return FReply::Handled();
-    }
-
-    const TArray<FSkeletalMaterial>& Materials = RuntimeMesh->GetMaterials();
-    TArray<FString> UpdatedMaterials;
-    TArray<FString> Failures;
-
-    FScopedSlowTask SlowTask(
-        static_cast<float>(FMath::Max(1, WettableSlots.Num() + 2)),
-        FText::FromString(FString::Printf(
-            TEXT("Generating unified DWC materials for %s (%d slot%s)..."),
-            *GetNameSafe(Asset),
-            WettableSlots.Num(),
-            WettableSlots.Num() == 1 ? TEXT("") : TEXT("s"))));
-    SlowTask.MakeDialog(false);
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        FText::FromString(FString::Printf(
-            TEXT("Preparing %d wettable material slot%s..."),
-            WettableSlots.Num(),
-            WettableSlots.Num() == 1 ? TEXT("") : TEXT("s"))));
-
-    Asset->Modify();
-    bool bUpdatedAnyMaterial = false;
-    for (const int32 MaterialSlotIndex : WettableSlots)
-    {
-        if (!Materials.IsValidIndex(MaterialSlotIndex))
-        {
-            Failures.Add(FString::Printf(TEXT("Slot %d is out of range."), MaterialSlotIndex));
-            continue;
-        }
-
-        UMaterialInterface* SourceMaterial =
-            FWCAMaterialGenerator::ResolveGeneratedMaterialSource(Asset, MaterialSlotIndex, Materials[MaterialSlotIndex].MaterialInterface);
-        if (SourceMaterial == nullptr)
-        {
-            Failures.Add(FString::Printf(TEXT("Slot %d has no source material."), MaterialSlotIndex));
-            continue;
-        }
-
-        FWetClothingGeneratedWetMaterialOverride* ExistingOverride =
-            Asset->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
-                [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
-                {
-                    return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
-                });
-        const bool bHadCompleteOverride =
-            ExistingOverride != nullptr &&
-            ExistingOverride->GeneratedMaterial != nullptr &&
-            ExistingOverride->GeneratedMaterialInstance != nullptr;
-
-        SlowTask.EnterProgressFrame(
-            1.0f,
-            FText::FromString(FString::Printf(
-                TEXT("Generating shared material and runtime instance for slot %d from '%s'..."),
-                MaterialSlotIndex,
-                *GetNameSafe(SourceMaterial))));
-
-        const FWCAMaterialGenerator::FOptions MaterialSetupOptions =
-            FWCAMaterialGenerator::MakeOptionsForAsset(
-                Asset,
-                EDWCSimulationMode::VertexCPU,
-                MaterialSlotIndex);
-        const FWetClothingUnifiedMaterialSetupResult MaterialSet =
-            FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
-        if (!MaterialSet.bSucceeded || MaterialSet.GeneratedMaterial == nullptr ||
-            MaterialSet.GeneratedMaterialInstance == nullptr)
-        {
-            Failures.Add(FString::Printf(
-                TEXT("Slot %d: %s"),
-                MaterialSlotIndex,
-                *MaterialSet.Message));
-            continue;
-        }
-
-        FString MetadataError;
-        if (!FWCAMaterialGenerator::CommitGeneratedMaterialOverride(
-                Asset,
-                MaterialSlotIndex,
-                SourceMaterial,
-                MaterialSet,
-                &MetadataError))
-        {
-            Failures.Add(FString::Printf(TEXT("Slot %d: %s"), MaterialSlotIndex, *MetadataError));
-            continue;
-        }
-
-        UMaterialInterface* CurrentMaterial = RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface;
-        const bool bCanApplyGeneratedMaterial = CurrentMaterial == nullptr ||
-            CurrentMaterial == SourceMaterial ||
-            CurrentMaterial == MaterialSet.GeneratedMaterial ||
-            CurrentMaterial == MaterialSet.GeneratedMaterialInstance ||
-            IsSameMaterialFamily(CurrentMaterial, SourceMaterial);
-        if (bCanApplyGeneratedMaterial)
-        {
-            RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface = MaterialSet.GeneratedMaterialInstance;
-            RuntimeMesh->MarkPackageDirty();
-        }
-        bUpdatedAnyMaterial = true;
-
-        UpdatedMaterials.Add(FString::Printf(
-            TEXT("Slot %d -> shared %s, runtime %s (%s)"),
-            MaterialSlotIndex,
-            *GetNameSafe(MaterialSet.GeneratedMaterial),
-            *GetNameSafe(MaterialSet.GeneratedMaterialInstance),
-            bHadCompleteOverride || MaterialSet.bAlreadyConfigured
-                ? TEXT("overwritten/refreshed")
-                : TEXT("created")));
-    }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("GenerateMaterialsRefreshState", "Refreshing generated material state..."));
-
-    if (bUpdatedAnyMaterial)
-    {
-        Asset->MarkPackageDirty();
-    }
-    RefreshAssetStateAndEditor();
-
-    const FString MaterialSummary = UpdatedMaterials.IsEmpty()
-        ? TEXT("No material overrides were updated.")
-        : FString::Printf(
-            TEXT("Updated unified material sets:\n- %s"),
-            *FString::Join(UpdatedMaterials, TEXT("\n- ")));
-    FString Summary = FString::Printf(TEXT("Generated unified DWC material overrides.\n\n%s"), *MaterialSummary);
-    if (!Failures.IsEmpty())
-    {
-        Summary += FString::Printf(TEXT("\n\nFailures:\n- %s"), *FString::Join(Failures, TEXT("\n- ")));
-    }
-
-    const EAppMsgCategory Category = Failures.IsEmpty() ? EAppMsgCategory::Success : EAppMsgCategory::Warning;
-    FMessageDialog::Open(Category, EAppMsgType::Ok, FText::FromString(Summary));
-    return FReply::Handled();
-}
-
 bool FWCAEditor::ResolveIssuesAndSave(
     FString& OutFailure,
     FString* OutSuccessSummary,
@@ -4875,109 +4167,6 @@ bool FWCAEditor::ResolveIssuesAndSave(
     }
     MemoryTrace.Complete();
     return true;
-}
-
-TSharedRef<SWidget> FWCAEditor::BuildModeToolbarWidget()
-{
-    return SNew(SBox)
-        .Padding(FMargin(12.0f, 0.0f))
-            [SNew(SHorizontalBox)
-             + SHorizontalBox::Slot()
-                   .AutoWidth()
-                   .VAlign(VAlign_Center)
-                   .Padding(0.0f, 0.0f, 16.0f, 0.0f)
-                       [BuildModeToggleButton(
-                           EWCAEditorMode::PartEdit,
-                           TEXT("DWCEditor.Mode.Part"),
-                           LOCTEXT("PartEditModeTooltip", "Part Edit Mode"))]
-
-             + SHorizontalBox::Slot()
-                   .AutoWidth()
-                   .VAlign(VAlign_Center)
-                   .Padding(0.0f, 0.0f, 16.0f, 0.0f)
-                       [BuildModeToggleButton(
-                           EWCAEditorMode::WrinkleEdit,
-                           TEXT("DWCEditor.Mode.Wrinkle"),
-                           LOCTEXT("WrinkleEditModeTooltip", "Wrinkle Edit Mode"))]
-
-             + SHorizontalBox::Slot()
-                   .AutoWidth()
-                   .VAlign(VAlign_Center)
-                   .Padding(0.0f)
-                       [BuildModeToggleButton(
-                           EWCAEditorMode::TransparencyBake,
-                           TEXT("DWCEditor.Mode.Transparency"),
-                           LOCTEXT("TransparencyBakeModeTooltip", "Transparency Bake Mode"))]];
-}
-
-TSharedRef<SWidget> FWCAEditor::BuildModeToggleButton(EWCAEditorMode Mode, FName IconName, const FText& ToolTipText)
-{
-    return SNew(SCheckBox)
-        .Style(&GetWetClothingModeToggleStyle())
-        .Type(ESlateCheckBoxType::ToggleButton)
-        .ToolTipText(ToolTipText)
-        .IsChecked(this, &FWCAEditor::IsModeChecked, Mode)
-        .OnCheckStateChanged(this, &FWCAEditor::HandleModeCheckStateChanged, Mode)
-            [SNew(SBox)
-                 .WidthOverride(76.0f)
-                 .HeightOverride(32.0f)
-                 .HAlign(HAlign_Center)
-                 .VAlign(VAlign_Center)
-                     [SNew(SImage)
-                          .DesiredSizeOverride(FVector2D(24.0f, 24.0f))
-                          .Image(FDWCEditorStyle::GetBrush(IconName))
-                          .ColorAndOpacity(this, &FWCAEditor::GetModeIconColor, Mode)]];
-}
-
-void FWCAEditor::SetEditorMode(EWCAEditorMode NewMode)
-{
-    if (CurrentMode == NewMode)
-    {
-        return;
-    }
-
-    FDWCEditorAuthoringOperationScope DiagnosticScope(TEXT("WCAEditor.SetEditorMode"), WetClothingAsset.Get());
-    CurrentMode = NewMode;
-
-    if (EditorPanel.IsValid())
-    {
-        EditorPanel->SetEditorMode(NewMode);
-    }
-
-    RegenerateMenusAndToolbars();
-}
-
-ECheckBoxState FWCAEditor::IsModeChecked(EWCAEditorMode Mode) const
-{
-    return CurrentMode == Mode ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-}
-
-void FWCAEditor::HandleModeCheckStateChanged(ECheckBoxState NewState, EWCAEditorMode Mode)
-{
-    if (NewState == ECheckBoxState::Checked)
-    {
-        SetEditorMode(Mode);
-    }
-}
-
-FSlateColor FWCAEditor::GetModeIconColor(EWCAEditorMode Mode) const
-{
-    if (CurrentMode == Mode)
-    {
-        return FSlateColor(FLinearColor::White);
-    }
-
-    switch (Mode)
-    {
-    case EWCAEditorMode::PartEdit:
-        return FSlateColor(FLinearColor(1.0f, 0.66f, 0.78f, 1.0f));
-    case EWCAEditorMode::WrinkleEdit:
-        return FSlateColor(FLinearColor(0.62f, 0.95f, 0.62f, 1.0f));
-    case EWCAEditorMode::TransparencyBake:
-        return FSlateColor(FLinearColor(0.45f, 0.78f, 1.0f, 1.0f));
-    default:
-        return FSlateColor::UseForeground();
-    }
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -6,6 +6,43 @@
 
 #include "Algo/Sort.h"
 
+bool FDWCRevealBakeTileLayout::IsValid() const
+{
+    return Resolution.X > 0 && Resolution.Y > 0 && TileSize > 0 &&
+        TilesX > 0 && TilesY > 0 && Tiles.Num() == TilesX * TilesY;
+}
+
+uint64 FDWCRevealBakeTileLayout::GetAllocatedBytes() const
+{
+    uint64 Bytes = sizeof(FDWCRevealBakeTileLayout) + Tiles.GetAllocatedSize() +
+        EligibleSurfaceTriangleIndices.GetAllocatedSize();
+    for (const FDWCRevealBakeTile& Tile : Tiles)
+    {
+        Bytes += Tile.SurfaceTriangleIndices.GetAllocatedSize();
+    }
+    return Bytes;
+}
+
+uint64 FDWCRevealBakeTileLayout::EstimateMaximumScratchBytes() const
+{
+    const uint64 MaximumTilePixels = static_cast<uint64>(TileSize) * TileSize;
+    return MaximumTilePixels *
+        (sizeof(FDWCRevealBakeTexelSample) + sizeof(int32) + sizeof(uint8));
+}
+
+void FDWCRevealBakeTileScratch::Reset()
+{
+    OccupiedPixelSamples.Reset();
+    RasterFlags.Reset();
+    Samples.Reset();
+}
+
+uint64 FDWCRevealBakeTileScratch::GetAllocatedBytes() const
+{
+    return OccupiedPixelSamples.GetAllocatedSize() + RasterFlags.GetAllocatedSize() +
+        Samples.GetAllocatedSize();
+}
+
 FVector FDWCRevealBakeTexelSampler::InterpolateVector(const FVector& Barycentric, const FVector Values[3])
 {
     return Values[0] * Barycentric.X + Values[1] * Barycentric.Y + Values[2] * Barycentric.Z;
@@ -159,6 +196,12 @@ bool FDWCRevealBakeRayProjector::FBakeProjectionBvh::Build(
     return Nodes.Num() > 0;
 }
 
+uint64 FDWCRevealBakeRayProjector::FBakeProjectionBvh::GetAllocatedBytes() const
+{
+    return TriangleRefs.GetAllocatedSize() + Nodes.GetAllocatedSize() +
+        LeafTriangleRefIndices.GetAllocatedSize();
+}
+
 void FDWCRevealBakeRayProjector::FBakeProjectionBvh::ForEachRayCandidate(
     const FVector&                                        RayOrigin,
     const FVector&                                        RayDirection,
@@ -294,6 +337,259 @@ int32 FDWCRevealBakeRayProjector::FBakeProjectionBvh::FindLongestAxis(const FBox
         return 1;
     }
     return 2;
+}
+
+bool FDWCRevealBakeTexelSampler::BuildTileLayout(
+    const FDWCRevealBakeSurface& OuterSurface,
+    const FDWCRevealBakeTexelSamplingSettings& Settings,
+    const TSet<int32>& EligibleTriangleIDs,
+    const int32 TileSize,
+    FDWCRevealBakeTileLayout& OutLayout,
+    FString* OutErrorMessage)
+{
+    OutLayout = {};
+    if (Settings.Resolution.X <= 0 || Settings.Resolution.Y <= 0 || TileSize <= 0)
+    {
+        SetError(OutErrorMessage, TEXT("Tile layout requires a positive resolution and tile size."));
+        return false;
+    }
+    if (OuterSurface.Triangles.IsEmpty() || EligibleTriangleIDs.IsEmpty())
+    {
+        SetError(OutErrorMessage, TEXT("Tile layout requires eligible outer-surface triangles."));
+        return false;
+    }
+
+    OutLayout.Resolution = Settings.Resolution;
+    OutLayout.TileSize = TileSize;
+    OutLayout.TilesX = FMath::DivideAndRoundUp(Settings.Resolution.X, TileSize);
+    OutLayout.TilesY = FMath::DivideAndRoundUp(Settings.Resolution.Y, TileSize);
+    OutLayout.Tiles.SetNum(OutLayout.TilesX * OutLayout.TilesY);
+    for (int32 TileY = 0; TileY < OutLayout.TilesY; ++TileY)
+    {
+        for (int32 TileX = 0; TileX < OutLayout.TilesX; ++TileX)
+        {
+            FDWCRevealBakeTile& Tile = OutLayout.Tiles[TileY * OutLayout.TilesX + TileX];
+            Tile.Rect = FIntRect(
+                TileX * TileSize,
+                TileY * TileSize,
+                FMath::Min((TileX + 1) * TileSize, Settings.Resolution.X),
+                FMath::Min((TileY + 1) * TileSize, Settings.Resolution.Y));
+        }
+    }
+
+    constexpr int64 MaximumTileTriangleReferences = 1024 * 1024;
+    int64 TileTriangleReferenceCount = 0;
+    for (int32 SurfaceTriangleIndex = 0;
+         SurfaceTriangleIndex < OuterSurface.Triangles.Num();
+         ++SurfaceTriangleIndex)
+    {
+        const FDWCRevealBakeSurfaceTriangle& Triangle =
+            OuterSurface.Triangles[SurfaceTriangleIndex];
+        if ((Settings.MaterialSlotIndex != INDEX_NONE &&
+             Triangle.MaterialSlotIndex != Settings.MaterialSlotIndex) ||
+            !EligibleTriangleIDs.Contains(Triangle.TriangleIndex))
+        {
+            continue;
+        }
+
+        OutLayout.EligibleSurfaceTriangleIndices.Add(SurfaceTriangleIndex);
+
+        const FIntRect Bounds = MakePixelBoundsFromUVTriangle(Triangle, Settings.Resolution);
+        if (Bounds.Width() <= 0 || Bounds.Height() <= 0)
+        {
+            continue;
+        }
+        const int32 MinTileX = FMath::Clamp(Bounds.Min.X / TileSize, 0, OutLayout.TilesX - 1);
+        const int32 MaxTileX = FMath::Clamp((Bounds.Max.X - 1) / TileSize, 0, OutLayout.TilesX - 1);
+        const int32 MinTileY = FMath::Clamp(Bounds.Min.Y / TileSize, 0, OutLayout.TilesY - 1);
+        const int32 MaxTileY = FMath::Clamp((Bounds.Max.Y - 1) / TileSize, 0, OutLayout.TilesY - 1);
+        const int64 NewReferenceCount =
+            static_cast<int64>(MaxTileX - MinTileX + 1) *
+            static_cast<int64>(MaxTileY - MinTileY + 1);
+        if (OutLayout.bUsesPerTileTriangleBins &&
+            TileTriangleReferenceCount + NewReferenceCount > MaximumTileTriangleReferences)
+        {
+            OutLayout.bUsesPerTileTriangleBins = false;
+            for (FDWCRevealBakeTile& Tile : OutLayout.Tiles)
+            {
+                Tile.SurfaceTriangleIndices.Reset();
+            }
+        }
+        if (!OutLayout.bUsesPerTileTriangleBins)
+        {
+            continue;
+        }
+        for (int32 TileY = MinTileY; TileY <= MaxTileY; ++TileY)
+        {
+            for (int32 TileX = MinTileX; TileX <= MaxTileX; ++TileX)
+            {
+                OutLayout.Tiles[TileY * OutLayout.TilesX + TileX]
+                    .SurfaceTriangleIndices.Add(SurfaceTriangleIndex);
+            }
+        }
+        TileTriangleReferenceCount += NewReferenceCount;
+    }
+
+    if (OutLayout.EligibleSurfaceTriangleIndices.IsEmpty())
+    {
+        OutLayout = {};
+        SetError(OutErrorMessage, TEXT("No eligible outer triangles intersect the target texture."));
+        return false;
+    }
+    SetError(OutErrorMessage, TEXT(""));
+    return true;
+}
+
+bool FDWCRevealBakeTexelSampler::BuildTileSamples(
+    const FDWCRevealBakeSurface& OuterSurface,
+    const FDWCRevealBakeTexelSamplingSettings& Settings,
+    const FDWCRevealBakeTileLayout& Layout,
+    const int32 TileIndex,
+    FDWCRevealBakeTileScratch& InOutScratch,
+    FString* OutErrorMessage,
+    int32* OutOverlappedPixelCount)
+{
+    InOutScratch.Samples.Reset();
+    if (OutOverlappedPixelCount != nullptr)
+    {
+        *OutOverlappedPixelCount = 0;
+    }
+    if (!Layout.IsValid() || Layout.Resolution != Settings.Resolution ||
+        !Layout.Tiles.IsValidIndex(TileIndex))
+    {
+        SetError(OutErrorMessage, TEXT("The target tile layout is invalid or stale."));
+        return false;
+    }
+
+    const FDWCRevealBakeTile& Tile = Layout.Tiles[TileIndex];
+    const TArray<int32>& SurfaceTriangleIndices = Layout.bUsesPerTileTriangleBins
+        ? Tile.SurfaceTriangleIndices
+        : Layout.EligibleSurfaceTriangleIndices;
+    if (SurfaceTriangleIndices.IsEmpty())
+    {
+        InOutScratch.OccupiedPixelSamples.Reset();
+        InOutScratch.RasterFlags.Reset();
+        SetError(OutErrorMessage, TEXT(""));
+        return true;
+    }
+
+    const int32 TileWidth = Tile.Rect.Width();
+    const int32 TileHeight = Tile.Rect.Height();
+    const int32 TilePixelCount = TileWidth * TileHeight;
+    InOutScratch.OccupiedPixelSamples.Init(INDEX_NONE, TilePixelCount);
+    InOutScratch.RasterFlags.Init(0, TilePixelCount);
+    InOutScratch.Samples.Reserve(TilePixelCount);
+
+    constexpr uint8 CoverageMaskBits = 0x0f;
+    constexpr uint8 OverlapReportedBit = 0x80;
+    for (const int32 SurfaceTriangleIndex : SurfaceTriangleIndices)
+    {
+        if (!OuterSurface.Triangles.IsValidIndex(SurfaceTriangleIndex))
+        {
+            SetError(OutErrorMessage, TEXT("A target tile references an invalid surface triangle."));
+            return false;
+        }
+        const FDWCRevealBakeSurfaceTriangle& Triangle =
+            OuterSurface.Triangles[SurfaceTriangleIndex];
+        const FIntRect Bounds = MakePixelBoundsFromUVTriangle(Triangle, Settings.Resolution);
+        const int32 MinX = FMath::Max(Bounds.Min.X, Tile.Rect.Min.X);
+        const int32 MinY = FMath::Max(Bounds.Min.Y, Tile.Rect.Min.Y);
+        const int32 MaxX = FMath::Min(Bounds.Max.X, Tile.Rect.Max.X);
+        const int32 MaxY = FMath::Min(Bounds.Max.Y, Tile.Rect.Max.Y);
+        for (int32 Y = MinY; Y < MaxY; ++Y)
+        {
+            for (int32 X = MinX; X < MaxX; ++X)
+            {
+                const uint8 TriangleCoverageMask =
+                    ComputeSubpixelMask(X, Y, Settings.Resolution, Triangle);
+                if (TriangleCoverageMask == 0)
+                {
+                    continue;
+                }
+                const int32 LocalPixelKey =
+                    (Y - Tile.Rect.Min.Y) * TileWidth + (X - Tile.Rect.Min.X);
+                const int32 ExistingSampleIndex =
+                    InOutScratch.OccupiedPixelSamples[LocalPixelKey];
+                if (ExistingSampleIndex != INDEX_NONE)
+                {
+                    const int32 ExistingSurfaceTriangleIndex =
+                        InOutScratch.Samples[ExistingSampleIndex].TriangleIndex;
+                    const FDWCRevealBakeSurfaceTriangle& ExistingTriangle =
+                        OuterSurface.Triangles[ExistingSurfaceTriangleIndex];
+                    bool bSharesVertex = false;
+                    for (int32 ExistingCorner = 0; ExistingCorner < 3 && !bSharesVertex; ++ExistingCorner)
+                    {
+                        for (int32 NewCorner = 0; NewCorner < 3; ++NewCorner)
+                        {
+                            bSharesVertex |= ExistingTriangle.VertexIndices[ExistingCorner] ==
+                                Triangle.VertexIndices[NewCorner];
+                        }
+                    }
+                    if (!bSharesVertex)
+                    {
+                        if (OutOverlappedPixelCount != nullptr &&
+                            (InOutScratch.RasterFlags[LocalPixelKey] & OverlapReportedBit) == 0)
+                        {
+                            InOutScratch.RasterFlags[LocalPixelKey] |= OverlapReportedBit;
+                            ++(*OutOverlappedPixelCount);
+                        }
+                        continue;
+                    }
+                    InOutScratch.RasterFlags[LocalPixelKey] |= TriangleCoverageMask;
+                    continue;
+                }
+
+                FDWCRevealBakeTexelSample& Sample =
+                    InOutScratch.Samples.AddDefaulted_GetRef();
+                Sample.Pixel = FIntPoint(X, Y);
+                Sample.TriangleIndex = SurfaceTriangleIndex;
+                InOutScratch.OccupiedPixelSamples[LocalPixelKey] =
+                    InOutScratch.Samples.Num() - 1;
+                InOutScratch.RasterFlags[LocalPixelKey] |= TriangleCoverageMask;
+            }
+        }
+    }
+
+    constexpr uint8 SubsampleCountByMask[] =
+    {
+        0, 1, 1, 2, 1, 2, 2, 3,
+        1, 2, 2, 3, 2, 3, 3, 4
+    };
+    constexpr uint8 CoverageBySubsampleCount[] = { 0, 64, 128, 191, 255 };
+    for (FDWCRevealBakeTexelSample& Sample : InOutScratch.Samples)
+    {
+        const int32 SurfaceTriangleIndex = Sample.TriangleIndex;
+        const FDWCRevealBakeSurfaceTriangle& Triangle =
+            OuterSurface.Triangles[SurfaceTriangleIndex];
+        const int32 LocalPixelKey =
+            (Sample.Pixel.Y - Tile.Rect.Min.Y) * TileWidth +
+            (Sample.Pixel.X - Tile.Rect.Min.X);
+        FVector2D UV;
+        FVector Barycentric;
+        if (!ResolveRepresentativeSample(
+                Sample.Pixel.X,
+                Sample.Pixel.Y,
+                Settings.Resolution,
+                Triangle,
+                UV,
+                Barycentric))
+        {
+            SetError(OutErrorMessage, TEXT("A covered target tile texel has no representative surface point."));
+            return false;
+        }
+        const uint8 CoverageMask = InOutScratch.RasterFlags[LocalPixelKey] & CoverageMaskBits;
+        Sample.UV = UV;
+        Sample.Coverage = CoverageBySubsampleCount[SubsampleCountByMask[CoverageMask]];
+        Sample.Position = InterpolateVector(Barycentric, Triangle.Positions);
+        Sample.Normal = InterpolateDirection(Barycentric, Triangle.Normals).GetSafeNormal();
+        Sample.TriangleIndex = Triangle.TriangleIndex;
+        Sample.MaterialSlotIndex = Triangle.MaterialSlotIndex;
+        Sample.UVIslandID = Triangle.UVIslandID;
+        Sample.Barycentric = Barycentric;
+    }
+
+    SetError(OutErrorMessage, TEXT(""));
+    return true;
 }
 
 bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
@@ -696,43 +992,91 @@ void FDWCRevealBakeTexelSampler::SetError(FString* OutErrorMessage, const TCHAR*
     }
 }
 
-bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
-    const FDWCRevealBakeSurface&                    OuterSurface,
-    const TConstArrayView<FDWCRevealBakeSurface>    SourceSurfaces,
-    const TArray<FDWCRevealBakeTexelSample>&        Samples,
-    const FDWCRevealBakeRayProjectionSettings&      Settings,
-    TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
-    FString*                                        OutErrorMessage,
-    const FDWCEditorCancellationToken*              CancellationToken,
-    const TConstArrayView<int32>                    SampleIndices,
-    const FDWCRevealBakeProjectionProgressCallback* ProgressCallback)
+struct FDWCRevealBakeRayProjector::FPreparedProjection::FImpl
 {
-    if (Samples.Num() == 0)
-    {
-        SetError(OutErrorMessage, TEXT("No texel samples were provided for ray projection."));
-        return false;
-    }
+    FBakeProjectionBvh Bvh;
+    FDWCRevealBakeRayProjectionSettings Settings;
+    float MaxRevealDistance = 0.0f;
+};
 
-    if (SourceSurfaces.Num() == 0)
+FDWCRevealBakeRayProjector::FPreparedProjection::FPreparedProjection()
+    : Impl(MakeUnique<FImpl>())
+{
+}
+
+FDWCRevealBakeRayProjector::FPreparedProjection::~FPreparedProjection() = default;
+FDWCRevealBakeRayProjector::FPreparedProjection::FPreparedProjection(FPreparedProjection&&) = default;
+FDWCRevealBakeRayProjector::FPreparedProjection&
+FDWCRevealBakeRayProjector::FPreparedProjection::operator=(FPreparedProjection&&) = default;
+
+bool FDWCRevealBakeRayProjector::FPreparedProjection::IsValid() const
+{
+    return Impl.IsValid() && Impl->MaxRevealDistance > 0.0f;
+}
+
+uint64 FDWCRevealBakeRayProjector::FPreparedProjection::GetAllocatedBytes() const
+{
+    return Impl.IsValid() ? sizeof(FImpl) + Impl->Bvh.GetAllocatedBytes() : 0;
+}
+
+TUniquePtr<FDWCRevealBakeRayProjector::FPreparedProjection>
+FDWCRevealBakeRayProjector::PrepareProjection(
+    const FDWCRevealBakeSurface& OuterSurface,
+    const TConstArrayView<FDWCRevealBakeSurface> SourceSurfaces,
+    const FDWCRevealBakeRayProjectionSettings& Settings,
+    FString* OutErrorMessage)
+{
+    if (SourceSurfaces.IsEmpty())
     {
         SetError(OutErrorMessage, TEXT("No source surfaces were provided for ray projection."));
-        return false;
+        return nullptr;
     }
-
-    const float MaxRevealDistance = FMath::Max(0.0f, OuterSurface.MaxRevealDistance * FMath::Max(Settings.RayLengthScale, 0.0f));
-    if (MaxRevealDistance <= 0.0f)
+    TUniquePtr<FPreparedProjection> Prepared = MakeUnique<FPreparedProjection>();
+    Prepared->Impl->Settings = Settings;
+    Prepared->Impl->MaxRevealDistance = FMath::Max(
+        0.0f,
+        OuterSurface.MaxRevealDistance * FMath::Max(Settings.RayLengthScale, 0.0f));
+    if (Prepared->Impl->MaxRevealDistance <= 0.0f)
     {
         SetError(OutErrorMessage, TEXT("Max reveal distance must be positive."));
-        return false;
+        return nullptr;
     }
-
-    FBakeProjectionBvh ProjectionBvh;
-    if (!ProjectionBvh.Build(OuterSurface, SourceSurfaces, Settings))
+    if (!Prepared->Impl->Bvh.Build(OuterSurface, SourceSurfaces, Settings))
     {
         SetError(OutErrorMessage, TEXT("No eligible source triangles were available for ray projection."));
+        return nullptr;
+    }
+    SetError(OutErrorMessage, TEXT(""));
+    return Prepared;
+}
+
+bool FDWCRevealBakeRayProjector::ProjectPreparedSamples(
+    const FPreparedProjection& PreparedProjection,
+    const TArray<FDWCRevealBakeTexelSample>& Samples,
+    TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
+    FString* OutErrorMessage,
+    const FDWCEditorCancellationToken* CancellationToken,
+    const TConstArrayView<int32> SampleIndices,
+    const FDWCRevealBakeProjectionProgressCallback* ProgressCallback)
+{
+    if (!PreparedProjection.IsValid())
+    {
+        SetError(OutErrorMessage, TEXT("The prepared transparency projection is invalid."));
         return false;
     }
+    if (Samples.IsEmpty())
+    {
+        if (ProgressCallback != nullptr)
+        {
+            (*ProgressCallback)(0, 0);
+        }
+        SetError(OutErrorMessage, TEXT(""));
+        return true;
+    }
 
+    const FPreparedProjection::FImpl& Prepared = *PreparedProjection.Impl;
+    const FDWCRevealBakeRayProjectionSettings& Settings = Prepared.Settings;
+    const float MaxRevealDistance = Prepared.MaxRevealDistance;
     const int32 ProjectionSampleCount = SampleIndices.IsEmpty()
         ? Samples.Num()
         : SampleIndices.Num();
@@ -743,15 +1087,13 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
     for (int32 ProjectionSampleIndex = 0; ProjectionSampleIndex < ProjectionSampleCount;
          ++ProjectionSampleIndex)
     {
-        if ((ProjectionSampleIndex & 255) == 0 &&
-            CancellationToken != nullptr &&
+        if ((ProjectionSampleIndex & 255) == 0 && CancellationToken != nullptr &&
             CancellationToken->IsCanceled())
         {
             SetError(OutErrorMessage, TEXT("Transparency ray projection was canceled."));
             return false;
         }
-        if (ProgressCallback != nullptr &&
-            ProjectionSampleIndex > 0 &&
+        if (ProgressCallback != nullptr && ProjectionSampleIndex > 0 &&
             (ProjectionSampleIndex & 2047) == 0)
         {
             (*ProgressCallback)(ProjectionSampleIndex, ProjectionSampleCount);
@@ -770,15 +1112,13 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
 
         FCandidateHit BestRevealCandidate;
         FCandidateHit BestBlockerCandidate;
-        bool          bHasRevealCandidate = false;
-        bool          bHasBlockerCandidate = false;
-
+        bool bHasRevealCandidate = false;
+        bool bHasBlockerCandidate = false;
         const auto IsPreferredCandidate =
             [&Settings](const FCandidateHit& Candidate, const FCandidateHit& Current)
         {
             if (Settings.bPreferLowerSourceLayerOrder &&
-                Candidate.SourceSurface != nullptr &&
-                Current.SourceSurface != nullptr &&
+                Candidate.SourceSurface != nullptr && Current.SourceSurface != nullptr &&
                 Candidate.SourceSurface->LayerOrder != Current.SourceSurface->LayerOrder)
             {
                 return Candidate.SourceSurface->LayerOrder < Current.SourceSurface->LayerOrder;
@@ -786,7 +1126,7 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
             return Candidate.Distance < Current.Distance;
         };
 
-        ProjectionBvh.ForEachRayCandidate(
+        Prepared.Bvh.ForEachRayCandidate(
             RayOrigin,
             RayDirection,
             MaxRevealDistance,
@@ -796,8 +1136,7 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
                 {
                     return;
                 }
-
-                float   Distance = 0.0f;
+                float Distance = 0.0f;
                 FVector Barycentric;
                 if (!IntersectRayTriangle(
                         RayOrigin,
@@ -805,18 +1144,10 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
                         *TriangleRef.Triangle,
                         MaxRevealDistance,
                         Distance,
-                        Barycentric))
-                {
-                    return;
-                }
-
-                if (Distance < FMath::Max(0.0f, Settings.MinHitDistance))
-                {
-                    return;
-                }
-
-                if (Settings.bRespectPerSourceMaxDistance &&
-                    Distance > FMath::Max(0.0f, TriangleRef.SourceSurface->MaxRevealDistance))
+                        Barycentric) ||
+                    Distance < FMath::Max(0.0f, Settings.MinHitDistance) ||
+                    (Settings.bRespectPerSourceMaxDistance &&
+                     Distance > FMath::Max(0.0f, TriangleRef.SourceSurface->MaxRevealDistance)))
                 {
                     return;
                 }
@@ -826,22 +1157,16 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
                 Candidate.Triangle = TriangleRef.Triangle;
                 Candidate.Barycentric = Barycentric;
                 Candidate.Distance = Distance;
-
                 if (TriangleRef.SourceSurface->bCanBeRevealSource)
                 {
-                    if (!bHasRevealCandidate ||
-                        IsPreferredCandidate(Candidate, BestRevealCandidate))
+                    if (!bHasRevealCandidate || IsPreferredCandidate(Candidate, BestRevealCandidate))
                     {
                         BestRevealCandidate = Candidate;
                         bHasRevealCandidate = true;
                     }
-                    return;
                 }
-
-                if (Settings.bRespectBlockers &&
-                    TriangleRef.SourceSurface->bBlocksReveal &&
-                    (!bHasBlockerCandidate ||
-                     IsPreferredCandidate(Candidate, BestBlockerCandidate)))
+                else if (Settings.bRespectBlockers && TriangleRef.SourceSurface->bBlocksReveal &&
+                         (!bHasBlockerCandidate || IsPreferredCandidate(Candidate, BestBlockerCandidate)))
                 {
                     BestBlockerCandidate = Candidate;
                     bHasBlockerCandidate = true;
@@ -850,11 +1175,8 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
 
         FDWCRevealBakeRayHit SelectedHit;
         SelectedHit.Pixel = Sample.Pixel;
-
-        const bool bBlocked =
-            bHasBlockerCandidate &&
-            (!bHasRevealCandidate ||
-             IsPreferredCandidate(BestBlockerCandidate, BestRevealCandidate));
+        const bool bBlocked = bHasBlockerCandidate &&
+            (!bHasRevealCandidate || IsPreferredCandidate(BestBlockerCandidate, BestRevealCandidate));
         SelectedHit.bBlocked = bBlocked;
         if (bBlocked)
         {
@@ -876,7 +1198,6 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
                     1.0f);
             }
         }
-
         ConsumeHit(SelectedHit);
     }
 
@@ -884,9 +1205,36 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
     {
         (*ProgressCallback)(ProjectionSampleCount, ProjectionSampleCount);
     }
-
     SetError(OutErrorMessage, TEXT(""));
     return true;
+}
+
+bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
+    const FDWCRevealBakeSurface& OuterSurface,
+    const TConstArrayView<FDWCRevealBakeSurface> SourceSurfaces,
+    const TArray<FDWCRevealBakeTexelSample>& Samples,
+    const FDWCRevealBakeRayProjectionSettings& Settings,
+    TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
+    FString* OutErrorMessage,
+    const FDWCEditorCancellationToken* CancellationToken,
+    const TConstArrayView<int32> SampleIndices,
+    const FDWCRevealBakeProjectionProgressCallback* ProgressCallback)
+{
+    if (Samples.IsEmpty())
+    {
+        SetError(OutErrorMessage, TEXT("No texel samples were provided for ray projection."));
+        return false;
+    }
+    TUniquePtr<FPreparedProjection> Prepared = PrepareProjection(
+        OuterSurface, SourceSurfaces, Settings, OutErrorMessage);
+    return Prepared.IsValid() && ProjectPreparedSamples(
+        *Prepared,
+        Samples,
+        ConsumeHit,
+        OutErrorMessage,
+        CancellationToken,
+        SampleIndices,
+        ProgressCallback);
 }
 
 bool FDWCRevealBakeRayProjector::IntersectRayTriangle(

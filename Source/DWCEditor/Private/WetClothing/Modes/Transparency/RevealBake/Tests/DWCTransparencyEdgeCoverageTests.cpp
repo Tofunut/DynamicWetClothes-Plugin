@@ -243,6 +243,165 @@ bool FDWCTransparencyBoundedMaskRasterParityTest::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyTileRasterParityTest,
+    "DWC.Editor.Transparency.RevealBake.TileRasterParity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyTileRasterParityTest::RunTest(const FString&)
+{
+    FDWCRevealBakeSurface Surface;
+    Surface.Triangles.Add(MakeTriangle(
+        FVector2D(0.0, 0.0), FVector2D(1.0, 0.0), FVector2D(1.0, 1.0),
+        7, 0, 1, 2));
+    Surface.Triangles.Add(MakeTriangle(
+        FVector2D(0.0, 0.0), FVector2D(1.0, 1.0), FVector2D(0.0, 1.0),
+        8, 0, 2, 3));
+    Surface.Triangles[0].UVIslandID = 4;
+    Surface.Triangles[1].UVIslandID = 4;
+
+    FDWCRevealBakeTexelSamplingSettings Settings;
+    Settings.Resolution = FIntPoint(8, 8);
+    Settings.MaterialSlotIndex = 0;
+    TArray<FDWCRevealBakeTexelSample> ReferenceSamples;
+    FString Error;
+    int32 ReferenceOverlapCount = 0;
+    TestTrue(TEXT("The full reference raster succeeds."),
+        FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
+            Surface, Settings, ReferenceSamples, &Error, &ReferenceOverlapCount));
+
+    TSet<int32> EligibleTriangleIDs = { 7, 8 };
+    FDWCRevealBakeTileLayout Layout;
+    TestTrue(TEXT("A non-divisible tile layout is built."),
+        FDWCRevealBakeTexelSampler::BuildTileLayout(
+            Surface, Settings, EligibleTriangleIDs, 3, Layout, &Error));
+    TestEqual(TEXT("The 8x8 target uses a 3x3 tile grid."), Layout.Tiles.Num(), 9);
+    FDWCRevealBakeTileLayout SmallBoundedLayout;
+    TestTrue(TEXT("The small target accepts the production tile size."),
+        FDWCRevealBakeTexelSampler::BuildTileLayout(
+            Surface, Settings, EligibleTriangleIDs, 128, SmallBoundedLayout, &Error));
+    FDWCRevealBakeTexelSamplingSettings LargeSettings = Settings;
+    LargeSettings.Resolution = FIntPoint(4096, 4096);
+    FDWCRevealBakeTileLayout LargeLayout;
+    TestTrue(TEXT("The same surface builds a 4K tile layout."),
+        FDWCRevealBakeTexelSampler::BuildTileLayout(
+            Surface, LargeSettings, EligibleTriangleIDs, 128, LargeLayout, &Error));
+    TestEqual(TEXT("Tile scratch is independent of full output resolution."),
+        LargeLayout.EstimateMaximumScratchBytes(),
+        SmallBoundedLayout.EstimateMaximumScratchBytes());
+
+    FDWCRevealBakeTileScratch Scratch;
+    TArray<FDWCRevealBakeTexelSample> StreamedSamples;
+    int32 StreamedOverlapCount = 0;
+    int32 MaximumResidentSamples = 0;
+    for (int32 TileIndex = 0; TileIndex < Layout.Tiles.Num(); ++TileIndex)
+    {
+        int32 TileOverlapCount = 0;
+        TestTrue(TEXT("Each target tile rasterizes successfully."),
+            FDWCRevealBakeTexelSampler::BuildTileSamples(
+                Surface,
+                Settings,
+                Layout,
+                TileIndex,
+                Scratch,
+                &Error,
+                &TileOverlapCount));
+        MaximumResidentSamples = FMath::Max(MaximumResidentSamples, Scratch.Samples.Num());
+        StreamedOverlapCount += TileOverlapCount;
+        StreamedSamples.Append(Scratch.Samples);
+    }
+
+    TestTrue(TEXT("Tile scratch never retains more than one tile of samples."),
+        MaximumResidentSamples <= 9);
+    TestEqual(TEXT("Tile and full raster emit the same sample count."),
+        StreamedSamples.Num(), ReferenceSamples.Num());
+    TestEqual(TEXT("Tile and full raster report the same overlaps."),
+        StreamedOverlapCount, ReferenceOverlapCount);
+    for (const FDWCRevealBakeTexelSample& Reference : ReferenceSamples)
+    {
+        const FDWCRevealBakeTexelSample* Streamed = FindSample(StreamedSamples, Reference.Pixel);
+        TestNotNull(TEXT("Every full-raster pixel exists in the streamed result."), Streamed);
+        if (Streamed != nullptr)
+        {
+            TestEqual(TEXT("Tile raster preserves coverage."), Streamed->Coverage, Reference.Coverage);
+            TestEqual(TEXT("Tile raster preserves triangle identity."),
+                Streamed->TriangleIndex, Reference.TriangleIndex);
+            TestEqual(TEXT("Tile raster preserves island identity."),
+                Streamed->UVIslandID, Reference.UVIslandID);
+            TestTrue(TEXT("Tile raster preserves the representative position."),
+                Streamed->Position.Equals(Reference.Position));
+            TestTrue(TEXT("Tile raster preserves barycentric coordinates."),
+                Streamed->Barycentric.Equals(Reference.Barycentric));
+        }
+    }
+
+    FDWCRevealBakeSurface SparseSurface;
+    SparseSurface.Triangles.Add(MakeTriangle(
+        FVector2D(0.0, 0.0), FVector2D(0.1, 0.0), FVector2D(0.0, 0.1),
+        21, 0, 1, 2));
+    TSet<int32> SparseEligibleTriangleIDs = { 21 };
+    FDWCRevealBakeTileLayout SparseLayout;
+    TestTrue(TEXT("A sparse target tile layout is built."),
+        FDWCRevealBakeTexelSampler::BuildTileLayout(
+            SparseSurface, Settings, SparseEligibleTriangleIDs, 4, SparseLayout, &Error));
+    TestTrue(TEXT("An empty sparse tile skips scratch initialization."),
+        FDWCRevealBakeTexelSampler::BuildTileSamples(
+            SparseSurface, Settings, SparseLayout, 3, Scratch, &Error));
+    TestEqual(TEXT("An empty tile emits no samples."), Scratch.Samples.Num(), 0);
+    TestEqual(TEXT("An empty tile has no live occupancy entries."),
+        Scratch.OccupiedPixelSamples.Num(), 0);
+    TestEqual(TEXT("An empty tile has no live raster flags."), Scratch.RasterFlags.Num(), 0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCTransparencyPreparedProjectionBatchParityTest,
+    "DWC.Editor.Transparency.RevealBake.PreparedProjectionBatchParity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCTransparencyPreparedProjectionBatchParityTest::RunTest(const FString&)
+{
+    FDWCRevealBakeSurface OuterSurface;
+    OuterSurface.MaxRevealDistance = 5.0f;
+    OuterSurface.LayerOrder = 100;
+    TArray<FDWCRevealBakeSurface> Sources;
+    Sources.Add(MakeProjectionSurface(TEXT("Reveal"), -1.0f, true, false));
+
+    FDWCRevealBakeRayProjectionSettings Settings;
+    FString Error;
+    TUniquePtr<FDWCRevealBakeRayProjector::FPreparedProjection> Prepared =
+        FDWCRevealBakeRayProjector::PrepareProjection(
+            OuterSurface, Sources, Settings, &Error);
+    TestTrue(TEXT("The source BVH is prepared once."), Prepared.IsValid());
+    if (!Prepared.IsValid())
+    {
+        return false;
+    }
+
+    int32 HitCount = 0;
+    for (int32 BatchIndex = 0; BatchIndex < 2; ++BatchIndex)
+    {
+        FDWCRevealBakeTexelSample Sample;
+        Sample.Pixel = FIntPoint(BatchIndex, 0);
+        Sample.Position = FVector(BatchIndex == 0 ? -1.0 : 1.0, 0.0, 0.0);
+        Sample.Normal = FVector::UpVector;
+        TArray<FDWCRevealBakeTexelSample> Batch = { Sample };
+        TestTrue(TEXT("Each sample batch reuses the prepared source BVH."),
+            FDWCRevealBakeRayProjector::ProjectPreparedSamples(
+                *Prepared,
+                Batch,
+                [&HitCount](const FDWCRevealBakeRayHit& Hit)
+                {
+                    HitCount += Hit.bHit ? 1 : 0;
+                },
+                &Error));
+    }
+    TestEqual(TEXT("Both streamed batches produce a hit."), HitCount, 2);
+    TestTrue(TEXT("Prepared projection reports owned BVH memory."),
+        Prepared->GetAllocatedBytes() > 0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FDWCTransparencyUVOverlapCoverageTest,
     "DWC.Transparency.RevealBake.UVOverlapCoverage",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

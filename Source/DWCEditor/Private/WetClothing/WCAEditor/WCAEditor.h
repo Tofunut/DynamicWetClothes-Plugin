@@ -42,10 +42,10 @@ class FWCAEditor : public FAssetEditorToolkit
 
   private:
     virtual void         PostRegenerateMenusAndToolbars() override;
-    void                 HandleFinishedChangingProperties(const FPropertyChangedEvent& PropertyChangedEvent);
     void                 HandleObjectPropertyChanged(UObject* ObjectBeingModified, FPropertyChangedEvent& PropertyChangedEvent);
     void                 HandleDWCEditorAssetSaveAttemptFinished(UObject* SavedAsset, bool bSaveSucceeded);
     void                 HandleEditorPanelStatusChanged();
+    void                 ShutdownEditorPanel();
     TSharedRef<SDockTab> SpawnMainTab(const FSpawnTabArgs& Args);
     void                 FillAssetToolbar(FToolBarBuilder& ToolbarBuilder);
     void                 HandleAssetSetupClicked();
@@ -67,14 +67,6 @@ class FWCAEditor : public FAssetEditorToolkit
     void                 HandleResetPreviewDiagnostics();
     FReply               HandleBuildAllRequiredClicked();
     void                 ExecuteBuildAllRequiredExclusive();
-    FReply               HandleBuildCPURuntimeDataClicked();
-    FReply               HandleBuildGPURuntimeDataClicked();
-    FReply               HandleBakeRenderProfileDataClicked();
-    FReply               HandleBakeWrinkleNormalMapClicked();
-    FReply               HandleBakeTransparencyMapsClicked();
-    FReply               HandleRebakeAffectedTransparencyMapsClicked();
-    FReply               HandleGenerateMaterialsClicked();
-    FReply               GenerateWetMaterials();
     bool                 ResolveIssuesAndSave(
         FString& OutFailure,
         FString* OutSuccessSummary = nullptr,

@@ -24,9 +24,12 @@
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeProjection.h"
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurface.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogDWCTransparencyStage2, Log, All);
+
 namespace
 {
     TAtomic<uint64> GNextTransparencyStage2OperationId{1};
+    constexpr int32 TransparencyStage2TileSize = 128;
 
     uint64 SaturatingMultiply(const uint64 A, const uint64 B)
     {
@@ -75,30 +78,21 @@ namespace
         return static_cast<int32>(FMath::Min<int64>(TriangleCount, MAX_int32));
     }
 
-    uint64 EstimateRasterSampleBytes(
-        const FDWCRevealBakeSurface& Surface,
-        const FIntPoint Resolution)
+    uint64 EstimateTileStreamingScratchBytes(const FDWCRevealBakeTileLayout& Layout)
     {
-        double CoveredTexels = 0.0;
-        const double PixelCount = static_cast<double>(FMath::Max(Resolution.X, 0)) *
-            static_cast<double>(FMath::Max(Resolution.Y, 0));
-        for (const FDWCRevealBakeSurfaceTriangle& Triangle : Surface.Triangles)
-        {
-            const FVector2D EdgeA = Triangle.UVs[1] - Triangle.UVs[0];
-            const FVector2D EdgeB = Triangle.UVs[2] - Triangle.UVs[0];
-            const double UVArea = FMath::Abs(EdgeA.X * EdgeB.Y - EdgeA.Y * EdgeB.X) * 0.5;
-            const FVector2D EdgeC = Triangle.UVs[2] - Triangle.UVs[1];
-            const double EdgeTexels =
-                EdgeA.Size() * FMath::Max(Resolution.X, Resolution.Y) +
-                EdgeB.Size() * FMath::Max(Resolution.X, Resolution.Y) +
-                EdgeC.Size() * FMath::Max(Resolution.X, Resolution.Y);
-            CoveredTexels += UVArea * PixelCount + EdgeTexels * 0.5 + 1.0;
-        }
-        // Conservative sub-pixel/edge allowance without reserving the entire
-        // square texture for sparse target slots.
-        const uint64 EstimatedSamples = static_cast<uint64>(FMath::CeilToDouble(
-            FMath::Min(PixelCount, CoveredTexels * 1.25 + Surface.Triangles.Num() * 2.0)));
-        return SaturatingMultiply(EstimatedSamples, sizeof(FDWCRevealBakeTexelSample));
+        const uint64 TilePixels = SaturatingMultiply(
+            static_cast<uint64>(FMath::Max(Layout.TileSize, 0)),
+            static_cast<uint64>(FMath::Max(Layout.TileSize, 0)));
+        return Layout.EstimateMaximumScratchBytes() +
+            SaturatingMultiply(TilePixels, sizeof(int32));
+    }
+
+    uint64 EstimateProjectionBvhBytes(const FDWCRevealBakeSurface& Surface)
+    {
+        // Triangle refs, leaf indices and a conservative two-node allowance.
+        return SaturatingMultiply(
+            static_cast<uint64>(Surface.Triangles.Num()),
+            sizeof(FDWCRevealBakeSurfaceTriangle) + sizeof(int32) + 128ull);
     }
 
     FDWCEditorAsyncOperationIdentity MakeStage2Owner(
@@ -1163,7 +1157,8 @@ struct FDWCTransparencyAutoMapSnapshot::FImpl
 
     FDWCRevealBakeSurface OuterSurface;
     TArray<FDWCRevealBakeSurface> SourceSurfaces;
-    TArray<FDWCRevealBakeTexelSample> OuterSamples;
+    FDWCRevealBakeTexelSamplingSettings SamplingSettings;
+    FDWCRevealBakeTileLayout TileLayout;
     FDWCRevealBakeRayProjectionSettings ProjectionSettings;
     FWetClothingTransparencyRaySettings RaySettings;
     TMap<FName, int32> PriorityBySourceLayerId;
@@ -1343,44 +1338,8 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
         return false;
     }
 
-    FDWCRevealBakeTexelSamplingSettings SamplingSettings;
-    SamplingSettings.Resolution = BakeResolution;
-    SamplingSettings.MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
-    if (PhaseOperation != nullptr)
-    {
-        const uint64 BaseSurfaceCacheBytes = EstimateSurfaceBytes(
-            CountMeshTriangles(RuntimeMesh));
-        const uint64 TargetSurfaceBytes = Snapshot.OuterSurface.Triangles.GetAllocatedSize();
-        FDWCTransparencyStage2PhaseResources Resources;
-        Resources.WorkerPeakBytes = BaseSurfaceCacheBytes + TargetSurfaceBytes +
-            EstimateRasterSampleBytes(Snapshot.OuterSurface, BakeResolution);
-        Resources.WorkerRetainedBytes = Resources.WorkerPeakBytes;
-        if (!PhaseOperation->BeginPhase(
-                EDWCTransparencyStage2OperationPhase::RasterizeTarget,
-                Resources,
-                OutErrorMessage))
-        {
-            return false;
-        }
-    }
-    int32 OverlappedPixelCount = 0;
-    if (!FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
-            Snapshot.OuterSurface,
-            SamplingSettings,
-            Snapshot.OuterSamples,
-            &BuildError,
-            &OverlappedPixelCount))
-    {
-        OutErrorMessage = FString::Printf(
-            TEXT("Failed to rasterize the transparency target UVs: %s"),
-            *BuildError);
-        return false;
-    }
-    if (Snapshot.OuterSamples.IsEmpty())
-    {
-        OutErrorMessage = TEXT("No outer texel samples were generated. Check the selected target slot and DWC Data UV channel.");
-        return false;
-    }
+    Snapshot.SamplingSettings.Resolution = BakeResolution;
+    Snapshot.SamplingSettings.MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
 
     TSet<int32> EligibleTriangleIDs;
     if (!BuildTargetWetPartEligibleTriangles(
@@ -1392,11 +1351,115 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
     {
         return false;
     }
-    if (FilterSamplesToWetPartEligibility(Snapshot.OuterSamples, EligibleTriangleIDs) == 0)
+    if (!FDWCRevealBakeTexelSampler::BuildTileLayout(
+            Snapshot.OuterSurface,
+            Snapshot.SamplingSettings,
+            EligibleTriangleIDs,
+            TransparencyStage2TileSize,
+            Snapshot.TileLayout,
+            &BuildError))
     {
         OutErrorMessage = FString::Printf(
-            TEXT("Transparency Target Part slot %d Wet Part UV islands did not rasterize any DWC Data UV texels."),
-            Layer.TargetSurface.OuterMaterialSlotIndex);
+            TEXT("Failed to partition the transparency target UVs: %s"),
+            *BuildError);
+        return false;
+    }
+    if (PhaseOperation != nullptr)
+    {
+        const uint64 BaseSurfaceCacheBytes = EstimateSurfaceBytes(
+            CountMeshTriangles(RuntimeMesh));
+        const uint64 TargetSurfaceBytes = Snapshot.OuterSurface.Triangles.GetAllocatedSize();
+        FDWCTransparencyStage2PhaseResources Resources;
+        Resources.WorkerPeakBytes = BaseSurfaceCacheBytes + TargetSurfaceBytes +
+            Snapshot.TileLayout.GetAllocatedBytes() + EstimatePayloadBytes(BakeResolution) +
+            EstimateTileStreamingScratchBytes(Snapshot.TileLayout);
+        Resources.WorkerRetainedBytes = BaseSurfaceCacheBytes + TargetSurfaceBytes +
+            Snapshot.TileLayout.GetAllocatedBytes() + EstimatePayloadBytes(BakeResolution);
+        if (!PhaseOperation->BeginPhase(
+                EDWCTransparencyStage2OperationPhase::RasterizeTarget,
+                Resources,
+                OutErrorMessage))
+        {
+            return false;
+        }
+    }
+
+    FDWCTransparencySourcePayload& SeedResult = Snapshot.SeedResult;
+    SeedResult.LayerGuid = Layer.LayerGuid;
+    SeedResult.MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
+    SeedResult.UVChannelIndex = DataUVChannelIndex;
+    SeedResult.LODIndex = LODIndex;
+    SeedResult.Resolution = BakeResolution;
+    SeedResult.OutputResolutionIdentity = ResolvedOutputResolution.Identity;
+    SeedResult.InnerColorBuffer.Init(FColor::Black, PixelCount);
+    SeedResult.RevealSurfaceAuthoring.Init(
+        SeedResult.Resolution,
+        FColor(128, 128, 0, 0));
+    SeedResult.AutoAlphaBuffer.Init(0, PixelCount);
+    SeedResult.OuterCoverageBuffer.Init(0, PixelCount);
+    SeedResult.ValidHitBuffer.Init(false, PixelCount);
+    SeedResult.HitDistanceBuffer.Init(0.0f, PixelCount);
+    SeedResult.SourcePriorityBuffer.Init(INDEX_NONE, PixelCount);
+    SeedResult.OuterIslandIDBuffer.Init(
+        FDWCTransparencySourcePayload::InvalidOuterIslandID,
+        PixelCount);
+
+    const FDWCDataUVLODMetadata* DataUVMetadata =
+        WetClothingAsset.FindDataUVMetadataForLOD(LODIndex);
+    FDWCRevealBakeTileScratch RasterScratch;
+    int32 OverlappedPixelCount = 0;
+    for (int32 TileIndex = 0; TileIndex < Snapshot.TileLayout.Tiles.Num(); ++TileIndex)
+    {
+        if (AbortCanceledGeneration(CancellationToken, OutErrorMessage))
+        {
+            return false;
+        }
+        int32 TileOverlapCount = 0;
+        if (!FDWCRevealBakeTexelSampler::BuildTileSamples(
+                Snapshot.OuterSurface,
+                Snapshot.SamplingSettings,
+                Snapshot.TileLayout,
+                TileIndex,
+                RasterScratch,
+                &BuildError,
+                &TileOverlapCount))
+        {
+            OutErrorMessage = FString::Printf(
+                TEXT("Failed to rasterize transparency target tile %d: %s"),
+                TileIndex,
+                *BuildError);
+            return false;
+        }
+        OverlappedPixelCount += TileOverlapCount;
+        for (const FDWCRevealBakeTexelSample& Sample : RasterScratch.Samples)
+        {
+            const int32 PixelIndex = Sample.Pixel.Y * Resolution + Sample.Pixel.X;
+            SeedResult.OuterCoverageBuffer[PixelIndex] = Sample.Coverage;
+            uint16 EncodedIslandID = FDWCTransparencySourcePayload::InvalidOuterIslandID;
+            if (!TryEncodeOuterSampleUVIslandID(
+                    DataUVMetadata,
+                    Sample,
+                    EncodedIslandID,
+                    OutErrorMessage))
+            {
+                return false;
+            }
+            SeedResult.OuterIslandIDBuffer[PixelIndex] = EncodedIslandID;
+        }
+        SeedResult.OuterSampleCount += RasterScratch.Samples.Num();
+        ReportGenerationProgress(
+            ProgressCallback,
+            EDWCTransparencyGenerationPhase::RasterizingTarget,
+            0.08 + 0.10 * static_cast<double>(TileIndex + 1) /
+                FMath::Max(1, Snapshot.TileLayout.Tiles.Num()),
+            TileIndex + 1,
+            Snapshot.TileLayout.Tiles.Num());
+    }
+    RasterScratch.Reset();
+    SeedResult.OverlappedUVPixelCount = OverlappedPixelCount;
+    if (SeedResult.OuterSampleCount == 0)
+    {
+        OutErrorMessage = TEXT("No outer texel samples were generated. Check the selected target slot and DWC Data UV channel.");
         return false;
     }
     ReportGenerationProgress(
@@ -1436,10 +1499,11 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
         }
         const uint64 PreparedTargetBytes =
             Snapshot.OuterSurface.Triangles.GetAllocatedSize() +
-            Snapshot.OuterSamples.GetAllocatedSize();
+            Snapshot.TileLayout.GetAllocatedBytes() +
+            Snapshot.SeedResult.GetAllocatedBytes();
         FDWCTransparencyStage2PhaseResources Resources;
-        Resources.WorkerPeakBytes = BuildCacheEstimate + PreparedTargetBytes + SourceSurfaceEstimate +
-            EstimatePayloadBytes(BakeResolution);
+        Resources.WorkerPeakBytes =
+            BuildCacheEstimate + PreparedTargetBytes + SourceSurfaceEstimate;
         Resources.WorkerRetainedBytes = Resources.WorkerPeakBytes;
         if (!PhaseOperation->BeginPhase(
                 EDWCTransparencyStage2OperationPhase::PrepareSources,
@@ -1643,47 +1707,6 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
     Snapshot.ProjectionSettings.bUseNormalAlignmentConfidence = false;
     Snapshot.RaySettings = Layer.RaySettings;
 
-    FDWCTransparencySourcePayload& SeedResult = Snapshot.SeedResult;
-    SeedResult.LayerGuid = Layer.LayerGuid;
-    SeedResult.MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
-    SeedResult.UVChannelIndex = DataUVChannelIndex;
-    SeedResult.LODIndex = LODIndex;
-    SeedResult.Resolution = BakeResolution;
-    SeedResult.OutputResolutionIdentity = ResolvedOutputResolution.Identity;
-    SeedResult.OuterSampleCount = Snapshot.OuterSamples.Num();
-    SeedResult.OverlappedUVPixelCount = OverlappedPixelCount;
-    SeedResult.InnerColorBuffer.Init(FColor::Black, PixelCount);
-    SeedResult.RevealSurfaceAuthoring.Init(
-        SeedResult.Resolution,
-        FColor(128, 128, 0, 0));
-    SeedResult.AutoAlphaBuffer.Init(0, PixelCount);
-    SeedResult.OuterCoverageBuffer.Init(0, PixelCount);
-    SeedResult.ValidHitBuffer.Init(false, PixelCount);
-    SeedResult.HitDistanceBuffer.Init(0.0f, PixelCount);
-    SeedResult.SourcePriorityBuffer.Init(INDEX_NONE, PixelCount);
-    SeedResult.OuterIslandIDBuffer.Init(FDWCTransparencySourcePayload::InvalidOuterIslandID, PixelCount);
-
-    const FDWCDataUVLODMetadata* DataUVMetadata = WetClothingAsset.FindDataUVMetadataForLOD(LODIndex);
-    for (const FDWCRevealBakeTexelSample& Sample : Snapshot.OuterSamples)
-    {
-        if (Sample.Pixel.X >= 0 && Sample.Pixel.Y >= 0 &&
-            Sample.Pixel.X < Resolution && Sample.Pixel.Y < Resolution)
-        {
-            const int32 PixelIndex = Sample.Pixel.Y * Resolution + Sample.Pixel.X;
-            SeedResult.OuterCoverageBuffer[PixelIndex] = Sample.Coverage;
-            uint16 EncodedIslandID = FDWCTransparencySourcePayload::InvalidOuterIslandID;
-            if (!TryEncodeOuterSampleUVIslandID(
-                    DataUVMetadata,
-                    Sample,
-                    EncodedIslandID,
-                    OutErrorMessage))
-            {
-                return false;
-            }
-            SeedResult.OuterIslandIDBuffer[PixelIndex] = EncodedIslandID;
-        }
-    }
-
     if (!FDWCTransparencySignatureService::BuildSourceSignature(
             WetClothingAsset,
             Layer,
@@ -1703,7 +1726,7 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
 
     Snapshot.EstimatedBytes =
         Snapshot.OuterSurface.Triangles.GetAllocatedSize() +
-        Snapshot.OuterSamples.GetAllocatedSize() +
+        Snapshot.TileLayout.GetAllocatedBytes() +
         SeedResult.InnerColorBuffer.GetAllocatedSize() +
         SeedResult.RevealSurfaceAuthoring.GetAllocatedBytes() +
         SeedResult.AutoAlphaBuffer.GetAllocatedSize() +
@@ -1722,7 +1745,7 @@ bool FDWCTransparencyAutoMapGenerator::BuildProjectionSnapshotInternal(
     Snapshot.bValid = true;
     FDWCTransparencyBaselineDiagnostics::RecordProjectionSnapshotBuild(
         Snapshot.SourceSurfaces.Num(),
-        Snapshot.OuterSamples.Num());
+        SeedResult.OuterSampleCount);
     ReportGenerationProgress(
         ProgressCallback,
         EDWCTransparencyGenerationPhase::PreparingSources,
@@ -1757,11 +1780,20 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
     if (PhaseOperation != nullptr)
     {
         const uint64 SnapshotBytes = FMath::Max<uint64>(Snapshot.EstimatedBytes, 1);
-        const uint64 IndexScratchBytes =
-            static_cast<uint64>(Snapshot.OuterSamples.Num()) * sizeof(int32) * 2ull +
-            static_cast<uint64>(PixelCount) * sizeof(float);
+        uint64 MaximumBvhBytes = 0;
+        for (const FDWCRevealBakeSurface& SourceSurface : Snapshot.SourceSurfaces)
+        {
+            MaximumBvhBytes = FMath::Max(
+                MaximumBvhBytes,
+                EstimateProjectionBvhBytes(SourceSurface));
+        }
+        const uint64 CompactStateBytes =
+            static_cast<uint64>((PixelCount + 7) / 8) * 2ull;
+        const uint64 StreamingScratchBytes =
+            EstimateTileStreamingScratchBytes(Snapshot.TileLayout) +
+            CompactStateBytes + MaximumBvhBytes;
         FDWCTransparencyStage2PhaseResources Resources;
-        Resources.WorkerPeakBytes = SnapshotBytes + IndexScratchBytes;
+        Resources.WorkerPeakBytes = SnapshotBytes + StreamingScratchBytes;
         Resources.WorkerRetainedBytes = SnapshotBytes;
         FString PhaseError;
         if (!PhaseOperation->BeginPhase(
@@ -1778,49 +1810,31 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
     BuildTriangleLookup(Snapshot.OuterSurface, OuterTrianglesByID);
 
     TMap<int32, TArray<int32>> SurfaceIndicesByPriority;
-    bool bHasBlockers = false;
     for (int32 SurfaceIndex = 0; SurfaceIndex < Snapshot.SourceSurfaces.Num(); ++SurfaceIndex)
     {
         const FDWCRevealBakeSurface& Surface = Snapshot.SourceSurfaces[SurfaceIndex];
         SurfaceIndicesByPriority.FindOrAdd(Surface.LayerOrder).Add(SurfaceIndex);
-        bHasBlockers |= Surface.bBlocksReveal && !Surface.bCanBeRevealSource;
     }
     TArray<int32> Priorities;
     SurfaceIndicesByPriority.GetKeys(Priorities);
     Priorities.Sort();
 
-    TArray<int32> UnresolvedSampleIndices;
-    UnresolvedSampleIndices.Reserve(Snapshot.OuterSamples.Num());
-    for (int32 SampleIndex = 0; SampleIndex < Snapshot.OuterSamples.Num(); ++SampleIndex)
-    {
-        UnresolvedSampleIndices.Add(SampleIndex);
-    }
-    TArray<int32> NextUnresolvedSampleIndices;
-    NextUnresolvedSampleIndices.Reserve(UnresolvedSampleIndices.Num());
-    TArray<float> BlockerDistanceByPixel;
-    if (bHasBlockers)
-    {
-        BlockerDistanceByPixel.Init(-1.0f, PixelCount);
-    }
+    TBitArray<> ResolvedPixels(false, PixelCount);
+    TBitArray<> CandidateBlocked(false, PixelCount);
+    FDWCRevealBakeTileScratch TileScratch;
+    TArray<int32> ActiveSampleIndices;
+    ActiveSampleIndices.Reserve(Snapshot.TileLayout.TileSize * Snapshot.TileLayout.TileSize);
+    int32 RemainingSampleCount = SourcePayload.OuterSampleCount;
+    int32 MaximumResidentTileSamples = 0;
+    uint64 MaximumTileScratchBytes = 0;
+    uint64 MaximumPreparedProjectionBytes = 0;
 
     const int32 TotalSourceCount = Snapshot.SourceSurfaces.Num();
     int32 ProcessedSourceCount = 0;
 
-    const auto ResetCandidatePixel =
-        [&SourcePayload, &BlockerDistanceByPixel](const int32 PixelIndex)
-    {
-        SourcePayload.ValidHitBuffer[PixelIndex] = false;
-        SourcePayload.HitDistanceBuffer[PixelIndex] = 0.0f;
-        SourcePayload.SourcePriorityBuffer[PixelIndex] = INDEX_NONE;
-        if (BlockerDistanceByPixel.IsValidIndex(PixelIndex))
-        {
-            BlockerDistanceByPixel[PixelIndex] = -1.0f;
-        }
-    };
-
     for (const int32 Priority : Priorities)
     {
-        if (UnresolvedSampleIndices.IsEmpty())
+        if (RemainingSampleCount == 0)
         {
             break;
         }
@@ -1829,16 +1843,6 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
             Result.bCanceled = true;
             Result.Error = TEXT("Transparency ray projection was canceled.");
             return Result;
-        }
-
-        for (const int32 SampleIndex : UnresolvedSampleIndices)
-        {
-            const FDWCRevealBakeTexelSample& Sample = Snapshot.OuterSamples[SampleIndex];
-            if (Sample.Pixel.X >= 0 && Sample.Pixel.Y >= 0 &&
-                Sample.Pixel.X < Resolution && Sample.Pixel.Y < Resolution)
-            {
-                ResetCandidatePixel(Sample.Pixel.Y * Resolution + Sample.Pixel.X);
-            }
         }
 
         const TArray<int32>& SurfaceIndices = SurfaceIndicesByPriority.FindChecked(Priority);
@@ -1923,7 +1927,7 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
                 EDWCTransparencyGenerationPhase::ProjectingSamples,
                 SourceStartFraction + SourceFractionRange * 0.35,
                 0,
-                UnresolvedSampleIndices.Num(),
+                SourcePayload.OuterSampleCount,
                 SourceDisplayName,
                 SourceMaterialSlotIndex);
 
@@ -1934,7 +1938,7 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
                  &Snapshot,
                  &OuterTrianglesByID,
                  &SourceTrianglesByID,
-                 &BlockerDistanceByPixel,
+                 &CandidateBlocked,
                  &MaterialSurface,
                  Resolution](const FDWCRevealBakeRayHit& Hit)
             {
@@ -1946,10 +1950,18 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
                 const int32 PixelIndex = Hit.Pixel.Y * Resolution + Hit.Pixel.X;
                 if (Hit.bBlocked)
                 {
-                    float& BlockerDistance = BlockerDistanceByPixel[PixelIndex];
-                    if (BlockerDistance < 0.0f || Hit.Distance < BlockerDistance)
+                    const bool bHasCandidate = CandidateBlocked[PixelIndex] ||
+                        SourcePayload.ValidHitBuffer[PixelIndex];
+                    if (!bHasCandidate ||
+                        Hit.Distance < SourcePayload.HitDistanceBuffer[PixelIndex])
                     {
-                        BlockerDistance = Hit.Distance;
+                        CandidateBlocked[PixelIndex] = true;
+                        SourcePayload.ValidHitBuffer[PixelIndex] = false;
+                        SourcePayload.HitDistanceBuffer[PixelIndex] = Hit.Distance;
+                        SourcePayload.SourcePriorityBuffer[PixelIndex] = INDEX_NONE;
+                        SourcePayload.InnerColorBuffer[PixelIndex] = FColor::Black;
+                        SourcePayload.RevealSurfaceAuthoring[PixelIndex] =
+                            FColor(128, 128, 0, 0);
                     }
                     return;
                 }
@@ -1957,12 +1969,15 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
                 {
                     return;
                 }
-                if (SourcePayload.ValidHitBuffer[PixelIndex] &&
+                const bool bHasCandidate = CandidateBlocked[PixelIndex] ||
+                    SourcePayload.ValidHitBuffer[PixelIndex];
+                if (bHasCandidate &&
                     SourcePayload.HitDistanceBuffer[PixelIndex] <= Hit.Distance)
                 {
                     return;
                 }
 
+                CandidateBlocked[PixelIndex] = false;
                 SourcePayload.ValidHitBuffer[PixelIndex] = true;
                 SourcePayload.HitDistanceBuffer[PixelIndex] = Hit.Distance;
                 const int32 StatsIndex = Snapshot.StatsIndexBySourceLayerId.FindRef(
@@ -1990,35 +2005,13 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
             };
 
             FString ProjectionError;
-            const FDWCRevealBakeProjectionProgressCallback ProjectionProgress =
-                [ProgressCallback,
-                 SourceStartFraction,
-                 SourceFractionRange,
-                 SourceDisplayName,
-                 SourceMaterialSlotIndex](const int32 CompletedSamples, const int32 TotalSamples)
-            {
-                const double SampleFraction = TotalSamples > 0
-                    ? static_cast<double>(CompletedSamples) / TotalSamples
-                    : 1.0;
-                ReportGenerationProgress(
-                    ProgressCallback,
-                    EDWCTransparencyGenerationPhase::ProjectingSamples,
-                    SourceStartFraction + SourceFractionRange * (0.35 + 0.65 * SampleFraction),
-                    CompletedSamples,
-                    TotalSamples,
-                    SourceDisplayName,
-                    SourceMaterialSlotIndex);
-            };
-            if (!FDWCRevealBakeRayProjector::ProjectSamplesToSources(
+            TUniquePtr<FDWCRevealBakeRayProjector::FPreparedProjection> PreparedProjection =
+                FDWCRevealBakeRayProjector::PrepareProjection(
                     Snapshot.OuterSurface,
                     MakeArrayView(&SourceSurface, 1),
-                    Snapshot.OuterSamples,
                     Snapshot.ProjectionSettings,
-                    ConsumeSourceHit,
-                    &ProjectionError,
-                    CancellationToken,
-                    UnresolvedSampleIndices,
-                    ProgressCallback != nullptr ? &ProjectionProgress : nullptr))
+                    &ProjectionError);
+            if (!PreparedProjection.IsValid())
             {
                 MaterialSurface.Reset();
                 if (MaterialSurfaceBytes > 0)
@@ -2026,9 +2019,96 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
                     FDWCTransparencyMaterialColorBakeCache::ReclaimUnleasedBytes(
                         &WetClothingAsset, MaterialSurfaceBytes);
                 }
-                Result.bCanceled = CancellationToken != nullptr && CancellationToken->IsCanceled();
                 Result.Error = MoveTemp(ProjectionError);
                 return Result;
+            }
+            MaximumPreparedProjectionBytes = FMath::Max(
+                MaximumPreparedProjectionBytes,
+                PreparedProjection->GetAllocatedBytes());
+
+            for (int32 TileIndex = 0;
+                 TileIndex < Snapshot.TileLayout.Tiles.Num();
+                 ++TileIndex)
+            {
+                if (CancellationToken != nullptr && CancellationToken->IsCanceled())
+                {
+                    MaterialSurface.Reset();
+                    if (MaterialSurfaceBytes > 0)
+                    {
+                        FDWCTransparencyMaterialColorBakeCache::ReclaimUnleasedBytes(
+                            &WetClothingAsset, MaterialSurfaceBytes);
+                    }
+                    Result.bCanceled = true;
+                    Result.Error = TEXT("Transparency ray projection was canceled.");
+                    return Result;
+                }
+                if (!FDWCRevealBakeTexelSampler::BuildTileSamples(
+                        Snapshot.OuterSurface,
+                        Snapshot.SamplingSettings,
+                        Snapshot.TileLayout,
+                        TileIndex,
+                        TileScratch,
+                        &ProjectionError))
+                {
+                    MaterialSurface.Reset();
+                    if (MaterialSurfaceBytes > 0)
+                    {
+                        FDWCTransparencyMaterialColorBakeCache::ReclaimUnleasedBytes(
+                            &WetClothingAsset, MaterialSurfaceBytes);
+                    }
+                    Result.Error = MoveTemp(ProjectionError);
+                    return Result;
+                }
+                MaximumResidentTileSamples = FMath::Max(
+                    MaximumResidentTileSamples,
+                    TileScratch.Samples.Num());
+                MaximumTileScratchBytes = FMath::Max(
+                    MaximumTileScratchBytes,
+                    TileScratch.GetAllocatedBytes() + ActiveSampleIndices.GetAllocatedSize());
+
+                ActiveSampleIndices.Reset();
+                for (int32 SampleIndex = 0; SampleIndex < TileScratch.Samples.Num(); ++SampleIndex)
+                {
+                    const FDWCRevealBakeTexelSample& Sample = TileScratch.Samples[SampleIndex];
+                    const int32 PixelIndex = Sample.Pixel.Y * Resolution + Sample.Pixel.X;
+                    if (!ResolvedPixels[PixelIndex])
+                    {
+                        ActiveSampleIndices.Add(SampleIndex);
+                    }
+                }
+                if (!ActiveSampleIndices.IsEmpty() &&
+                    !FDWCRevealBakeRayProjector::ProjectPreparedSamples(
+                        *PreparedProjection,
+                        TileScratch.Samples,
+                        ConsumeSourceHit,
+                        &ProjectionError,
+                        CancellationToken,
+                        ActiveSampleIndices))
+                {
+                    MaterialSurface.Reset();
+                    if (MaterialSurfaceBytes > 0)
+                    {
+                        FDWCTransparencyMaterialColorBakeCache::ReclaimUnleasedBytes(
+                            &WetClothingAsset, MaterialSurfaceBytes);
+                    }
+                    Result.bCanceled = CancellationToken != nullptr && CancellationToken->IsCanceled();
+                    Result.Error = MoveTemp(ProjectionError);
+                    return Result;
+                }
+
+                const double TileFraction = static_cast<double>(TileIndex + 1) /
+                    FMath::Max(1, Snapshot.TileLayout.Tiles.Num());
+                const int32 CompletedSamples = FMath::Min(
+                    SourcePayload.OuterSampleCount,
+                    FMath::RoundToInt(TileFraction * SourcePayload.OuterSampleCount));
+                ReportGenerationProgress(
+                    ProgressCallback,
+                    EDWCTransparencyGenerationPhase::ProjectingSamples,
+                    SourceStartFraction + SourceFractionRange * (0.35 + 0.65 * TileFraction),
+                    CompletedSamples,
+                    SourcePayload.OuterSampleCount,
+                    SourceDisplayName,
+                    SourceMaterialSlotIndex);
             }
 
             MaterialSurface.Reset();
@@ -2040,38 +2120,33 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
             ++ProcessedSourceCount;
         }
 
-        NextUnresolvedSampleIndices.Reset();
-        for (const int32 SampleIndex : UnresolvedSampleIndices)
+        for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
         {
-            const FDWCRevealBakeTexelSample& Sample = Snapshot.OuterSamples[SampleIndex];
-            if (Sample.Pixel.X < 0 || Sample.Pixel.Y < 0 ||
-                Sample.Pixel.X >= Resolution || Sample.Pixel.Y >= Resolution)
+            if (ResolvedPixels[PixelIndex] ||
+                SourcePayload.OuterCoverageBuffer[PixelIndex] == 0)
             {
                 continue;
             }
-            const int32 PixelIndex = Sample.Pixel.Y * Resolution + Sample.Pixel.X;
             const bool bHasReveal = SourcePayload.ValidHitBuffer[PixelIndex];
-            const float BlockerDistance = BlockerDistanceByPixel.IsValidIndex(PixelIndex)
-                ? BlockerDistanceByPixel[PixelIndex]
-                : -1.0f;
-            const bool bBlocked = BlockerDistance >= 0.0f &&
-                (!bHasReveal || BlockerDistance < SourcePayload.HitDistanceBuffer[PixelIndex]);
-            if (bBlocked)
+            if (CandidateBlocked[PixelIndex])
             {
+                ResolvedPixels[PixelIndex] = true;
+                CandidateBlocked[PixelIndex] = false;
                 SourcePayload.ValidHitBuffer[PixelIndex] = false;
                 SourcePayload.HitDistanceBuffer[PixelIndex] = 0.0f;
                 SourcePayload.SourcePriorityBuffer[PixelIndex] = INDEX_NONE;
                 SourcePayload.InnerColorBuffer[PixelIndex] = FColor::Black;
                 SourcePayload.RevealSurfaceAuthoring[PixelIndex] = FColor(128, 128, 0, 0);
                 SourcePayload.AutoAlphaBuffer[PixelIndex] = 0;
+                --RemainingSampleCount;
                 continue;
             }
             if (!bHasReveal)
             {
-                NextUnresolvedSampleIndices.Add(SampleIndex);
                 continue;
             }
 
+            ResolvedPixels[PixelIndex] = true;
             FDWCRevealBakeRayHit FinalHit;
             FinalHit.bHit = true;
             FinalHit.Distance = SourcePayload.HitDistanceBuffer[PixelIndex];
@@ -2093,9 +2168,8 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
             SourcePayload.SourcePriorityBuffer[PixelIndex] = static_cast<int16>(
                 FMath::Clamp(Priority, 0, static_cast<int32>(MAX_int16)));
             ++SourcePayload.ValidHitCount;
+            --RemainingSampleCount;
         }
-        UnresolvedSampleIndices = MoveTemp(NextUnresolvedSampleIndices);
-        NextUnresolvedSampleIndices.Reserve(UnresolvedSampleIndices.Num());
     }
 
     SourcePayload.NoHitCount = FMath::Max(
@@ -2104,9 +2178,10 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
     OuterTrianglesByID.Empty();
     SurfaceIndicesByPriority.Empty();
     Priorities.Empty();
-    UnresolvedSampleIndices.Empty();
-    NextUnresolvedSampleIndices.Empty();
-    BlockerDistanceByPixel.Empty();
+    ResolvedPixels.Reset();
+    CandidateBlocked.Reset();
+    ActiveSampleIndices.Empty();
+    TileScratch.Reset();
     if (PhaseOperation != nullptr)
     {
         FDWCTransparencyStage2PhaseResources Resources;
@@ -2129,7 +2204,7 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
         SourcePayload.OuterSampleCount,
         SourcePayload.OuterSampleCount);
     Result.Summary = FString::Printf(
-        TEXT("Generated %d outer samples: %d valid hit(s), %d no-hit sample(s), with source material surfaces streamed by priority layer."),
+        TEXT("Generated %d outer samples: %d valid hit(s), %d no-hit sample(s), using bounded target tiles and source material streaming."),
         SourcePayload.OuterSampleCount,
         SourcePayload.ValidHitCount,
         SourcePayload.NoHitCount);
@@ -2142,6 +2217,21 @@ FDWCTransparencyAutoMapComputedResult FDWCTransparencyAutoMapGenerator::ComputeS
         SourcePayload.ValidHitBuffer.GetAllocatedSize() +
         SourcePayload.HitDistanceBuffer.GetAllocatedSize() +
         SourcePayload.SourcePriorityBuffer.GetAllocatedSize();
+    UE_LOG(
+        LogDWCTransparencyStage2,
+        Display,
+        TEXT("Stage 2 bounded projection completed: resolution=%dx%d tile=%d tiles=%d outerSamples=%d sources=%d retained=%.2fMiB maxTileSamples=%d tileScratch=%.2fMiB preparedBVH=%.2fMiB bins=%s."),
+        SourcePayload.Resolution.X,
+        SourcePayload.Resolution.Y,
+        Snapshot.TileLayout.TileSize,
+        Snapshot.TileLayout.Tiles.Num(),
+        SourcePayload.OuterSampleCount,
+        Snapshot.SourceSurfaces.Num(),
+        static_cast<double>(Result.ResultBytes) / (1024.0 * 1024.0),
+        MaximumResidentTileSamples,
+        static_cast<double>(MaximumTileScratchBytes) / (1024.0 * 1024.0),
+        static_cast<double>(MaximumPreparedProjectionBytes) / (1024.0 * 1024.0),
+        Snapshot.TileLayout.bUsesPerTileTriangleBins ? TEXT("per-tile") : TEXT("bounded-fallback"));
     Result.bSucceeded = true;
     return Result;
 }

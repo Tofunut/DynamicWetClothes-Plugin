@@ -21,17 +21,13 @@
 #include "WetClothing/Foundation/Build/DWCEditorBuildOperationManager.h"
 #include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
 #include "WetClothing/Modes/Part/Editor/SWetClothingPartEditorPanel.h"
-#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 #include "WetClothing/Modes/Transparency/Editor/SWetClothingTransparencyBakePanel.h"
 #include "WetClothing/Modes/Transparency/MaterialBake/DWCTransparencyMaterialColorBakeCache.h"
-#include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyAssetBakeService.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 #include "WetClothing/Foundation/UV/DWCEditorUVTopologyCache.h"
 #include "WetClothing/Foundation/Preview/DWCEditorPreviewResourceContext.h"
-#include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
-#include "WetClothing/Foundation/Build/DWCTransparencyBuildTargetResolver.h"
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleEditorPanel.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationSnapshot.h"
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
@@ -217,6 +213,26 @@ FString FWCAEditorIssueStatus::BuildSummary() const
 
 SWCAEditorPanel::~SWCAEditorPanel()
 {
+    // FWCAEditor normally calls Shutdown while this widget still has shared ownership.
+    // The fallback never re-enters preview widgets or shared-delegate lifecycle paths.
+    ShutdownInternal(false);
+}
+
+void SWCAEditorPanel::Shutdown()
+{
+    ShutdownInternal(true);
+}
+
+void SWCAEditorPanel::ShutdownInternal(const bool bNotifyPreviewModes)
+{
+    check(IsInGameThread());
+    if (ShutdownState == EWCAEditorPanelShutdownState::Closed)
+    {
+        return;
+    }
+
+    BeginPreviewResourceShutdown();
+
     if (GeneratedDataInvalidationHandle.IsValid())
     {
         FWCAGeneratedDataInvalidator::OnInvalidated().Remove(GeneratedDataInvalidationHandle);
@@ -232,8 +248,28 @@ SWCAEditorPanel::~SWCAEditorPanel()
         FEditorDelegates::EndPIE.Remove(EndPIEHandle);
         EndPIEHandle.Reset();
     }
-    SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::EditorClosing, true);
-    BeginPreviewResourceShutdown();
+    if (AuthoringDocument.IsValid())
+    {
+        AuthoringDocument->OnChanged().RemoveAll(this);
+    }
+    OnStatusChanged.Unbind();
+    RefreshState.CancelModeRefresh();
+    RefreshState.CancelStatusRefresh();
+    UnregisterActiveTimers();
+
+    if (bNotifyPreviewModes)
+    {
+        // This transition revokes preview generations and cancels mode work. Since the
+        // panel is already quiescing, none of its callbacks can create a new Slate timer.
+        ApplyHostLifecycleTransition(
+            HostLifecycle.SetBlocker(EDWCEditorHostLifecycleBlocker::EditorClosing, true));
+    }
+
+    if (PreviewCommitCoordinator.IsValid())
+    {
+        FDWCEditorPreviewDiagnostics::UnregisterCommitCoordinator(PreviewCommitCoordinator.Get());
+        PreviewCommitCoordinator->Shutdown();
+    }
     if (BakeCoordinator.IsValid())
     {
         BakeCoordinator->Shutdown();
@@ -276,26 +312,37 @@ SWCAEditorPanel::~SWCAEditorPanel()
     }
     ResourceBrokerSessionId.Invalidate();
     ResourceBroker.Reset();
-    if (AuthoringDocument.IsValid())
-    {
-        AuthoringDocument->OnChanged().RemoveAll(this);
-    }
+    SessionStore.Reset();
+    AuthoringDocument.Reset();
+    DetailsView.Reset();
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
         FWCAGeneratedDataInvalidator::InvalidateAsset(*Asset);
         Asset->ReleaseLoadedOriginalUVTopologiesForEditor();
     }
+    WetClothingAsset.Reset();
+    ShutdownState = EWCAEditorPanelShutdownState::Closed;
+}
+
+bool SWCAEditorPanel::IsShuttingDown() const
+{
+    return ShutdownState != EWCAEditorPanelShutdownState::Running;
+}
+
+bool SWCAEditorPanel::IsShutdownComplete() const
+{
+    return ShutdownState == EWCAEditorPanelShutdownState::Closed;
 }
 
 void SWCAEditorPanel::BeginPreviewResourceShutdown()
 {
     check(IsInGameThread());
-    if (PreviewResourceShutdownState != EWCAEditorPreviewResourceShutdownState::Running)
+    if (ShutdownState != EWCAEditorPanelShutdownState::Running)
     {
         return;
     }
 
-    PreviewResourceShutdownState = EWCAEditorPreviewResourceShutdownState::Quiescing;
+    ShutdownState = EWCAEditorPanelShutdownState::Quiescing;
     if (RenderUploadQueue.IsValid())
     {
         RenderUploadQueue->SetWorkAvailableCallback(nullptr);
@@ -304,17 +351,12 @@ void SWCAEditorPanel::BeginPreviewResourceShutdown()
     {
         TextureWorkspace->SetMaintenanceRequiredCallback(nullptr);
     }
-    if (PreviewCommitCoordinator.IsValid())
-    {
-        FDWCEditorPreviewDiagnostics::UnregisterCommitCoordinator(PreviewCommitCoordinator.Get());
-        PreviewCommitCoordinator->Shutdown();
-    }
 }
 
 void SWCAEditorPanel::CompletePreviewResourceShutdown()
 {
     check(IsInGameThread());
-    if (PreviewResourceShutdownState == EWCAEditorPreviewResourceShutdownState::Closed)
+    if (ShutdownState == EWCAEditorPanelShutdownState::Closed)
     {
         return;
     }
@@ -355,7 +397,6 @@ void SWCAEditorPanel::CompletePreviewResourceShutdown()
         AssetResidency->Shutdown();
     }
     AssetResidency.Reset();
-    PreviewResourceShutdownState = EWCAEditorPreviewResourceShutdownState::Closed;
 }
 
 void SWCAEditorPanel::Construct(const FArguments& InArgs)
@@ -557,7 +598,7 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
 void SWCAEditorPanel::HandleGeneratedDataInvalidated(
     const FWCAGeneratedDataInvalidation& Invalidation)
 {
-    if (!CacheStore.IsValid())
+    if (IsShuttingDown() || !CacheStore.IsValid())
     {
         return;
     }
@@ -751,10 +792,27 @@ void SWCAEditorPanel::UnregisterResourceParticipants()
     ResourceParticipantIds.Reset();
 }
 
+void SWCAEditorPanel::UnregisterActiveTimers()
+{
+    check(IsInGameThread());
+    const auto Unregister = [this](TWeakPtr<FActiveTimerHandle>& WeakHandle)
+    {
+        if (const TSharedPtr<FActiveTimerHandle> Handle = WeakHandle.Pin())
+        {
+            UnRegisterActiveTimer(Handle.ToSharedRef());
+        }
+        WeakHandle.Reset();
+    };
+
+    Unregister(DeferredRefreshTimerHandle);
+    Unregister(DeferredStatusRefreshTimerHandle);
+    Unregister(TextureUploadTimerHandle);
+}
+
 void SWCAEditorPanel::EnsureTextureUploadTimer()
 {
     check(IsInGameThread());
-    if (TextureUploadTimerHandle.IsValid())
+    if (IsShuttingDown() || TextureUploadTimerHandle.IsValid())
     {
         return;
     }
@@ -767,6 +825,12 @@ EActiveTimerReturnType SWCAEditorPanel::HandleTextureUploadTimer(
     double,
     float)
 {
+    if (IsShuttingDown())
+    {
+        TextureUploadTimerHandle.Reset();
+        return EActiveTimerReturnType::Stop;
+    }
+
     if (PreviewGPUResidencyManager.IsValid())
     {
         PreviewGPUResidencyManager->Tick();
@@ -797,6 +861,11 @@ EActiveTimerReturnType SWCAEditorPanel::HandleTextureUploadTimer(
 
 TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
 {
+    if (IsShuttingDown())
+    {
+        return SNullWidget::NullWidget;
+    }
+
     switch (Mode)
     {
     case EWCAEditorMode::PartEdit:
@@ -857,8 +926,11 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
 
 void SWCAEditorPanel::RefreshFromAsset(const bool bRebuildActiveModePreview)
 {
-    bRefreshPending = false;
-    bPendingFullModeRefresh = false;
+    if (IsShuttingDown())
+    {
+        return;
+    }
+    RefreshState.CancelModeRefresh();
     UpdateCachedStatus();
 
     const EWCAEditorMode ActiveMode = SessionStore.IsValid()
@@ -892,35 +964,56 @@ void SWCAEditorPanel::RefreshFromAsset(const bool bRebuildActiveModePreview)
 
 void SWCAEditorPanel::RefreshStatusFromAsset()
 {
+    if (IsShuttingDown())
+    {
+        return;
+    }
+    RefreshState.CancelStatusRefresh();
     UpdateCachedStatus();
 }
 
 void SWCAEditorPanel::RequestRefreshFromAsset(const bool bRebuildActiveModePreview)
 {
-    bPendingFullModeRefresh |= bRebuildActiveModePreview;
-    if (bRefreshPending)
+    if (IsShuttingDown())
     {
         return;
     }
-    bRefreshPending = true;
-    RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleDeferredRefresh));
+    if (!RefreshState.RequestModeRefresh(bRebuildActiveModePreview))
+    {
+        return;
+    }
+    DeferredRefreshTimerHandle = RegisterActiveTimer(
+        0.0f,
+        FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleDeferredRefresh));
 }
 
 EActiveTimerReturnType SWCAEditorPanel::HandleDeferredRefresh(double CurrentTime, float DeltaTime)
 {
-    const bool bRebuildActiveModePreview = bPendingFullModeRefresh;
-    RefreshFromAsset(bRebuildActiveModePreview);
+    DeferredRefreshTimerHandle.Reset();
+    if (IsShuttingDown())
+    {
+        RefreshState.CancelModeRefresh();
+        return EActiveTimerReturnType::Stop;
+    }
+    bool bRebuildActiveModePreview = false;
+    if (RefreshState.ConsumeModeRefresh(bRebuildActiveModePreview))
+    {
+        RefreshFromAsset(bRebuildActiveModePreview);
+    }
     return EActiveTimerReturnType::Stop;
 }
 
 void SWCAEditorPanel::RequestStatusRefresh()
 {
-    if (bStatusRefreshPending)
+    if (IsShuttingDown())
     {
         return;
     }
-    bStatusRefreshPending = true;
-    RegisterActiveTimer(
+    if (!RefreshState.RequestStatusRefresh())
+    {
+        return;
+    }
+    DeferredStatusRefreshTimerHandle = RegisterActiveTimer(
         0.0f,
         FWidgetActiveTimerDelegate::CreateSP(
             this,
@@ -929,8 +1022,16 @@ void SWCAEditorPanel::RequestStatusRefresh()
 
 EActiveTimerReturnType SWCAEditorPanel::HandleDeferredStatusRefresh(double, float)
 {
-    bStatusRefreshPending = false;
-    UpdateCachedStatus();
+    DeferredStatusRefreshTimerHandle.Reset();
+    if (IsShuttingDown())
+    {
+        RefreshState.CancelStatusRefresh();
+        return EActiveTimerReturnType::Stop;
+    }
+    if (RefreshState.ConsumeStatusRefresh())
+    {
+        UpdateCachedStatus();
+    }
     return EActiveTimerReturnType::Stop;
 }
 
@@ -973,314 +1074,13 @@ void SWCAEditorPanel::UpdateCachedStatus()
     }
 }
 
-bool SWCAEditorPanel::HasPendingVisualBakeTasks(FString* OutSummary) const
-{
-    TArray<FString> PendingSections;
-    FString PartSummary;
-    if (FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(WetClothingAsset.Get(), &PartSummary))
-    {
-        PendingSections.Add(PartSummary);
-    }
-    if (OutSummary)
-    {
-        *OutSummary = PendingSections.IsEmpty() ? TEXT("Render Profile Lookup Texture is up to date.") : FString::Join(PendingSections, TEXT("\n\n"));
-    }
-    return !PendingSections.IsEmpty();
-}
-
-bool SWCAEditorPanel::BakeWetVisualAssets(FString& OutSummary, bool* OutHadWarnings)
-{
-    return FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMaterials(WetClothingAsset.Get(), OutSummary, OutHadWarnings);
-}
-
-bool SWCAEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings)
-{
-    if (OutHadWarnings != nullptr)
-    {
-        *OutHadWarnings = false;
-    }
-
-    TArray<FString> Sections;
-    TArray<FString> Failures;
-    bool bHadWarnings = false;
-
-    FString PartPendingSummary;
-    if (FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(WetClothingAsset.Get(), &PartPendingSummary))
-    {
-        FString PartBakeSummary;
-        bool bPartWarnings = false;
-        if (FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMaterials(WetClothingAsset.Get(), PartBakeSummary, &bPartWarnings))
-        {
-            Sections.Add(PartBakeSummary);
-            bHadWarnings |= bPartWarnings;
-        }
-        else
-        {
-            Failures.Add(FString::Printf(TEXT("Render Profile Lookup Texture: %s"), *PartBakeSummary));
-        }
-    }
-
-    if (!Failures.IsEmpty())
-    {
-        OutSummary = FString::Join(Failures, TEXT("\n\n"));
-        if (OutHadWarnings != nullptr)
-        {
-            *OutHadWarnings = true;
-        }
-        return false;
-    }
-
-    OutSummary = Sections.IsEmpty() ? TEXT("Render Profile Lookup Texture is up to date.") : FString::Join(Sections, TEXT("\n\n"));
-    if (OutHadWarnings != nullptr)
-    {
-        *OutHadWarnings = bHadWarnings;
-    }
-    return true;
-}
-
-bool SWCAEditorPanel::BakeAllWrinkleMaps(FString& OutSummary, bool* OutHadWarnings)
-{
-    if (!SpatialQueryService.IsValid() || !SurfacePatchProjectionCache.IsValid())
-    {
-        OutSummary = TEXT("The editor spatial query service is unavailable.");
-        return false;
-    }
-    return FWetWrinkleBakeService::BakeAllWrinkleMaps(
-        WetClothingAsset.Get(),
-        SpatialQueryService.ToSharedRef(),
-        SurfacePatchProjectionCache.ToSharedRef(),
-        OutSummary,
-        OutHadWarnings);
-}
-
-bool SWCAEditorPanel::RequestBakeAllWrinkleMaps(
-    TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
-    FString* OutError)
-{
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !BakeCoordinator.IsValid())
-    {
-        if (OutError != nullptr) *OutError = TEXT("The asynchronous bake service is unavailable.");
-        return false;
-    }
-    TArray<int32> MaterialSlots;
-    FWetWrinkleBakeService::CollectBakeMaterialSlots(*Asset, MaterialSlots);
-    return BakeCoordinator->RequestWrinkleBake(
-        MoveTemp(MaterialSlots),
-        true,
-        MoveTemp(Completion),
-        OutError);
-}
-
-bool SWCAEditorPanel::RequestBakeAllTransparencyMaps(
-    TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
-    FString* OutError)
-{
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !BakeCoordinator.IsValid())
-    {
-        if (OutError != nullptr) *OutError = TEXT("The asynchronous bake service is unavailable.");
-        return false;
-    }
-
-    TArray<FGuid> LayerGuids;
-    const FDWCTransparencyBuildTargetSnapshot Targets =
-        FDWCTransparencyBuildTargetResolver::Resolve(
-            *Asset, EDWCEditorValidationAccess::ExactPayload);
-    Targets.CollectLayerGuids(
-        EDWCTransparencyBuildRequirement::FullBake,
-        LayerGuids);
-    if (LayerGuids.IsEmpty())
-    {
-        if (OutError != nullptr)
-        {
-            *OutError = Targets.HasEnabledLayers()
-                ? TEXT("No enabled Transparency Target Part requires a full bake.")
-                : TEXT("No enabled Transparency Target Parts require runtime output.");
-        }
-        return false;
-    }
-    return BakeCoordinator->RequestTransparencyBake(
-        MoveTemp(LayerGuids),
-        true,
-        MoveTemp(Completion),
-        OutError);
-}
-
-bool SWCAEditorPanel::RequestRebakeAffectedTransparencyMaps(
-    TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
-    FString* OutError)
-{
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !BakeCoordinator.IsValid())
-    {
-        if (OutError != nullptr) *OutError = TEXT("The asynchronous bake service is unavailable.");
-        return false;
-    }
-    const FDWCTransparencyBuildTargetSnapshot Targets =
-        FDWCTransparencyBuildTargetResolver::Resolve(
-            *Asset, EDWCEditorValidationAccess::ExactPayload);
-    TArray<int32> MaterialSlots;
-    for (const FDWCTransparencyBuildTarget& Target : Targets.Targets)
-    {
-        if (Target.Requirement == EDWCTransparencyBuildRequirement::AffectedStage4 &&
-            Target.IsBuildable())
-        {
-            MaterialSlots.AddUnique(Target.MaterialSlotIndex);
-        }
-    }
-    if (MaterialSlots.IsEmpty())
-    {
-        if (OutError != nullptr)
-        {
-            *OutError = TEXT("No Transparency Stage 4 outputs require an affected wrinkle-only rebake.");
-        }
-        return false;
-    }
-    return BakeCoordinator->RequestAffectedTransparencyStage4Rebake(
-        MoveTemp(MaterialSlots),
-        true,
-        MoveTemp(Completion),
-        OutError);
-}
-
-bool SWCAEditorPanel::IsWrinkleBakeActive() const
-{
-    return BakeCoordinator.IsValid() && BakeCoordinator->IsWrinkleBakeActive();
-}
-
-EDWCEditorTransparencyBakeKind SWCAEditorPanel::GetActiveTransparencyBakeKind() const
-{
-    return BakeCoordinator.IsValid()
-        ? BakeCoordinator->GetActiveTransparencyBakeKind()
-        : EDWCEditorTransparencyBakeKind::None;
-}
-
-TSet<EDWCEditorBuildAction> SWCAEditorPanel::GetRunningBuildActions() const
-{
-    return BuildOperationManager.IsValid()
-        ? BuildOperationManager->GetRunningActions()
-        : TSet<EDWCEditorBuildAction>();
-}
-
-bool SWCAEditorPanel::CanStartBuildAction(FString* OutReason) const
-{
-    if (OutReason != nullptr)
-    {
-        OutReason->Reset();
-    }
-    if (IsExclusiveBuildActive())
-    {
-        if (OutReason != nullptr)
-        {
-            *OutReason = TEXT("An exclusive WCA Build is already in progress.");
-        }
-        return false;
-    }
-    if (BuildOperationManager.IsValid() && !BuildOperationManager->GetRunningActions().IsEmpty())
-    {
-        if (OutReason != nullptr)
-        {
-            *OutReason = TEXT("A WCA Build action is already in progress.");
-        }
-        return false;
-    }
-    if (WorkerJobScheduler.IsValid() &&
-        WorkerJobScheduler->HasOutstandingWorkClass(EDWCEditorWorkClass::UserBuild))
-    {
-        if (OutReason != nullptr)
-        {
-            *OutReason = TEXT("A WCA Build worker job is already in progress.");
-        }
-        return false;
-    }
-    return !ResourceBroker.IsValid() || ResourceBroker->CanAdmitWork(
-        ResourceBrokerSessionId,
-        EDWCEditorWorkClass::UserBuild,
-        FGuid(),
-        OutReason);
-}
-
-bool SWCAEditorPanel::IsExclusiveBuildActive() const
-{
-    return ExclusiveBuildCoordinator.IsValid() && ExclusiveBuildCoordinator->IsActive();
-}
-
-bool SWCAEditorPanel::RequestExclusiveBuild(
-    const FString& DebugName,
-    TFunction<void()> Work,
-    FString* OutError)
-{
-    check(IsInGameThread());
-    if (OutError != nullptr)
-    {
-        OutError->Reset();
-    }
-    if (!Work)
-    {
-        if (OutError != nullptr)
-        {
-            *OutError = TEXT("The exclusive Build has no work callback.");
-        }
-        return false;
-    }
-    if (!ExclusiveBuildCoordinator.IsValid())
-    {
-        if (OutError != nullptr)
-        {
-            *OutError = TEXT("The WCA editor Build resource services are unavailable.");
-        }
-        return false;
-    }
-    if (!CanStartBuildAction(OutError))
-    {
-        return false;
-    }
-
-    if (!ExclusiveBuildCoordinator->Request(DebugName, MoveTemp(Work), OutError))
-    {
-        return false;
-    }
-    if (OnStatusChanged.IsBound())
-    {
-        OnStatusChanged.Execute();
-    }
-    return true;
-}
-
-void SWCAEditorPanel::HandleExclusiveBuildBarrierChanged(const bool bActive)
-{
-    check(IsInGameThread());
-    SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::ExclusiveBuild, bActive);
-    if (OnStatusChanged.IsBound())
-    {
-        OnStatusChanged.Execute();
-    }
-}
-
-FReply SWCAEditorPanel::BakeSelectedWrinkleNormalMap()
-{
-    EnsureModeWidget(EWCAEditorMode::WrinkleEdit);
-    return WrinkleEditorPanel.IsValid()
-               ? WrinkleEditorPanel->BakeSelectedWrinkleNormalMap()
-               : FReply::Handled();
-}
-
-bool SWCAEditorPanel::SaveTransparencySetupAssets() const
-{
-    return FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(WetClothingAsset.Get());
-}
-
-bool SWCAEditorPanel::SaveBakedVisualAssets() const
-{
-    bool bSaved = true;
-    bSaved &= FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(WetClothingAsset.Get());
-    bSaved &= FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(WetClothingAsset.Get());
-    return bSaved;
-}
-
 void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)
 {
+    if (IsShuttingDown())
+    {
+        return;
+    }
+
     if (IsExclusiveBuildActive())
     {
         return;
@@ -1332,14 +1132,14 @@ void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)
     }
     else
     {
-        bRefreshPending = false;
+        RefreshState.CancelModeRefresh();
         UpdateCachedStatus();
     }
 }
 
 void SWCAEditorPanel::HandleAuthoringDocumentChanged(const FDWCEditorAuthoringChange& Change)
 {
-    if (!SessionStore.IsValid())
+    if (IsShuttingDown() || !SessionStore.IsValid())
     {
         return;
     }
@@ -1364,6 +1164,10 @@ void SWCAEditorPanel::SetHostLifecycleBlocker(
     const bool bEnabled)
 {
     check(IsInGameThread());
+    if (IsShuttingDown())
+    {
+        return;
+    }
     ApplyHostLifecycleTransition(HostLifecycle.SetBlocker(Blocker, bEnabled));
 }
 
@@ -1371,6 +1175,10 @@ void SWCAEditorPanel::SetHostVisibilitySnapshot(
     const FDWCEditorHostVisibilitySnapshot& Visibility)
 {
     check(IsInGameThread());
+    if (IsShuttingDown())
+    {
+        return;
+    }
     ApplyHostLifecycleTransition(HostLifecycle.SetVisibilitySnapshot(Visibility));
 }
 
@@ -1426,7 +1234,7 @@ void SWCAEditorPanel::ApplyHostLifecycleTransition(
 
 bool SWCAEditorPanel::CanRunInteractivePreview() const
 {
-    return HostLifecycle.CanRunInteractivePreview();
+    return !IsShuttingDown() && HostLifecycle.CanRunInteractivePreview();
 }
 
 EDWCEditorPreviewSuspendReason SWCAEditorPanel::ResolveHostSuspendReason() const
@@ -1478,7 +1286,7 @@ TSharedPtr<FDWCEditorPreviewModeLifetime> SWCAEditorPanel::FindPreviewModeLifeti
 FDWCEditorPreviewRunToken SWCAEditorPanel::CapturePreviewRunToken(
     const FDWCEditorWorkerJobDescriptor& Descriptor) const
 {
-    if (Descriptor.WorkClass != EDWCEditorWorkClass::InteractivePreview)
+    if (IsShuttingDown() || Descriptor.WorkClass != EDWCEditorWorkClass::InteractivePreview)
     {
         return {};
     }
@@ -1670,12 +1478,18 @@ void SWCAEditorPanel::SuspendAllPreviewModes(const EDWCEditorPreviewSuspendReaso
 
 void SWCAEditorPanel::HandlePreBeginPIE(const bool)
 {
-    SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::PIE, true);
+    if (!IsShuttingDown())
+    {
+        SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::PIE, true);
+    }
 }
 
 void SWCAEditorPanel::HandleEndPIE(const bool)
 {
-    SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::PIE, false);
+    if (!IsShuttingDown())
+    {
+        SetHostLifecycleBlocker(EDWCEditorHostLifecycleBlocker::PIE, false);
+    }
 }
 
 #undef LOCTEXT_NAMESPACE

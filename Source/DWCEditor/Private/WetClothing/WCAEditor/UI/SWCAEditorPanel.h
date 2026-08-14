@@ -8,6 +8,7 @@
 #include "WetClothing/Foundation/Preview/Lifecycle/DWCEditorPreviewModeLifetime.h"
 #include "WetClothing/Foundation/Resources/DWCEditorResourceBroker.h"
 #include "WetClothing/WCAEditor/WCAEditorMode.h"
+#include "WetClothing/WCAEditor/UI/WCAEditorRefreshState.h"
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -49,7 +50,7 @@ enum class EWCAEditorStatusSeverity : uint8
     Error
 };
 
-enum class EWCAEditorPreviewResourceShutdownState : uint8
+enum class EWCAEditorPanelShutdownState : uint8
 {
     Running,
     Quiescing,
@@ -95,6 +96,9 @@ public:
 
     virtual ~SWCAEditorPanel() override;
     void Construct(const FArguments& InArgs);
+    void Shutdown();
+    bool IsShuttingDown() const;
+    bool IsShutdownComplete() const;
 
     void RefreshFromAsset(bool bRebuildActiveModePreview = true);
     void RefreshStatusFromAsset();
@@ -103,7 +107,6 @@ public:
     bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
     bool BakeWetVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
-    FReply BakeSelectedWrinkleNormalMap();
     bool BakeAllWrinkleMaps(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool RequestBakeAllWrinkleMaps(
         TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
@@ -123,8 +126,6 @@ public:
         FString* OutError = nullptr);
     bool CanStartBuildAction(FString* OutReason = nullptr) const;
     bool IsExclusiveBuildActive() const;
-    bool SaveBakedVisualAssets() const;
-    bool SaveTransparencySetupAssets() const;
     void SetEditorMode(EWCAEditorMode NewMode);
     void SetHostVisibilitySnapshot(const FDWCEditorHostVisibilitySnapshot& Visibility);
 
@@ -157,6 +158,8 @@ private:
     void HandleEndPIE(bool bIsSimulating);
     void RegisterResourceParticipants();
     void UnregisterResourceParticipants();
+    void UnregisterActiveTimers();
+    void ShutdownInternal(bool bNotifyPreviewModes);
     void BeginPreviewResourceShutdown();
     void CompletePreviewResourceShutdown();
     void HandleExclusiveBuildBarrierChanged(bool bActive);
@@ -195,9 +198,7 @@ private:
     TSharedPtr<SWetClothingPartEditorPanel> PartEditorPanel;
     TSharedPtr<SWetWrinkleEditorPanel> WrinkleEditorPanel;
     TSharedPtr<SWetClothingTransparencyBakePanel> TransparencyBakePanel;
-    bool bRefreshPending = false;
-    bool bPendingFullModeRefresh = false;
-    bool bStatusRefreshPending = false;
+    FWCAEditorRefreshState RefreshState;
     bool bSuppressStatusChangedNotification = false;
     bool bHasActiveEditorMode = false;
     EWCAEditorMode ActiveEditorMode = EWCAEditorMode::PartEdit;
@@ -205,7 +206,8 @@ private:
     EWCAEditorStatusSeverity CachedStatusSeverity = EWCAEditorStatusSeverity::Info;
     FDelegateHandle PreBeginPIEHandle;
     FDelegateHandle EndPIEHandle;
+    TWeakPtr<FActiveTimerHandle> DeferredRefreshTimerHandle;
+    TWeakPtr<FActiveTimerHandle> DeferredStatusRefreshTimerHandle;
     TWeakPtr<FActiveTimerHandle> TextureUploadTimerHandle;
-    EWCAEditorPreviewResourceShutdownState PreviewResourceShutdownState =
-        EWCAEditorPreviewResourceShutdownState::Running;
+    EWCAEditorPanelShutdownState ShutdownState = EWCAEditorPanelShutdownState::Running;
 };

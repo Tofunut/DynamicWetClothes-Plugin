@@ -48,6 +48,46 @@ struct FDWCRevealBakeTexelSamplingSettings
     int32     MaterialSlotIndex = INDEX_NONE;
 };
 
+struct FDWCRevealBakeTile
+{
+    FIntRect Rect;
+    /** Surface-array triangle indices in deterministic source order. */
+    TArray<int32> SurfaceTriangleIndices;
+
+    uint64 GetAllocatedBytes() const
+    {
+        return sizeof(FDWCRevealBakeTile) + SurfaceTriangleIndices.GetAllocatedSize();
+    }
+};
+
+/** Immutable target-space partition reused by every streamed source pass. */
+struct FDWCRevealBakeTileLayout
+{
+    FIntPoint Resolution = FIntPoint::ZeroValue;
+    int32 TileSize = 0;
+    int32 TilesX = 0;
+    int32 TilesY = 0;
+    TArray<FDWCRevealBakeTile> Tiles;
+    /** Single-copy fallback used when per-tile references would exceed the cap. */
+    TArray<int32> EligibleSurfaceTriangleIndices;
+    bool bUsesPerTileTriangleBins = true;
+
+    bool IsValid() const;
+    uint64 GetAllocatedBytes() const;
+    uint64 EstimateMaximumScratchBytes() const;
+};
+
+/** Mutable bounded workspace. Capacity is retained and reused between tiles. */
+struct FDWCRevealBakeTileScratch
+{
+    TArray<int32> OccupiedPixelSamples;
+    TArray<uint8> RasterFlags;
+    TArray<FDWCRevealBakeTexelSample> Samples;
+
+    void Reset();
+    uint64 GetAllocatedBytes() const;
+};
+
 struct FDWCRevealBakeRayProjectionSettings
 {
     float RayStartOffset = 0.01f;
@@ -63,6 +103,24 @@ struct FDWCRevealBakeRayProjectionSettings
 class FDWCRevealBakeTexelSampler
 {
   public:
+    static bool BuildTileLayout(
+        const FDWCRevealBakeSurface&               OuterSurface,
+        const FDWCRevealBakeTexelSamplingSettings& Settings,
+        const TSet<int32>&                         EligibleTriangleIDs,
+        int32                                      TileSize,
+        FDWCRevealBakeTileLayout&                  OutLayout,
+        FString*                                   OutErrorMessage = nullptr);
+
+    /** Rasterizes one tile into reusable scratch. Empty tiles are valid. */
+    static bool BuildTileSamples(
+        const FDWCRevealBakeSurface&               OuterSurface,
+        const FDWCRevealBakeTexelSamplingSettings& Settings,
+        const FDWCRevealBakeTileLayout&            Layout,
+        int32                                      TileIndex,
+        FDWCRevealBakeTileScratch&                 InOutScratch,
+        FString*                                   OutErrorMessage = nullptr,
+        int32*                                     OutOverlappedPixelCount = nullptr);
+
     static bool BuildOuterTexelSamples(
         const FDWCRevealBakeSurface&               OuterSurface,
         const FDWCRevealBakeTexelSamplingSettings& Settings,
@@ -131,6 +189,38 @@ class FDWCRevealBakeTexelSampler
 class FDWCRevealBakeRayProjector
 {
   public:
+    class FPreparedProjection
+    {
+      public:
+        FPreparedProjection();
+        ~FPreparedProjection();
+        FPreparedProjection(FPreparedProjection&&);
+        FPreparedProjection& operator=(FPreparedProjection&&);
+
+        bool IsValid() const;
+        uint64 GetAllocatedBytes() const;
+
+      private:
+        struct FImpl;
+        TUniquePtr<FImpl> Impl;
+        friend class FDWCRevealBakeRayProjector;
+    };
+
+    static TUniquePtr<FPreparedProjection> PrepareProjection(
+        const FDWCRevealBakeSurface&               OuterSurface,
+        TConstArrayView<FDWCRevealBakeSurface>      SourceSurfaces,
+        const FDWCRevealBakeRayProjectionSettings& Settings,
+        FString*                                   OutErrorMessage = nullptr);
+
+    static bool ProjectPreparedSamples(
+        const FPreparedProjection&                      PreparedProjection,
+        const TArray<FDWCRevealBakeTexelSample>&        Samples,
+        TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
+        FString*                                        OutErrorMessage = nullptr,
+        const FDWCEditorCancellationToken*              CancellationToken = nullptr,
+        TConstArrayView<int32>                          SampleIndices = {},
+        const FDWCRevealBakeProjectionProgressCallback* ProgressCallback = nullptr);
+
     static bool ProjectSamplesToSources(
         const FDWCRevealBakeSurface&                    OuterSurface,
         TConstArrayView<FDWCRevealBakeSurface>           SourceSurfaces,
@@ -181,6 +271,8 @@ class FDWCRevealBakeRayProjector
             const FDWCRevealBakeSurface&               OuterSurface,
             TConstArrayView<FDWCRevealBakeSurface>      SourceSurfaces,
             const FDWCRevealBakeRayProjectionSettings& Settings);
+
+        uint64 GetAllocatedBytes() const;
 
         void ForEachRayCandidate(
             const FVector&                                        RayOrigin,

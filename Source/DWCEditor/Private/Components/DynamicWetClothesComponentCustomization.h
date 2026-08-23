@@ -39,6 +39,9 @@ class FDynamicWetClothesComponentCustomization : public IDetailCustomization
         TWeakObjectPtr<USkeletalMesh>          CurrentMesh;
         TWeakObjectPtr<USkeletalMesh>          SourceMesh;
         TWeakObjectPtr<USkeletalMesh>          RequiredMesh;
+        bool                                   bCPURuntimeDataValid = false;
+        bool                                   bGPURuntimeDataValid = false;
+        bool                                   bGPUMapDataValid = false;
         EBindingState                          State = EBindingState::NoMatchingComponent;
     };
 
@@ -47,6 +50,8 @@ class FDynamicWetClothesComponentCustomization : public IDetailCustomization
     void        HandleObjectPropertyChanged(UObject* ChangedObject, FPropertyChangedEvent& PropertyChangedEvent);
     FText       GetBindingWarningText() const;
     EVisibility GetBindingWarningVisibility() const;
+    FText       GetRuntimeDataWarningText() const;
+    EVisibility GetRuntimeDataWarningVisibility() const;
 
   private:
     TWeakObjectPtr<UDynamicWetClothesComponent> Component;

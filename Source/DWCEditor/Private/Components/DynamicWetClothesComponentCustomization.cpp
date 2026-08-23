@@ -214,6 +214,15 @@ void FDynamicWetClothesComponentCustomization::CustomizeDetails(IDetailLayoutBui
         TEXT("Simulation"), LOCTEXT("SimulationCategory", "Simulation"), ECategoryPriority::Important);
     SimulationCategory.SetSortOrder(10);
     AddDirectProperty(SimulationCategory, SimulationModeHandle);
+    if (GetRuntimeDataWarningVisibility() == EVisibility::Visible)
+    {
+        SimulationCategory.AddCustomRow(LOCTEXT("RuntimeDataValidationFilter", "Wet Clothing Asset Runtime Data Validation"))
+            .WholeRowContent()
+                [SNew(SBorder)
+                     .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                     .Padding(8.0f)
+                         [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 1.0f, 8.0f, 0.0f)[SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))] + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(STextBlock).AutoWrapText(true).Text(this, &FDynamicWetClothesComponentCustomization::GetRuntimeDataWarningText)]]];
+    }
     AddSettingsProperty(SimulationCategory, GetSettingsChild(SettingsHandle, GET_MEMBER_NAME_CHECKED(FWetClothingSettings, WetnessUpdateInterval)));
     AddSettingsProperty(SimulationCategory, GetSettingsChild(SettingsHandle, GET_MEMBER_NAME_CHECKED(FWetClothingSettings, MaxWetness)));
     AddSettingsProperty(SimulationCategory, GetSettingsChild(SettingsHandle, GET_MEMBER_NAME_CHECKED(FWetClothingSettings, DryRateScale)));
@@ -332,6 +341,12 @@ void FDynamicWetClothesComponentCustomization::RebuildBindingStatus()
         {
             CachedBindingStatus.MeshComponent = Candidate;
             CachedBindingStatus.CurrentMesh = CurrentMesh;
+            CachedBindingStatus.bCPURuntimeDataValid =
+                Asset->IsPrecomputedSimulationDataValidForMesh(RequiredMesh);
+            CachedBindingStatus.bGPURuntimeDataValid =
+                Asset->IsGPURuntimeDataValidForMesh(RequiredMesh, UWetClothingAsset::RuntimeSimulationLODIndex);
+            CachedBindingStatus.bGPUMapDataValid =
+                Asset->IsGPUWetMapDataValidForMesh(RequiredMesh, UWetClothingAsset::RuntimeSimulationLODIndex);
             CachedBindingStatus.State = EBindingState::Ready;
             return;
         }
@@ -436,6 +451,58 @@ EVisibility FDynamicWetClothesComponentCustomization::GetBindingWarningVisibilit
     return bHasBindingStatus && CachedBindingStatus.State != EBindingState::Ready
                ? EVisibility::Visible
                : EVisibility::Collapsed;
+}
+
+FText FDynamicWetClothesComponentCustomization::GetRuntimeDataWarningText() const
+{
+    const UDynamicWetClothesComponent* DWC = Component.Get();
+    const UWetClothingAsset*          Asset = CachedBindingStatus.Asset.Get();
+    if (!bHasBindingStatus || CachedBindingStatus.State != EBindingState::Ready || DWC == nullptr || Asset == nullptr)
+    {
+        return FText::GetEmpty();
+    }
+
+    if (DWC->SimulationMode == EDWCSimulationMode::VertexCPU)
+    {
+        if (CachedBindingStatus.bCPURuntimeDataValid)
+        {
+            return FText::GetEmpty();
+        }
+        if (!Asset->GetSetupSettings().bBuildCPUVertexSimulationData)
+        {
+            return LOCTEXT("CPURuntimeDataDisabled", "This component is set to Vertex (CPU), but CPU Vertex Simulation Data is disabled in the Wet Clothing Asset Setup. Enable it, then use Build for Runtime > Build CPU Runtime Data.");
+        }
+        return LOCTEXT("CPURuntimeDataInvalid", "This component is set to Vertex (CPU), but the Wet Clothing Asset has no valid CPU Runtime Data for the assigned DWC mesh. Use Build for Runtime > Build CPU Runtime Data and save the asset.");
+    }
+
+    if (!CachedBindingStatus.bGPURuntimeDataValid || !CachedBindingStatus.bGPUMapDataValid)
+    {
+        if (!Asset->GetSetupSettings().bBuildGPUWetnessMapSimulationData)
+        {
+            return LOCTEXT("GPURuntimeDataDisabled", "This component is set to Wetness Map (GPU), but GPU Wetness Map Simulation Data is disabled in the Wet Clothing Asset Setup. Enable it, then use Build for Runtime > Build GPU Runtime Data.");
+        }
+        return LOCTEXT("GPURuntimeDataInvalid", "This component is set to Wetness Map (GPU), but the Wet Clothing Asset has no valid GPU Runtime Data or GPU Map Data for the assigned DWC mesh. Use Build for Runtime > Build GPU Runtime Data and save the asset.");
+    }
+
+    return FText::GetEmpty();
+}
+
+EVisibility FDynamicWetClothesComponentCustomization::GetRuntimeDataWarningVisibility() const
+{
+    const UDynamicWetClothesComponent* DWC = Component.Get();
+    if (!bHasBindingStatus || CachedBindingStatus.State != EBindingState::Ready || DWC == nullptr)
+    {
+        return EVisibility::Collapsed;
+    }
+
+    if (DWC->SimulationMode == EDWCSimulationMode::VertexCPU)
+    {
+        return CachedBindingStatus.bCPURuntimeDataValid ? EVisibility::Collapsed : EVisibility::Visible;
+    }
+
+    return CachedBindingStatus.bGPURuntimeDataValid && CachedBindingStatus.bGPUMapDataValid
+               ? EVisibility::Collapsed
+               : EVisibility::Visible;
 }
 
 #undef LOCTEXT_NAMESPACE

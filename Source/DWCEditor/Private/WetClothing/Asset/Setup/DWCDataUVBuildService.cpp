@@ -27,6 +27,7 @@
 namespace DWCDataUVBuildServicePrivate
 {
     static constexpr int32 CanonicalDataUVLODIndex = 0;
+    static constexpr int32 SupportedUVChannelMaxIndex = 3;
 
     int32 ResolveMaxParallelMaterialSlots(const FDWCDataUVBuildOptions* Options)
     {
@@ -2566,7 +2567,12 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::RelocateChannel(
     }
 
     const int32 SourceUVChannelIndex = Asset.GetDWCDataUVChannelIndex();
-    const int32 SafeDestinationUVChannelIndex = FMath::Clamp(DestinationUVChannelIndex, 0, 7);
+    if (DestinationUVChannelIndex < 0 || DestinationUVChannelIndex > SupportedUVChannelMaxIndex)
+    {
+        SetFailure(Result, TEXT("The destination DWC UV Channel is outside the supported UV0-UV3 range."));
+        return Result;
+    }
+    const int32 SafeDestinationUVChannelIndex = DestinationUVChannelIndex;
     if (SafeDestinationUVChannelIndex == Asset.GetOriginalUVChannelIndex())
     {
         SetFailure(Result, TEXT("DWC UV Channel cannot be relocated onto the locked Original UV channel."));

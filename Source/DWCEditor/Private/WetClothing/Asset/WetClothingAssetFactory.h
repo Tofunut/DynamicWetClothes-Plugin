@@ -19,7 +19,7 @@ class DWCEDITOR_API UWetClothingAssetCreationSettings : public UObject
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Source Skeletal Mesh"))
     TObjectPtr<USkeletalMesh> SourceSkeletalMesh = nullptr;
 
-    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Original UV Channel", ClampMin = "0", ClampMax = "7"))
+    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Original UV Channel", ClampMin = "0", ClampMax = "3"))
     int32 OriginalUVChannelIndex = 0;
 
     /** INDEX_NONE is displayed as Same as Original in the custom creation UI. */
@@ -77,7 +77,7 @@ class DWCEDITOR_API UWetClothingAssetSetupSettingsObject : public UObject
     GENERATED_BODY()
 
   public:
-    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Original UV Channel", ClampMin = "0", ClampMax = "7"))
+    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Original UV Channel", ClampMin = "0", ClampMax = "3"))
     int32 OriginalUVChannelIndex = 0;
 
     /** INDEX_NONE is displayed as Same as Original in the custom setup UI. */

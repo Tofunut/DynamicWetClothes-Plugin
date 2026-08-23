@@ -466,7 +466,11 @@ void UWetClothingAssetCreationSettings::PostEditChangeProperty(FPropertyChangedE
         FirstGeneratedLODIndex = 0;
         LastGeneratedLODIndex = FMath::Max(0, GetSkeletalMeshLODCount(SourceSkeletalMesh) - 1);
     }
-    OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);
+    OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, MaxDWCDataUVChannelIndex);
+    if (SurfaceWaterNormalUVChannelIndex != INDEX_NONE)
+    {
+        SurfaceWaterNormalUVChannelIndex = FMath::Clamp(SurfaceWaterNormalUVChannelIndex, 0, MaxDWCDataUVChannelIndex);
+    }
     PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, MaxDWCDataUVChannelIndex);
     ClampLODRangeForMesh(SourceSkeletalMesh, FirstGeneratedLODIndex, LastGeneratedLODIndex);
 }
@@ -511,7 +515,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
     }
     TArray<TSharedPtr<int32>> SurfaceNormalUVChannelOptions;
     SurfaceNormalUVChannelOptions.Add(MakeShared<int32>(INDEX_NONE));
-    for (int32 UVChannelIndex = 0; UVChannelIndex < 8; ++UVChannelIndex)
+    for (int32 UVChannelIndex = 0; UVChannelIndex <= MaxDWCDataUVChannelIndex; ++UVChannelIndex)
     {
         SurfaceNormalUVChannelOptions.Add(MakeShared<int32>(UVChannelIndex));
     }
@@ -615,7 +619,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                   [SNew(SBorder)
                                        .Padding(8.0f)
                                        .BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-                                           [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("DWCUVChannelSectionLabel", "DWC UV Channel")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)[BuildCreationHelperTextRow(BuildCreateDWCDataUVTargetText())] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 0.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("OriginalUVChannelLabel", "Original UV Channel"))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(180.0f)[SNew(SSpinBox<int32>).IsEnabled_Lambda(HasSourceMesh).MinValue(0).MaxValue(7).MinSliderValue(0).MaxSliderValue(7).Value_Lambda([this]()
+                                           [SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(LOCTEXT("DWCUVChannelSectionLabel", "DWC UV Channel")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)[BuildCreationHelperTextRow(BuildCreateDWCDataUVTargetText())] + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 0.0f)[SNew(SHorizontalBox) + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(STextBlock).Text(LOCTEXT("OriginalUVChannelLabel", "Original UV Channel"))] + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(180.0f)[SNew(SSpinBox<int32>).IsEnabled_Lambda(HasSourceMesh).MinValue(0).MaxValue(MaxDWCDataUVChannelIndex).MinSliderValue(0).MaxSliderValue(MaxDWCDataUVChannelIndex).Value_Lambda([this]()
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               { return PendingCreationSettings != nullptr
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            ? PendingCreationSettings->OriginalUVChannelIndex
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            : 0; })
@@ -625,7 +629,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                     {
                                         return;
                                     }
-                                    PendingCreationSettings->OriginalUVChannelIndex = FMath::Clamp(NewValue, 0, 7); })]]] +
+                                    PendingCreationSettings->OriginalUVChannelIndex = FMath::Clamp(NewValue, 0, MaxDWCDataUVChannelIndex); })]]] +
                                             SVerticalBox::Slot()
                                                 .AutoHeight()
                                                 .Padding(0.0f, 10.0f, 0.0f, 0.0f)

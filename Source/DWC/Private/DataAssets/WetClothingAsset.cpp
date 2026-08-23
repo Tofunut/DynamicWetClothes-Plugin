@@ -26,6 +26,7 @@
 namespace
 {
     static constexpr float CoincidentVertexNeighborTolerance = 0.001f;
+    static constexpr int32 DWCSupportedUVChannelMaxIndex = 3;
     static constexpr int32 DWCRuntimeBulkPayloadMagic = 0x44574342; // DWCB
     static constexpr int32 DWCMinSupportedRuntimeBulkDataVersion = 1;
 #if WITH_EDITORONLY_DATA
@@ -891,7 +892,13 @@ namespace
 
         constexpr int32 SourceLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
         const int32 UVChannelCount = GetLODUVChannelCount(SourceMesh, SourceLODIndex);
-        if (Settings.OriginalUVChannelIndex < 0 || Settings.OriginalUVChannelIndex >= UVChannelCount)
+        if (Settings.OriginalUVChannelIndex < 0 ||
+            Settings.OriginalUVChannelIndex > DWCSupportedUVChannelMaxIndex)
+        {
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("Original UV Channel must be between UV0 and UV3."));
+            return false;
+        }
+        if (Settings.OriginalUVChannelIndex >= UVChannelCount)
         {
             DWC::Error::SetMessage(
                 OutErrorMessage,
@@ -902,7 +909,27 @@ namespace
                     UVChannelCount));
             return false;
         }
-        if (Settings.PreferredDWCDataUVChannelIndex < 0 || Settings.PreferredDWCDataUVChannelIndex > 3)
+        if (Settings.SurfaceWaterNormalUVChannelIndex != INDEX_NONE &&
+            (Settings.SurfaceWaterNormalUVChannelIndex < 0 ||
+             Settings.SurfaceWaterNormalUVChannelIndex > DWCSupportedUVChannelMaxIndex))
+        {
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("Surface Normal UV Channel must be Same as Original or between UV0 and UV3."));
+            return false;
+        }
+        if (Settings.SurfaceWaterNormalUVChannelIndex != INDEX_NONE &&
+            Settings.SurfaceWaterNormalUVChannelIndex >= UVChannelCount)
+        {
+            DWC::Error::SetMessage(
+                OutErrorMessage,
+                FString::Printf(
+                    TEXT("Surface Normal UV Channel UV%d is unavailable on LOD%d. That LOD has %d UV channel(s)."),
+                    Settings.SurfaceWaterNormalUVChannelIndex,
+                    SourceLODIndex,
+                    UVChannelCount));
+            return false;
+        }
+        if (Settings.PreferredDWCDataUVChannelIndex < 0 ||
+            Settings.PreferredDWCDataUVChannelIndex > DWCSupportedUVChannelMaxIndex)
         {
             DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel must be between UV0 and UV3."));
             return false;
@@ -3221,7 +3248,7 @@ bool UWetClothingAsset::CommitInitialDataUVLayout(USkeletalMesh* InRuntimeMesh, 
             TEXT("DWC UV Channel and Original UV island topology are write-once. Create a new WCA instead of rebuilding this layout."));
         return false;
     }
-    if (InRuntimeMesh == nullptr || InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex >= 8)
+    if (InRuntimeMesh == nullptr || InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex > DWCSupportedUVChannelMaxIndex)
     {
         DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC UV Channel target is invalid."));
         return false;
@@ -3273,7 +3300,7 @@ bool UWetClothingAsset::ReplaceDataUVLayout(
             TEXT("The WCA does not contain a DWC UV Channel layout to rebuild."));
         return false;
     }
-    if (InRuntimeMesh == nullptr || InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex >= 8)
+    if (InRuntimeMesh == nullptr || InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex > DWCSupportedUVChannelMaxIndex)
     {
         DWC::Error::SetMessage(OutErrorMessage, TEXT("The rebuilt DWC UV Channel target is invalid."));
         return false;
@@ -3323,9 +3350,9 @@ bool UWetClothingAsset::CommitDataUVChannelRelocation(
         DWC::Error::SetMessage(OutErrorMessage, TEXT("The WCA does not contain a sealed DWC UV Channel layout to relocate."));
         return false;
     }
-    if (InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex >= 8)
+    if (InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex > DWCSupportedUVChannelMaxIndex)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("The destination DWC UV Channel is outside the supported UV0-UV7 range."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The destination DWC UV Channel is outside the supported UV0-UV3 range."));
         return false;
     }
     if (InDWCDataUVChannelIndex == Metadata.OriginalUVChannelIndex)

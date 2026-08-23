@@ -265,10 +265,10 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
         SurfaceWaterRTResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(SurfaceWaterRTResolution));
         WrinkleMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(WrinkleMapResolution));
         TransparencyMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(TransparencyMapResolution));
-        OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);
+        OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 3);
         if (SurfaceWaterNormalUVChannelIndex != INDEX_NONE)
         {
-            SurfaceWaterNormalUVChannelIndex = FMath::Clamp(SurfaceWaterNormalUVChannelIndex, 0, 7);
+            SurfaceWaterNormalUVChannelIndex = FMath::Clamp(SurfaceWaterNormalUVChannelIndex, 0, 3);
         }
         PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, 3);
         FirstGeneratedLODIndex = FMath::Max(0, FirstGeneratedLODIndex);

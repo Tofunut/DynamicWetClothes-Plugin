@@ -53,6 +53,7 @@ namespace
     const FName     PartPreviewSelectionFillColorParameter(TEXT("DWC_PartPreviewSelectionFillColor"));
     const FName     PartPreviewSelectionBoundaryColorParameter(TEXT("DWC_PartPreviewSelectionBoundaryColor"));
     constexpr int32 PartPreviewTextureResolution = 1024;
+    constexpr int32 SupportedUVChannelMaxIndex = 3;
 
     constexpr float SurfacePreviewMinDetailSize = 0.0f;
     constexpr float SurfacePreviewMaxDetailSize = 4.0f;
@@ -379,7 +380,7 @@ namespace
         const USkeletalMesh*     PreviewMesh)
     {
         const int32 OriginalUVChannelIndex = Asset != nullptr
-                                                 ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
+                                                 ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, SupportedUVChannelMaxIndex)
                                                  : 0;
         if (Asset == nullptr || PreviewMesh == nullptr ||
             Asset->GetRuntimeSkeletalMesh() != PreviewMesh)
@@ -388,7 +389,7 @@ namespace
         }
 
         const int32 DataUVChannelIndex = Asset->GetDWCDataUVChannelIndex();
-        if (DataUVChannelIndex < 0 || DataUVChannelIndex >= 8)
+        if (DataUVChannelIndex < 0 || DataUVChannelIndex > SupportedUVChannelMaxIndex)
         {
             return OriginalUVChannelIndex;
         }
@@ -1719,7 +1720,7 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
     if (RenderTriangles.IsEmpty())
     {
         const int32 OriginalUVChannelIndex = Asset != nullptr
-                                                 ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
+                                                 ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, SupportedUVChannelMaxIndex)
                                                  : 0;
         if (PreviewOverlayUVChannelIndex != OriginalUVChannelIndex)
         {

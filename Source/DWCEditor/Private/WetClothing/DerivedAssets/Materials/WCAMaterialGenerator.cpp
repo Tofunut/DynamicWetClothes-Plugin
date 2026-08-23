@@ -68,6 +68,7 @@ namespace
     const FName            LegacyUseRevealSurfaceMapParameterName(TEXT("DWC_UseRevealSurfaceMap"));
     constexpr int32        DwcSourceGraphTargetMinX = -3600;
     constexpr int32        DwcSourceGraphTargetMinY = -420;
+    constexpr int32        SupportedUVChannelMaxIndex = 3;
 
     FString MakeMaterialParameterKey(const FMaterialParameterInfo& Info)
     {
@@ -2482,13 +2483,13 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateOrUpdateUnif
         return Result;
     }
 
-    if (Options.DWCDataUVChannelIndex < 0 || Options.DWCDataUVChannelIndex > 7)
+    if (Options.DWCDataUVChannelIndex < 0 || Options.DWCDataUVChannelIndex > SupportedUVChannelMaxIndex)
     {
         Result.Message = TEXT("Unified DWC material generation requires a valid DWC UV Channel.");
         return Result;
     }
     if (Options.bUseSurfaceWater &&
-        (Options.SurfaceWaterNormalUVChannelIndex < 0 || Options.SurfaceWaterNormalUVChannelIndex > 7))
+        (Options.SurfaceWaterNormalUVChannelIndex < 0 || Options.SurfaceWaterNormalUVChannelIndex > SupportedUVChannelMaxIndex))
     {
         Result.Message = TEXT("Unified DWC material generation requires a valid Surface Water Normal UV channel for this slot.");
         return Result;
@@ -2595,11 +2596,11 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateTransientUni
     PreviewOptions.bEnableDWCDataUVSampling = true;
     PreviewOptions.bConnectWetnessMapPath = true;
     PreviewOptions.OwningWetClothingAsset = nullptr;
-    if (PreviewOptions.DWCDataUVChannelIndex < 0 || PreviewOptions.DWCDataUVChannelIndex > 7)
+    if (PreviewOptions.DWCDataUVChannelIndex < 0 || PreviewOptions.DWCDataUVChannelIndex > SupportedUVChannelMaxIndex)
     {
         PreviewOptions.DWCDataUVChannelIndex = 0;
     }
-    if (PreviewOptions.SurfaceWaterNormalUVChannelIndex < 0 || PreviewOptions.SurfaceWaterNormalUVChannelIndex > 7)
+    if (PreviewOptions.SurfaceWaterNormalUVChannelIndex < 0 || PreviewOptions.SurfaceWaterNormalUVChannelIndex > SupportedUVChannelMaxIndex)
     {
         PreviewOptions.SurfaceWaterNormalUVChannelIndex = PreviewOptions.OriginalUVChannelIndex >= 0
                                                               ? PreviewOptions.OriginalUVChannelIndex

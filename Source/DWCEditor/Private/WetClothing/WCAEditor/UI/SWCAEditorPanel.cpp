@@ -20,6 +20,7 @@
 #include "WetClothing/Foundation/Build/DWCEditorExclusiveBuildCoordinator.h"
 #include "WetClothing/Foundation/Build/DWCEditorBuildOperationManager.h"
 #include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
+#include "WetClothing/Foundation/Preview/Session/DWCEditorPreviewSession.h"
 #include "WetClothing/Modes/Part/Editor/SWetClothingPartEditorPanel.h"
 #include "WetClothing/Modes/Transparency/Editor/SWetClothingTransparencyBakePanel.h"
 #include "WetClothing/Modes/Transparency/MaterialBake/DWCTransparencyMaterialColorBakeCache.h"

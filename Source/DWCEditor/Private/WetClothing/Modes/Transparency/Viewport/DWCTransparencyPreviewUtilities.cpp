@@ -2,6 +2,7 @@
 
 #include "WetClothing/Modes/Transparency/Viewport/DWCTransparencyPreviewUtilities.h"
 
+#include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyRevealColorTileStore.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"
 

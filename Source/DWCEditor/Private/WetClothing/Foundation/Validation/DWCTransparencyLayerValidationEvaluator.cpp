@@ -3,6 +3,7 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Foundation/Build/DWCTransparencyBuildTargetResolver.h"
+#include "WetClothing/Foundation/Validation/DWCEditorValidationEvaluatorUtils.h"
 #include "WetClothing/Foundation/Validation/DWCEditorValidationSnapshot.h"
 
 namespace

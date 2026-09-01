@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataAssets/WetClothingTransparencyData.h"
 #include "WetClothing/Foundation/Async/DWCEditorAsyncOperationTypes.h"
 #include "WetClothing/Foundation/Operations/DWCEditorOperationPhaseTypes.h"
 #include "WetClothing/Modes/Transparency/Pipeline/DWCTransparencySourcePayload.h"

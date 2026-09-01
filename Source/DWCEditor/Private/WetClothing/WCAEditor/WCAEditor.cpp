@@ -36,6 +36,7 @@
 #include "Misc/MessageDialog.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
 #include "PropertyEditorModule.h"
 #include "PropertyEditorDelegates.h"

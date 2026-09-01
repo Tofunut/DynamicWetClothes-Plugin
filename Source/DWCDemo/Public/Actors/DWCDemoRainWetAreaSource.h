@@ -6,55 +6,54 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "WetInputSystem/DWCPersistentWetnessProvider.h"
 #include "DWCDemoRainWetAreaSource.generated.h"
-
 class UBoxComponent;
 class UDynamicWetClothesComponent;
-class UPrimitiveComponent;
 class UNiagaraComponent;
 struct FDWCWetAreaData;
 
 UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "DWC Demo Rain Wet Area Source"))
-class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
+class DWCDEMO_API ADWCDemoRainWetAreaSource
+    : public AActor
+    , public IDWCPersistentWetnessProvider
 {
     GENERATED_BODY()
 
   public:
     ADWCDemoRainWetAreaSource();
 
+    /** Explicitly connects a DWC receiver to this demo source. */
+    UFUNCTION(BlueprintCallable, Category = "DWC Demo|Rain Wet Area Source|Receivers")
+    bool AddWetnessReceiver(UDynamicWetClothesComponent* Receiver);
+
+    /** Convenience API that connects the first DWC component found on ReceiverActor. */
+    UFUNCTION(BlueprintCallable, Category = "DWC Demo|Rain Wet Area Source|Receivers")
+    bool AddWetnessReceiverFromActor(AActor* ReceiverActor);
+
+    UFUNCTION(BlueprintCallable, Category = "DWC Demo|Rain Wet Area Source|Receivers")
+    void RemoveWetnessReceiver(UDynamicWetClothesComponent* Receiver);
+
+    UFUNCTION(BlueprintCallable, Category = "DWC Demo|Rain Wet Area Source|Receivers")
+    void ClearWetnessReceivers();
+
+    UFUNCTION(BlueprintPure, Category = "DWC Demo|Rain Wet Area Source|Receivers")
+    int32 GetWetnessReceiverCount() const;
+
   protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void OnConstruction(const FTransform& Transform) override;
+    virtual void ApplyPersistentWetness(
+        UDynamicWetClothesComponent& Receiver,
+        float                        DeltaSeconds) override;
 
   private:
-    void    RefreshExistingOverlaps();
-    void    RefreshReceiversInsideBounds();
-    void    ApplyWetnessTick();
-    void    AddReceiverFromActor(AActor* OtherActor);
-    void    RemoveReceiverFromActor(AActor* OtherActor);
     bool    IsReceiverInsideRainBounds(const UDynamicWetClothesComponent& Receiver) const;
     FVector GetRainDirectionWorld() const;
-    void    BuildRainWetAreaData(FDWCWetAreaData& OutAreaData) const;
-    void    ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const;
+    void    BuildRainWetAreaData(FDWCWetAreaData& OutAreaData, float DeltaSeconds) const;
+    void    ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver, float DeltaSeconds) const;
     void    ApplyRainNiagaraParameters() const;
-    bool    ShouldLogDebug() const;
-
-    UFUNCTION()
-    void OnRainBeginOverlap(
-        UPrimitiveComponent* OverlappedComponent,
-        AActor*              OtherActor,
-        UPrimitiveComponent* OtherComp,
-        int32                OtherBodyIndex,
-        bool                 bFromSweep,
-        const FHitResult&    SweepResult);
-
-    UFUNCTION()
-    void OnRainEndOverlap(
-        UPrimitiveComponent* OverlappedComponent,
-        AActor*              OtherActor,
-        UPrimitiveComponent* OtherComp,
-        int32                OtherBodyIndex);
 
     UPROPERTY(VisibleAnywhere, Category = "DWC Demo|Rain Wet Area Source")
     UBoxComponent* RainBounds;
@@ -65,13 +64,14 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "0.0"))
     float WetAmountPerSecond = 0.5f;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "0.01"))
-    float UpdateInterval = 0.1f;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC Demo|Rain Wet Area Source", meta = (AllowPrivateAccess = "true"))
     bool bApplyWetArea = true;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "1"))
+    /** Level actors connected when play begins. Runtime callers can use the receiver API instead. */
+    UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "DWC Demo|Rain Wet Area Source|Receivers", meta = (AllowPrivateAccess = "true"))
+    TArray<TObjectPtr<AActor>> InitialReceiverActors;
+
+    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "1", DisplayName = "Rain Samples Per Simulation"))
     int32 RainSamplesPerTick = 300;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (AdvancedDisplay, ToolTip = "Uses the rain direction to favor surfaces facing the incoming rain."))
@@ -95,12 +95,7 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|Debug")
     bool bEnableDebugLogging = true;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|Debug", meta = (ClampMin = "0.1"))
-    float DebugLogInterval = 1.0f;
-
-    TMap<TWeakObjectPtr<UDynamicWetClothesComponent>, int32> ReceiverOverlapCounts;
-    FTimerHandle                                             WetnessTimer;
-    mutable double                                           LastDebugLogTime = -1000000.0;
+    TSet<TWeakObjectPtr<UDynamicWetClothesComponent>> RegisteredReceivers;
 
   public:
 };

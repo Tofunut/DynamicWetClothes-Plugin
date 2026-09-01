@@ -24,6 +24,12 @@ bool FDWCApplyBinnedAbsorptionCS::ShouldCompilePermutation(const FGlobalShaderPe
     return ShouldCompileDWC(Parameters);
 }
 
+IMPLEMENT_GLOBAL_SHADER(FDWCApplyWaterSurfaceCS, "/DWCGPU/DWCApplyWaterSurface.usf", "MainCS", SF_Compute);
+bool FDWCApplyWaterSurfaceCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}
+
 IMPLEMENT_GLOBAL_SHADER(FDWCUpdateTriangleFlowCS, "/DWCGPU/DWCUpdateTriangleFlow.usf", "MainCS", SF_Compute);
 bool FDWCUpdateTriangleFlowCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {

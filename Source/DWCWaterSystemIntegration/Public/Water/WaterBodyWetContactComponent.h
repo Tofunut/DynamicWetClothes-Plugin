@@ -5,6 +5,7 @@
 #include "UObject/WeakObjectPtr.h"
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "WetInputSystem/DWCPersistentWetnessProvider.h"
 #include "WaterBodyWetContactComponent.generated.h"
 
 class UBoxComponent;
@@ -14,7 +15,9 @@ class UWaterBodyComponent;
 struct FDWCWaterSurfaceData;
 
 UCLASS(ClassGroup = (DWC), DisplayName = "Water Body Wet Contact", meta = (BlueprintSpawnableComponent))
-class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActorComponent
+class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent
+    : public UActorComponent
+    , public IDWCPersistentWetnessProvider
 {
     GENERATED_BODY()
 
@@ -24,19 +27,18 @@ class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActo
   protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void ApplyPersistentWetness(
+        UDynamicWetClothesComponent& Receiver,
+        float                        DeltaSeconds) override;
 
   private:
     void InitializeWaterBody();
     void CreateOverlapProxy();
     void DestroyOverlapProxy();
     void RefreshExistingOverlaps();
-    void RefreshReceiversInsideBounds();
-    void ApplyWetnessTick(float DeltaTime);
     void AddReceiverFromActor(AActor* OtherActor);
     void RemoveReceiverFromActor(AActor* OtherActor);
-    bool IsOceanWaterBody() const;
-    bool ShouldTrackReceiver(const UDynamicWetClothesComponent& Receiver, const FBox* OptionalWaterBodyBounds = nullptr) const;
+    void UnregisterFromAllReceivers();
     bool BuildWaterSurfaceDataForReceiver(const UDynamicWetClothesComponent& Receiver, FDWCWaterSurfaceData& OutWaterSurfaceData) const;
     bool QueryWaterSurfaceZ(const FVector& WorldPosition, float& OutSurfaceZ) const;
     bool GetWaterBodyProxyBounds(FBox& OutBounds) const;
@@ -60,13 +62,7 @@ class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActo
   private:
     // Internal integration policy. These values are intentionally not exposed in Details or Blueprint.
     bool  bApplyToExistingOverlapsOnBeginPlay = true;
-    bool  bRefreshReceiversInsideBounds = true;
-    float ReceiverRefreshInterval = 0.25f;
     bool  bCreateOverlapProxy = true;
-
-    // Profiling remains available in C++ without becoming part of the product-facing component UI.
-    bool  bEnablePerformanceLogging = false;
-    float PerformanceLogInterval = 1.0f;
 
     UPROPERTY(Transient)
     TObjectPtr<UWaterBodyComponent> WaterBodyComponent;
@@ -75,12 +71,4 @@ class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActo
     TObjectPtr<UBoxComponent> OverlapProxy;
 
     TMap<TWeakObjectPtr<UDynamicWetClothesComponent>, int32> ReceiverOverlapCounts;
-
-    double AccumulatedBuildSurfaceDataSeconds = 0.0;
-    double AccumulatedApplyWetSurfaceSeconds = 0.0;
-    float  AccumulatedReceiverRefreshSeconds = 0.0f;
-    float  AccumulatedPerformanceLogSeconds = 0.0f;
-    int32  AccumulatedPerformanceFrames = 0;
-    int32  AccumulatedProcessedReceivers = 0;
-    int32  AccumulatedWaterSurfaceSamples = 0;
 };

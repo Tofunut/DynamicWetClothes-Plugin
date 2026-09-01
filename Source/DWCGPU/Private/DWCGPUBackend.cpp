@@ -38,6 +38,7 @@ DECLARE_GPU_STAT_NAMED(DWC_SurfaceDry, TEXT("DWC SurfaceDry"));
 DECLARE_GPU_STAT_NAMED(DWC_NiagaraDropletResolve, TEXT("DWC NiagaraDropletResolve"));
 DECLARE_GPU_STAT_NAMED(DWC_NiagaraDropletStamp, TEXT("DWC NiagaraDropletStamp"));
 DECLARE_GPU_STAT_NAMED(DWC_ApplyAbsorption, TEXT("DWC ApplyAbsorption"));
+DECLARE_GPU_STAT_NAMED(DWC_ApplyWaterSurface, TEXT("DWC ApplyWaterSurface"));
 DECLARE_GPU_STAT_NAMED(DWC_DiffuseDry, TEXT("DWC DiffuseDry"));
 DECLARE_GPU_STAT_NAMED(DWC_SeamGather, TEXT("DWC SeamGather"));
 
@@ -1687,6 +1688,85 @@ bool FDWCGPUBackend::EnqueueSurfaceStamps(const TArray<FDWCSurfaceStampRequest>&
     return AddedCount > 0;
 }
 
+bool FDWCGPUBackend::EnqueueWaterSurface(
+    const FDWCWaterSurfaceData& WaterSurfaceData,
+    const float                 Amount)
+{
+    FQueuedWaterSurface Request;
+    if (!BuildQueuedWaterSurface(WaterSurfaceData, Amount, Request))
+    {
+        return false;
+    }
+
+    PendingWaterSurfaces.Add(MoveTemp(Request));
+    return true;
+}
+
+bool FDWCGPUBackend::BuildQueuedWaterSurface(
+    const FDWCWaterSurfaceData& WaterSurfaceData,
+    const float                 Amount,
+    FQueuedWaterSurface&        OutRequest) const
+{
+    if (!bInitialized ||
+        !FMath::IsFinite(Amount) ||
+        FMath::IsNearlyZero(Amount) ||
+        WaterSurfaceData.SizeX < 2 ||
+        WaterSurfaceData.SizeY < 2 ||
+        !WaterSurfaceData.Bounds.IsValid)
+    {
+        return false;
+    }
+
+    const int64 SampleCount64 = static_cast<int64>(WaterSurfaceData.SizeX) *
+                                static_cast<int64>(WaterSurfaceData.SizeY);
+    if (SampleCount64 <= 0 ||
+        SampleCount64 > MAX_int32 ||
+        WaterSurfaceData.SurfaceZ.Num() != SampleCount64 ||
+        WaterSurfaceData.Valid.Num() != SampleCount64)
+    {
+        return false;
+    }
+
+    const FVector BoundsMin = WaterSurfaceData.Bounds.Min;
+    const FVector BoundsMax = WaterSurfaceData.Bounds.Max;
+    const double  BoundsSizeX = BoundsMax.X - BoundsMin.X;
+    const double  BoundsSizeY = BoundsMax.Y - BoundsMin.Y;
+    if (!FMath::IsFinite(BoundsMin.X) ||
+        !FMath::IsFinite(BoundsMin.Y) ||
+        !FMath::IsFinite(BoundsSizeX) ||
+        !FMath::IsFinite(BoundsSizeY) ||
+        BoundsSizeX <= KINDA_SMALL_NUMBER ||
+        BoundsSizeY <= KINDA_SMALL_NUMBER)
+    {
+        return false;
+    }
+
+    OutRequest = FQueuedWaterSurface();
+    OutRequest.BoundsMin = FVector2f(
+        static_cast<float>(BoundsMin.X),
+        static_cast<float>(BoundsMin.Y));
+    OutRequest.InverseBoundsSize = FVector2f(
+        static_cast<float>(1.0 / BoundsSizeX),
+        static_cast<float>(1.0 / BoundsSizeY));
+    OutRequest.GridSize = FIntPoint(WaterSurfaceData.SizeX, WaterSurfaceData.SizeY);
+    OutRequest.Amount = Amount;
+    OutRequest.Samples.Reserve(static_cast<int32>(SampleCount64));
+    for (int32 SampleIndex = 0; SampleIndex < static_cast<int32>(SampleCount64); ++SampleIndex)
+    {
+        const bool  bValid = WaterSurfaceData.Valid[SampleIndex] != 0;
+        const float Height = WaterSurfaceData.SurfaceZ[SampleIndex];
+        if (bValid && !FMath::IsFinite(Height))
+        {
+            return false;
+        }
+        OutRequest.Samples.Add(FVector2f(
+            bValid ? Height : 0.0f,
+            bValid ? 1.0f : 0.0f));
+    }
+
+    return true;
+}
+
 bool FDWCGPUBackend::ApplyWetAll(const float Amount)
 {
     if (!bInitialized || FMath::IsNearlyZero(Amount))
@@ -1723,6 +1803,7 @@ void FDWCGPUBackend::ClearPendingWetnessMaps()
     }
 
     PendingContacts.Reset();
+    PendingWaterSurfaces.Reset();
     PendingWetAllAmount = 0.0f;
 
     TArray<FTextureRenderTargetResource*> PendingResources;
@@ -1779,6 +1860,7 @@ void FDWCGPUBackend::ClearWetnessMaps()
 
     PendingContacts.Reset();
     PendingSurfaceStamps.Reset();
+    PendingWaterSurfaces.Reset();
     PendingWetAllAmount = 0.0f;
 
     TArray<FTextureRenderTargetResource*> ResourcesToClear;
@@ -1850,17 +1932,21 @@ void FDWCGPUBackend::Update(const float DeltaSeconds)
     Swap(Contacts, PendingContacts);
     TArray<FDWCSurfaceStampRequest> SurfaceStamps;
     Swap(SurfaceStamps, PendingSurfaceStamps);
+    TArray<FQueuedWaterSurface> WaterSurfaces;
+    Swap(WaterSurfaces, PendingWaterSurfaces);
     const float WetAllAmount = PendingWetAllAmount;
     PendingWetAllAmount = 0.0f;
     if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose) &&
-        (!Contacts.IsEmpty() || !SurfaceStamps.IsEmpty() || !FMath::IsNearlyZero(WetAllAmount) || DebugDispatchLogCount < 3))
+        (!Contacts.IsEmpty() || !SurfaceStamps.IsEmpty() || !WaterSurfaces.IsEmpty() ||
+         !FMath::IsNearlyZero(WetAllAmount) || DebugDispatchLogCount < 3))
     {
         UE_LOG(
             LogDWCGPU,
             Log,
-            TEXT("DWCGPU: Update dispatch. contacts=%d, surfaceStamps=%d, wetAll=%.4f, delta=%.4f."),
+            TEXT("DWCGPU: Update dispatch. contacts=%d, surfaceStamps=%d, waterSurfaces=%d, wetAll=%.4f, delta=%.4f."),
             Contacts.Num(),
             SurfaceStamps.Num(),
+            WaterSurfaces.Num(),
             WetAllAmount,
             DeltaSeconds);
         ++DebugDispatchLogCount;
@@ -1868,6 +1954,7 @@ void FDWCGPUBackend::Update(const float DeltaSeconds)
     DispatchSimulation(
         MoveTemp(Contacts),
         MoveTemp(SurfaceStamps),
+        MoveTemp(WaterSurfaces),
         WetAllAmount,
         FMath::Clamp(DeltaSeconds, 0.0f, 0.25f));
 }
@@ -1875,6 +1962,7 @@ void FDWCGPUBackend::Update(const float DeltaSeconds)
 void FDWCGPUBackend::DispatchSimulation(
     TArray<FDWCResolvedSurfaceContact>&& Contacts,
     TArray<FDWCSurfaceStampRequest>&&    SurfaceStamps,
+    TArray<FQueuedWaterSurface>&&         WaterSurfaces,
     const float                          WetAllAmount,
     const float                          DeltaSeconds)
 {
@@ -1888,7 +1976,9 @@ void FDWCGPUBackend::DispatchSimulation(
     const FDWCGPULODBakeData&   BakedData = Asset->GetGPUWetMapRuntimeData(LODIndex);
     TArray<FSlotRenderDispatch> SlotDispatches;
     SlotDispatches.Reserve(MaterialSlots.Num());
-    const bool                         bHadWetInput = !Contacts.IsEmpty() || !FMath::IsNearlyZero(WetAllAmount);
+    const bool bHadAbsorptionInput = !Contacts.IsEmpty() ||
+                                     !FMath::IsNearlyZero(WetAllAmount);
+    const bool bHadWetInput = bHadAbsorptionInput || !WaterSurfaces.IsEmpty();
     const bool                         bHadSurfaceInput = !SurfaceStamps.IsEmpty();
     int32                              TotalAbsorptionDispatches = 0;
     int32                              TotalBinnedAbsorptionContacts = 0;
@@ -2026,9 +2116,10 @@ void FDWCGPUBackend::DispatchSimulation(
             UE_LOG(
                 LogDWCGPU,
                 Warning,
-                TEXT("DWCGPU: No slot dispatches were built. contacts=%d, surfaceStamps=%d, wetAll=%.4f, materialSlots=%d, asset='%s', mesh='%s'."),
+                TEXT("DWCGPU: No slot dispatches were built. contacts=%d, surfaceStamps=%d, waterSurfaces=%d, wetAll=%.4f, materialSlots=%d, asset='%s', mesh='%s'."),
                 Contacts.Num(),
                 SurfaceStamps.Num(),
+                WaterSurfaces.Num(),
                 WetAllAmount,
                 MaterialSlots.Num(),
                 *GetNameSafe(Asset),
@@ -2037,7 +2128,7 @@ void FDWCGPUBackend::DispatchSimulation(
         return;
     }
 
-    if (bHadWetInput && TotalAbsorptionDispatches <= 0 && TotalBinnedAbsorptionContacts <= 0)
+    if (bHadAbsorptionInput && TotalAbsorptionDispatches <= 0 && TotalBinnedAbsorptionContacts <= 0)
     {
         UE_LOG(
             LogDWCGPU,
@@ -2167,7 +2258,7 @@ void FDWCGPUBackend::DispatchSimulation(
 
     FDWCWorkloadStats::RecordGPUBackendUpdateSubmitted();
     ENQUEUE_RENDER_COMMAND(DWCFullWetMapSimulation)(
-        [MeshObject, StaticData, RTState, SharedStaticResources, SlotDispatches = MoveTemp(SlotDispatches), DeltaSeconds, MaxWetnessValue, DryRateScaleValue, CapillaryImmediateAbsorptionFractionValue, WorldGravityDirection, ReceiverBoundsMinValue, ReceiverBoundsMaxValue, ReceiverLocalToWorldValue, SimulationLODIndex, ReceiverGPUIdValue = ReceiverGPUId, bUseEightDirectionDiffusion = bUseEightDirectionDiffusion](FRHICommandListImmediate& RHICmdList) mutable
+        [MeshObject, StaticData, RTState, SharedStaticResources, SlotDispatches = MoveTemp(SlotDispatches), WaterSurfaces = MoveTemp(WaterSurfaces), DeltaSeconds, MaxWetnessValue, DryRateScaleValue, CapillaryImmediateAbsorptionFractionValue, WorldGravityDirection, ReceiverBoundsMinValue, ReceiverBoundsMaxValue, ReceiverLocalToWorldValue, SimulationLODIndex, ReceiverGPUIdValue = ReceiverGPUId, bUseEightDirectionDiffusion = bUseEightDirectionDiffusion](FRHICommandListImmediate& RHICmdList) mutable
         {
             if (!StaticData.IsValid() || !RTState.IsValid())
             {
@@ -2434,6 +2525,7 @@ void FDWCGPUBackend::DispatchSimulation(
             FRDGBufferSRVRef                                   TrianglePositionsSRV = GraphBuilder.CreateSRV(TrianglePositionsBuffer);
             TShaderMapRef<FDWCApplyTriangleAbsorptionCS>       AbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCApplyBinnedAbsorptionCS>         BinnedAbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCApplyWaterSurfaceCS>             WaterSurfaceShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCApplyNiagaraWetCollisionCS>      NiagaraWetCollisionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCResolveNiagaraDropletContactsCS> ResolveNiagaraDropletContactsShader(
                 GetGlobalShaderMap(GMaxRHIFeatureLevel));
@@ -2555,6 +2647,41 @@ void FDWCGPUBackend::DispatchSimulation(
                             FIntVector(ResolveBatchCount, 1, 1));
                     }
                 }
+            }
+
+            struct FPreparedWaterSurface
+            {
+                FVector2f        BoundsMin = FVector2f::ZeroVector;
+                FVector2f        InverseBoundsSize = FVector2f::ZeroVector;
+                FIntPoint        GridSize = FIntPoint::ZeroValue;
+                float            Amount = 0.0f;
+                FRDGBufferSRVRef Samples = nullptr;
+            };
+
+            TArray<FPreparedWaterSurface> PreparedWaterSurfaces;
+            PreparedWaterSurfaces.Reserve(WaterSurfaces.Num());
+            for (const FQueuedWaterSurface& WaterSurface : WaterSurfaces)
+            {
+                if (WaterSurface.Samples.IsEmpty())
+                {
+                    continue;
+                }
+
+                FRDGBufferRef SamplesBuffer = CreateStructuredBuffer(
+                    GraphBuilder,
+                    TEXT("DWC.WaterSurface.Samples"),
+                    WaterSurface.Samples);
+                if (SamplesBuffer == nullptr)
+                {
+                    continue;
+                }
+
+                FPreparedWaterSurface& Prepared = PreparedWaterSurfaces.AddDefaulted_GetRef();
+                Prepared.BoundsMin = WaterSurface.BoundsMin;
+                Prepared.InverseBoundsSize = WaterSurface.InverseBoundsSize;
+                Prepared.GridSize = WaterSurface.GridSize;
+                Prepared.Amount = WaterSurface.Amount;
+                Prepared.Samples = GraphBuilder.CreateSRV(SamplesBuffer);
             }
 
             for (FSlotRenderDispatch& SlotDispatch : SlotDispatches)
@@ -2730,6 +2857,46 @@ void FDWCGPUBackend::DispatchSimulation(
                 AddCopyTexturePass(GraphBuilder, CurrentPendingTexture, InputPendingTexture);
                 FRDGTextureUAVRef InputUAV = GraphBuilder.CreateUAV(InputAppliedTexture);
                 FRDGTextureUAVRef PendingInputUAV = GraphBuilder.CreateUAV(InputPendingTexture);
+
+                for (int32 WaterSurfaceIndex = 0;
+                     WaterSurfaceIndex < PreparedWaterSurfaces.Num();
+                     ++WaterSurfaceIndex)
+                {
+                    const FPreparedWaterSurface& WaterSurface =
+                        PreparedWaterSurfaces[WaterSurfaceIndex];
+                    FDWCApplyWaterSurfaceCS::FParameters* Parameters =
+                        GraphBuilder.AllocParameters<FDWCApplyWaterSurfaceCS::FParameters>();
+                    Parameters->TextureSize = FIntPoint(
+                        SlotDispatch.Resolution,
+                        SlotDispatch.Resolution);
+                    Parameters->WaterGridSize = WaterSurface.GridSize;
+                    Parameters->WaterBoundsMin = WaterSurface.BoundsMin;
+                    Parameters->WaterInverseBoundsSize = WaterSurface.InverseBoundsSize;
+                    Parameters->Amount = WaterSurface.Amount;
+                    Parameters->MaxWetness = MaxWetnessValue;
+                    Parameters->WaterSamples = WaterSurface.Samples;
+                    Parameters->TexelLookup = LookupSRV;
+                    Parameters->TrianglePositions = TrianglePositionsSRV;
+                    Parameters->WetnessTexture = InputUAV;
+                    Parameters->PendingWetnessTexture = PendingInputUAV;
+                    FDWCWorkloadStats::RecordGPUBackendDispatch();
+                    RDG_EVENT_SCOPE_STAT(
+                        GraphBuilder,
+                        DWC_ApplyWaterSurface,
+                        "DWC ApplyWaterSurface");
+                    FComputeShaderUtils::AddPass(
+                        GraphBuilder,
+                        RDG_EVENT_NAME(
+                            "DWC Apply Water Surface Slot %d Surface %d",
+                            StaticSlot.MaterialSlotIndex,
+                            WaterSurfaceIndex),
+                        WaterSurfaceShader,
+                        Parameters,
+                        FIntVector(
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
+                            1));
+                }
 
                 if (!SlotDispatch.BinnedAbsorptionContacts.IsEmpty() &&
                     !SlotDispatch.BinnedAbsorptionTileBins.IsEmpty() &&
@@ -3043,13 +3210,19 @@ FDWCGPUBackendStats FDWCGPUBackend::GetStats() const
     FDWCGPUBackendStats Stats;
     Stats.ActiveMaterialCount = static_cast<uint32>(MaterialSlots.Num());
     Stats.PendingSurfaceStampCount = static_cast<uint32>(PendingSurfaceStamps.Num());
+    Stats.PendingWaterSurfaceCount = static_cast<uint32>(PendingWaterSurfaces.Num());
     Stats.CPUBytes = sizeof(*this) +
                      MaterialSlots.GetAllocatedSize() +
                      PendingContacts.GetAllocatedSize() +
                      PendingSurfaceStamps.GetAllocatedSize() +
+                     PendingWaterSurfaces.GetAllocatedSize() +
                      DebugVertexDataUVs.GetAllocatedSize() +
                      DebugVertexMaterialSlots.GetAllocatedSize();
 
+    for (const FQueuedWaterSurface& WaterSurface : PendingWaterSurfaces)
+    {
+        Stats.CPUBytes += WaterSurface.Samples.GetAllocatedSize();
+    }
     for (const FMaterialSlotRuntime& Slot : MaterialSlots)
     {
         Stats.CPUBytes += Slot.WetnessMaps.GetAllocatedSize();
@@ -3125,6 +3298,7 @@ void FDWCGPUBackend::Shutdown()
 {
     PendingContacts.Reset();
     PendingSurfaceStamps.Reset();
+    PendingWaterSurfaces.Reset();
     DebugVertexDataUVs.Reset();
     DebugVertexMaterialSlots.Reset();
     PendingWetAllAmount = 0.0f;

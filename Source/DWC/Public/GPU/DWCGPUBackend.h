@@ -46,6 +46,7 @@ struct DWC_API FDWCGPUBackendStats
 {
     uint32 ActiveMaterialCount = 0;
     uint32 PendingSurfaceStampCount = 0;
+    uint32 PendingWaterSurfaceCount = 0;
     uint64 CPUBytes = 0;
     uint64 GPUBytes = 0;
 };
@@ -60,6 +61,7 @@ class DWC_API IDWCGPUBackend
     virtual bool                Initialize(const FDWCGPUBackendInitArgs& Args) = 0;
     virtual bool                EnqueueResolvedContacts(const TArray<FDWCResolvedSurfaceContact>& Contacts) = 0;
     virtual bool                EnqueueSurfaceStamps(const TArray<FDWCSurfaceStampRequest>& Stamps) = 0;
+    virtual bool                EnqueueWaterSurface(const FDWCWaterSurfaceData& WaterSurfaceData, float Amount) = 0;
     virtual bool                ApplyWetAll(float Amount) = 0;
     virtual void                ClearPendingWetnessMaps() = 0;
     virtual void                ClearWetnessMaps() = 0;

@@ -1,0 +1,107 @@
+#include "/Engine/Public/Platform.ush"
+
+RWTexture2D<float> WetnessTexture;
+RWTexture2D<float> PendingWetnessTexture;
+
+StructuredBuffer<float2> WaterSamples;
+StructuredBuffer<uint4> TexelLookup;
+StructuredBuffer<float4> TrianglePositions;
+
+int2 TextureSize;
+int2 WaterGridSize;
+float2 WaterBoundsMin;
+float2 WaterInverseBoundsSize;
+float Amount;
+float MaxWetness;
+
+bool IsValidLookup(uint4 Lookup)
+{
+    return Lookup.w != 0u && Lookup.x != 0xffffffffu;
+}
+
+float3 UnpackBarycentricXY(uint Packed)
+{
+    const float X = (float)(Packed & 0xffffu) / 65535.0;
+    const float Y = (float)((Packed >> 16u) & 0xffffu) / 65535.0;
+    return float3(X, Y, 1.0 - X - Y);
+}
+
+float3 ComputeTexelWorldPosition(uint4 Lookup)
+{
+    const uint PositionBase = Lookup.x * 3u;
+    const float3 Barycentric = UnpackBarycentricXY(Lookup.y);
+    return TrianglePositions[PositionBase + 0u].xyz * Barycentric.x +
+           TrianglePositions[PositionBase + 1u].xyz * Barycentric.y +
+           TrianglePositions[PositionBase + 2u].xyz * Barycentric.z;
+}
+
+uint FlattenWaterSample(int2 Sample)
+{
+    return (uint)(Sample.y * WaterGridSize.x + Sample.x);
+}
+
+bool QueryWaterSurface(float2 WorldXY, out float SurfaceZ)
+{
+    SurfaceZ = 0.0;
+
+    // Match the CPU QueryWaterSurfaceData contract: positions outside the
+    // XY bounds sample the nearest edge of the height grid.
+    const float2 Normalized = saturate((WorldXY - WaterBoundsMin) * WaterInverseBoundsSize);
+    const float2 Grid = Normalized * float2(WaterGridSize - 1);
+    const int2 Sample00 = clamp(int2(floor(Grid)), int2(0, 0), WaterGridSize - 1);
+    const int2 Sample11 = min(Sample00 + 1, WaterGridSize - 1);
+    const int2 Sample10 = int2(Sample11.x, Sample00.y);
+    const int2 Sample01 = int2(Sample00.x, Sample11.y);
+
+    const float2 Data00 = WaterSamples[FlattenWaterSample(Sample00)];
+    const float2 Data10 = WaterSamples[FlattenWaterSample(Sample10)];
+    const float2 Data01 = WaterSamples[FlattenWaterSample(Sample01)];
+    const float2 Data11 = WaterSamples[FlattenWaterSample(Sample11)];
+    if (Data00.y < 0.5 || Data10.y < 0.5 || Data01.y < 0.5 || Data11.y < 0.5)
+    {
+        return false;
+    }
+
+    const float2 Alpha = Grid - floor(Grid);
+    const float Height0 = lerp(Data00.x, Data10.x, Alpha.x);
+    const float Height1 = lerp(Data01.x, Data11.x, Alpha.x);
+    SurfaceZ = lerp(Height0, Height1, Alpha.y);
+    return isfinite(SurfaceZ);
+}
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    const int2 Texel = int2(DispatchThreadId.xy);
+    if (Texel.x < 0 || Texel.y < 0 || Texel.x >= TextureSize.x || Texel.y >= TextureSize.y)
+    {
+        return;
+    }
+
+    const uint TexelIndex = (uint)(Texel.y * TextureSize.x + Texel.x);
+    const uint4 Lookup = TexelLookup[TexelIndex];
+    if (!IsValidLookup(Lookup))
+    {
+        return;
+    }
+
+    const float3 WorldPosition = ComputeTexelWorldPosition(Lookup);
+    float SurfaceZ = 0.0;
+    if (!QueryWaterSurface(WorldPosition.xy, SurfaceZ) || WorldPosition.z > SurfaceZ)
+    {
+        return;
+    }
+
+    if (Amount > 0.0)
+    {
+        WetnessTexture[Texel] = max(MaxWetness, 0.0);
+        PendingWetnessTexture[Texel] = 0.0;
+    }
+    else if (Amount < 0.0)
+    {
+        WetnessTexture[Texel] = clamp(
+            WetnessTexture[Texel] + Amount,
+            0.0,
+            max(MaxWetness, 0.0));
+    }
+}

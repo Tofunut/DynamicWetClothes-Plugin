@@ -1,6 +1,7 @@
 // Copyright 2026 Team Tofunut. All Rights Reserved.
 
 #include "Components/DynamicWetClothesComponent.h"
+#include "WetInputSystem/DWCPersistentWetnessProvider.h"
 
 #include "Async/DWCLODVertexColorTasks.h"
 #include "Async/DWCSkinningTasks.h"
@@ -236,6 +237,7 @@ void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
         }
     }
     Receivers.Reset();
+    PersistentWetnessProviders.Reset();
     bSimulationModeLocked = false;
     SetComponentTickEnabled(false);
 
@@ -721,6 +723,27 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
     return FWetApplicationStage::ApplyWetSurface(Context, WaterSurfaceData, Amount, bApplyMaterial);
 }
 
+bool UDynamicWetClothesComponent::RegisterPersistentWetnessProvider(UObject* Provider)
+{
+    if (!IsValid(Provider) || !Provider->GetClass()->ImplementsInterface(UDWCPersistentWetnessProvider::StaticClass()))
+    {
+        return false;
+    }
+
+    PersistentWetnessProviders.Add(Provider);
+    return true;
+}
+
+void UDynamicWetClothesComponent::UnregisterPersistentWetnessProvider(UObject* Provider)
+{
+    if (!Provider)
+    {
+        return;
+    }
+
+    PersistentWetnessProviders.Remove(Provider);
+}
+
 void UDynamicWetClothesComponent::SetDryRateScale(const float InDryRateScale)
 {
     WetnessSettings.DryRateScale = FMath::Max(0.0f, InDryRateScale);
@@ -1165,15 +1188,41 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
     return FWetApplicationStage::FlushPendingWetContacts(Context);
 }
 
+void UDynamicWetClothesComponent::ApplyPersistentWetnessProviders(const float DeltaSeconds)
+{
+    // Work from a snapshot so a provider may safely unregister while it is being sampled.
+    const TArray<TWeakObjectPtr<UObject>> Providers = PersistentWetnessProviders.Array();
+    for (const TWeakObjectPtr<UObject>& WeakProvider : Providers)
+    {
+        UObject* ProviderObject = WeakProvider.Get();
+        if (!IsValid(ProviderObject))
+        {
+            PersistentWetnessProviders.Remove(WeakProvider);
+            continue;
+        }
+
+        IDWCPersistentWetnessProvider* Provider = Cast<IDWCPersistentWetnessProvider>(ProviderObject);
+        if (!Provider)
+        {
+            PersistentWetnessProviders.Remove(WeakProvider);
+            continue;
+        }
+
+        Provider->ApplyPersistentWetness(*this, DeltaSeconds);
+    }
+}
+
 void UDynamicWetClothesComponent::UpdateWetness()
 {
     FlushAsyncTaskQueueGameThread();
+
+    const float DeltaSeconds = FMath::Max(KINDA_SMALL_NUMBER, WetnessSettings.WetnessUpdateInterval);
+    ApplyPersistentWetnessProviders(DeltaSeconds);
 
     if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         FlushPendingWetContacts();
 
-        const float DeltaSeconds = FMath::Max(KINDA_SMALL_NUMBER, WetnessSettings.WetnessUpdateInterval);
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
             if (!Receiver.IsValid() || !Receiver->GPUBackend.IsValid())

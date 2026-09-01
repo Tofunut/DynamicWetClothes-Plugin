@@ -635,13 +635,33 @@ bool FWetApplicationStage::ApplyWetSurface(
                 continue;
             }
 
-            TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
-            FWetSurfaceContactResolverArgs     ResolverArgs = MakeWetSurfaceContactResolverArgs(Context, *Receiver);
-            if (FWetSurfaceContactResolver::ResolveWaterSurface(ResolverArgs, WaterSurfaceData, Amount, ResolvedContacts) &&
-                Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
+            const bool bQueued = Receiver->GPUBackend->EnqueueWaterSurface(WaterSurfaceData, Amount);
+            if (!bQueued)
             {
-                QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
-                bAnyQueued = true;
+                continue;
+            }
+
+            bAnyQueued = true;
+            // Absorbed wetness is handled texel-accurately by the dedicated GPU
+            // water-surface pass. Preserve the existing rejected-water droplet
+            // behavior only for assets that actually use Surface Water.
+            const UWetClothingAsset* Asset = Receiver->WetClothingAsset.Get();
+            if (Amount > 0.0f &&
+                Asset != nullptr &&
+                Asset->UsesSurfaceWater() &&
+                Receiver->QualityLODState.ResolvedPolicy.bUpdateSurfaceWater)
+            {
+                TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
+                FWetSurfaceContactResolverArgs     ResolverArgs =
+                    MakeWetSurfaceContactResolverArgs(Context, *Receiver);
+                if (FWetSurfaceContactResolver::ResolveWaterSurface(
+                        ResolverArgs,
+                        WaterSurfaceData,
+                        Amount,
+                        ResolvedContacts))
+                {
+                    QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
+                }
             }
         }
         return bAnyQueued;

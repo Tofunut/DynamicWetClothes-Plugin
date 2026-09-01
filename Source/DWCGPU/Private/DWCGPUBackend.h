@@ -17,6 +17,7 @@ class FDWCGPUBackend final : public IDWCGPUBackend
     virtual bool                Initialize(const FDWCGPUBackendInitArgs& Args) override;
     virtual bool                EnqueueResolvedContacts(const TArray<FDWCResolvedSurfaceContact>& Contacts) override;
     virtual bool                EnqueueSurfaceStamps(const TArray<FDWCSurfaceStampRequest>& Stamps) override;
+    virtual bool                EnqueueWaterSurface(const FDWCWaterSurfaceData& WaterSurfaceData, float Amount) override;
     virtual bool                ApplyWetAll(float Amount) override;
     virtual void                ClearPendingWetnessMaps() override;
     virtual void                ClearWetnessMaps() override;
@@ -27,6 +28,15 @@ class FDWCGPUBackend final : public IDWCGPUBackend
   private:
     struct FStaticSimulationData;
     struct FRenderState;
+
+    struct FQueuedWaterSurface
+    {
+        FVector2f        BoundsMin = FVector2f::ZeroVector;
+        FVector2f        InverseBoundsSize = FVector2f::ZeroVector;
+        FIntPoint        GridSize = FIntPoint::ZeroValue;
+        TArray<FVector2f> Samples;
+        float            Amount = 0.0f;
+    };
 
     struct FMaterialSlotRuntime
     {
@@ -56,9 +66,14 @@ class FDWCGPUBackend final : public IDWCGPUBackend
     bool BuildDebugVertexLookup();
     bool CreateSlotResources();
     bool BindMaterialSlot(FMaterialSlotRuntime& Slot);
+    bool BuildQueuedWaterSurface(
+        const FDWCWaterSurfaceData& WaterSurfaceData,
+        float                       Amount,
+        FQueuedWaterSurface&        OutRequest) const;
     void DispatchSimulation(
         TArray<FDWCResolvedSurfaceContact>&& Contacts,
         TArray<FDWCSurfaceStampRequest>&&    SurfaceStamps,
+        TArray<FQueuedWaterSurface>&&         WaterSurfaces,
         float                                WetAllAmount,
         float                                DeltaSeconds);
 
@@ -74,6 +89,7 @@ class FDWCGPUBackend final : public IDWCGPUBackend
     TArray<FMaterialSlotRuntime>                                        MaterialSlots;
     TArray<FDWCResolvedSurfaceContact>                                  PendingContacts;
     TArray<FDWCSurfaceStampRequest>                                     PendingSurfaceStamps;
+    TArray<FQueuedWaterSurface>                                         PendingWaterSurfaces;
     TArray<FVector2f>                                                   DebugVertexDataUVs;
     TArray<int32>                                                       DebugVertexMaterialSlots;
     float                                                               PendingWetAllAmount = 0.0f;

@@ -10,12 +10,9 @@
 #include "WaterBodyTypes.h"
 #include "Utility/DWCProfiling.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogDWCWaterIntegration, Log, All);
-
 UWaterBodyWetContactComponent::UWaterBodyWetContactComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = false;
+    PrimaryComponentTick.bCanEverTick = false;
 }
 
 void UWaterBodyWetContactComponent::BeginPlay()
@@ -39,7 +36,9 @@ void UWaterBodyWetContactComponent::BeginPlay()
         {
             RefreshExistingOverlaps();
         }
+
     }
+
 }
 
 void UWaterBodyWetContactComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -55,22 +54,10 @@ void UWaterBodyWetContactComponent::EndPlay(const EEndPlayReason::Type EndPlayRe
             &UWaterBodyWetContactComponent::OnProxyEndOverlap);
     }
 
-    ReceiverOverlapCounts.Reset();
+    UnregisterFromAllReceivers();
     DestroyOverlapProxy();
 
     Super::EndPlay(EndPlayReason);
-}
-
-void UWaterBodyWetContactComponent::TickComponent(
-    const float                        DeltaTime,
-    const ELevelTick                   TickType,
-    FActorComponentTickFunction* const ThisTickFunction)
-{
-    DWC_PROFILE_SCOPE(DWC_Water_TickComponent);
-
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    ApplyWetnessTick(DeltaTime);
 }
 
 void UWaterBodyWetContactComponent::InitializeWaterBody()
@@ -78,10 +65,6 @@ void UWaterBodyWetContactComponent::InitializeWaterBody()
     AActor* Owner = GetOwner();
     WaterBodyComponent = IsValid(Owner) ? Owner->FindComponentByClass<UWaterBodyComponent>() : nullptr;
 
-    if (!IsValid(WaterBodyComponent) && IsValid(Owner))
-    {
-        UE_LOG(LogDWCWaterIntegration, Warning, TEXT("WaterBodyWetContactComponent: WaterBodyComponent not found on %s."), *Owner->GetName());
-    }
 }
 
 void UWaterBodyWetContactComponent::CreateOverlapProxy()
@@ -100,7 +83,6 @@ void UWaterBodyWetContactComponent::CreateOverlapProxy()
     FBox WaterBodyBounds(ForceInit);
     if (!GetWaterBodyProxyBounds(WaterBodyBounds))
     {
-        UE_LOG(LogDWCWaterIntegration, Warning, TEXT("WaterBodyWetContactComponent: Could not resolve water body bounds on %s."), *Owner->GetName());
         return;
     }
 
@@ -163,93 +145,22 @@ void UWaterBodyWetContactComponent::RefreshExistingOverlaps()
     }
 }
 
-void UWaterBodyWetContactComponent::ApplyWetnessTick(const float DeltaTime)
+void UWaterBodyWetContactComponent::ApplyPersistentWetness(
+    UDynamicWetClothesComponent& Receiver,
+    const float                  /*DeltaSeconds*/)
 {
-    DWC_PROFILE_SCOPE(DWC_Water_ApplyWetnessTick);
+    DWC_PROFILE_SCOPE(DWC_Water_ApplyPersistentWetness);
 
-    if (!IsValid(WaterBodyComponent) || ReceiverOverlapCounts.Num() == 0)
+    if (!IsValid(WaterBodyComponent))
     {
         return;
     }
 
     constexpr float WetAmount = 1.0f;
-
-    for (auto It = ReceiverOverlapCounts.CreateIterator(); It; ++It)
+    FDWCWaterSurfaceData WaterSurfaceData;
+    if (BuildWaterSurfaceDataForReceiver(Receiver, WaterSurfaceData))
     {
-        UDynamicWetClothesComponent* Receiver = It.Key().Get();
-        if (!IsValid(Receiver) || It.Value() <= 0)
-        {
-            It.RemoveCurrent();
-            continue;
-        }
-
-        FDWCWaterSurfaceData WaterSurfaceData;
-        const double         BuildStartSeconds = FPlatformTime::Seconds();
-        if (!BuildWaterSurfaceDataForReceiver(*Receiver, WaterSurfaceData))
-        {
-            if (bEnablePerformanceLogging)
-            {
-                AccumulatedBuildSurfaceDataSeconds += FPlatformTime::Seconds() - BuildStartSeconds;
-            }
-            continue;
-        }
-
-        const double BuildEndSeconds = FPlatformTime::Seconds();
-        const double ApplyStartSeconds = BuildEndSeconds;
-        {
-            DWC_PROFILE_SCOPE(DWC_Water_ApplyWetSurface);
-
-            Receiver->ApplyWetSurface(WaterSurfaceData, WetAmount, false);
-        }
-        const double ApplyEndSeconds = FPlatformTime::Seconds();
-
-        if (bEnablePerformanceLogging)
-        {
-            AccumulatedBuildSurfaceDataSeconds += BuildEndSeconds - BuildStartSeconds;
-            AccumulatedApplyWetSurfaceSeconds += ApplyEndSeconds - ApplyStartSeconds;
-            ++AccumulatedProcessedReceivers;
-            AccumulatedWaterSurfaceSamples += WaterSurfaceData.SizeX * WaterSurfaceData.SizeY;
-        }
-    }
-
-    if (ReceiverOverlapCounts.Num() == 0)
-    {
-        SetComponentTickEnabled(false);
-    }
-
-    if (bEnablePerformanceLogging)
-    {
-        ++AccumulatedPerformanceFrames;
-        AccumulatedPerformanceLogSeconds += DeltaTime;
-        if (AccumulatedPerformanceLogSeconds >= FMath::Max(0.1f, PerformanceLogInterval))
-        {
-            const double BuildMilliseconds = AccumulatedBuildSurfaceDataSeconds * 1000.0;
-            const double ApplyMilliseconds = AccumulatedApplyWetSurfaceSeconds * 1000.0;
-            const double TotalMilliseconds = BuildMilliseconds + ApplyMilliseconds;
-            const int32  SafeFrames = FMath::Max(1, AccumulatedPerformanceFrames);
-            const int32  SafeReceivers = FMath::Max(1, AccumulatedProcessedReceivers);
-
-            UE_LOG(
-                LogDWCWaterIntegration,
-                Log,
-                TEXT("WaterBodyWetContact perf: frames=%d receivers=%d samples=%d total=%.3fms build/query=%.3fms apply=%.3fms avg/frame=%.3fms avg/receiver build=%.3fms apply=%.3fms"),
-                AccumulatedPerformanceFrames,
-                AccumulatedProcessedReceivers,
-                AccumulatedWaterSurfaceSamples,
-                TotalMilliseconds,
-                BuildMilliseconds,
-                ApplyMilliseconds,
-                TotalMilliseconds / static_cast<double>(SafeFrames),
-                BuildMilliseconds / static_cast<double>(SafeReceivers),
-                ApplyMilliseconds / static_cast<double>(SafeReceivers));
-
-            AccumulatedBuildSurfaceDataSeconds = 0.0;
-            AccumulatedApplyWetSurfaceSeconds = 0.0;
-            AccumulatedPerformanceLogSeconds = 0.0f;
-            AccumulatedPerformanceFrames = 0;
-            AccumulatedProcessedReceivers = 0;
-            AccumulatedWaterSurfaceSamples = 0;
-        }
+        Receiver.ApplyWetSurface(WaterSurfaceData, WetAmount, false);
     }
 }
 
@@ -266,9 +177,14 @@ void UWaterBodyWetContactComponent::AddReceiverFromActor(AActor* OtherActor)
         return;
     }
 
+    const bool bWasUnregistered = !ReceiverOverlapCounts.Contains(Receiver);
     int32& OverlapCount = ReceiverOverlapCounts.FindOrAdd(Receiver);
     ++OverlapCount;
-    SetComponentTickEnabled(true);
+    if (bWasUnregistered)
+    {
+        Receiver->RegisterPersistentWetnessProvider(this);
+    }
+
 }
 
 void UWaterBodyWetContactComponent::RemoveReceiverFromActor(AActor* OtherActor)
@@ -293,13 +209,23 @@ void UWaterBodyWetContactComponent::RemoveReceiverFromActor(AActor* OtherActor)
     --(*OverlapCount);
     if (*OverlapCount <= 0)
     {
+        Receiver->UnregisterPersistentWetnessProvider(this);
         ReceiverOverlapCounts.Remove(Receiver);
     }
 
-    if (ReceiverOverlapCounts.Num() == 0)
+}
+
+void UWaterBodyWetContactComponent::UnregisterFromAllReceivers()
+{
+    for (const TPair<TWeakObjectPtr<UDynamicWetClothesComponent>, int32>& Entry : ReceiverOverlapCounts)
     {
-        SetComponentTickEnabled(false);
+        if (UDynamicWetClothesComponent* Receiver = Entry.Key.Get(); IsValid(Receiver))
+        {
+            Receiver->UnregisterPersistentWetnessProvider(this);
+        }
     }
+
+    ReceiverOverlapCounts.Reset();
 }
 
 bool UWaterBodyWetContactComponent::BuildWaterSurfaceDataForReceiver(
@@ -309,7 +235,7 @@ bool UWaterBodyWetContactComponent::BuildWaterSurfaceDataForReceiver(
     DWC_PROFILE_SCOPE(DWC_Water_BuildWaterSurfaceDataForReceiver);
 
     FBox ReceiverBounds(ForceInit);
-    if (!Receiver.GetWetnessWorldBounds(ReceiverBounds))
+    if (!IsValid(WaterBodyComponent) || !Receiver.GetWetnessWorldBounds(ReceiverBounds))
     {
         return false;
     }

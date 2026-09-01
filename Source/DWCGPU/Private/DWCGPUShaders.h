@@ -55,6 +55,30 @@ class FDWCApplyBinnedAbsorptionCS final : public FGlobalShader
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
 
+/** Saturates or removes absorbed wetness by testing each wet-map texel against a world-space height grid. */
+class FDWCApplyWaterSurfaceCS final : public FGlobalShader
+{
+  public:
+    DECLARE_GLOBAL_SHADER(FDWCApplyWaterSurfaceCS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCApplyWaterSurfaceCS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+    SHADER_PARAMETER(FIntPoint, TextureSize)
+    SHADER_PARAMETER(FIntPoint, WaterGridSize)
+    SHADER_PARAMETER(FVector2f, WaterBoundsMin)
+    SHADER_PARAMETER(FVector2f, WaterInverseBoundsSize)
+    SHADER_PARAMETER(float, Amount)
+    SHADER_PARAMETER(float, MaxWetness)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float2>, WaterSamples)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TrianglePositions)
+    SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, WetnessTexture)
+    SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
 /** Builds one dynamic gravity/area entry for every simulation-LOD triangle in a render section. */
 class FDWCUpdateTriangleFlowCS final : public FGlobalShader
 {

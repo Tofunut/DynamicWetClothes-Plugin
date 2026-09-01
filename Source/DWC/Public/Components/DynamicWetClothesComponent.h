@@ -108,6 +108,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool ApplyWetArea(const FDWCWetAreaData& AreaData, bool bApplyMaterial = true);
     UFUNCTION(BlueprintCallable, Category = "Wetness", meta = (AdvancedDisplay = "bApplyMaterial", ToolTip = "Applies wetness to vertices under the supplied water surface height grid. Negative Amount values remove wetness."))
     bool ApplyWetSurface(const FDWCWaterSurfaceData& WaterSurfaceData, float Amount, bool bApplyMaterial = true);
+    /** Registers a persistent source that DWC samples at its own simulation cadence. */
+    bool RegisterPersistentWetnessProvider(UObject* Provider);
+    void UnregisterPersistentWetnessProvider(UObject* Provider);
     UFUNCTION(BlueprintCallable, Category = "Wetness")
     void SetDryRateScale(float InDryRateScale);
     UFUNCTION(BlueprintPure, Category = "Wetness")
@@ -188,6 +191,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     // Per-frame simulation and rendering updates.
     void UpdateWetness();
+    void ApplyPersistentWetnessProviders(float DeltaSeconds);
     void UpdateWetRendering();
     bool FlushPendingWetContacts();
     bool ShouldUpdateCPUWetnessRendering(FDWCWetMeshReceiverRuntime& Receiver) const;
@@ -294,6 +298,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool            bRebindingExternalMaterials = false;
 #endif
     TArray<FDWCWetContact> PendingWetContacts;
+    TSet<TWeakObjectPtr<UObject>> PersistentWetnessProviders;
     bool                   bPendingWetContactsApplyMaterial = false;
     bool                   bWetRenderDirty = false;
     // Internal runtime state for DWC quality-LOD support. Not exposed through the public API.
